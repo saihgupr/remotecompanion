@@ -8254,16 +8254,67 @@ static NSString *handle_command(NSString *cmd) {
     return nil;
 }
 
-typedef int (*system_func_t)(const char *);
+static const char* rc_shell_path(void) {
+    if (access("/var/jb/bin/sh", X_OK) == 0) return "/var/jb/bin/sh";
+    if (access("/var/jb/usr/bin/sh", X_OK) == 0) return "/var/jb/usr/bin/sh";
+    return "/bin/sh";
+}
+
+static char** rc_shell_env(void) {
+    static char *custom_env[] = {
+        (char *)"PATH=/var/jb/usr/local/bin:/var/jb/usr/bin:/var/jb/bin:/var/jb/usr/sbin:/var/jb/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+        NULL
+    };
+    return custom_env;
+}
+
 static void execute_shell_command(const char *cmd) {
-    system_func_t sys_func = (system_func_t)dlsym(RTLD_DEFAULT, "system");
-    if (sys_func) {
-        sys_func(cmd);
-    } else {
-        pid_t pid;
-        char *argv[] = {"sh", "-c", (char *)cmd, NULL};
-        rc_posix_spawn(&pid, "/bin/sh", NULL, NULL, argv, NULL);
+    const char *sh = rc_shell_path();
+    pid_t pid;
+    char *argv[] = {(char *)sh, "-c", (char *)cmd, NULL};
+    rc_posix_spawn(&pid, sh, NULL, NULL, argv, rc_shell_env());
+}
+
+static int rc_execute_command_status(const char *cmd) {
+    const char *sh = rc_shell_path();
+    pid_t pid;
+    char *argv[] = {(char *)sh, "-c", (char *)cmd, NULL};
+    if (rc_posix_spawn(&pid, sh, NULL, NULL, argv, rc_shell_env()) == 0) {
+        int status = 0;
+        waitpid(pid, &status, 0);
+        if (WIFEXITED(status)) {
+            return WEXITSTATUS(status);
+        }
     }
+    return -1;
+}
+
+static BOOL is_audiostreamerd_running(void) {
+    // Fast path: check if port 18080 is actively listening on localhost
+    int s = socket(AF_INET, SOCK_STREAM, 0);
+    if (s >= 0) {
+        struct sockaddr_in sin;
+        memset(&sin, 0, sizeof(sin));
+        sin.sin_family = AF_INET;
+        sin.sin_port = htons(18080);
+        sin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        
+        struct timeval tv;
+        tv.tv_sec = 0;
+        tv.tv_usec = 100000; // 100ms timeout
+        setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+        
+        int res = connect(s, (struct sockaddr *)&sin, sizeof(sin));
+        close(s);
+        if (res == 0) {
+            return YES;
+        }
+    }
+    
+    // Process table fallback
+    int ret = rc_execute_command_status("ps aux 2>/dev/null | grep -i '[a]udiostreamerd' | grep -v ' Z ' >/dev/null 2>&1");
+    return (ret == 0);
 }
 
 static NSString* get_local_ip_address(void) {
@@ -8644,9 +8695,40 @@ static void start_web_server() {
                                 } else if ([path isEqualToString:@"/api/capabilities"] && [method isEqualToString:@"GET"]) {
                                     NSDictionary *caps = @{
                                         @"sneakycam": @(is_sneakycam_installed()),
-                                        @"audiostream": @(is_audiostream_installed())
+                                        @"audiostream": @(is_audiostream_installed()),
+                                        @"audiostream_running": @(is_audiostreamerd_running())
                                     };
                                     NSData *jsonData = [NSJSONSerialization dataWithJSONObject:caps options:0 error:nil];
+                                    NSString *jsonStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+                                    responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)[jsonStr lengthOfBytesUsingEncoding:NSUTF8StringEncoding], jsonStr];
+                                } else if ([path isEqualToString:@"/api/audiostream/status"] && [method isEqualToString:@"GET"]) {
+                                    BOOL running = is_audiostreamerd_running();
+                                    NSDictionary *dict = @{@"running": @(running), @"port": @(18080)};
+                                    NSData *jsonData = [NSJSONSerialization dataWithJSONObject:dict options:0 error:nil];
+                                    NSString *jsonStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+                                    responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)[jsonStr lengthOfBytesUsingEncoding:NSUTF8StringEncoding], jsonStr];
+                                } else if ([path isEqualToString:@"/api/audiostream/start"] && ([method isEqualToString:@"POST"] || [method isEqualToString:@"GET"])) {
+                                    BOOL alreadyRunning = is_audiostreamerd_running();
+                                    if (alreadyRunning) {
+                                        NSDictionary *dict = @{@"status": @"already_running", @"port": @(18080)};
+                                        NSData *jsonData = [NSJSONSerialization dataWithJSONObject:dict options:0 error:nil];
+                                        NSString *jsonStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+                                        responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)[jsonStr lengthOfBytesUsingEncoding:NSUTF8StringEncoding], jsonStr];
+                                    } else {
+                                        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                                            execute_shell_command("if [ -x /var/jb/usr/bin/audiostream ]; then /var/jb/usr/bin/audiostream start --auto-off; elif [ -x /usr/bin/audiostream ]; then /usr/bin/audiostream start --auto-off; else audiostream start --auto-off; fi");
+                                        });
+                                        NSDictionary *dict = @{@"status": @"started", @"port": @(18080)};
+                                        NSData *jsonData = [NSJSONSerialization dataWithJSONObject:dict options:0 error:nil];
+                                        NSString *jsonStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+                                        responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)[jsonStr lengthOfBytesUsingEncoding:NSUTF8StringEncoding], jsonStr];
+                                    }
+                                } else if ([path isEqualToString:@"/api/audiostream/stop"] && ([method isEqualToString:@"POST"] || [method isEqualToString:@"GET"])) {
+                                    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                                        execute_shell_command("if [ -x /var/jb/usr/bin/audiostream ]; then /var/jb/usr/bin/audiostream stop; elif [ -x /usr/bin/audiostream ]; then /usr/bin/audiostream stop; else audiostream stop; fi");
+                                    });
+                                    NSDictionary *dict = @{@"status": @"stopped", @"port": @(18080)};
+                                    NSData *jsonData = [NSJSONSerialization dataWithJSONObject:dict options:0 error:nil];
                                     NSString *jsonStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
                                     responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)[jsonStr lengthOfBytesUsingEncoding:NSUTF8StringEncoding], jsonStr];
                                 } else if ([path isEqualToString:@"/api/sysinfo"] && [method isEqualToString:@"GET"]) {
