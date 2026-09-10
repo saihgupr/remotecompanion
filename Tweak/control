@@ -2,7 +2,7 @@ Package: com.saihgupr.remotecompanion
 Name: RemoteCompanion
 Depends: mobilesubstrate
 Version: 3.6.3
-Architecture: iphoneos-arm
+Architecture: iphoneos-arm64
 Description: A modern Activator replacement for rootless and rootful jailbreaks. Bind triggers like Touch ID, Power/Volume buttons, and Status Bar gestures to system actions, Siri automation, and custom TCP commands. Includes native arm64e support for iOS 14. https://github.com/saihgupr/RemoteCompanion
 Icon: https://saihgupr.github.io/remotecompanion/CydiaIcon.png
 Maintainer: Saihgupr
