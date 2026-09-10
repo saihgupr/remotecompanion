@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.6.4] - 2026-09-10
+
+### Added
+- **Sequential Volume Button Triggers (#35)**:
+  - Added Activator-style one-handed pocket gestures: **Volume Up then Down** (`volume_up_then_down`) and **Volume Down then Up** (`volume_down_then_up`).
+  - Integrated sequence detection window (380ms) in SpringBoard's `SBVolumeHardwareButtonActions`.
+  - Intelligently suppresses volume changes and triggers haptic feedback when the sequence is completed, while seamlessly replaying normal volume step adjustments if the second button is not pressed.
+  - Multi-tap volume adjustments immediately cancel pending sequence windows to ensure fast, continuous volume stepping with zero dropped presses or responsiveness degradation.
+  - Added configuration support, display names, and `arrow.up.and.down.circle.fill` SF Symbol mapping across the iOS Companion App (`Volume Buttons` section) and Web UI.
+
 ## [3.6.3] - 2026-09-03
 
 ### Fixed
