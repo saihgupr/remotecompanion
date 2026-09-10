@@ -52,6 +52,7 @@ if [ -z "$1" ]; then
     echo "  is-locked         - Check if device is locked"
     echo "  dnd on/off/debug   - Toggle Do Not Disturb or inspect state"
     echo "  audiomix on/off/toggle/status - Control AudioMix tweak"
+    echo "  screenrecord [toggle|start|stop] - Control system screen recording"
     echo "  sneakycam photo/video - Trigger SneakyCam photo or toggle video"
     echo "  camera [photo|video|portrait|slomo|timelapse] [0.5x|1x|2x] [front] [flash] - Open Camera in specified mode"
     echo "  camera shutter / snap - Press Camera shutter button to take photo or toggle recording"
@@ -96,6 +97,8 @@ elif [[ "$_CMD" == "safe-mode" || "$_CMD" == "safe_mode" ]]; then
     _CMD="safemode"
 elif [[ "$_CMD" == "shortcut "* ]]; then
     _CMD="shortcut:${_CMD#shortcut }"
+elif [[ "$_CMD" == "screen-record"* || "$_CMD" == "screen_record"* ]]; then
+    _CMD="screenrecord${_CMD#screen*record}"
 elif [[ "$_CMD" == "log" || "$_CMD" == "logs" ]]; then
     if [[ "$IP" == "127.0.0.1" ]]; then
         for log_candidate in "/var/jb/tmp/remotecommand.log" "/tmp/remotecommand.log" "/var/mobile/Library/Logs/RemoteCompanion/remotecompanion.log"; do

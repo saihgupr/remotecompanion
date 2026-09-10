@@ -2574,6 +2574,7 @@ const CMD_NAMES = {
   'bluetooth on':'Bluetooth On','bluetooth off':'Bluetooth Off','bluetooth toggle':'Bluetooth Toggle',
   'airplane on':'Airplane On','airplane off':'Airplane Off','airplane toggle':'Airplane Toggle',
   'haptic':'Haptic Feedback','screenshot':'Screenshot',
+  'screenrecord':'Screen Recording Toggle','screenrecord toggle':'Screen Recording Toggle','screenrecord start':'Start Screen Recording','screenrecord stop':'Stop Screen Recording','screenrecord status':'Screen Recording Status',
   'camera photo 0.5x':'Open Camera (Photo 0.5x)','camera photo 2x':'Open Camera (Photo 2x)','camera photo':'Open Camera (Photo)',
   'camera portrait 2x':'Open Camera (Portrait 2x)','camera portrait':'Open Camera (Portrait)',
   'camera video 2x flash':'Open Video Camera (2x, Flash)',
@@ -2797,6 +2798,7 @@ function iconForCmd(cmd) {
     'open control center':'gear',
     'low power on':'battery_25','low power off':'battery_100',
     'screenshot':'camera_fill','haptic':'hand_raised_fill',
+    'screenrecord':'record_circle_fill','screenrecord toggle':'record_circle_fill','screenrecord start':'record_circle_fill','screenrecord stop':'stop_circle_fill',
     'sneakycam photo':'camera_fill','sneakycam video':'video_fill',
     'mute':'speaker_slash_fill','mute on':'speaker_slash_fill','mute off':'speaker_3_fill','mute toggle':'speaker_slash_fill',
   };
@@ -2877,6 +2879,7 @@ const ACTION_SECTIONS = [
   { title:'System', actions:[
     { name:'Haptic Feedback',   cmd:'haptic',        icon:'hand_raised_fill' },
     { name:'Screenshot',        cmd:'screenshot',    icon:'camera_fill' },
+    { name:'Screen Recording',  cmd:'screenrecord toggle', icon:'record_circle_fill', is_toggle:true },
     { name:'Open App…',         cmd:'__OPEN_APP__',  icon:'square_grid_2x2_fill', needs_input:true },
     { name:'Kill App…',         cmd:'__KILL_APP__',  icon:'xmark_circle_fill', needs_input:true },
     { name:'Lock Device',       cmd:'lock',          icon:'lock_fill' },

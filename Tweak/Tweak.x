@@ -1651,7 +1651,9 @@ static NSString *rc_status_command_for_condition_key(NSString *conditionKey) {
         @"orientation": @"orientation status",
         @"location": @"location status",
         @"location_services": @"location status",
-        @"gps": @"location status"
+        @"gps": @"location status",
+        @"screenrecord": @"screenrecord status",
+        @"screen_recording": @"screenrecord status"
     };
     return map[conditionKey];
 }
@@ -1676,6 +1678,14 @@ static NSString *rc_canonical_status_value_for_condition_key(NSString *condition
     if ([conditionKey isEqualToString:@"orientation"]) {
         if ([upper containsString:@"PORTRAIT"]) return @"PORTRAIT";
         if ([upper containsString:@"LANDSCAPE"]) return @"LANDSCAPE";
+        return nil;
+    }
+    
+    if ([conditionKey isEqualToString:@"screenrecord"] || [conditionKey isEqualToString:@"screen_recording"]) {
+        if ([upper containsString:@"ACTIVE"]) return @"ACTIVE";
+        if ([upper containsString:@"INACTIVE"]) return @"INACTIVE";
+        if ([upper containsString:@"ON"]) return @"ACTIVE";
+        if ([upper containsString:@"OFF"]) return @"INACTIVE";
         return nil;
     }
     
@@ -5769,6 +5779,99 @@ static NSString *rc_open_camera_video(double zoomFactor, NSInteger flashMode) {
     return rc_open_camera_unified(1, 0, zoomFactor, flashMode, NO);
 }
 
+static NSString *rc_handle_screenrecord(NSString *subcmd) {
+    dlopen("/System/Library/Frameworks/ReplayKit.framework/ReplayKit", RTLD_NOW);
+    Class RPC = objc_getClass("RPScreenRecorder");
+    if (!RPC) {
+        return @"Error: RPScreenRecorder class not found\n";
+    }
+
+    id recorder = nil;
+    if ([RPC respondsToSelector:@selector(sharedRecorder)]) {
+        recorder = [RPC performSelector:@selector(sharedRecorder)];
+    }
+    if (!recorder) {
+        return @"Error: Could not obtain RPScreenRecorder shared instance\n";
+    }
+
+    BOOL isRecording = NO;
+    if ([recorder respondsToSelector:@selector(isRecording)]) {
+        isRecording = [recorder isRecording];
+    } else if ([recorder respondsToSelector:@selector(systemRecording)]) {
+        isRecording = ((BOOL (*)(id, SEL))objc_msgSend)(recorder, @selector(systemRecording));
+    }
+
+    NSString *action = [subcmd lowercaseString];
+    if (action.length == 0 || [action isEqualToString:@"toggle"]) {
+        action = isRecording ? @"stop" : @"start";
+    }
+
+    if ([action isEqualToString:@"status"]) {
+        return isRecording ? @"Screen recording: active\n" : @"Screen recording: inactive\n";
+    }
+
+    if ([action isEqualToString:@"start"] || [action isEqualToString:@"on"]) {
+        if (isRecording) {
+            return @"Screen recording already active\n";
+        }
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            @try {
+                SEL s1 = NSSelectorFromString(@"startRecordingWithMicrophoneEnabled:windowToRecord:systemRecording:handler:");
+                SEL s2 = NSSelectorFromString(@"startSystemRecordingWithMicrophoneEnabled:handler:");
+                SEL s3 = NSSelectorFromString(@"startRecordingWithHandler:");
+
+                if ([recorder respondsToSelector:s1]) {
+                    void (*msg)(id, SEL, BOOL, id, BOOL, id) = (void (*)(id, SEL, BOOL, id, BOOL, id))objc_msgSend;
+                    msg(recorder, s1, NO, nil, YES, nil);
+                    SRLog(@"Screen recording started via startRecordingWithMicrophoneEnabled:windowToRecord:systemRecording:handler:");
+                } else if ([recorder respondsToSelector:s2]) {
+                    void (*msg)(id, SEL, BOOL, id) = (void (*)(id, SEL, BOOL, id))objc_msgSend;
+                    msg(recorder, s2, NO, nil);
+                    SRLog(@"Screen recording started via startSystemRecordingWithMicrophoneEnabled:handler:");
+                } else if ([recorder respondsToSelector:s3]) {
+                    void (*msg)(id, SEL, id) = (void (*)(id, SEL, id))objc_msgSend;
+                    msg(recorder, s3, nil);
+                    SRLog(@"Screen recording started via startRecordingWithHandler:");
+                } else {
+                    SRLog(@"RPScreenRecorder: No matching start recording selector found");
+                }
+            } @catch (NSException *e) {
+                SRLog(@"Exception starting screen recording: %@", e);
+            }
+        });
+        return @"Screen recording started\n";
+    } else if ([action isEqualToString:@"stop"] || [action isEqualToString:@"off"]) {
+        if (!isRecording) {
+            return @"Screen recording is not active\n";
+        }
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            @try {
+                SEL stop1 = NSSelectorFromString(@"stopSystemRecording:");
+                SEL stop2 = NSSelectorFromString(@"stopRecordingWithHandler:");
+
+                if ([recorder respondsToSelector:stop1]) {
+                    void (*msg)(id, SEL, id) = (void (*)(id, SEL, id))objc_msgSend;
+                    msg(recorder, stop1, nil);
+                    SRLog(@"Screen recording stopped via stopSystemRecording:");
+                } else if ([recorder respondsToSelector:stop2]) {
+                    void (*msg)(id, SEL, id) = (void (*)(id, SEL, id))objc_msgSend;
+                    msg(recorder, stop2, nil);
+                    SRLog(@"Screen recording stopped via stopRecordingWithHandler:");
+                } else {
+                    SRLog(@"RPScreenRecorder: No matching stop recording selector found");
+                }
+            } @catch (NSException *e) {
+                SRLog(@"Exception stopping screen recording: %@", e);
+            }
+        });
+        return @"Screen recording stopped\n";
+    }
+
+    return @"Usage: rc screenrecord [toggle|start|stop|status]\n";
+}
+
 static NSString *handle_command(NSString *cmd) {
     if (!cmd || ![cmd isKindOfClass:[NSString class]]) {
         SRLog(@"ERROR: handle_command received nil or invalid command string");
@@ -7776,6 +7879,12 @@ static NSString *handle_command(NSString *cmd) {
              }
          });
          return @"Screenshot triggered\n";
+    } else if ([cleanCmd isEqualToString:@"screenrecord"] || [cleanCmd hasPrefix:@"screenrecord "]) {
+        NSString *arg = @"";
+        if ([cleanCmd hasPrefix:@"screenrecord "]) {
+            arg = [[cleanCmd substringFromIndex:13] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        }
+        return rc_handle_screenrecord(arg);
     } else if ([cleanCmd hasPrefix:@"delay "]) {
         NSString *delayStr = [cleanCmd substringFromIndex:6];
         float seconds = [delayStr floatValue];
@@ -9221,6 +9330,7 @@ static void start_web_server() {
                                     @{@"command": @"unlock <passcode>", @"desc": @"Security: Unlock device screen (INSECURE: Passcode sent in plain text!)"},
                                     @{@"command": @"home", @"desc": @"System: Simulate a Home Button press"},
                                     @{@"command": @"screenshot", @"desc": @"System: Take a screenshot"},
+                                    @{@"command": @"screenrecord [toggle|start|stop]", @"desc": @"System: Control system screen recording"},
                                     @{@"command": @"camera video [zoom] [flash]", @"desc": @"Camera: Open Camera in Video mode (e.g. 2x, 2x flash)"},
                                     @{@"command": @"open control center", @"desc": @"System: Open Control Center"},
                                     @{@"command": @"app switcher", @"desc": @"System: Open App Switcher"},

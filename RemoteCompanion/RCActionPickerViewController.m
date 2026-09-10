@@ -157,6 +157,7 @@
         @[
             @{ @"name": @"Haptic Feedback", @"command": @"haptic", @"icon": @"hand.tap.fill" },
             @{ @"name": @"Screenshot", @"command": @"screenshot", @"icon": @"camera.fill" },
+            @{ @"name": @"Screen Recording", @"command": @"screenrecord toggle", @"icon": @"record.circle.fill" },
             @{ @"name": @"Open App...", @"command": @"__OPEN_APP__", @"icon": @"square.grid.2x2.fill" },
             @{ @"name": @"Kill App...", @"command": @"__KILL_APP__", @"icon": @"xmark.square.fill" },
             @{ @"name": @"Lock Device", @"command": @"lock", @"icon": @"lock.fill" },

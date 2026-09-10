@@ -891,6 +891,11 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         @"gps toggle": @"Location Services Toggle",
         @"haptic": @"Haptic Feedback",
         @"screenshot": @"Screenshot",
+        @"screenrecord": @"Screen Recording Toggle",
+        @"screenrecord toggle": @"Screen Recording Toggle",
+        @"screenrecord start": @"Start Screen Recording",
+        @"screenrecord stop": @"Stop Screen Recording",
+        @"screenrecord status": @"Screen Recording Status",
         @"lock": @"Lock Device",
         @"unlock": @"Unlock Device",
         @"lock toggle": @"Lock Toggle",
@@ -1347,6 +1352,11 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         @"airplane toggle": @"airplane",
         @"haptic": @"hand.tap.fill",
         @"screenshot": @"camera.fill",
+        @"screenrecord": @"record.circle.fill",
+        @"screenrecord toggle": @"record.circle.fill",
+        @"screenrecord start": @"record.circle.fill",
+        @"screenrecord stop": @"stop.circle.fill",
+        @"screenrecord status": @"record.circle",
         @"lock": @"lock.fill",
         @"unlock": @"lock.open.fill",
         @"lock toggle": @"lock.circle",
@@ -1438,6 +1448,15 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
     NSString *lower = [cmd lowercaseString];
     
     NSArray *definitions = @[
+        @{
+            @"key": @"screenrecord",
+            @"name": @"Screen Recording",
+            @"icon": @"record.circle.fill",
+            @"prefixes": @[@"screenrecord ", @"record screen "],
+            @"suffixes": @[@"toggle", @"start", @"stop"],
+            @"displaySuffixes": @[@"Toggle", @"Start", @"Stop"],
+            @"exactMatches": @{ @"screenrecord": @"toggle" }
+        },
         @{
             @"key": @"airplane",
             @"name": @"Airplane Mode",
