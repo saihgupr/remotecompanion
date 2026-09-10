@@ -11,6 +11,14 @@ All notable changes to this project will be documented in this file.
   - Intelligently suppresses volume changes and triggers haptic feedback when the sequence is completed, while seamlessly replaying normal volume step adjustments if the second button is not pressed.
   - Multi-tap volume adjustments immediately cancel pending sequence windows to ensure fast, continuous volume stepping with zero dropped presses or responsiveness degradation.
   - Added configuration support, display names, and `arrow.up.and.down.circle.fill` SF Symbol mapping across the iOS Companion App (`Volume Buttons` section) and Web UI.
+- **Dedicated Screen Recording Action**:
+  - Added native SpringBoard ReplayKit integration via `rc screenrecord [toggle|start|stop|status]`.
+  - Added **Screen Recording** to the Companion App action picker under System controls with interactive toggle cycle support (`RCConfigManager`).
+  - Added action picker builder item, styling, and icon mappings (`record_circle_fill` / `stop_circle_fill`) in Web UI.
+- **Dedicated Snapper Integration**:
+  - Added dedicated Snapper actions (`rc snapper [open|freeze|instant|close]`) separate from the standard screenshot action.
+  - Directly triggers Snapper 2 and Snapper 3 overlay functions via system Darwin notifications (`com.jontelang.snapper3.open`, `freeze`, `instant`, `close.all`, etc.).
+  - Added Snapper 2/3 installation detection, `/api/capabilities` reporting (`snapper: true/false`), and action picker entries under Integrations in both iOS Companion App and Web UI.
 
 ## [3.6.3] - 2026-09-03
 
