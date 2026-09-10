@@ -1466,7 +1466,10 @@ static NSString *get_human_name_for_trigger(NSString *key, NSDictionary *trigger
             @"trigger_ringer_unmute": @"Ringer Unmuted",
             @"trigger_ringer_toggle": @"Ringer Toggled",
             @"trigger_bottombar_swipe_left": @"Bottom Bar Swipe Left",
-            @"trigger_bottombar_swipe_right": @"Bottom Bar Swipe Right"
+            @"trigger_bottombar_swipe_right": @"Bottom Bar Swipe Right",
+            @"trigger_bottom_swipe_up_left": @"Bottom Swipe Up (Left)",
+            @"trigger_bottom_swipe_up_center": @"Bottom Swipe Up (Center)",
+            @"trigger_bottom_swipe_up_right": @"Bottom Swipe Up (Right)"
         };
     });
     
@@ -10963,6 +10966,8 @@ static CGFloat g_bottomBarSwipeStartX = 0;
 static CGFloat g_bottomBarSwipeStartY = 0;
 static BOOL g_bottomBarTouchActive = NO;
 static BOOL g_bottomBarHapticFired = NO;
+static NSString *g_pendingBottomBarSwipeUpTrigger = nil;
+static BOOL g_bottomBarSwipeUpTriggered = NO;
 
 // Status Bar Extended State
 static BOOL g_statusBarSwipeHapticFired = NO;
@@ -11116,6 +11121,28 @@ static NSTimeInterval g_lastStatusBarDoubleTapTime = 0;
                 g_bottomBarSwipeStartY = loc.y;
                 g_bottomBarTouchActive = YES;
                 g_bottomBarHapticFired = NO;
+                g_bottomBarSwipeUpTriggered = NO;
+                g_pendingBottomBarSwipeUpTrigger = nil;
+                
+                CGFloat progress = 0;
+                if (orientation == UIInterfaceOrientationPortrait) {
+                    progress = loc.x / lw;
+                } else if (orientation == UIInterfaceOrientationPortraitUpsideDown) {
+                    progress = 1.0 - (loc.x / lw);
+                } else if (orientation == UIInterfaceOrientationLandscapeLeft) {
+                    progress = 1.0 - (loc.y / lh);
+                } else if (orientation == UIInterfaceOrientationLandscapeRight) {
+                    progress = loc.y / lh;
+                }
+                
+                if (progress < 0.33) {
+                    g_pendingBottomBarSwipeUpTrigger = @"trigger_bottom_swipe_up_left";
+                } else if (progress > 0.67) {
+                    g_pendingBottomBarSwipeUpTrigger = @"trigger_bottom_swipe_up_right";
+                } else {
+                    g_pendingBottomBarSwipeUpTrigger = @"trigger_bottom_swipe_up_center";
+                }
+                SRLog(@"[RCBottom] Bottom Touch began at progress=%.2f -> Zone: %@", progress, g_pendingBottomBarSwipeUpTrigger);
             }
         }
         else if (touch && (touch.phase == UITouchPhaseMoved || touch.phase == UITouchPhaseEnded)) {
@@ -11156,7 +11183,8 @@ static NSTimeInterval g_lastStatusBarDoubleTapTime = 0;
 
                 CGFloat abs_udx = fabs(user_dx);
                 CGFloat abs_udy = fabs(user_dy);
-                BOOL isHoz = (abs_udx > abs_udy * 2.0);
+                BOOL isHoz = (abs_udx > abs_udy * 1.8);
+                BOOL isVertUp = (user_dy < -15 && abs_udy > abs_udx * 1.5);
                 
                 // --- Status Bar Moves ---
                 if (g_statusBarTouchActive && !g_statusBarHoldTriggered) {
@@ -11194,6 +11222,21 @@ static NSTimeInterval g_lastStatusBarDoubleTapTime = 0;
                     }
                 }
                 
+                // Bottom Bar Swipe Up (3-Zone) during Move
+                if (g_bottomBarTouchActive && !g_bottomBarSwipeUpTriggered && isVertUp && abs_udy > 45) {
+                    if (g_pendingBottomBarSwipeUpTrigger) {
+                        load_trigger_config();
+                        BOOL enabled = [g_triggerConfig[@"masterEnabled"] boolValue] && 
+                                       [g_triggerConfig[@"triggers"][g_pendingBottomBarSwipeUpTrigger][@"enabled"] boolValue];
+                        if (enabled) {
+                            g_bottomBarSwipeUpTriggered = YES;
+                            trigger_haptic();
+                            RCExecuteTrigger(g_pendingBottomBarSwipeUpTrigger);
+                            SRLog(@"[RCBottom] %@ FIRED during move!", g_pendingBottomBarSwipeUpTrigger);
+                        }
+                    }
+                }
+                
                 // --- Gesture Finalized ---
                 if (isEnded) {
                     if (g_statusBarHoldTimer) {
@@ -11208,16 +11251,31 @@ static NSTimeInterval g_lastStatusBarDoubleTapTime = 0;
                             RCExecuteTrigger(trigger);
                         }
                     }
-                    if (g_bottomBarTouchActive) {
+                    if (g_bottomBarTouchActive && !g_bottomBarSwipeUpTriggered && isVertUp && abs_udy > 35) {
+                        if (g_pendingBottomBarSwipeUpTrigger) {
+                            load_trigger_config();
+                            BOOL enabled = [g_triggerConfig[@"masterEnabled"] boolValue] && 
+                                           [g_triggerConfig[@"triggers"][g_pendingBottomBarSwipeUpTrigger][@"enabled"] boolValue];
+                            if (enabled) {
+                                g_bottomBarSwipeUpTriggered = YES;
+                                trigger_haptic();
+                                RCExecuteTrigger(g_pendingBottomBarSwipeUpTrigger);
+                                SRLog(@"[RCBottom] %@ FIRED on ended!", g_pendingBottomBarSwipeUpTrigger);
+                            }
+                        }
+                    }
+                    if (g_bottomBarTouchActive && !g_bottomBarSwipeUpTriggered) {
                         if (isHoz && abs_udx > 60) {
                             NSString *trigger = (user_dx > 0) ? @"trigger_bottombar_swipe_right" : @"trigger_bottombar_swipe_left";
                             RCExecuteTrigger(trigger);
                         }
                     }
-                    SRLog(@"[Debug] Ended: user_dx=%.1f user_dy=%.1f orient=%ld isHoz=%d", user_dx, user_dy, (long)orientation, isHoz);
+                    SRLog(@"[Debug] Ended: user_dx=%.1f user_dy=%.1f orient=%ld isHoz=%d isVertUp=%d", user_dx, user_dy, (long)orientation, isHoz, isVertUp);
                     g_statusBarTouchActive = NO;
                     g_bottomBarTouchActive = NO;
                     g_statusBarHoldTriggered = NO;
+                    g_bottomBarSwipeUpTriggered = NO;
+                    g_pendingBottomBarSwipeUpTrigger = nil;
                 }
             }
         }
@@ -11231,6 +11289,8 @@ static NSTimeInterval g_lastStatusBarDoubleTapTime = 0;
             g_statusBarTouchActive = NO;
             g_bottomBarTouchActive = NO;
             g_bottomBarHapticFired = NO;
+            g_bottomBarSwipeUpTriggered = NO;
+            g_pendingBottomBarSwipeUpTrigger = nil;
         }
     }
     

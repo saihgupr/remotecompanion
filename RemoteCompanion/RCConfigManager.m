@@ -91,6 +91,8 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
                              @"volume_both_press", @"volume_up_then_down", @"volume_down_then_up", @"touchid_tap",
                              @"power_volume_up", @"power_volume_down", @"shake",
                              @"trigger_ringer_mute", @"trigger_ringer_unmute", @"trigger_ringer_toggle",
+                             @"trigger_bottombar_swipe_left", @"trigger_bottombar_swipe_right",
+                             @"trigger_bottom_swipe_up_left", @"trigger_bottom_swipe_up_center", @"trigger_bottom_swipe_up_right",
                              @"trigger_device_lock", @"trigger_device_unlock",
                              @"trigger_media_play", @"trigger_media_pause", @"trigger_media_track_change"];
         
@@ -197,7 +199,10 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
                 @"trigger_ringer_toggle": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
                 @"shake": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
                 @"trigger_bottombar_swipe_left": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"trigger_bottombar_swipe_right": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy]
+                @"trigger_bottombar_swipe_right": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
+                @"trigger_bottom_swipe_up_left": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
+                @"trigger_bottom_swipe_up_center": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
+                @"trigger_bottom_swipe_up_right": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy]
             } mutableCopy]
         } mutableCopy];
     }
@@ -458,7 +463,7 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
 }
 
 - (NSArray<NSString *> *)allTriggerKeys {
-    return @[@"volume_up_hold", @"volume_down_hold", @"volume_both_press", @"volume_up_then_down", @"volume_down_then_up", @"power_double_tap", @"power_long_press", @"power_triple_click", @"power_quadruple_click", @"trigger_statusbar_left_hold", @"trigger_statusbar_center_hold", @"trigger_statusbar_right_hold", @"trigger_statusbar_swipe_left", @"trigger_statusbar_swipe_right", @"trigger_statusbar_double_tap", @"trigger_home_triple_click", @"trigger_home_quadruple_click", @"trigger_home_double_click", @"touchid_tap", @"touchid_hold", @"trigger_edge_left_swipe_up", @"trigger_edge_left_swipe_down", @"trigger_edge_right_swipe_up", @"trigger_edge_right_swipe_down", @"trigger_ringer_mute", @"trigger_ringer_unmute", @"trigger_ringer_toggle", @"trigger_bottombar_swipe_left", @"trigger_bottombar_swipe_right", @"power_volume_up", @"power_volume_down", @"shake", @"trigger_device_lock", @"trigger_device_unlock", @"trigger_media_play", @"trigger_media_pause", @"trigger_media_track_change"];
+    return @[@"volume_up_hold", @"volume_down_hold", @"volume_both_press", @"volume_up_then_down", @"volume_down_then_up", @"power_double_tap", @"power_long_press", @"power_triple_click", @"power_quadruple_click", @"trigger_statusbar_left_hold", @"trigger_statusbar_center_hold", @"trigger_statusbar_right_hold", @"trigger_statusbar_swipe_left", @"trigger_statusbar_swipe_right", @"trigger_statusbar_double_tap", @"trigger_home_triple_click", @"trigger_home_quadruple_click", @"trigger_home_double_click", @"touchid_tap", @"touchid_hold", @"trigger_edge_left_swipe_up", @"trigger_edge_left_swipe_down", @"trigger_edge_right_swipe_up", @"trigger_edge_right_swipe_down", @"trigger_ringer_mute", @"trigger_ringer_unmute", @"trigger_ringer_toggle", @"trigger_bottombar_swipe_left", @"trigger_bottombar_swipe_right", @"trigger_bottom_swipe_up_left", @"trigger_bottom_swipe_up_center", @"trigger_bottom_swipe_up_right", @"power_volume_up", @"power_volume_down", @"shake", @"trigger_device_lock", @"trigger_device_unlock", @"trigger_media_play", @"trigger_media_pause", @"trigger_media_track_change"];
 }
 
 - (NSArray<NSDictionary *> *)notificationTriggers {
@@ -514,7 +519,10 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         @"trigger_ringer_unmute": @"Ringer Unmuted (Silent Mode Off)",
         @"trigger_ringer_toggle": @"Ringer Toggled (Any Change)",
         @"trigger_bottombar_swipe_left": @"Bottom Bar Swipe Left",
-        @"trigger_bottombar_swipe_right": @"Bottom Bar Swipe Right"
+        @"trigger_bottombar_swipe_right": @"Bottom Bar Swipe Right",
+        @"trigger_bottom_swipe_up_left": @"Bottom Swipe Up (Left)",
+        @"trigger_bottom_swipe_up_center": @"Bottom Swipe Up (Center)",
+        @"trigger_bottom_swipe_up_right": @"Bottom Swipe Up (Right)"
     };
     
     if ([triggerKey hasPrefix:@"nfc_"]) {

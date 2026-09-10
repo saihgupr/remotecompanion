@@ -2446,7 +2446,7 @@ const TRIGGER_SECTIONS = [
   { title: 'Power Button',           id: 'power',     keys: ['power_double_tap','power_triple_click','power_quadruple_click','power_volume_up','power_volume_down','power_long_press'] },
   { title: 'Screen Gestures',        id: 'statusbar', keys: ['trigger_statusbar_left_hold','trigger_statusbar_center_hold','trigger_statusbar_right_hold','trigger_statusbar_swipe_left','trigger_statusbar_swipe_right','trigger_statusbar_double_tap'] },
   { title: 'Edge Gestures',          id: 'edge',      keys: ['trigger_edge_left_swipe_up','trigger_edge_left_swipe_down','trigger_edge_right_swipe_up','trigger_edge_right_swipe_down'] },
-  { title: 'Bottom Bar Gestures',    id: 'bottombar', keys: ['trigger_bottombar_swipe_left','trigger_bottombar_swipe_right'] },
+  { title: 'Bottom Bar Gestures',    id: 'bottombar', keys: ['trigger_bottombar_swipe_left','trigger_bottombar_swipe_right','trigger_bottom_swipe_up_left','trigger_bottom_swipe_up_center','trigger_bottom_swipe_up_right'] },
   { title: 'Home Button',            id: 'home',      keys: ['trigger_home_double_click','trigger_home_triple_click','trigger_home_quadruple_click','touchid_tap','touchid_hold'] },
   { title: 'Ringer Switch',          id: 'ringer',    keys: ['trigger_ringer_mute','trigger_ringer_unmute','trigger_ringer_toggle'] },
   { title: 'Device Status',          id: 'status',    keys: [], prefix: 'trigger_device_', prefix2: 'trigger_media_', deletable: true },
@@ -2477,6 +2477,7 @@ const TRIGGER_NAMES = {
   trigger_edge_right_swipe_up:'Right Edge Swipe Up', trigger_edge_right_swipe_down:'Right Edge Swipe Down',
   trigger_ringer_mute:'Ringer Muted', trigger_ringer_unmute:'Ringer Unmuted', trigger_ringer_toggle:'Ringer Toggled',
   trigger_bottombar_swipe_left:'Bottom Bar Swipe Left', trigger_bottombar_swipe_right:'Bottom Bar Swipe Right',
+  trigger_bottom_swipe_up_left:'Bottom Swipe Up (Left)', trigger_bottom_swipe_up_center:'Bottom Swipe Up (Center)', trigger_bottom_swipe_up_right:'Bottom Swipe Up (Right)',
   trigger_device_lock: 'Device Locked', trigger_device_unlock: 'Device Unlocked',
   trigger_power_connect: 'Power Connected', trigger_power_disconnect: 'Power Disconnected',
   trigger_media_play: 'Media Playing', trigger_media_pause: 'Media Paused', trigger_media_track_change: 'Media Track Changed',
@@ -2512,6 +2513,9 @@ const TRIGGER_ICONS = {
   trigger_edge_right_swipe_down:{ icon:'arrow_down_to_line', cls:'icon-gray' },
   trigger_bottombar_swipe_left: { icon:'square_stack_3d_up_fill', cls:'icon-gray' },
   trigger_bottombar_swipe_right:{ icon:'square_stack_3d_up_fill', cls:'icon-gray' },
+  trigger_bottom_swipe_up_left: { icon:'arrow_up_to_line',        cls:'icon-indigo' },
+  trigger_bottom_swipe_up_center:{ icon:'arrow_up_to_line',       cls:'icon-indigo' },
+  trigger_bottom_swipe_up_right: { icon:'arrow_up_to_line',       cls:'icon-indigo' },
   trigger_ringer_mute:   { icon:'bell_slash_fill', cls:'icon-red' },
   trigger_ringer_unmute: { icon:'bell_fill',       cls:'icon-green' },
   trigger_ringer_toggle: { icon:'bell_badge_fill', cls:'icon-orange' },
@@ -2601,6 +2605,9 @@ const CMD_NAMES = {
   'haptic':'Haptic Feedback',
   'trigger_bottombar_swipe_left':'Bottom Bar Swipe Left',
   'trigger_bottombar_swipe_right':'Bottom Bar Swipe Right',
+  'trigger_bottom_swipe_up_left':'Bottom Swipe Up (Left)',
+  'trigger_bottom_swipe_up_center':'Bottom Swipe Up (Center)',
+  'trigger_bottom_swipe_up_right':'Bottom Swipe Up (Right)',
 };
 
 function nameForCmd(cmd) {
@@ -2836,6 +2843,7 @@ function iconForCmd(cmd) {
   if (lowCmd.startsWith('uiopen '))       return { icon:'app_badge_fill',  cls:'icon-pink' };
   if (lowCmd.startsWith('kill '))         return { icon:'xmark_circle_fill', cls:'icon-red' };
   if (lowCmd.startsWith('exec ') || lowCmd.startsWith('root ')) return { icon:'command', cls:'icon-dark' };
+  if (lowCmd.startsWith('trigger_bottom_swipe_up')) return { icon:'arrow_up_to_line', cls:'icon-indigo' };
   if (lowCmd.startsWith('trigger_bottombar')) return { icon:'square_stack_3d_up_fill', cls:'icon-gray' };
   // Touch gestures
   if (lowCmd.startsWith('tap '))   return { icon:'hand_tap',         cls:'icon-teal' };

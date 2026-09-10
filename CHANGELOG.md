@@ -19,6 +19,11 @@ All notable changes to this project will be documented in this file.
   - Added dedicated Snapper actions (`rc snapper [open|freeze|instant|close]`) separate from the standard screenshot action.
   - Directly triggers Snapper 2 and Snapper 3 overlay functions via system Darwin notifications (`com.jontelang.snapper3.open`, `freeze`, `instant`, `close.all`, etc.).
   - Added Snapper 2/3 installation detection, `/api/capabilities` reporting (`snapper: true/false`), and action picker entries under Integrations in both iOS Companion App and Web UI.
+- **3-Zone Bottom Screen Swipe-Up Gestures**:
+  - Added 3 distinct horizontal zones for swipe-up gestures along the bottom screen edge: **Bottom Swipe Up (Left)** (`trigger_bottom_swipe_up_left`), **Bottom Swipe Up (Center)** (`trigger_bottom_swipe_up_center`), and **Bottom Swipe Up (Right)** (`trigger_bottom_swipe_up_right`).
+  - Integrated into `%hook UIApplication sendEvent:` with orientation awareness, responsive in-flight trigger execution upon reaching upward vertical displacement threshold, and haptic feedback.
+  - Fully backwards-compatible with existing horizontal bottom bar swipes (`trigger_bottombar_swipe_left`, `trigger_bottombar_swipe_right`).
+  - Configurable across iOS Companion App (`Bottom Bar Gestures` section) and Web UI with custom icon and title mappings.
 
 ## [3.6.3] - 2026-09-03
 

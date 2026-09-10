@@ -27,6 +27,8 @@
 
 - (NSString *)iconNameForTrigger:(NSString *)triggerKey {
     if ([triggerKey isEqualToString:@"volume_up_then_down"] || [triggerKey isEqualToString:@"volume_down_then_up"]) return @"arrow.up.and.down.circle.fill";
+    if ([triggerKey hasPrefix:@"trigger_bottom_swipe_up"]) return @"chevron.compact.up";
+    if ([triggerKey hasPrefix:@"trigger_bottombar"]) return @"square.stack.3d.up.fill";
     if ([triggerKey containsString:@"volume"]) return @"speaker.wave.2.fill";
     if ([triggerKey containsString:@"power"]) return @"power";
     if ([triggerKey containsString:@"statusbar"]) return @"hand.draw"; // Status bar / screen gestures
@@ -252,7 +254,7 @@
     addSection(@[@"power_double_tap", @"power_triple_click", @"power_quadruple_click", @"power_volume_up", @"power_volume_down", @"power_long_press"], @"Power Button", NO);
     addSection(@[@"trigger_statusbar_left_hold", @"trigger_statusbar_center_hold", @"trigger_statusbar_right_hold", @"trigger_statusbar_swipe_left", @"trigger_statusbar_swipe_right", @"trigger_statusbar_double_tap"], @"Screen Gestures", NO);
     addSection(@[@"trigger_edge_left_swipe_up", @"trigger_edge_left_swipe_down", @"trigger_edge_right_swipe_up", @"trigger_edge_right_swipe_down"], @"Edge Gestures", NO);
-    addSection(@[@"trigger_bottombar_swipe_left", @"trigger_bottombar_swipe_right"], @"Bottom Bar Gestures", NO);
+    addSection(@[@"trigger_bottombar_swipe_left", @"trigger_bottombar_swipe_right", @"trigger_bottom_swipe_up_left", @"trigger_bottom_swipe_up_center", @"trigger_bottom_swipe_up_right"], @"Bottom Bar Gestures", NO);
     addSection(@[@"trigger_home_double_click", @"trigger_home_triple_click", @"trigger_home_quadruple_click", @"touchid_tap", @"touchid_hold"], @"Home Button", NO);
     addSection(@[@"trigger_ringer_mute", @"trigger_ringer_unmute", @"trigger_ringer_toggle"], @"Ringer Switch", NO);
     // Device State Section (Only show if configured, hide if empty)
