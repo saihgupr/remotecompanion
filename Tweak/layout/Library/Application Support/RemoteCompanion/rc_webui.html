@@ -2442,7 +2442,7 @@ function toggleEditMode() {
 // ── Trigger metadata ──────────────────────────────────────────────────────────
 const TRIGGER_SECTIONS = [
   { title: 'Favorites',              id: 'favorites', keys: [] },
-  { title: 'Volume Buttons',         id: 'volume',    keys: ['volume_up_hold','volume_down_hold','volume_both_press'] },
+  { title: 'Volume Buttons',         id: 'volume',    keys: ['volume_up_hold','volume_down_hold','volume_both_press','volume_up_then_down','volume_down_then_up'] },
   { title: 'Power Button',           id: 'power',     keys: ['power_double_tap','power_triple_click','power_quadruple_click','power_volume_up','power_volume_down','power_long_press'] },
   { title: 'Screen Gestures',        id: 'statusbar', keys: ['trigger_statusbar_left_hold','trigger_statusbar_center_hold','trigger_statusbar_right_hold','trigger_statusbar_swipe_left','trigger_statusbar_swipe_right','trigger_statusbar_double_tap'] },
   { title: 'Edge Gestures',          id: 'edge',      keys: ['trigger_edge_left_swipe_up','trigger_edge_left_swipe_down','trigger_edge_right_swipe_up','trigger_edge_right_swipe_down'] },
@@ -2463,6 +2463,7 @@ const TRIGGER_SECTIONS = [
 const TRIGGER_NAMES = {
   shake:'Shake Device',
   volume_up_hold:'Volume Up Hold', volume_down_hold:'Volume Down Hold', volume_both_press:'Volume Up + Down (Both)',
+  volume_up_then_down:'Volume Up then Down', volume_down_then_up:'Volume Down then Up',
   power_double_tap:'Power Double-Tap', power_long_press:'Power Long Press',
   power_triple_click:'Power Triple Click', power_quadruple_click:'Power Quadruple Click',
   power_volume_up:'Power + Volume Up', power_volume_down:'Power + Volume Down',
@@ -2486,6 +2487,8 @@ const TRIGGER_ICONS = {
   volume_up_hold:     { icon:'speaker_3_fill',           cls:'icon-blue' },
   volume_down_hold:   { icon:'speaker_1_fill',           cls:'icon-blue' },
   volume_both_press:  { icon:'speaker_3_fill',           cls:'icon-indigo' },
+  volume_up_then_down:{ icon:'arrow_up_arrow_down',      cls:'icon-indigo' },
+  volume_down_then_up:{ icon:'arrow_up_arrow_down',      cls:'icon-indigo' },
   power_double_tap:   { icon:'bolt_fill',                cls:'icon-orange' },
   power_long_press:   { icon:'power',                    cls:'icon-red' },
   power_triple_click: { icon:'power',                    cls:'icon-red' },

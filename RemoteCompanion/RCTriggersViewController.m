@@ -26,6 +26,7 @@
 }
 
 - (NSString *)iconNameForTrigger:(NSString *)triggerKey {
+    if ([triggerKey isEqualToString:@"volume_up_then_down"] || [triggerKey isEqualToString:@"volume_down_then_up"]) return @"arrow.up.and.down.circle.fill";
     if ([triggerKey containsString:@"volume"]) return @"speaker.wave.2.fill";
     if ([triggerKey containsString:@"power"]) return @"power";
     if ([triggerKey containsString:@"statusbar"]) return @"hand.draw"; // Status bar / screen gestures
@@ -247,7 +248,7 @@
     };
 
     // Standard Sections (Always show headers)
-    addSection(@[@"volume_up_hold", @"volume_down_hold", @"volume_both_press"], @"Volume Buttons", NO);
+    addSection(@[@"volume_up_hold", @"volume_down_hold", @"volume_both_press", @"volume_up_then_down", @"volume_down_then_up"], @"Volume Buttons", NO);
     addSection(@[@"power_double_tap", @"power_triple_click", @"power_quadruple_click", @"power_volume_up", @"power_volume_down", @"power_long_press"], @"Power Button", NO);
     addSection(@[@"trigger_statusbar_left_hold", @"trigger_statusbar_center_hold", @"trigger_statusbar_right_hold", @"trigger_statusbar_swipe_left", @"trigger_statusbar_swipe_right", @"trigger_statusbar_double_tap"], @"Screen Gestures", NO);
     addSection(@[@"trigger_edge_left_swipe_up", @"trigger_edge_left_swipe_down", @"trigger_edge_right_swipe_up", @"trigger_edge_right_swipe_down"], @"Edge Gestures", NO);

@@ -88,7 +88,7 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
                              @"trigger_home_triple_click", @"trigger_home_quadruple_click", @"trigger_home_double_click",
                              @"trigger_edge_left_swipe_up", @"trigger_edge_left_swipe_down", 
                              @"trigger_edge_right_swipe_up", @"trigger_edge_right_swipe_down",
-                             @"volume_both_press", @"touchid_tap",
+                             @"volume_both_press", @"volume_up_then_down", @"volume_down_then_up", @"touchid_tap",
                              @"power_volume_up", @"power_volume_down", @"shake",
                              @"trigger_ringer_mute", @"trigger_ringer_unmute", @"trigger_ringer_toggle",
                              @"trigger_device_lock", @"trigger_device_unlock",
@@ -188,6 +188,8 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
                 @"trigger_edge_right_swipe_up": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
                 @"trigger_edge_right_swipe_down": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
                 @"volume_both_press": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
+                @"volume_up_then_down": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
+                @"volume_down_then_up": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
                 @"power_volume_up": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
                 @"power_volume_down": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
                 @"trigger_ringer_mute": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
@@ -456,7 +458,7 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
 }
 
 - (NSArray<NSString *> *)allTriggerKeys {
-    return @[@"volume_up_hold", @"volume_down_hold", @"volume_both_press", @"power_double_tap", @"power_long_press", @"power_triple_click", @"power_quadruple_click", @"trigger_statusbar_left_hold", @"trigger_statusbar_center_hold", @"trigger_statusbar_right_hold", @"trigger_statusbar_swipe_left", @"trigger_statusbar_swipe_right", @"trigger_statusbar_double_tap", @"trigger_home_triple_click", @"trigger_home_quadruple_click", @"trigger_home_double_click", @"touchid_tap", @"touchid_hold", @"trigger_edge_left_swipe_up", @"trigger_edge_left_swipe_down", @"trigger_edge_right_swipe_up", @"trigger_edge_right_swipe_down", @"trigger_ringer_mute", @"trigger_ringer_unmute", @"trigger_ringer_toggle", @"trigger_bottombar_swipe_left", @"trigger_bottombar_swipe_right", @"power_volume_up", @"power_volume_down", @"shake", @"trigger_device_lock", @"trigger_device_unlock", @"trigger_media_play", @"trigger_media_pause", @"trigger_media_track_change"];
+    return @[@"volume_up_hold", @"volume_down_hold", @"volume_both_press", @"volume_up_then_down", @"volume_down_then_up", @"power_double_tap", @"power_long_press", @"power_triple_click", @"power_quadruple_click", @"trigger_statusbar_left_hold", @"trigger_statusbar_center_hold", @"trigger_statusbar_right_hold", @"trigger_statusbar_swipe_left", @"trigger_statusbar_swipe_right", @"trigger_statusbar_double_tap", @"trigger_home_triple_click", @"trigger_home_quadruple_click", @"trigger_home_double_click", @"touchid_tap", @"touchid_hold", @"trigger_edge_left_swipe_up", @"trigger_edge_left_swipe_down", @"trigger_edge_right_swipe_up", @"trigger_edge_right_swipe_down", @"trigger_ringer_mute", @"trigger_ringer_unmute", @"trigger_ringer_toggle", @"trigger_bottombar_swipe_left", @"trigger_bottombar_swipe_right", @"power_volume_up", @"power_volume_down", @"shake", @"trigger_device_lock", @"trigger_device_unlock", @"trigger_media_play", @"trigger_media_pause", @"trigger_media_track_change"];
 }
 
 - (NSArray<NSDictionary *> *)notificationTriggers {
@@ -485,6 +487,8 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         @"volume_up_hold": @"Volume Up Hold",
         @"volume_down_hold": @"Volume Down Hold",
         @"volume_both_press": @"Volume Up + Down (Both)",
+        @"volume_up_then_down": @"Volume Up then Down",
+        @"volume_down_then_up": @"Volume Down then Up",
         @"power_double_tap": @"Power Double-Tap",
         @"power_long_press": @"Power Long Press",
         @"power_triple_click": @"Power Triple Click",

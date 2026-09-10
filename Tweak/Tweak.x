@@ -1439,6 +1439,8 @@ static NSString *get_human_name_for_trigger(NSString *key, NSDictionary *trigger
             @"volume_up_hold": @"Volume Up Hold",
             @"volume_down_hold": @"Volume Down Hold",
             @"volume_both_press": @"Volume Up + Down (Both)",
+            @"volume_up_then_down": @"Volume Up then Down",
+            @"volume_down_then_up": @"Volume Down then Up",
             @"power_double_tap": @"Power Double-Tap",
             @"power_long_press": @"Power Long Press",
             @"power_triple_click": @"Power Triple Click",
@@ -9467,6 +9469,21 @@ static BOOL g_volComboTriggered = NO;
 static NSTimeInterval g_lastVolUpPressTime = 0;
 static NSTimeInterval g_lastVolDownPressTime = 0;
 
+static NSTimer *g_pendingVolUpSeqTimer = nil;
+static NSTimer *g_pendingVolDownSeqTimer = nil;
+static BOOL g_volSeqJustFired = NO;
+
+static void cancel_pending_volume_sequences() {
+    if (g_pendingVolUpSeqTimer) {
+        [g_pendingVolUpSeqTimer invalidate];
+        g_pendingVolUpSeqTimer = nil;
+    }
+    if (g_pendingVolDownSeqTimer) {
+        [g_pendingVolDownSeqTimer invalidate];
+        g_pendingVolDownSeqTimer = nil;
+    }
+}
+
 static NSTimer *g_lockButtonTimer = nil;
 static BOOL g_lockButtonTriggered = NO;
 static NSTimer *g_systemPowerOffTimer = nil; // New for dual-stage
@@ -9603,6 +9620,7 @@ static BOOL g_isSwappingVolume = NO;
 
     // 1. Check for Power + Volume Up combination
     if (g_powerIsDown) {
+        cancel_pending_volume_sequences();
         load_trigger_config();
         BOOL masterEnabled = [g_triggerConfig[@"masterEnabled"] boolValue];
         BOOL enabled = masterEnabled && [g_triggerConfig[@"triggers"][@"power_volume_up"][@"enabled"] boolValue];
@@ -9617,9 +9635,38 @@ static BOOL g_isSwappingVolume = NO;
         }
     }
 
-    // 2. Check for simultaneous Volume Up + Volume Down dual press
+    // 2. Check for pending Volume Down -> Volume Up sequence
+    if (g_pendingVolDownSeqTimer) {
+        [g_pendingVolDownSeqTimer invalidate];
+        g_pendingVolDownSeqTimer = nil;
+        load_trigger_config();
+        BOOL masterEnabled = [g_triggerConfig[@"masterEnabled"] boolValue];
+        BOOL seqDownUpEnabled = masterEnabled && [g_triggerConfig[@"triggers"][@"volume_down_then_up"][@"enabled"] boolValue];
+        if (seqDownUpEnabled) {
+            SRLog(@"Volume Down then Up sequence triggered!");
+            g_volSeqJustFired = YES;
+            if (g_volUpTimer) { [g_volUpTimer invalidate]; g_volUpTimer = nil; }
+            if (g_volDownTimer) { [g_volDownTimer invalidate]; g_volDownTimer = nil; }
+            trigger_haptic();
+            RCExecuteTrigger(@"volume_down_then_up");
+            return;
+        }
+    }
+
+    // 3. If user is rapidly tapping Vol Up again, cancel pending Vol Up replay timer and replay immediately
+    if (g_pendingVolUpSeqTimer) {
+        [g_pendingVolUpSeqTimer invalidate];
+        g_pendingVolUpSeqTimer = nil;
+        g_volIsReplaying = YES;
+        [self volumeIncreasePressDownWithModifiers:0];
+        [self volumeIncreasePressUp];
+        g_volIsReplaying = NO;
+    }
+
+    // 4. Check for simultaneous Volume Up + Volume Down dual press
     BOOL isDualPress = g_volDownIsDown || (g_lastVolDownPressTime > 0 && (now - g_lastVolDownPressTime) < 0.20);
     if (isDualPress) {
+        cancel_pending_volume_sequences();
         load_trigger_config();
         BOOL masterEnabled = [g_triggerConfig[@"masterEnabled"] boolValue];
         BOOL comboEnabled = masterEnabled && [g_triggerConfig[@"triggers"][@"volume_both_press"][@"enabled"] boolValue];
@@ -9645,8 +9692,9 @@ static BOOL g_isSwappingVolume = NO;
         BOOL masterEnabled = [g_triggerConfig[@"masterEnabled"] boolValue];
         BOOL comboEnabled = masterEnabled && [g_triggerConfig[@"triggers"][@"volume_both_press"][@"enabled"] boolValue];
         BOOL holdEnabled = masterEnabled && [g_triggerConfig[@"triggers"][@"volume_up_hold"][@"enabled"] boolValue];
+        BOOL seqUpDownEnabled = masterEnabled && [g_triggerConfig[@"triggers"][@"volume_up_then_down"][@"enabled"] boolValue];
 
-        if (holdEnabled || comboEnabled) {
+        if (holdEnabled || comboEnabled || seqUpDownEnabled) {
             if (g_volUpTimer) [g_volUpTimer invalidate];
             g_volUpTimer = [NSTimer scheduledTimerWithTimeInterval:0.35 repeats:NO block:^(NSTimer *timer) {
                 if (g_volComboTriggered || g_powerVolComboTriggered || g_volDownIsDown) return;
@@ -9655,6 +9703,10 @@ static BOOL g_isSwappingVolume = NO;
                     g_volUpTriggered = YES;
                     trigger_haptic();
                     RCExecuteTrigger(@"volume_up_hold");
+                } else {
+                    g_volIsReplaying = YES;
+                    [self volumeIncreasePressDownWithModifiers:arg1];
+                    g_volIsReplaying = NO;
                 }
             }];
         } else {
@@ -9679,6 +9731,12 @@ static BOOL g_isSwappingVolume = NO;
         return;
     }
 
+    if (g_volSeqJustFired) {
+        g_volSeqJustFired = NO;
+        if (g_volUpTimer) { [g_volUpTimer invalidate]; g_volUpTimer = nil; }
+        return;
+    }
+
     if (g_volComboTriggered) {
         if (!g_volDownIsDown) g_volComboTriggered = NO;
         if (g_volUpTimer) { [g_volUpTimer invalidate]; g_volUpTimer = nil; }
@@ -9695,18 +9753,31 @@ static BOOL g_isSwappingVolume = NO;
         BOOL masterEnabled = [g_triggerConfig[@"masterEnabled"] boolValue];
         BOOL holdEnabled = masterEnabled && [g_triggerConfig[@"triggers"][@"volume_up_hold"][@"enabled"] boolValue];
         BOOL comboEnabled = masterEnabled && [g_triggerConfig[@"triggers"][@"volume_both_press"][@"enabled"] boolValue];
+        BOOL seqUpDownEnabled = masterEnabled && [g_triggerConfig[@"triggers"][@"volume_up_then_down"][@"enabled"] boolValue];
 
-        if (holdEnabled || comboEnabled) {
-            if (g_volUpTimer) {
-                [g_volUpTimer invalidate];
-                g_volUpTimer = nil;
+        if (g_volUpTriggered) {
+            g_volUpTriggered = NO;
+            return;
+        }
+
+        if (g_volUpTimer) {
+            [g_volUpTimer invalidate];
+            g_volUpTimer = nil;
+
+            if (seqUpDownEnabled) {
+                if (g_pendingVolUpSeqTimer) [g_pendingVolUpSeqTimer invalidate];
+                g_pendingVolUpSeqTimer = [NSTimer scheduledTimerWithTimeInterval:0.38 repeats:NO block:^(NSTimer *timer) {
+                    g_pendingVolUpSeqTimer = nil;
+                    g_volIsReplaying = YES;
+                    [self volumeIncreasePressDownWithModifiers:0];
+                    [self volumeIncreasePressUp];
+                    g_volIsReplaying = NO;
+                }];
+            } else if (holdEnabled || comboEnabled) {
                 g_volIsReplaying = YES;
                 [self volumeIncreasePressDownWithModifiers:0];
                 [self volumeIncreasePressUp];
                 g_volIsReplaying = NO;
-            }
-            if (g_volUpTriggered) {
-                g_volUpTriggered = NO;
             }
         } else {
             g_volIsReplaying = YES;
@@ -9735,6 +9806,7 @@ static BOOL g_isSwappingVolume = NO;
 
     // 1. Check for Power + Volume Down combination
     if (g_powerIsDown) {
+        cancel_pending_volume_sequences();
         load_trigger_config();
         BOOL masterEnabled = [g_triggerConfig[@"masterEnabled"] boolValue];
         BOOL enabled = masterEnabled && [g_triggerConfig[@"triggers"][@"power_volume_down"][@"enabled"] boolValue];
@@ -9749,9 +9821,38 @@ static BOOL g_isSwappingVolume = NO;
         }
     }
 
-    // 2. Check for simultaneous Volume Up + Volume Down dual press
+    // 2. Check for pending Volume Up -> Volume Down sequence
+    if (g_pendingVolUpSeqTimer) {
+        [g_pendingVolUpSeqTimer invalidate];
+        g_pendingVolUpSeqTimer = nil;
+        load_trigger_config();
+        BOOL masterEnabled = [g_triggerConfig[@"masterEnabled"] boolValue];
+        BOOL seqUpDownEnabled = masterEnabled && [g_triggerConfig[@"triggers"][@"volume_up_then_down"][@"enabled"] boolValue];
+        if (seqUpDownEnabled) {
+            SRLog(@"Volume Up then Down sequence triggered!");
+            g_volSeqJustFired = YES;
+            if (g_volUpTimer) { [g_volUpTimer invalidate]; g_volUpTimer = nil; }
+            if (g_volDownTimer) { [g_volDownTimer invalidate]; g_volDownTimer = nil; }
+            trigger_haptic();
+            RCExecuteTrigger(@"volume_up_then_down");
+            return;
+        }
+    }
+
+    // 3. If user is rapidly tapping Vol Down again, cancel pending Vol Down replay timer and replay immediately
+    if (g_pendingVolDownSeqTimer) {
+        [g_pendingVolDownSeqTimer invalidate];
+        g_pendingVolDownSeqTimer = nil;
+        g_volIsReplaying = YES;
+        [self volumeDecreasePressDownWithModifiers:0];
+        [self volumeDecreasePressUp];
+        g_volIsReplaying = NO;
+    }
+
+    // 4. Check for simultaneous Volume Up + Volume Down dual press
     BOOL isDualPress = g_volUpIsDown || (g_lastVolUpPressTime > 0 && (now - g_lastVolUpPressTime) < 0.20);
     if (isDualPress) {
+        cancel_pending_volume_sequences();
         load_trigger_config();
         BOOL masterEnabled = [g_triggerConfig[@"masterEnabled"] boolValue];
         BOOL comboEnabled = masterEnabled && [g_triggerConfig[@"triggers"][@"volume_both_press"][@"enabled"] boolValue];
@@ -9777,8 +9878,9 @@ static BOOL g_isSwappingVolume = NO;
         BOOL masterEnabled = [g_triggerConfig[@"masterEnabled"] boolValue];
         BOOL comboEnabled = masterEnabled && [g_triggerConfig[@"triggers"][@"volume_both_press"][@"enabled"] boolValue];
         BOOL holdEnabled = masterEnabled && [g_triggerConfig[@"triggers"][@"volume_down_hold"][@"enabled"] boolValue];
+        BOOL seqDownUpEnabled = masterEnabled && [g_triggerConfig[@"triggers"][@"volume_down_then_up"][@"enabled"] boolValue];
 
-        if (holdEnabled || comboEnabled) {
+        if (holdEnabled || comboEnabled || seqDownUpEnabled) {
             if (g_volDownTimer) [g_volDownTimer invalidate];
             g_volDownTimer = [NSTimer scheduledTimerWithTimeInterval:0.35 repeats:NO block:^(NSTimer *timer) {
                 if (g_volComboTriggered || g_powerVolComboTriggered || g_volUpIsDown) return;
@@ -9787,6 +9889,10 @@ static BOOL g_isSwappingVolume = NO;
                     g_volDownTriggered = YES;
                     trigger_haptic();
                     RCExecuteTrigger(@"volume_down_hold");
+                } else {
+                    g_volIsReplaying = YES;
+                    [self volumeDecreasePressDownWithModifiers:arg1];
+                    g_volIsReplaying = NO;
                 }
             }];
         } else {
@@ -9811,6 +9917,12 @@ static BOOL g_isSwappingVolume = NO;
         return;
     }
 
+    if (g_volSeqJustFired) {
+        g_volSeqJustFired = NO;
+        if (g_volDownTimer) { [g_volDownTimer invalidate]; g_volDownTimer = nil; }
+        return;
+    }
+
     if (g_volComboTriggered) {
         if (!g_volUpIsDown) g_volComboTriggered = NO;
         if (g_volDownTimer) { [g_volDownTimer invalidate]; g_volDownTimer = nil; }
@@ -9827,18 +9939,31 @@ static BOOL g_isSwappingVolume = NO;
         BOOL masterEnabled = [g_triggerConfig[@"masterEnabled"] boolValue];
         BOOL holdEnabled = masterEnabled && [g_triggerConfig[@"triggers"][@"volume_down_hold"][@"enabled"] boolValue];
         BOOL comboEnabled = masterEnabled && [g_triggerConfig[@"triggers"][@"volume_both_press"][@"enabled"] boolValue];
+        BOOL seqDownUpEnabled = masterEnabled && [g_triggerConfig[@"triggers"][@"volume_down_then_up"][@"enabled"] boolValue];
 
-        if (holdEnabled || comboEnabled) {
-            if (g_volDownTimer) {
-                [g_volDownTimer invalidate];
-                g_volDownTimer = nil;
+        if (g_volDownTriggered) {
+            g_volDownTriggered = NO;
+            return;
+        }
+
+        if (g_volDownTimer) {
+            [g_volDownTimer invalidate];
+            g_volDownTimer = nil;
+
+            if (seqDownUpEnabled) {
+                if (g_pendingVolDownSeqTimer) [g_pendingVolDownSeqTimer invalidate];
+                g_pendingVolDownSeqTimer = [NSTimer scheduledTimerWithTimeInterval:0.38 repeats:NO block:^(NSTimer *timer) {
+                    g_pendingVolDownSeqTimer = nil;
+                    g_volIsReplaying = YES;
+                    [self volumeDecreasePressDownWithModifiers:0];
+                    [self volumeDecreasePressUp];
+                    g_volIsReplaying = NO;
+                }];
+            } else if (holdEnabled || comboEnabled) {
                 g_volIsReplaying = YES;
                 [self volumeDecreasePressDownWithModifiers:0];
                 [self volumeDecreasePressUp];
                 g_volIsReplaying = NO;
-            }
-            if (g_volDownTriggered) {
-                g_volDownTriggered = NO;
             }
         } else {
             g_volIsReplaying = YES;
@@ -10244,6 +10369,7 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
                             SRLog(@"[HID] ⚡️+🔊 POWER + VOLUME COMBINATION DETECTED (Power after Volume): %@", triggerKey);
                             g_powerVolComboTriggered = YES;
                             dispatch_async(dispatch_get_main_queue(), ^{
+                                 cancel_pending_volume_sequences();
                                  if (g_volUpTimer) { [g_volUpTimer invalidate]; g_volUpTimer = nil; }
                                  if (g_volDownTimer) { [g_volDownTimer invalidate]; g_volDownTimer = nil; }
                                  trigger_haptic();
@@ -10307,6 +10433,7 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
                     
                     // Invalidate standard timers in Main Thread
                     dispatch_async(dispatch_get_main_queue(), ^{
+                         cancel_pending_volume_sequences();
                          if (g_volUpTimer) { [g_volUpTimer invalidate]; g_volUpTimer = nil; }
                          if (g_volDownTimer) { [g_volDownTimer invalidate]; g_volDownTimer = nil; }
                          trigger_haptic();
@@ -10326,6 +10453,7 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
                         
                         // Invalidate standard timers in Main Thread
                         dispatch_async(dispatch_get_main_queue(), ^{
+                             cancel_pending_volume_sequences();
                              if (g_volUpTimer) { [g_volUpTimer invalidate]; g_volUpTimer = nil; }
                              if (g_volDownTimer) { [g_volDownTimer invalidate]; g_volDownTimer = nil; }
                              trigger_haptic();
