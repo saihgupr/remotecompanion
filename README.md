@@ -90,7 +90,9 @@ Access the desktop-class automation hub at `http://[DEVICE_IP]:8080` from any co
 - `rc dnd [on|off|toggle]` - Toggle Do Not Disturb.
 - `rc low power mode [on|off|toggle]` - Toggle battery saver.
 - `rc airplane [on|off|toggle]` - Control Airplane Mode.
-- `rc haptic` / `rc screenshot` - Haptic feedback / Screenshot (or activate Snapper 3).
+- `rc haptic` / `rc screenshot` - Haptic feedback / Screenshot.
+- `rc screenrecord [toggle|start|stop|status]` - Native SpringBoard screen recording control.
+- `rc snapper [open|freeze|instant|close]` - Direct Snapper 2 / Snapper 3 overlay trigger.
 - `rc control-center` - Opens the system Control Center.
 - `rc switcher` - Opens/toggles the App Switcher.
 - `rc previous app` / `rc last app` - Returns to the previously active application.
@@ -108,7 +110,8 @@ Access the desktop-class automation hub at `http://[DEVICE_IP]:8080` from any co
 - `rc wifi [on|off|toggle]` / `rc cellular [on|off|toggle]` / `rc bluetooth [on|off|toggle]` / `rc location [on|off|toggle]`
 - `rc bluetooth [connect|disconnect] <name>` - Manage paired devices.
 - `rc airplay list` - See speakers and their UIDs.
-- `rc airplay connect <UID|Name>` / `rc airplay disconnect` - Route audio output.
+- `rc airplay connect <name|UID>` - Stream audio to an AirPlay receiver.
+- `rc airplay disconnect` - Stop AirPlay streaming.
 
 ### Text & Notifications
 - `rc type "Text"` - Type text (supports symbols).
@@ -149,14 +152,15 @@ Configure these in the `RemoteCompanion` app for custom action sequences. Tip: *
 
 - **Hardware Buttons**:
   - **Power**: Double-tap, Long-press, **Triple/Quadruple click**, or **Power + Volume Up/Down** combos.
-  - **Volume**: Long hold Up/Down (0.3s) or **Volume Up + Down** combo.
+  - **Volume**: Long hold Up/Down (0.3s), **Volume Up + Down** combo, or sequential **Volume Up then Down** / **Volume Down then Up** one-handed pocket gestures.
   - **Home**: Double-tap (Touch ID), Double, Triple, or Quadruple click.
 - **Touch ID Sensor**: **Single Tap** and **Hold (Rest Finger)** triggers.
 - **NFC Triggers**: Scan physical NFC tags to run actions on screen wake (Optional toggle in Settings).
 - **Ringer Switch**: Mute, Unmute, or Toggle triggers.
 - **Gestures**: 
-  - **Status Bar**: Hold (Left/Center/Right) or Swipe Left/Right.
+  - **Status Bar**: Hold (Left/Center/Right), Double-Tap, or Swipe Left/Right.
   - **Edge Gestures**: Vertical swipe on left/right edges.
+  - **Bottom Bar Gestures**: Swipe Left/Right, or **3-Zone Swipe Up** (Left 33%, Center 34%, Right 33%).
 - **Motion Gestures**:
   - **Shake**: Fire actions when the device is physically shaken.
 - **System Events**:
