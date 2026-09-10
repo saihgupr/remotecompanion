@@ -2948,27 +2948,13 @@ const CONDITION_DEFS = [
   { key:'front_app',   title:'Front App is', values:null, freeText:true },
 ];
 
+let serverCapabilities = { snapper: false, sneakycam: false, audiostream: false };
+
 async function loadCapabilities() {
   try {
     const res = await fetch('/api/capabilities');
     if (res.ok) {
-      const caps = await res.json();
-      if (caps && caps.snapper === false) {
-        ACTION_SECTIONS.forEach(sec => {
-          sec.actions = sec.actions.filter(a => !a.cmd.startsWith('snapper'));
-        });
-      }
-      if (caps && caps.sneakycam === false) {
-        ACTION_SECTIONS.forEach(sec => {
-          sec.actions = sec.actions.filter(a => !a.cmd.startsWith('sneakycam'));
-        });
-      }
-      if (caps && caps.audiostream === false) {
-        const audioStreamCmds = ['queuealbum', 'queue album', 'queueartist', 'queue artist', 'shuffleall', 'shuffle all songs', 'deletesong', 'delete song', 'delete current song'];
-        ACTION_SECTIONS.forEach(sec => {
-          sec.actions = sec.actions.filter(a => !audioStreamCmds.includes(a.cmd));
-        });
-      }
+      serverCapabilities = await res.json();
     }
   } catch(e) {
     console.error("Failed to load capabilities", e);
@@ -4699,6 +4685,15 @@ function renderPickerSections() {
         }
         if (a.cmd === '__MQTT_PUBLISH__') {
           return !!config.mqttEnabled;
+        }
+        if (a.cmd.startsWith('snapper')) {
+          return !!(serverCapabilities && serverCapabilities.snapper);
+        }
+        if (a.cmd.startsWith('sneakycam')) {
+          return !!(serverCapabilities && serverCapabilities.sneakycam);
+        }
+        if (['queuealbum', 'queue album', 'queueartist', 'queue artist', 'shuffleall', 'shuffle all songs', 'deletesong', 'delete song', 'delete current song'].includes(a.cmd)) {
+          return !!(serverCapabilities && serverCapabilities.audiostream);
         }
         return true;
       });

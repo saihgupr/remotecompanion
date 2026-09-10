@@ -203,9 +203,8 @@
                 @"/var/jb/Library/MobileSubstrate/DynamicLibraries/sneakycam.plist",
                 @"/var/jb/usr/lib/TweakInject/SneakyCam.dylib",
                 @"/var/jb/usr/lib/TweakInject/sneakycam.dylib",
-                @"/var/mobile/Library/Preferences/com.spark.sneakycam.plist",
-                @"/var/mobile/Library/Preferences/com.spark.SneakyCam.plist",
-                @"/var/jb/var/mobile/Library/Preferences/com.spark.sneakycam.plist"
+                @"/Library/PreferenceBundles/SneakyCamPrefs.bundle",
+                @"/var/jb/Library/PreferenceBundles/SneakyCamPrefs.bundle"
             ];
             BOOL sneakyInstalled = NO;
             NSFileManager *fm = [NSFileManager defaultManager];
@@ -233,16 +232,18 @@
                 @"/var/jb/Library/MobileSubstrate/DynamicLibraries/snapper3.dylib",
                 @"/var/jb/Library/MobileSubstrate/DynamicLibraries/Snapper2.dylib",
                 @"/var/jb/Library/MobileSubstrate/DynamicLibraries/snapper2.dylib",
+                @"/var/jb/Library/MobileSubstrate/DynamicLibraries/Snapper3.plist",
+                @"/var/jb/Library/MobileSubstrate/DynamicLibraries/snapper3.plist",
+                @"/var/jb/Library/MobileSubstrate/DynamicLibraries/Snapper2.plist",
+                @"/var/jb/Library/MobileSubstrate/DynamicLibraries/snapper2.plist",
                 @"/var/jb/usr/lib/TweakInject/Snapper3.dylib",
                 @"/var/jb/usr/lib/TweakInject/snapper3.dylib",
                 @"/var/jb/usr/lib/TweakInject/Snapper2.dylib",
                 @"/var/jb/usr/lib/TweakInject/snapper2.dylib",
-                @"/var/mobile/Library/Preferences/com.jontelang.snapper3preferences.plist",
-                @"/var/jb/var/mobile/Library/Preferences/com.jontelang.snapper3preferences.plist",
-                @"/var/mobile/Library/Preferences/com.jontelang.snapper2.plist",
-                @"/var/jb/var/mobile/Library/Preferences/com.jontelang.snapper2.plist",
                 @"/Library/PreferenceBundles/Snapper3Preferences.bundle",
-                @"/var/jb/Library/PreferenceBundles/Snapper3Preferences.bundle"
+                @"/var/jb/Library/PreferenceBundles/Snapper3Preferences.bundle",
+                @"/Library/ControlCenter/Bundles/Snapper3CCSupportNormal.bundle",
+                @"/var/jb/Library/ControlCenter/Bundles/Snapper3CCSupportNormal.bundle"
             ];
             BOOL snapperInstalled = NO;
             for (NSString *p in snapperPaths) {

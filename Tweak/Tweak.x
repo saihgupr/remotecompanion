@@ -2592,9 +2592,8 @@ static BOOL is_sneakycam_installed() {
         @"/var/jb/Library/MobileSubstrate/DynamicLibraries/sneakycam.plist",
         @"/var/jb/usr/lib/TweakInject/SneakyCam.dylib",
         @"/var/jb/usr/lib/TweakInject/sneakycam.dylib",
-        @"/var/mobile/Library/Preferences/com.spark.sneakycam.plist",
-        @"/var/mobile/Library/Preferences/com.spark.SneakyCam.plist",
-        @"/var/jb/var/mobile/Library/Preferences/com.spark.sneakycam.plist"
+        @"/Library/PreferenceBundles/SneakyCamPrefs.bundle",
+        @"/var/jb/Library/PreferenceBundles/SneakyCamPrefs.bundle"
     ];
     NSFileManager *fm = [NSFileManager defaultManager];
     for (NSString *path in paths) {
@@ -2621,16 +2620,18 @@ static BOOL is_snapper_installed() {
         @"/var/jb/Library/MobileSubstrate/DynamicLibraries/snapper3.dylib",
         @"/var/jb/Library/MobileSubstrate/DynamicLibraries/Snapper2.dylib",
         @"/var/jb/Library/MobileSubstrate/DynamicLibraries/snapper2.dylib",
+        @"/var/jb/Library/MobileSubstrate/DynamicLibraries/Snapper3.plist",
+        @"/var/jb/Library/MobileSubstrate/DynamicLibraries/snapper3.plist",
+        @"/var/jb/Library/MobileSubstrate/DynamicLibraries/Snapper2.plist",
+        @"/var/jb/Library/MobileSubstrate/DynamicLibraries/snapper2.plist",
         @"/var/jb/usr/lib/TweakInject/Snapper3.dylib",
         @"/var/jb/usr/lib/TweakInject/snapper3.dylib",
         @"/var/jb/usr/lib/TweakInject/Snapper2.dylib",
         @"/var/jb/usr/lib/TweakInject/snapper2.dylib",
-        @"/var/mobile/Library/Preferences/com.jontelang.snapper3preferences.plist",
-        @"/var/jb/var/mobile/Library/Preferences/com.jontelang.snapper3preferences.plist",
-        @"/var/mobile/Library/Preferences/com.jontelang.snapper2.plist",
-        @"/var/jb/var/mobile/Library/Preferences/com.jontelang.snapper2.plist",
         @"/Library/PreferenceBundles/Snapper3Preferences.bundle",
-        @"/var/jb/Library/PreferenceBundles/Snapper3Preferences.bundle"
+        @"/var/jb/Library/PreferenceBundles/Snapper3Preferences.bundle",
+        @"/Library/ControlCenter/Bundles/Snapper3CCSupportNormal.bundle",
+        @"/var/jb/Library/ControlCenter/Bundles/Snapper3CCSupportNormal.bundle"
     ];
     NSFileManager *fm = [NSFileManager defaultManager];
     for (NSString *path in paths) {
@@ -5911,29 +5912,96 @@ static NSString *rc_handle_screenrecord(NSString *subcmd) {
     return @"Usage: rc screenrecord [toggle|start|stop|status]\n";
 }
 
+static void rc_post_snapper_notification(NSString *name) {
+    if (!name || name.length == 0) return;
+    CFStringRef cfName = (__bridge CFStringRef)name;
+
+    // 1. Post to Distributed Notification Center (used by Snapper 3 CC Support and Snapper 3 tweak)
+    typedef CFNotificationCenterRef (*GetDistCenterFunc)(void);
+    static GetDistCenterFunc getDistCenter = NULL;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        getDistCenter = (GetDistCenterFunc)dlsym(RTLD_DEFAULT, "CFNotificationCenterGetDistributedCenter");
+    });
+    CFNotificationCenterRef distCenter = getDistCenter ? getDistCenter() : NULL;
+    if (distCenter) {
+        CFNotificationCenterPostNotification(distCenter, cfName, NULL, NULL, YES);
+    }
+
+    // 2. Post to Darwin Notify Center
+    CFNotificationCenterRef darwinCenter = CFNotificationCenterGetDarwinNotifyCenter();
+    if (darwinCenter) {
+        CFNotificationCenterPostNotification(darwinCenter, cfName, NULL, NULL, YES);
+    }
+
+    // 3. Post via notify_post
+    notify_post([name UTF8String]);
+    SRLog(@"[Snapper] Posted '%@' (distCenter=%p)", name, distCenter);
+}
+
 static NSString *rc_handle_snapper(NSString *arg) {
     NSString *sub = [[arg lowercaseString] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    
+    void (^dispatch_post)(NSArray<NSString *> *) = ^(NSArray<NSString *> *names) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            for (NSString *name in names) {
+                rc_post_snapper_notification(name);
+            }
+        });
+    };
+
     if ([sub isEqualToString:@"freeze"]) {
-        SRLog(@"[Snapper] Posting freeze notifications...");
-        notify_post("com.jontelang.snapper3.freeze");
-        notify_post("com.jontelang.snapper2.freeze");
+        SRLog(@"[Snapper] Triggering freeze...");
+        dispatch_post(@[
+            @"com.jontelang.snapper3.forcefreeze.open",
+            @"com.jontelang.snapper3.freeze",
+            @"com.jontelang.snapper2.forcefreeze.open",
+            @"com.jontelang.snapper2.freeze"
+        ]);
         return @"Snapper: Freeze triggered\n";
     } else if ([sub isEqualToString:@"instant"]) {
-        SRLog(@"[Snapper] Posting instant notifications...");
-        notify_post("com.jontelang.snapper3.instant");
-        notify_post("com.jontelang.snapper2.instant");
+        SRLog(@"[Snapper] Triggering instant...");
+        dispatch_post(@[
+            @"com.jontelang.snapper3.forceinstant.open",
+            @"com.jontelang.snapper3.instant",
+            @"com.jontelang.snapper2.forceinstant.open",
+            @"com.jontelang.snapper2.instant"
+        ]);
         return @"Snapper: Instant triggered\n";
     } else if ([sub isEqualToString:@"close"] || [sub isEqualToString:@"closeall"] || [sub isEqualToString:@"close_all"] || [sub isEqualToString:@"close-all"]) {
-        SRLog(@"[Snapper] Posting close notifications...");
-        notify_post("com.jontelang.snapper3.close.all");
-        notify_post("com.jontelang.snapper3.closecrop");
-        notify_post("com.jontelang.snapper2.close");
+        SRLog(@"[Snapper] Triggering close all...");
+        dispatch_post(@[
+            @"com.jontelang.snapper3.close.all",
+            @"com.jontelang.snapper3.closecrop",
+            @"com.jontelang.snapper2.close.all",
+            @"com.jontelang.snapper2.closecrop",
+            @"com.jontelang.snapper2.close"
+        ]);
         return @"Snapper: Closed\n";
+    } else if ([sub isEqualToString:@"last"] || [sub isEqualToString:@"openlast"] || [sub isEqualToString:@"open_last"] || [sub isEqualToString:@"open-last"]) {
+        SRLog(@"[Snapper] Triggering open last...");
+        dispatch_post(@[
+            @"com.jontelang.snapper3.openlast",
+            @"com.jontelang.snapper3.open.last",
+            @"com.jontelang.snapper2.openlast"
+        ]);
+        return @"Snapper: Open last triggered\n";
+    } else if ([sub isEqualToString:@"history"]) {
+        SRLog(@"[Snapper] Triggering history...");
+        dispatch_post(@[
+            @"com.jontelang.snapper3.history",
+            @"com.jontelang.snapper2.history"
+        ]);
+        return @"Snapper: History triggered\n";
     } else {
         // default or "open"
-        SRLog(@"[Snapper] Posting open notifications...");
-        notify_post("com.jontelang.snapper3.open");
-        notify_post("com.jontelang.snapper2.open");
+        SRLog(@"[Snapper] Triggering open area...");
+        dispatch_post(@[
+            @"com.jontelang.snapper3.force.open",
+            @"com.jontelang.snapper3.open",
+            @"com.jontelang.snapper2.force.open",
+            @"com.jontelang.snapper2.open"
+        ]);
         return @"Snapper: Open triggered\n";
     }
 }
