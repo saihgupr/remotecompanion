@@ -2600,6 +2600,42 @@ static BOOL is_sneakycam_installed() {
     return NO;
 }
 
+static BOOL is_snapper_installed() {
+    NSArray *paths = @[
+        @"/Library/MobileSubstrate/DynamicLibraries/Snapper3.dylib",
+        @"/Library/MobileSubstrate/DynamicLibraries/snapper3.dylib",
+        @"/Library/MobileSubstrate/DynamicLibraries/Snapper2.dylib",
+        @"/Library/MobileSubstrate/DynamicLibraries/snapper2.dylib",
+        @"/Library/MobileSubstrate/DynamicLibraries/Snapper3.plist",
+        @"/Library/MobileSubstrate/DynamicLibraries/snapper3.plist",
+        @"/Library/MobileSubstrate/DynamicLibraries/Snapper2.plist",
+        @"/Library/MobileSubstrate/DynamicLibraries/snapper2.plist",
+        @"/usr/lib/TweakInject/Snapper3.dylib",
+        @"/usr/lib/TweakInject/snapper3.dylib",
+        @"/usr/lib/TweakInject/Snapper2.dylib",
+        @"/usr/lib/TweakInject/snapper2.dylib",
+        @"/var/jb/Library/MobileSubstrate/DynamicLibraries/Snapper3.dylib",
+        @"/var/jb/Library/MobileSubstrate/DynamicLibraries/snapper3.dylib",
+        @"/var/jb/Library/MobileSubstrate/DynamicLibraries/Snapper2.dylib",
+        @"/var/jb/Library/MobileSubstrate/DynamicLibraries/snapper2.dylib",
+        @"/var/jb/usr/lib/TweakInject/Snapper3.dylib",
+        @"/var/jb/usr/lib/TweakInject/snapper3.dylib",
+        @"/var/jb/usr/lib/TweakInject/Snapper2.dylib",
+        @"/var/jb/usr/lib/TweakInject/snapper2.dylib",
+        @"/var/mobile/Library/Preferences/com.jontelang.snapper3preferences.plist",
+        @"/var/jb/var/mobile/Library/Preferences/com.jontelang.snapper3preferences.plist",
+        @"/var/mobile/Library/Preferences/com.jontelang.snapper2.plist",
+        @"/var/jb/var/mobile/Library/Preferences/com.jontelang.snapper2.plist",
+        @"/Library/PreferenceBundles/Snapper3Preferences.bundle",
+        @"/var/jb/Library/PreferenceBundles/Snapper3Preferences.bundle"
+    ];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    for (NSString *path in paths) {
+        if ([fm fileExistsAtPath:path]) return YES;
+    }
+    return NO;
+}
+
 static BOOL is_audiostream_installed() {
     NSArray *paths = @[
         @"/Applications/AudioReceiver.app",
@@ -5872,6 +5908,33 @@ static NSString *rc_handle_screenrecord(NSString *subcmd) {
     return @"Usage: rc screenrecord [toggle|start|stop|status]\n";
 }
 
+static NSString *rc_handle_snapper(NSString *arg) {
+    NSString *sub = [[arg lowercaseString] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if ([sub isEqualToString:@"freeze"]) {
+        SRLog(@"[Snapper] Posting freeze notifications...");
+        notify_post("com.jontelang.snapper3.freeze");
+        notify_post("com.jontelang.snapper2.freeze");
+        return @"Snapper: Freeze triggered\n";
+    } else if ([sub isEqualToString:@"instant"]) {
+        SRLog(@"[Snapper] Posting instant notifications...");
+        notify_post("com.jontelang.snapper3.instant");
+        notify_post("com.jontelang.snapper2.instant");
+        return @"Snapper: Instant triggered\n";
+    } else if ([sub isEqualToString:@"close"] || [sub isEqualToString:@"closeall"] || [sub isEqualToString:@"close_all"] || [sub isEqualToString:@"close-all"]) {
+        SRLog(@"[Snapper] Posting close notifications...");
+        notify_post("com.jontelang.snapper3.close.all");
+        notify_post("com.jontelang.snapper3.closecrop");
+        notify_post("com.jontelang.snapper2.close");
+        return @"Snapper: Closed\n";
+    } else {
+        // default or "open"
+        SRLog(@"[Snapper] Posting open notifications...");
+        notify_post("com.jontelang.snapper3.open");
+        notify_post("com.jontelang.snapper2.open");
+        return @"Snapper: Open triggered\n";
+    }
+}
+
 static NSString *handle_command(NSString *cmd) {
     if (!cmd || ![cmd isKindOfClass:[NSString class]]) {
         SRLog(@"ERROR: handle_command received nil or invalid command string");
@@ -7885,6 +7948,12 @@ static NSString *handle_command(NSString *cmd) {
             arg = [[cleanCmd substringFromIndex:13] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         }
         return rc_handle_screenrecord(arg);
+    } else if ([cleanCmd isEqualToString:@"snapper"] || [cleanCmd hasPrefix:@"snapper "]) {
+        NSString *arg = @"";
+        if ([cleanCmd hasPrefix:@"snapper "]) {
+            arg = [[cleanCmd substringFromIndex:8] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        }
+        return rc_handle_snapper(arg);
     } else if ([cleanCmd hasPrefix:@"delay "]) {
         NSString *delayStr = [cleanCmd substringFromIndex:6];
         float seconds = [delayStr floatValue];
@@ -8806,6 +8875,7 @@ static void start_web_server() {
                                 } else if ([path isEqualToString:@"/api/capabilities"] && [method isEqualToString:@"GET"]) {
                                     NSDictionary *caps = @{
                                         @"sneakycam": @(is_sneakycam_installed()),
+                                        @"snapper": @(is_snapper_installed()),
                                         @"audiostream": @(is_audiostream_installed()),
                                         @"audiostream_running": @(is_audiostreamerd_running())
                                     };
@@ -9331,6 +9401,7 @@ static void start_web_server() {
                                     @{@"command": @"home", @"desc": @"System: Simulate a Home Button press"},
                                     @{@"command": @"screenshot", @"desc": @"System: Take a screenshot"},
                                     @{@"command": @"screenrecord [toggle|start|stop]", @"desc": @"System: Control system screen recording"},
+                                    @{@"command": @"snapper [open|freeze|instant|close]", @"desc": @"Integrations: Control Snapper 2 / Snapper 3"},
                                     @{@"command": @"camera video [zoom] [flash]", @"desc": @"Camera: Open Camera in Video mode (e.g. 2x, 2x flash)"},
                                     @{@"command": @"open control center", @"desc": @"System: Open Control Center"},
                                     @{@"command": @"app switcher", @"desc": @"System: Open App Switcher"},

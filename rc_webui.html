@@ -2575,6 +2575,7 @@ const CMD_NAMES = {
   'airplane on':'Airplane On','airplane off':'Airplane Off','airplane toggle':'Airplane Toggle',
   'haptic':'Haptic Feedback','screenshot':'Screenshot',
   'screenrecord':'Screen Recording Toggle','screenrecord toggle':'Screen Recording Toggle','screenrecord start':'Start Screen Recording','screenrecord stop':'Stop Screen Recording','screenrecord status':'Screen Recording Status',
+  'snapper':'Snapper: Open Area','snapper open':'Snapper: Open Area','snapper freeze':'Snapper: Freeze Screen','snapper instant':'Snapper: Instant Snap','snapper close':'Snapper: Close All',
   'camera photo 0.5x':'Open Camera (Photo 0.5x)','camera photo 2x':'Open Camera (Photo 2x)','camera photo':'Open Camera (Photo)',
   'camera portrait 2x':'Open Camera (Portrait 2x)','camera portrait':'Open Camera (Portrait)',
   'camera video 2x flash':'Open Video Camera (2x, Flash)',
@@ -2799,10 +2800,15 @@ function iconForCmd(cmd) {
     'low power on':'battery_25','low power off':'battery_100',
     'screenshot':'camera_fill','haptic':'hand_raised_fill',
     'screenrecord':'record_circle_fill','screenrecord toggle':'record_circle_fill','screenrecord start':'record_circle_fill','screenrecord stop':'stop_circle_fill',
+    'snapper':'crop','snapper open':'crop','snapper freeze':'snowflake','snapper instant':'bolt_fill','snapper close':'xmark_circle',
     'sneakycam photo':'camera_fill','sneakycam video':'video_fill',
     'mute':'speaker_slash_fill','mute on':'speaker_slash_fill','mute off':'speaker_3_fill','mute toggle':'speaker_slash_fill',
   };
   const lowCmd = cmd.toLowerCase().trim();
+  if (lowCmd.startsWith('snapper freeze')) return { icon:'snowflake', cls:'icon-blue' };
+  if (lowCmd.startsWith('snapper instant')) return { icon:'bolt_fill', cls:'icon-orange' };
+  if (lowCmd.startsWith('snapper close')) return { icon:'xmark_circle', cls:'icon-red' };
+  if (lowCmd.startsWith('snapper')) return { icon:'crop', cls:'icon-purple' };
   if (lowCmd.startsWith('camera') || lowCmd.startsWith('open camera')) {
     if (lowCmd.includes('flash') || lowCmd.includes('torch')) return { icon:'bolt_fill', cls:'icon-orange' };
     if (lowCmd.includes('front') || lowCmd.includes('selfie')) return { icon:'person_fill', cls:'icon-blue' };
@@ -2902,6 +2908,10 @@ const ACTION_SECTIONS = [
     { name:'Keyboard Maestro: Trigger Macro…',cmd:'__KM_TRIGGER__', icon:'command', needs_input:true },
     { name:'MQTT: Publish Topic…',            cmd:'__MQTT_PUBLISH__', icon:'antenna_radiowaves_left_right', needs_input:true },
     { name:'Shortcuts: Run Shortcut…',        cmd:'__SHORTCUT__',  icon:'command', needs_input:true },
+    { name:'Snapper: Open Area',              cmd:'snapper open',  icon:'crop' },
+    { name:'Snapper: Freeze Screen',          cmd:'snapper freeze', icon:'snowflake' },
+    { name:'Snapper: Instant Snap',           cmd:'snapper instant', icon:'bolt_fill' },
+    { name:'Snapper: Close All',              cmd:'snapper close', icon:'xmark_circle' },
     { name:'SneakyCam: Take Photo',           cmd:'sneakycam photo', icon:'camera_fill' },
     { name:'SneakyCam: Toggle Video',         cmd:'sneakycam video', icon:'video_fill' },
     { name:'AudioMix: Toggle',                cmd:'audiomix toggle',icon:'equalizer', is_toggle:true },
@@ -2935,6 +2945,11 @@ async function loadCapabilities() {
     const res = await fetch('/api/capabilities');
     if (res.ok) {
       const caps = await res.json();
+      if (caps && caps.snapper === false) {
+        ACTION_SECTIONS.forEach(sec => {
+          sec.actions = sec.actions.filter(a => !a.cmd.startsWith('snapper'));
+        });
+      }
       if (caps && caps.sneakycam === false) {
         ACTION_SECTIONS.forEach(sec => {
           sec.actions = sec.actions.filter(a => !a.cmd.startsWith('sneakycam'));

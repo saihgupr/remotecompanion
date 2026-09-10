@@ -896,6 +896,11 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         @"screenrecord start": @"Start Screen Recording",
         @"screenrecord stop": @"Stop Screen Recording",
         @"screenrecord status": @"Screen Recording Status",
+        @"snapper": @"Snapper: Open Area",
+        @"snapper open": @"Snapper: Open Area",
+        @"snapper freeze": @"Snapper: Freeze Screen",
+        @"snapper instant": @"Snapper: Instant Snap",
+        @"snapper close": @"Snapper: Close All",
         @"lock": @"Lock Device",
         @"unlock": @"Unlock Device",
         @"lock toggle": @"Lock Toggle",
@@ -1069,6 +1074,12 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
             result = [NSString stringWithFormat:@"Flashlight %@%%", [cmd substringFromIndex:6]];
         } else if ([cmd hasPrefix:@"shortcut:"]) {
             result = [NSString stringWithFormat:@"Run %@", [cmd substringFromIndex:9]];
+        } else if ([cmd hasPrefix:@"snapper "] || [cmd isEqualToString:@"snapper"]) {
+            NSString *sub = [cmd hasPrefix:@"snapper "] ? [cmd substringFromIndex:8] : @"";
+            if ([sub isEqualToString:@"freeze"]) result = @"Snapper: Freeze Screen";
+            else if ([sub isEqualToString:@"instant"]) result = @"Snapper: Instant Snap";
+            else if ([sub isEqualToString:@"close"]) result = @"Snapper: Close All";
+            else result = @"Snapper: Open Area";
         } else if ([cmd hasPrefix:@"ha "] || [cmd isEqualToString:@"ha"]) {
             NSString *raw = [cmd hasPrefix:@"ha "] ? [cmd substringFromIndex:3] : @"";
             NSArray *parts = [raw componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
@@ -1283,6 +1294,10 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
     }
     if ([cmd hasPrefix:@"sneakycam photo"] || [cmd isEqualToString:@"sneakycam takephoto"]) return @"camera.aperture";
     if ([cmd hasPrefix:@"sneakycam video"] || [cmd isEqualToString:@"sneakycam record"] || [cmd isEqualToString:@"sneakycam startstopvideo"]) return @"video.fill";
+    if ([cmd hasPrefix:@"snapper freeze"]) return @"snowflake";
+    if ([cmd hasPrefix:@"snapper instant"]) return @"bolt.fill";
+    if ([cmd hasPrefix:@"snapper close"]) return @"xmark.circle";
+    if ([cmd hasPrefix:@"snapper"]) return @"crop";
     if ([cmd hasPrefix:@"ha "] || [cmd isEqualToString:@"ha"]) return @"house.fill";
     if ([cmd hasPrefix:@"km "] || [cmd isEqualToString:@"km"]) return @"command";
     if ([cmd hasPrefix:@"mqtt "] || [cmd isEqualToString:@"mqtt"]) return @"antenna.radiowaves.left.and.right";
@@ -1357,6 +1372,11 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         @"screenrecord start": @"record.circle.fill",
         @"screenrecord stop": @"stop.circle.fill",
         @"screenrecord status": @"record.circle",
+        @"snapper": @"crop",
+        @"snapper open": @"crop",
+        @"snapper freeze": @"snowflake",
+        @"snapper instant": @"bolt.fill",
+        @"snapper close": @"xmark.circle",
         @"lock": @"lock.fill",
         @"unlock": @"lock.open.fill",
         @"lock toggle": @"lock.circle",

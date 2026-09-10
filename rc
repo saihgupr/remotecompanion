@@ -53,6 +53,7 @@ if [ -z "$1" ]; then
     echo "  dnd on/off/debug   - Toggle Do Not Disturb or inspect state"
     echo "  audiomix on/off/toggle/status - Control AudioMix tweak"
     echo "  screenrecord [toggle|start|stop] - Control system screen recording"
+    echo "  snapper [open|freeze|instant|close] - Control Snapper 2 / Snapper 3"
     echo "  sneakycam photo/video - Trigger SneakyCam photo or toggle video"
     echo "  camera [photo|video|portrait|slomo|timelapse] [0.5x|1x|2x] [front] [flash] - Open Camera in specified mode"
     echo "  camera shutter / snap - Press Camera shutter button to take photo or toggle recording"

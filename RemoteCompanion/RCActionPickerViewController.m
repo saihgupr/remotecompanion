@@ -216,6 +216,44 @@
                 [integrations addObject:@{ @"name": @"SneakyCam: Take Photo", @"command": @"sneakycam photo", @"icon": @"camera.aperture" }];
                 [integrations addObject:@{ @"name": @"SneakyCam: Toggle Video", @"command": @"sneakycam video", @"icon": @"video.fill" }];
             }
+            NSArray *snapperPaths = @[
+                @"/Library/MobileSubstrate/DynamicLibraries/Snapper3.dylib",
+                @"/Library/MobileSubstrate/DynamicLibraries/snapper3.dylib",
+                @"/Library/MobileSubstrate/DynamicLibraries/Snapper2.dylib",
+                @"/Library/MobileSubstrate/DynamicLibraries/snapper2.dylib",
+                @"/Library/MobileSubstrate/DynamicLibraries/Snapper3.plist",
+                @"/Library/MobileSubstrate/DynamicLibraries/snapper3.plist",
+                @"/Library/MobileSubstrate/DynamicLibraries/Snapper2.plist",
+                @"/Library/MobileSubstrate/DynamicLibraries/snapper2.plist",
+                @"/usr/lib/TweakInject/Snapper3.dylib",
+                @"/usr/lib/TweakInject/snapper3.dylib",
+                @"/usr/lib/TweakInject/Snapper2.dylib",
+                @"/usr/lib/TweakInject/snapper2.dylib",
+                @"/var/jb/Library/MobileSubstrate/DynamicLibraries/Snapper3.dylib",
+                @"/var/jb/Library/MobileSubstrate/DynamicLibraries/snapper3.dylib",
+                @"/var/jb/Library/MobileSubstrate/DynamicLibraries/Snapper2.dylib",
+                @"/var/jb/Library/MobileSubstrate/DynamicLibraries/snapper2.dylib",
+                @"/var/jb/usr/lib/TweakInject/Snapper3.dylib",
+                @"/var/jb/usr/lib/TweakInject/snapper3.dylib",
+                @"/var/jb/usr/lib/TweakInject/Snapper2.dylib",
+                @"/var/jb/usr/lib/TweakInject/snapper2.dylib",
+                @"/var/mobile/Library/Preferences/com.jontelang.snapper3preferences.plist",
+                @"/var/jb/var/mobile/Library/Preferences/com.jontelang.snapper3preferences.plist",
+                @"/var/mobile/Library/Preferences/com.jontelang.snapper2.plist",
+                @"/var/jb/var/mobile/Library/Preferences/com.jontelang.snapper2.plist",
+                @"/Library/PreferenceBundles/Snapper3Preferences.bundle",
+                @"/var/jb/Library/PreferenceBundles/Snapper3Preferences.bundle"
+            ];
+            BOOL snapperInstalled = NO;
+            for (NSString *p in snapperPaths) {
+                if ([fm fileExistsAtPath:p]) { snapperInstalled = YES; break; }
+            }
+            if (snapperInstalled) {
+                [integrations addObject:@{ @"name": @"Snapper: Open Area", @"command": @"snapper open", @"icon": @"crop" }];
+                [integrations addObject:@{ @"name": @"Snapper: Freeze Screen", @"command": @"snapper freeze", @"icon": @"snowflake" }];
+                [integrations addObject:@{ @"name": @"Snapper: Instant Snap", @"command": @"snapper instant", @"icon": @"bolt.fill" }];
+                [integrations addObject:@{ @"name": @"Snapper: Close All", @"command": @"snapper close", @"icon": @"xmark.circle" }];
+            }
             [integrations addObject:@{ @"name": @"AudioMix: Toggle", @"command": @"audiomix toggle", @"icon": @"music.note" }];
             integrations;
         }),
