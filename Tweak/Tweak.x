@@ -3389,6 +3389,12 @@ static uint32_t rc_resolve_target_context(double x, double y) {
 #include <spawn.h>
 #include <sys/wait.h>
 
+static const char* rc_shell_path(void) {
+    if (access("/var/jb/bin/sh", X_OK) == 0) return "/var/jb/bin/sh";
+    if (access("/var/jb/usr/bin/sh", X_OK) == 0) return "/var/jb/usr/bin/sh";
+    return "/bin/sh";
+}
+
 static int rc_posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *file_actions, const posix_spawnattr_t *attrp, char *const argv[], char *const envp[]) {
     posix_spawnattr_t local_attr;
     posix_spawnattr_init(&local_attr);
@@ -4655,6 +4661,7 @@ static NSString *evaluate_lua_code(NSString *code) {
     
     if (result != LUA_OK) {
         const char *error = lua_tostring(L, -1);
+        SRLog(@"Lua error: %s", error);
         output = [NSString stringWithFormat:@"Lua Error: %s", error];
         lua_pop(L, 1);
     }
@@ -8116,8 +8123,9 @@ static NSString *handle_command(NSString *cmd) {
 
                 // Execute with sh -c
                 pid_t pid;
-                char *args[] = {"/bin/sh", "-c", (char*)[shellCmd UTF8String], NULL};
-                int spawn_result = rc_posix_spawn(&pid, "/bin/sh", NULL, NULL, args, newEnviron);
+                const char *sh = rc_shell_path();
+                char *args[] = {(char *)sh, "-c", (char*)[shellCmd UTF8String], NULL};
+                int spawn_result = rc_posix_spawn(&pid, sh, NULL, NULL, args, newEnviron);
 
                 int result = -1;
                 if (spawn_result == 0) {
@@ -8126,6 +8134,8 @@ static NSString *handle_command(NSString *cmd) {
                     if (WIFEXITED(status)) {
                         result = WEXITSTATUS(status);
                     }
+                } else {
+                    SRLog(@"posix_spawn %s failed: %d", sh, spawn_result);
                 }
 
                 // Cleanup
@@ -8518,12 +8528,6 @@ static NSString *handle_command(NSString *cmd) {
         return [NSString stringWithFormat:@"Executing trigger: %@\n", key];
     }
     return nil;
-}
-
-static const char* rc_shell_path(void) {
-    if (access("/var/jb/bin/sh", X_OK) == 0) return "/var/jb/bin/sh";
-    if (access("/var/jb/usr/bin/sh", X_OK) == 0) return "/var/jb/usr/bin/sh";
-    return "/bin/sh";
 }
 
 static char** rc_shell_env(void) {
