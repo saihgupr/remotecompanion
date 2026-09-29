@@ -631,7 +631,7 @@
     CGPoint point = [gesture locationInView:self.tableView];
     NSIndexPath *indexPath = [self.tableView indexPathForRowAtPoint:point];
     
-    if (!indexPath) return;
+    if (!indexPath || [self isStatusExclusionRow:indexPath]) return;
     
     NSString *triggerKey = _sections[indexPath.section][indexPath.row];
     
@@ -664,6 +664,28 @@
     });
 }
 
+- (BOOL)isStatusExclusionRow:(NSIndexPath *)path {
+    return [_sectionTitles[path.section] isEqualToString:@"Screen Gestures"] && path.row == _sections[path.section].count;
+}
+- (void)openStatusExclusions {
+        RCAppPickerViewController *picker = [RCAppPickerViewController new];
+        picker.title = @"Status Bar: Excluded Apps";
+        picker.suppressAutoPop = YES;
+        picker.selectedBundleIDs = [NSSet setWithArray:[RCConfigManager sharedManager].statusBarExcludedApps];
+        __weak RCAppPickerViewController *weakPicker = picker;
+        picker.onAppSelected = ^(NSString *name, NSString *bundleID) {
+            if (!bundleID.length) return;
+            RCConfigManager *cm = [RCConfigManager sharedManager];
+            NSMutableSet *ids = [NSMutableSet setWithArray:cm.statusBarExcludedApps];
+            if ([ids containsObject:bundleID]) [ids removeObject:bundleID];
+            else [ids addObject:bundleID];
+            cm.statusBarExcludedApps = [[ids allObjects] sortedArrayUsingSelector:@selector(compare:)];
+            weakPicker.selectedBundleIDs = ids;
+        };
+        [self.navigationController pushViewController:picker animated:YES];
+
+}
+
 #pragma mark - Table View Data Source
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
@@ -692,10 +714,20 @@
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    return _sections[section].count;
+    return _sections[section].count + ([_sectionTitles[section] isEqualToString:@"Screen Gestures"] ? 1 : 0);
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    if ([self isStatusExclusionRow:indexPath]) {
+        UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:nil];
+        cell.textLabel.text = @"Excluded Apps";
+        cell.detailTextLabel.text = @"Disable status bar gestures in selected apps";
+        cell.imageView.image = [UIImage systemImageNamed:@"hand.raised.slash"];
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        [self applySectionCardStyleToCell:cell atIndexPath:indexPath];
+        return cell;
+    }
+
     NSString *triggerKey = _sections[indexPath.section][indexPath.row];
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"TriggerCell"];
     if (!cell) {
@@ -749,6 +781,7 @@
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    if ([self isStatusExclusionRow:indexPath]) { [self openStatusExclusions]; return; }
     
     NSString *triggerKey = _sections[indexPath.section][indexPath.row];
     
@@ -757,6 +790,7 @@
 }
 
 - (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView leadingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
+    if ([self isStatusExclusionRow:indexPath]) return nil;
     NSString *triggerKey = _sections[indexPath.section][indexPath.row];
 
     RCConfigManager *config = [RCConfigManager sharedManager];
@@ -780,10 +814,11 @@
 }
 
 - (BOOL)tableView:(UITableView *)tableView canEditRowAtIndexPath:(NSIndexPath *)indexPath {
-    return YES;
+    return ![self isStatusExclusionRow:indexPath];
 }
 
 - (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
+    if ([self isStatusExclusionRow:indexPath]) return nil;
     NSString *triggerKey = _sections[indexPath.section][indexPath.row];
 
     // Only allow delete for NFC, WiFi, BT, App, Notif, Sched, MQTT, Device State triggers

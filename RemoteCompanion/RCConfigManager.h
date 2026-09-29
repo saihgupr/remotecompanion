@@ -3,6 +3,7 @@
 
 @interface RCConfigManager : NSObject
 
+@property (nonatomic, copy) NSArray<NSString *> *statusBarExcludedApps;
 @property (nonatomic, assign) BOOL masterEnabled;
 @property (nonatomic, assign) BOOL tcpEnabled;
 @property (nonatomic, assign) BOOL webUIEnabled;
