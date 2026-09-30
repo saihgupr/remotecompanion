@@ -894,29 +894,32 @@ static void rc_show_hud_toast(NSString *title, NSString *subtitle, NSString *ico
         CGFloat pillX = (screenWidth - pillWidth) / 2.0;
         CGFloat startY = -pillHeight - 20.0;
         
-        // Query status bar height for target Y
-        CGFloat statusBarHeight = 20.0;
-        if (@available(iOS 13.0, *)) {
-            UIWindow *keyWin = nil;
-            #pragma clang diagnostic push
-            #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-            keyWin = [UIApplication sharedApplication].keyWindow;
-            #pragma clang diagnostic pop
-            if (keyWin && keyWin.windowScene && keyWin.windowScene.statusBarManager) {
-                statusBarHeight = keyWin.windowScene.statusBarManager.statusBarFrame.size.height;
+        // A window has to belong to a window scene to be displayed (iOS 13+); one made
+        // with initWithFrame: alone never appears in SpringBoard on iOS 16/17.
+        UIWindowScene *hudScene = nil;
+        id sbApp = [UIApplication sharedApplication];
+        id wsm = [sbApp respondsToSelector:@selector(windowSceneManager)] ? [sbApp performSelector:@selector(windowSceneManager)] : nil;
+        id embeddedScene = [wsm respondsToSelector:@selector(embeddedDisplayWindowScene)] ? [wsm performSelector:@selector(embeddedDisplayWindowScene)] : nil;
+        if ([embeddedScene isKindOfClass:[UIWindowScene class]]) hudScene = embeddedScene;
+        if (!hudScene) {
+            for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
+                if ([scene isKindOfClass:[UIWindowScene class]]) { hudScene = (UIWindowScene *)scene; break; }
             }
         }
-        if (statusBarHeight == 0) {
-            #pragma clang diagnostic push
-            #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-            statusBarHeight = [UIApplication sharedApplication].statusBarFrame.size.height;
-            #pragma clang diagnostic pop
+
+        // Top inset: the status bar height, or the safe-area top of the scene's windows
+        // (which still reflects a notch / Dynamic Island while the status bar is hidden).
+        CGFloat topInset = hudScene.statusBarManager.statusBarFrame.size.height;
+        for (UIWindow *w in hudScene.windows) {
+            topInset = MAX(topInset, w.safeAreaInsets.top);
         }
-        
-        // targetY places it right in status bar overlay position (matching native iOS ringer HUD)
-        CGFloat targetY = (statusBarHeight > 24.0) ? 15.0 : 12.0;
-        
-        UIWindow *hudWindow = [[UIWindow alloc] initWithFrame:CGRectMake(pillX, startY, pillWidth, pillHeight)];
+
+        // Notch / Dynamic Island: sit just below it. Otherwise keep the native
+        // ringer-HUD position, overlapping the status bar.
+        CGFloat targetY = (topInset > 24.0) ? topInset : 12.0;
+
+        UIWindow *hudWindow = hudScene ? [[UIWindow alloc] initWithWindowScene:hudScene] : [[UIWindow alloc] init];
+        hudWindow.frame = CGRectMake(pillX, startY, pillWidth, pillHeight);
         g_rcHUDWindow = hudWindow;
         hudWindow.windowLevel = UIWindowLevelAlert + 3000.0;
         hudWindow.backgroundColor = [UIColor clearColor];
