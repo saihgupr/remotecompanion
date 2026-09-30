@@ -914,9 +914,14 @@ static void rc_show_hud_toast(NSString *title, NSString *subtitle, NSString *ico
             topInset = MAX(topInset, w.safeAreaInsets.top);
         }
 
-        // Notch / Dynamic Island: sit just below it. Otherwise keep the native
-        // ringer-HUD position, overlapping the status bar.
-        CGFloat targetY = (topInset > 24.0) ? topInset : 12.0;
+        // Notch / Dynamic Island in portrait: sit just below it. Otherwise (no notch, or
+        // landscape, where it's at the side) keep the native ringer-HUD position.
+        UIInterfaceOrientation orientation = UIInterfaceOrientationPortrait;
+        if ([sbApp respondsToSelector:@selector(activeInterfaceOrientation)]) {
+            orientation = [(SpringBoard *)sbApp activeInterfaceOrientation];
+        }
+        BOOL landscape = UIInterfaceOrientationIsLandscape(orientation);
+        CGFloat targetY = (!landscape && topInset > 24.0) ? topInset : 12.0;
 
         UIWindow *hudWindow = hudScene ? [[UIWindow alloc] initWithWindowScene:hudScene] : [[UIWindow alloc] init];
         hudWindow.frame = CGRectMake(pillX, startY, pillWidth, pillHeight);
