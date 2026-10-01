@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.8.0] - Unreleased
+
+### Added
+- Auto-Lock action and condition support.
+- Configurable banners for action triggers.
+- Fixed ANC actions missing their selectable On / Off / Toggle controls.
+
 ## [3.7.0] - 2026-10-01
 
 ### Added

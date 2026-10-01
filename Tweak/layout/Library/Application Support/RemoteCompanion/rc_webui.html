@@ -3753,7 +3753,7 @@ function parseToggleCmd(cmd) {
   const definitions = [
     { key:'airplane', name:'Airplane Mode', icon:'airplane', prefixes:['airplane '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'] },
     { key:'low_power', name:'Low Power Mode', icon:'battery_25', prefixes:['low power ','lpm ','low power mode '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'] },
-    { key:'autolock', name:'Auto-Lock', icon:'timer', prefixes:['autolock ','auto-lock '], suffixes:['toggle','30s','1m','2m','3m','4m','5m','never'], displaySuffixes:['Toggle (Never / Previous)','30 Seconds','1 Minute','2 Minutes','3 Minutes','4 Minutes','5 Minutes','Never'] },
+    { key:'autolock', name:'Auto-Lock', icon:'timer', prefixes:['autolock ','auto-lock '], suffixes:['toggle','30s','1m','2m','3m','4m','5m','never'], displaySuffixes:['Toggle','30 Seconds','1 Minute','2 Minutes','3 Minutes','4 Minutes','5 Minutes','Never'] },
     { key:'dnd', name:'Do Not Disturb', icon:'moon_fill', prefixes:['dnd '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'] },
     { key:'wifi', name:'Wi-Fi', icon:'wifi', prefixes:['wifi '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'] },
     { key:'cellular', name:'Cellular Data', icon:'antenna_radiowaves_left_right', prefixes:['cellular ','cell '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'] },
@@ -3762,6 +3762,7 @@ function parseToggleCmd(cmd) {
     { key:'flashlight', name:'Flashlight', icon:'bolt_fill', prefixes:['flashlight ','flash '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'] },
     { key:'appearance', name:'Appearance', icon:'moon_fill', prefixes:['appearance '], suffixes:['dark','light','toggle'], displaySuffixes:['Dark','Light','Toggle'] },
     { key:'audiomix', name:'AudioMix', icon:'equalizer', prefixes:['audiomix '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'], exactMatches: { 'audiomix':'toggle' } },
+    { key:'anc', name:'Noise Cancellation', icon:'ear_badge_checkmark', prefixes:['anc '], suffixes:['on','off','transparency','toggle'], displaySuffixes:['On','Off','Transparency','Toggle'] },
     { key:'rotate', name:'Rotation Lock', icon:'lock_rotation', prefixes:['rotate '], suffixes:['lock','unlock','toggle'], displaySuffixes:['Lock','Unlock','Toggle'] },
     { key:'vibration_silent', name:'Silent Vibration', icon:'bell_slash', prefixes:['vibration silent-'], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'] },
     { key:'vibration_ring', name:'Ring Vibration', icon:'bell', prefixes:['vibration ring-'], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'] },

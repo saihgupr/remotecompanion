@@ -1537,7 +1537,7 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
             @"icon": @"timer",
             @"prefixes": @[@"autolock ", @"auto-lock "],
             @"suffixes": @[@"toggle", @"30s", @"1m", @"2m", @"3m", @"4m", @"5m", @"never"],
-            @"displaySuffixes": @[@"Toggle (Never / Previous)", @"30 Seconds", @"1 Minute", @"2 Minutes", @"3 Minutes", @"4 Minutes", @"5 Minutes", @"Never"]
+            @"displaySuffixes": @[@"Toggle", @"30 Seconds", @"1 Minute", @"2 Minutes", @"3 Minutes", @"4 Minutes", @"5 Minutes", @"Never"]
         },
         @{
             @"key": @"dnd",
@@ -1603,6 +1603,14 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
             @"suffixes": @[@"on", @"off", @"toggle"],
             @"displaySuffixes": @[@"On", @"Off", @"Toggle"],
             @"exactMatches": @{ @"audiomix": @"toggle" }
+        },
+        @{
+            @"key": @"anc",
+            @"name": @"Noise Cancellation",
+            @"icon": @"ear.badge.checkmark",
+            @"prefixes": @[@"anc "],
+            @"suffixes": @[@"on", @"off", @"transparency", @"toggle"],
+            @"displaySuffixes": @[@"On", @"Off", @"Transparency", @"Toggle"]
         },
         @{
             @"key": @"rotate",
