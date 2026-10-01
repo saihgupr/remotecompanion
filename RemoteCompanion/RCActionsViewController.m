@@ -2317,9 +2317,14 @@ static id g_actionClipboard = nil;
         } else {
              cell.detailTextLabel.font = [UIFont systemFontOfSize:15];
              cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
+             cell.textLabel.numberOfLines = 1; // the subtitle takes the second line
         }
     } else {
         cell.detailTextLabel.text = nil;
+        // No subtitle: long names (shortcuts, apps, entities, toast text) wrap to a
+        // second line rather than being cut off
+        cell.textLabel.numberOfLines = 2;
+        cell.textLabel.lineBreakMode = NSLineBreakByTruncatingTail;
     }
 
     NSString *iconName = [self iconForCommand:action];
