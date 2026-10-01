@@ -11439,17 +11439,6 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
                             RCExecuteTrigger(g_pendingBottomBarSwipeUpTrigger);
                             SRLog(@"[RCBottom] %@ FIRED during move!", g_pendingBottomBarSwipeUpTrigger);
                             
-                            Class ccClass = objc_getClass("SBControlCenterController");
-                            if (ccClass && [ccClass respondsToSelector:@selector(sharedInstanceIfExists)]) {
-                                id cc = [ccClass performSelector:@selector(sharedInstanceIfExists)];
-                                if (cc) {
-                                    if ([cc respondsToSelector:@selector(isVisible)] && [cc isVisible]) {
-                                        [cc dismissAnimated:NO];
-                                    } else if ([cc respondsToSelector:@selector(_presentControlCenterGestureCancelled)]) {
-                                        [cc performSelector:@selector(_presentControlCenterGestureCancelled)];
-                                    }
-                                }
-                            }
                         }
                     }
                 }
@@ -11480,17 +11469,6 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
                                 RCExecuteTrigger(g_pendingBottomBarSwipeUpTrigger);
                                 SRLog(@"[RCBottom] %@ FIRED on ended!", g_pendingBottomBarSwipeUpTrigger);
                                 
-                                Class ccClass = objc_getClass("SBControlCenterController");
-                                if (ccClass && [ccClass respondsToSelector:@selector(sharedInstanceIfExists)]) {
-                                    id cc = [ccClass performSelector:@selector(sharedInstanceIfExists)];
-                                    if (cc) {
-                                        if ([cc respondsToSelector:@selector(isVisible)] && [cc isVisible]) {
-                                            [cc dismissAnimated:NO];
-                                        } else if ([cc respondsToSelector:@selector(_presentControlCenterGestureCancelled)]) {
-                                            [cc performSelector:@selector(_presentControlCenterGestureCancelled)];
-                                        }
-                                    }
-                                }
                             }
                         }
                     }
