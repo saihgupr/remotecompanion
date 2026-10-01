@@ -2,6 +2,7 @@
 #import "RCConfigManager.h"
 #import "RCUITweaker.h"
 #import "RCIntegrationsViewController.h"
+#import "RCBannersViewController.h"
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 @interface RCSettingsViewController () <UIDocumentPickerDelegate>
@@ -101,6 +102,11 @@
     [self applyTweaks];
 }
 
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    [self.tableView reloadData]; // refresh the Banners count after returning from it
+}
+
 - (void)dealloc {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
@@ -170,7 +176,7 @@
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    if (section == 0) return 3; // Master + NFC + WebUI
+    if (section == 0) return 4; // Master + NFC + WebUI + Banners
     if (section == 1) return 1; // Integrations Submenu Row
     return 2; // Export, Import
 }
@@ -178,7 +184,8 @@
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     RCConfigManager *cm = [RCConfigManager sharedManager];
     
-    UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
+    BOOL isBannersRow = (indexPath.section == 0 && indexPath.row == 3);
+    UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:isBannersRow ? UITableViewCellStyleValue1 : UITableViewCellStyleDefault reuseIdentifier:nil];
     cell.backgroundColor = [cm tweakColorForKey:@"blockBackground" defaultVal:0.12];
     
     UIView *selBg = [[UIView alloc] init];
@@ -216,6 +223,11 @@
             [_webUISwitch addTarget:self action:@selector(webUIToggleChanged:) forControlEvents:UIControlEventValueChanged];
             cell.accessoryView = _webUISwitch;
             cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        } else if (indexPath.row == 3) {
+            cell.textLabel.text = @"Banners";
+            NSUInteger count = [RCBannersViewController checkedCount];
+            cell.detailTextLabel.text = count ? [NSString stringWithFormat:@"%lu", (unsigned long)count] : @"Off";
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         }
     } else if (indexPath.section == 1) {
         cell.textLabel.text = @"Integrations";
@@ -246,7 +258,9 @@
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
 
-    if (indexPath.section == 1) {
+    if (indexPath.section == 0 && indexPath.row == 3) {
+        [self.navigationController pushViewController:[[RCBannersViewController alloc] init] animated:YES];
+    } else if (indexPath.section == 1) {
         RCIntegrationsViewController *integrationsVC = [[RCIntegrationsViewController alloc] init];
         [self.navigationController pushViewController:integrationsVC animated:YES];
     } else if (indexPath.section == 2) {

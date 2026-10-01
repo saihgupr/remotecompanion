@@ -1613,6 +1613,12 @@
           <input type="checkbox" class="ios-toggle" id="setting-webui" onchange="config.webUIEnabled=this.checked;saveConfig()">
         </div>
       </div>
+      <div class="settings-row" style="cursor:pointer" onclick="openBannersPanel()">
+        <span class="settings-label">Banners</span>
+        <div class="settings-btn" style="color:#8e8e93;display:flex;align-items:center;gap:6px">
+          <span id="setting-banners-count">Off</span><i class="f7-icons" style="font-size:14px;color:#48484a">chevron_right</i>
+        </div>
+      </div>
 
     </div>
 
@@ -2025,6 +2031,21 @@
       <button onclick="closeToastDialog()" style="color:#ff3b30;">Cancel</button>
       <button onclick="toastDialogOk()" style="font-weight:600;">Save</button>
     </div>
+  </div>
+</div>
+
+<!-- ══ BANNERS PANEL (Settings > Banners) ═══════════════════════════════════ -->
+<div class="rc-panel" id="banners-panel">
+  <div class="panel-navbar">
+    <button class="panel-back" onclick="closeBannersPanel()">
+      <i class="f7-icons">chevron_left</i> Settings
+    </button>
+    <div class="panel-title">Banners</div>
+    <div style="width:80px"></div>
+  </div>
+  <div class="panel-content">
+    <div style="color:#8e8e93;font-size:13px;margin:20px 16px 0">Checked actions show a banner whenever a trigger runs them. Toggles show their new state; other actions show their name.</div>
+    <div id="banners-list"></div>
   </div>
 </div>
 
@@ -4690,36 +4711,28 @@ function _pickerBackdropClick(e) {
   if (e.target === document.getElementById('picker-dialog-backdrop')) closePickerPanel();
 }
 
+// Whether an action is offered: integrations only when switched on, tweak-specific
+// actions only when that tweak / app is installed. Shared by the picker and Settings > Banners.
+function pickerActionAvailable(sec, a) {
+  if (sec.title !== 'Integrations') return true;
+  if (a.cmd === '__HA_PICKER__') return !!config.haEnabled;
+  if (a.cmd === '__KM_TRIGGER__') return !!config.kmEnabled;
+  if (a.cmd === '__MQTT_PUBLISH__') return !!config.mqttEnabled;
+  if (a.cmd.startsWith('snapper')) return !!(serverCapabilities && serverCapabilities.snapper);
+  if (a.cmd.startsWith('sneakycam')) return !!(serverCapabilities && serverCapabilities.sneakycam);
+  if (['queuealbum', 'queue album', 'queueartist', 'queue artist', 'shuffleall', 'shuffle all songs', 'deletesong', 'delete song', 'delete current song'].includes(a.cmd)) {
+    return !!(serverCapabilities && serverCapabilities.audiostream);
+  }
+  return true;
+}
+
 function renderPickerSections() {
   const query = document.getElementById('action-search').value.toLowerCase().trim();
   const container = document.getElementById('picker-content');
   container.innerHTML = '';
 
   ACTION_SECTIONS.forEach(sec => {
-    let actions = sec.actions;
-    if (sec.title === 'Integrations') {
-      actions = actions.filter(a => {
-        if (a.cmd === '__HA_PICKER__') {
-          return !!config.haEnabled;
-        }
-        if (a.cmd === '__KM_TRIGGER__') {
-          return !!config.kmEnabled;
-        }
-        if (a.cmd === '__MQTT_PUBLISH__') {
-          return !!config.mqttEnabled;
-        }
-        if (a.cmd.startsWith('snapper')) {
-          return !!(serverCapabilities && serverCapabilities.snapper);
-        }
-        if (a.cmd.startsWith('sneakycam')) {
-          return !!(serverCapabilities && serverCapabilities.sneakycam);
-        }
-        if (['queuealbum', 'queue album', 'queueartist', 'queue artist', 'shuffleall', 'shuffle all songs', 'deletesong', 'delete song', 'delete current song'].includes(a.cmd)) {
-          return !!(serverCapabilities && serverCapabilities.audiostream);
-        }
-        return true;
-      });
-    }
+    const actions = sec.actions.filter(a => pickerActionAvailable(sec, a));
     const filtered = query
       ? actions.filter(a => a.name.toLowerCase().includes(query) || (a.cmd && a.cmd.toLowerCase().includes(query)))
       : actions;
@@ -5098,6 +5111,7 @@ function openSettings() {
   document.getElementById('setting-master').checked = !!config.masterEnabled;
   document.getElementById('setting-nfc').checked    = !!config.nfcEnabled;
   document.getElementById('setting-webui').checked  = !!config.webUIEnabled;
+  updateBannersCount();
 
   const haToggle = document.getElementById('setting-ha');
   if (haToggle) {
@@ -5797,6 +5811,154 @@ function promptManualHAEntity() {
       addActionToCurrent(clean);
     }
   });
+}
+
+// ── Banners (Settings > Banners) ─────────────────────────────────────────────
+// config.bannerActions: the picked actions, in the same format the app's
+// RCBannersViewController writes (see its header comment): { id, title, icon,
+// toggle, match, exclude }. "match"/"exclude" patterns ending in " ", ":" or "-"
+// are prefixes; anything else must equal the (lowercased) command.
+// Not offered: entries that don't run an action of their own, and Set Flashlight (covered by Flashlight)
+const BANNER_SKIP = new Set(['__IF_CONDITION__', '__DELAY__', '__TOAST__', '__SET_FLASHLIGHT__']);
+// The app's names for the same actions, so both UIs share one setting
+const BANNER_ID_ALIASES = { '__SHORTCUT__': '__SHORTCUT_PICKER__', 'queuealbum': 'queue album', 'queueartist': 'queue artist',
+  'shuffleall': 'shuffle all songs', 'deletesong': 'delete current song' };
+// Actions that show a banner of their own: listed ticked, and switching one off adds it to
+// config.bannerOptOut, which the tweak checks before showing that banner (ids = the app's)
+const BANNER_OWN = new Set(['__CAMERA_PICKER__', '__CAMERA_VIDEO_PICKER__', 'camera record', '__HA_PICKER__', '__KM_TRIGGER__',
+  '__MQTT_PUBLISH__', 'audiomix toggle', 'sneakycam photo', 'sneakycam video',
+  'queue album', 'queue artist', 'shuffle all songs', 'delete current song']);
+const BANNER_PLACEHOLDERS = {
+  '__SET_VOLUME__': ['set-vol '],
+  '__SET_BRIGHTNESS__': ['brightness '],
+  '__CAMERA_PICKER__': ['camera ', 'open camera ', 'camera', 'open camera'],
+  '__CAMERA_VIDEO_PICKER__': ['camera video ', 'open camera video ', 'camera video', 'open camera video', 'camera 2x'],
+  '__BT_CONNECT__': ['bt connect ', 'bluetooth connect '],
+  '__BT_DISCONNECT__': ['bt disconnect ', 'bluetooth disconnect '],
+  '__AIRPLAY_CONNECT__': ['airplay connect '],
+  '__OPEN_APP__': ['uiopen '],
+  '__KILL_APP__': ['kill '],
+  '__HA_PICKER__': ['ha '],
+  '__KM_TRIGGER__': ['km '],
+  '__MQTT_PUBLISH__': ['mqtt '],
+  '__SHORTCUT_PICKER__': ['shortcut:'],
+  '__LUA_SCRIPT__': ['lua ', 'lua_eval '],
+  '__CUSTOM__': ['exec ', 'root ', 'sudo ']
+};
+
+function bannerId(cmd) { return BANNER_ID_ALIASES[cmd] || cmd; }
+function bannerIsPrefix(p) { return /[ :-]$/.test(p); }
+
+function bannerCatalog() {
+  return ACTION_SECTIONS
+    .map(s => ({ title: s.title, actions: s.actions.filter(a => !BANNER_SKIP.has(a.cmd) && pickerActionAvailable(s, a)) }))
+    .filter(s => s.actions.length);
+}
+
+function bannerPatterns(cmd) {
+  const id = bannerId(cmd);
+  if (BANNER_PLACEHOLDERS[id]) return { patterns: BANNER_PLACEHOLDERS[id], toggle: false };
+  const info = parseToggleCmd(cmd);
+  if (info && info.prefixes && info.prefixes.length) return { patterns: info.prefixes.map(p => p.toLowerCase()), toggle: true };
+  return { patterns: [cmd.toLowerCase()], toggle: false };
+}
+
+function bannerEntryFor(action) {
+  const id = bannerId(action.cmd);
+  const { patterns, toggle } = bannerPatterns(action.cmd);
+  const exclude = [];
+  bannerCatalog().forEach(s => s.actions.forEach(other => {
+    if (bannerId(other.cmd) === id) return;
+    bannerPatterns(other.cmd).patterns.forEach(op => {
+      patterns.forEach(mine => {
+        if (bannerIsPrefix(mine) && op.length > mine.length && op.startsWith(mine) && !patterns.includes(op) && !exclude.includes(op)) exclude.push(op);
+      });
+    });
+  }));
+  // The banner needs an SF Symbol: keep the app's if it picked this action, otherwise derive
+  // one from the Framework7 name (they mostly mirror SF Symbols; the tweak skips unknown ones)
+  const existing = (config.bannerActions || []).find(e => e.id === id);
+  const icon = (existing && existing.icon) || (action.icon || '').replace(/_/g, '.');
+  return { id, title: action.name.replace(/(\.\.\.|…)$/, ''), icon, toggle, match: patterns, exclude };
+}
+
+function bannerIsSelected(cmd) {
+  const id = bannerId(cmd);
+  if (BANNER_OWN.has(id)) return !(config.bannerOptOut || []).includes(id);
+  return (config.bannerActions || []).some(e => e.id === id);
+}
+
+function toggleBannerSelection(cmd) {
+  const id = bannerId(cmd);
+  if (BANNER_OWN.has(id)) {
+    const off = new Set(config.bannerOptOut || []);
+    if (off.has(id)) off.delete(id); else off.add(id);
+    config.bannerOptOut = [...off];
+    saveConfig();
+    renderBannersList();
+    updateBannersCount();
+    return;
+  }
+  const selected = new Set((config.bannerActions || []).map(e => e.id));
+  if (selected.has(id)) selected.delete(id); else selected.add(id);
+  const entries = [];
+  bannerCatalog().forEach(s => s.actions.forEach(a => {
+    const aid = bannerId(a.cmd);
+    if (!BANNER_OWN.has(aid) && selected.has(aid) && !entries.some(e => e.id === aid)) entries.push(bannerEntryFor(a));
+  }));
+  // Keep app-picked actions this catalog doesn't list (e.g. integrations shown only in the app)
+  (config.bannerActions || []).forEach(e => { if (selected.has(e.id) && !entries.some(x => x.id === e.id)) entries.push(e); });
+  config.bannerActions = entries;
+  saveConfig();
+  renderBannersList();
+  updateBannersCount();
+}
+
+function renderBannersList() {
+  const list = document.getElementById('banners-list');
+  list.innerHTML = '';
+  bannerCatalog().forEach(section => {
+    const header = document.createElement('div');
+    header.className = 'action-list-header';
+    header.textContent = section.title;
+    list.appendChild(header);
+    const card = document.createElement('div');
+    card.className = 'action-list-card';
+    section.actions.forEach((a, i) => {
+      const row = document.createElement('div');
+      row.className = 'settings-row';
+      row.style.cursor = 'pointer';
+      if (i > 0) row.style.borderTop = '1px solid rgba(255,255,255,0.08)';
+      row.innerHTML = `
+        <span class="settings-label" style="display:flex;align-items:center;gap:12px">
+          <i class="f7-icons" style="font-size:18px;color:#8e8e93;width:22px;text-align:center">${a.icon || 'circle'}</i>
+          <span>${escHtml(a.name)}</span>
+        </span>
+        <div class="settings-btn">${bannerIsSelected(a.cmd) ? '<i class="f7-icons" style="color:#007aff;font-size:18px">checkmark_alt</i>' : ''}</div>`;
+      row.addEventListener('click', () => toggleBannerSelection(a.cmd));
+      card.appendChild(row);
+    });
+    list.appendChild(card);
+  });
+}
+
+function updateBannersCount() {
+  const el = document.getElementById('setting-banners-count');
+  if (el) {
+    let n = 0;
+    bannerCatalog().forEach(s => s.actions.forEach(a => { if (bannerIsSelected(a.cmd)) n++; }));
+    el.textContent = n ? String(n) : 'Off';
+  }
+}
+
+function openBannersPanel() {
+  renderBannersList();
+  document.getElementById('banners-panel').classList.add('active');
+}
+
+function closeBannersPanel() {
+  document.getElementById('banners-panel').classList.remove('active');
+  updateBannersCount();
 }
 
 function closeSettings() {
