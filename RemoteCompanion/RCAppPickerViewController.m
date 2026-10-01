@@ -1,4 +1,5 @@
 #import "RCAppPickerViewController.h"
+#import "RCConfigManager.h"
 
 // Private API Declarations
 @interface LSApplicationProxy : NSObject
@@ -27,6 +28,11 @@
 
 @implementation RCAppPickerViewController
 
+// Rounded inset list, like the other pickers
+- (instancetype)init {
+    return [super initWithStyle:UITableViewStyleInsetGrouped];
+}
+
 - (void)viewDidLoad {
     [super viewDidLoad];
     
@@ -37,7 +43,11 @@
     self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeAlways;
     self.navigationController.navigationBar.tintColor = [UIColor labelColor];
     
-    self.view.backgroundColor = [UIColor systemBackgroundColor];
+    RCConfigManager *cm = [RCConfigManager sharedManager];
+    UIColor *bg = [cm tweakColorForKey:@"mainBackground" defaultVal:0.09];
+    self.view.backgroundColor = bg;
+    self.tableView.backgroundColor = bg;
+    self.tableView.separatorColor = [cm tweakColorForKey:@"separators" defaultVal:0.30];
     
     [self.tableView registerClass:[UITableViewCell class] forCellReuseIdentifier:@"AppCell"];
     self.tableView.rowHeight = 60; // Consistent sizing
@@ -87,6 +97,11 @@
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"AppCell" forIndexPath:indexPath];
+    RCConfigManager *cm = [RCConfigManager sharedManager];
+    cell.backgroundColor = [cm tweakColorForKey:@"blockBackground" defaultVal:0.12];
+    UIView *selBg = [[UIView alloc] init];
+    selBg.backgroundColor = [cm tweakColorForKey:@"selectionHighlight" defaultVal:0.15];
+    cell.selectedBackgroundView = selBg;
     
     LSApplicationProxy *app = self.filteredApps[indexPath.row];
     cell.textLabel.text = app.localizedName ?: app.applicationIdentifier;
