@@ -1782,6 +1782,12 @@ static NSString *rc_canonical_status_value_for_condition_key(NSString *condition
         if ([upper containsString:@"PLAYING"]) return @"PLAYING";
         if ([upper containsString:@"PAUSED"]) return @"PAUSED";
         if ([upper containsString:@"STOPPED"]) return @"STOPPED";
+        // "player status" passes on all of MediaRemote's playback states. No app with a
+        // media session (Unknown) means nothing is playing; Interrupted is playback the
+        // system paused (a call, say); seeking only happens during playback.
+        if ([upper containsString:@"UNKNOWN"]) return @"STOPPED";
+        if ([upper containsString:@"INTERRUPTED"]) return @"PAUSED";
+        if ([upper containsString:@"SEEKING"]) return @"PLAYING";
         return nil;
     }
     
