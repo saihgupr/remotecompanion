@@ -11435,6 +11435,12 @@ static BOOL g_isSwappingVolume = NO;
             RCExecuteTrigger(@"power_volume_down");
             return;
         }
+        if (enabled) {
+            // Already fired for this press (the HID listener usually sees it first): swallow
+            // it, and backdate its press time so the release recognizes it too
+            g_lastVolDownPressTime = g_lastPowerVolComboFireTime;
+            return;
+        }
 
         // No custom combo is configured: hand the press to iOS instead of consuming
         // it (it still steps the volume). Whether the power press then sleeps the
@@ -12243,32 +12249,33 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
             if (mappedUsage == kHIDUsage_Csmr_VolumeDecrement) g_volDownHeldOnHID = !!down;
             if (mappedUsage == kHIDUsage_Csmr_VolumeIncrement) g_volUpHeldOnHID = !!down;
             
-            // Check for Power + Volume combination.
-            // FALLBACK ONLY. volumeIncreasePressDownWithModifiers:/volumeDecreasePress-
-            // DownWithModifiers: already detect this same combo on the main thread, and
-            // unlike the block above this one had no !g_powerVolComboTriggered guard at
-            // all - it fired unconditionally alongside the ObjC hook every single time.
-            if (!g_volHookAlive && down && g_powerIsDown) {
-                NSString *triggerKey = (mappedUsage == kHIDUsage_Csmr_VolumeIncrement) ? @"power_volume_up" : @"power_volume_down";
-                BOOL enabled = RC_TriggerIsActionable(triggerKey);
-
-                if (enabled && !g_powerVolComboTriggered) {
+            // Check for Power + Volume combination. The volume hooks
+            // (volumeIncreasePressDownWithModifiers: / volumeDecreasePressDownWithModifiers:)
+            // detect it too, but on the lock screen iOS doesn't call them while Power is held,
+            // so it's detected here as well. Decided on the main thread, like the hooks, so only
+            // the first to see the combo fires it (this listener usually sees the press first,
+            // and the hook then swallows the press); and before Power's release, which is
+            // handled there too.
+            if (down && g_powerIsDown) {
+                BOOL volumeUp = (mappedUsage == kHIDUsage_Csmr_VolumeIncrement);
+                NSString *triggerKey = volumeUp ? @"power_volume_up" : @"power_volume_down";
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    if (!g_powerIsDown || g_powerVolComboTriggered || !RC_TriggerIsActionable(triggerKey)) return;
                     SRLog(@"[HID] ⚡️+🔊 POWER + VOLUME COMBINATION DETECTED: %@", triggerKey);
                     g_powerVolComboTriggered = YES;
                     RC_MarkPowerVolComboFired();
-
-                    // Invalidate standard timers in Main Thread
-                    dispatch_async(dispatch_get_main_queue(), ^{
-                         cancel_pending_volume_sequences();
-                         if (g_volUpTimer) { [g_volUpTimer invalidate]; g_volUpTimer = nil; }
-                         if (g_volDownTimer) { [g_volDownTimer invalidate]; g_volDownTimer = nil; }
-                         trigger_haptic();
-                         RCExecuteTrigger(triggerKey);
-                    });
-                    
-                    // We might want to swallow the volume event here, but HID listener is just a listener.
-                    // The Volume hooks will also fire, we handle suppression there too.
-                }
+                    cancel_pending_volume_sequences();
+                    if (volumeUp) {
+                        RC_SetScreenshotRecognizerSuppressed(YES);
+                    } else {
+                        if (g_lockButtonTimer) { [g_lockButtonTimer invalidate]; g_lockButtonTimer = nil; }
+                        if (g_systemPowerOffTimer) { [g_systemPowerOffTimer invalidate]; g_systemPowerOffTimer = nil; }
+                    }
+                    if (g_volUpTimer) { [g_volUpTimer invalidate]; g_volUpTimer = nil; }
+                    if (g_volDownTimer) { [g_volDownTimer invalidate]; g_volDownTimer = nil; }
+                    trigger_haptic();
+                    RCExecuteTrigger(triggerKey);
+                });
             }
             
             // Volume Both Press. The volume hooks detect it on the main thread, but iOS 14
