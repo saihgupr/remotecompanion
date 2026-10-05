@@ -3349,14 +3349,36 @@ static BOOL g_bioWasLocked = NO;
 static BOOL g_lastLockedState = NO;
 static BOOL g_lockStateInitialized = NO;
 
+// Whether the phone is locked. iOS 17 also locks the UI while Notification Center is pulled down
+// over an unlocked phone, and unlocks it when it's put away - that isn't a lock. A real lock
+// turns the screen off or locks the passcode (SBLockStateAggregator lockState bit 2); once
+// locked, the phone stays locked until the UI unlocks (after Face ID, the lock screen still
+// shows until the swipe up). Main thread.
+static BOOL rc_device_locked(SBLockScreenManager *lsm) {
+    if (![lsm isUILocked]) return NO;
+    if (g_lastLockedState) return YES;
+    BOOL known = NO;
+    id aggregator = [objc_getClass("SBLockStateAggregator") respondsToSelector:@selector(sharedInstance)] ? [objc_getClass("SBLockStateAggregator") performSelector:@selector(sharedInstance)] : nil;
+    if ([aggregator respondsToSelector:@selector(lockState)]) {
+        known = YES;
+        if (((unsigned long long (*)(id, SEL))objc_msgSend)(aggregator, @selector(lockState)) & 2) return YES;
+    }
+    SBBacklightController *backlight = [objc_getClass("SBBacklightController") sharedInstance];
+    if ([backlight respondsToSelector:@selector(screenIsOn)]) {
+        known = YES;
+        if (![backlight screenIsOn]) return YES;
+    }
+    return !known;
+}
+
 static void initialize_lock_state() {
     if (g_lockStateInitialized) return;
-    
+
     Class LSMClass = objc_getClass("SBLockScreenManager");
     if (LSMClass) {
         SBLockScreenManager *lsm = [LSMClass sharedInstance];
         if (lsm) {
-            g_lastLockedState = [lsm isUILocked];
+            g_lastLockedState = rc_device_locked(lsm);
             g_lockStateInitialized = YES;
             SRLog(@"🔒 [RCSystem] Lock state successfully initialized to: %@", g_lastLockedState ? @"LOCKED" : @"UNLOCKED");
         }
@@ -3415,8 +3437,8 @@ static void handle_lock_state_notification(CFNotificationCenterRef center, void 
             return;
         }
         
-        BOOL currentLocked = [lsm isUILocked];
-        SRLog(@"🔒 [RCSystem] SBLockScreenManager.isUILocked = %@", currentLocked ? @"YES" : @"NO");
+        BOOL currentLocked = rc_device_locked(lsm);
+        SRLog(@"🔒 [RCSystem] SBLockScreenManager.isUILocked = %@, device %@", [lsm isUILocked] ? @"YES" : @"NO", currentLocked ? @"locked" : @"not locked");
         handle_lock_state_transition(currentLocked, @"Darwin Notification");
     });
 }
@@ -3560,8 +3582,17 @@ static void register_system_event_observers() {
     CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), 
                                     NULL, 
                                     handle_lock_state_notification, 
-                                    CFSTR("com.apple.springboard.lockstate"), 
-                                    NULL, 
+                                    CFSTR("com.apple.springboard.lockstate"),
+                                    NULL,
+                                    CFNotificationSuspensionBehaviorDeliverImmediately);
+
+    // Locking with Notification Center pulled down (iOS 17) posts no lockstate - the UI was
+    // already locked - so the screen going off is when that lock shows
+    CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),
+                                    NULL,
+                                    handle_lock_state_notification,
+                                    CFSTR("com.apple.springboard.hasBlankedScreen"),
+                                    NULL,
                                     CFNotificationSuspensionBehaviorDeliverImmediately);
 
     // Media State changes (Darwin Notifications)
@@ -7464,7 +7495,7 @@ static NSString *handle_command(NSString *cmd) {
             Class SBLockScreenManagerClass = objc_getClass("SBLockScreenManager");
             SBLockScreenManager *manager = SBLockScreenManagerClass ? [SBLockScreenManagerClass sharedInstance] : nil;
             if (manager && [manager respondsToSelector:@selector(isUILocked)]) {
-                status = [manager isUILocked] ? @"locked\n" : @"unlocked\n";
+                status = rc_device_locked(manager) ? @"locked\n" : @"unlocked\n";
             } else {
                 status = @"unlocked\n";
             }
