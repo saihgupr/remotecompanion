@@ -11687,6 +11687,55 @@ typedef void (*IOHIDEventSystemClientEventCallback)(void* target, void* refcon, 
 static int g_homeClickCount = 0;
 static NSTimer *g_homeClickTimer = nil;
 
+@interface SBHomeHardwareButtonActions : NSObject
+- (void)performDoublePressDownActions;
+- (void)performSinglePressUpActions;
+- (void)performSinglePressUpActionsWithSourceType:(unsigned long)sourceType;
+@end
+
+// iOS's own Home double press action (the App Switcher), held back until the click count is
+// known (see RC_HoldHomeSwitcher): if a trigger takes the clicks it replaces the App Switcher,
+// otherwise the App Switcher opens late. (The triple press action, the Accessibility Shortcut, is
+// left alone: it can be turned off in Settings.)
+static BOOL g_homeDoubleActionHeld = NO, g_homeActionReplaying = NO;
+static __weak id g_homeActionsTarget = nil;
+
+// Whether an Accessibility Shortcut is set (Settings > Accessibility > Accessibility Shortcut):
+// while one is, iOS itself waits to rule out a triple press before opening the App Switcher
+static BOOL RC_AccessibilityShortcutSet(void) {
+    CFPreferencesAppSynchronize(CFSTR("com.apple.Accessibility"));
+    CFPropertyListRef choice = CFPreferencesCopyAppValue(CFSTR("TripleClickChoice"), CFSTR("com.apple.Accessibility"));
+    BOOL set = choice && CFGetTypeID(choice) == CFArrayGetTypeID() && CFArrayGetCount((CFArrayRef)choice) > 0;
+    if (choice) CFRelease(choice);
+    return set;
+}
+
+// Whether to hold the App Switcher: for Home Double Click always (it replaces the App Switcher);
+// for Triple or Quadruple Click only when iOS doesn't wait itself, so the App Switcher doesn't open
+// partway through those clicks. With a shortcut set iOS already waits, and holding as well doubled
+// the delay of every double click.
+static BOOL RC_HoldHomeSwitcher(void) {
+    if (RC_IsForegroundAppExcluded()) return NO;
+    if (RC_TriggerIsActionable(@"trigger_home_double_click")) return YES;
+    if (!RC_TriggerIsActionable(@"trigger_home_triple_click") && !RC_TriggerIsActionable(@"trigger_home_quadruple_click")) return NO;
+    return !RC_AccessibilityShortcutSet();
+}
+
+// The end of a click sequence: drops the held App Switcher if a trigger fired or the clicks went
+// on to three or more (iOS doesn't open it for those either), otherwise opens it late. A count of
+// 1 counts too: iOS can take a slower second click as a double after this sequence has ended.
+// Main thread.
+static void RC_FinishHomeActions(int count, BOOL fired) {
+    id target = g_homeActionsTarget;
+    BOOL replay = !fired && count <= 2 && g_homeDoubleActionHeld;
+    g_homeDoubleActionHeld = NO;
+    if (!target || !replay) return;
+    SRLog(@"[Home] No trigger for %d clicks - opening iOS's App Switcher", count);
+    g_homeActionReplaying = YES;
+    [target performDoublePressDownActions];
+    g_homeActionReplaying = NO;
+}
+
 // Power Button Multi-Click Globals
 static int g_powerClickCount = 0;
 static NSTimer *g_powerClickTimer = nil;
@@ -11724,6 +11773,7 @@ static void RC_CheckAndFire() {
         SRLog(@"🚀 QUAD CLICK (4+) REACHED! Firing immediately.");
         trigger_haptic();
         RCExecuteTrigger(@"trigger_home_quadruple_click");
+        RC_FinishHomeActions(g_homeClickCount, YES);
         g_homeClickCount = 0; // Reset Sequence
         return;
     }
@@ -11743,14 +11793,17 @@ static void RC_CheckAndFire() {
         else if (g_homeClickCount == 3) triggerKey = @"trigger_home_triple_click";
         else if (g_homeClickCount == 2) triggerKey = @"trigger_home_double_click";
         
+        BOOL fired = NO;
         if (triggerKey && masterEnabled) {
             BOOL enabled = [g_triggerConfig[@"triggers"][triggerKey][@"enabled"] boolValue];
             if (enabled) {
                 SRLog(@"✅ FIRING TRIGGER: %@", triggerKey);
                 trigger_haptic();
                 RCExecuteTrigger(triggerKey);
+                fired = YES;
             }
         }
+        RC_FinishHomeActions(g_homeClickCount, fired);
         g_homeClickCount = 0;
     }];
 }
@@ -12716,6 +12769,37 @@ static void setup_background_hid_listener() {
 
 // iOS recognizing its own screenshot gesture (the chord differs by device) - so a Home + Power
 // chord doesn't get a second screenshot from the tweak (RC_FinishHomePowerChord)
+// With its double press held, iOS takes the next press of the same clicks as a new single press
+// - go home - and performs it before the click count is known: it belongs to the held clicks
+static BOOL RC_HomeSinglePressIsPartOfHeldClicks(void) {
+    if (!g_homeDoubleActionHeld) return NO;
+    SRLog(@"[Home] Single press during held clicks - not going home");
+    return YES;
+}
+
+// See g_homeDoubleActionHeld
+%hook SBHomeHardwareButtonActions
+- (void)performSinglePressUpActions {
+    if (RC_HomeSinglePressIsPartOfHeldClicks()) return;
+    %orig;
+}
+
+- (void)performSinglePressUpActionsWithSourceType:(unsigned long)sourceType {
+    if (RC_HomeSinglePressIsPartOfHeldClicks()) return;
+    %orig;
+}
+
+- (void)performDoublePressDownActions {
+    if (!g_homeActionReplaying && RC_HoldHomeSwitcher()) {
+        SRLog(@"[Home] iOS's App Switcher held until the click count is known");
+        g_homeDoubleActionHeld = YES;
+        g_homeActionsTarget = self;
+        return;
+    }
+    %orig;
+}
+%end
+
 %hook SBHomeHardwareButton
 - (void)screenshotRecognizerDidRecognize:(id)recognizer {
     g_lastIOSScreenshotTime = [[NSDate date] timeIntervalSince1970];
