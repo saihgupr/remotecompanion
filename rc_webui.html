@@ -2511,6 +2511,7 @@ const TRIGGER_NAMES = {
   trigger_bottom_swipe_up_left:'Bottom Swipe Up (Left)', trigger_bottom_swipe_up_center:'Bottom Swipe Up (Center)', trigger_bottom_swipe_up_right:'Bottom Swipe Up (Right)',
   trigger_device_lock: 'Device Locked', trigger_device_unlock: 'Device Unlocked',
   trigger_power_connect: 'Power Connected', trigger_power_disconnect: 'Power Disconnected',
+  trigger_carplay_connect: 'CarPlay Connected', trigger_carplay_disconnect: 'CarPlay Disconnected',
   trigger_media_play: 'Media Playing', trigger_media_pause: 'Media Paused', trigger_media_track_change: 'Media Track Changed',
 };
 
@@ -2554,6 +2555,8 @@ const TRIGGER_ICONS = {
   trigger_device_unlock: { icon:'lock_open_fill',  cls:'icon-green' },
   trigger_power_connect:    { icon:'bolt_fill',       cls:'icon-green' },
   trigger_power_disconnect: { icon:'bolt_slash_fill', cls:'icon-orange' },
+  trigger_carplay_connect:    { icon:'car_fill',      cls:'icon-green' },
+  trigger_carplay_disconnect: { icon:'car_fill',      cls:'icon-orange' },
   trigger_media_play:   { icon:'play_fill',        cls:'icon-blue' },
   trigger_media_pause:  { icon:'pause_fill',       cls:'icon-orange' },
   trigger_media_track_change: { icon:'forward_fill', cls:'icon-purple' },
@@ -2999,6 +3002,7 @@ const CONDITION_DEFS = [
   { key:'orientation',title:'Orientation',  values:[{value:'PORTRAIT',title:'Portrait'},{value:'LANDSCAPE',title:'Landscape'}] },
   { key:'wifi_network', title:'Wi-Fi Network is', values:null, freeText:true },
   { key:'bt_device', title:'Bluetooth Device Connected', values:null, freeText:true },
+  { key:'carplay',    title:'CarPlay', values:[{value:'CONNECTED',title:'Connected'},{value:'NOT_CONNECTED',title:'Not Connected'}] },
   { key:'cellular',   title:'Cellular Data', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
   { key:'dnd',        title:'Do Not Disturb', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
   { key:'lpm',        title:'Low Power Mode', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
@@ -3146,7 +3150,7 @@ function renderAll() {
   const allKeys = Object.keys(config.triggers);
   TRIGGER_SECTIONS.forEach(sec => {
     if (sec.id === 'status') {
-      sec.keys = allKeys.filter(k => k.startsWith('trigger_device_') || k.startsWith('trigger_media_'));
+      sec.keys = allKeys.filter(k => ['trigger_device_','trigger_media_','trigger_power_','trigger_carplay_'].some(p => k.startsWith(p)));
     } else if (sec.dynamic) {
       sec.keys = allKeys.filter(k => k.startsWith(sec.prefix));
     }
@@ -3158,6 +3162,7 @@ function renderAll() {
     let keys = sec.keys;
     if (sec.id !== 'favorites') keys = keys.filter(k => !favs.includes(k));
     if (sec.dynamic && keys.length === 0) return;
+    if (sec.id === 'home' && serverCapabilities.home_button === false) return;
     if (sec.id === 'favorites' && keys.length === 0) return;
 
     // Section header

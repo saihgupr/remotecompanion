@@ -1121,6 +1121,16 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             @"placeholder": @"Device name"
         },
         @{
+            @"key": @"carplay",
+            @"title": @"CarPlay",
+            @"icon": @"car.fill",
+            @"section": @"Connectivity",
+            @"values": @[
+                @{ @"value": @"CONNECTED", @"title": @"Connected" },
+                @{ @"value": @"NOT_CONNECTED", @"title": @"Not Connected" }
+            ]
+        },
+        @{
             @"key": @"cellular",
             @"title": @"Cellular Data",
             @"icon": @"antenna.radiowaves.left.and.right",

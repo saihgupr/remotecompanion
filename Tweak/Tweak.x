@@ -2053,6 +2053,8 @@ static NSString *rc_normalized_name(NSString *name) {
     return n;
 }
 
+static BOOL rc_carplay_connected(void);
+
 // If conditions answered by reading the state directly rather than through a status
 // command. Sets *handled for the keys it knows. expected is already uppercased.
 static BOOL rc_condition_direct_match(NSString *key, NSString *expected, BOOL *handled) {
@@ -2064,6 +2066,8 @@ static BOOL rc_condition_direct_match(NSString *key, NSString *expected, BOOL *h
     } else if ([key isEqualToString:@"flashlight"]) {
         AVCaptureDevice *device = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
         actual = (device.torchMode == AVCaptureTorchModeOn) ? @"ON" : @"OFF";
+    } else if ([key isEqualToString:@"carplay"]) {
+        actual = rc_carplay_connected() ? @"CONNECTED" : @"NOT_CONNECTED";
     } else if ([key isEqualToString:@"charging"]) {
         UIDevice *device = [UIDevice currentDevice];
         device.batteryMonitoringEnabled = YES;
@@ -3340,6 +3344,74 @@ static void handle_power_state_notification(CFNotificationCenterRef center, void
     });
 }
 
+// CarPlay: CarKit's session status (private, not loaded in SpringBoard by default) tells
+// its observers when a CarPlay session connects or disconnects, and has a currentSession
+// while one is connected. Same calls on iOS 14 and 17.
+@interface RCCarPlayObserver : NSObject
+@end
+
+static id g_carPlayStatus = nil;
+static RCCarPlayObserver *g_carPlayObserver = nil;
+static BOOL g_carPlayConnected = NO;
+static BOOL g_carPlayReady = NO;
+
+static BOOL rc_carplay_connected(void) {
+    return [g_carPlayStatus respondsToSelector:@selector(currentSession)] && [g_carPlayStatus performSelector:@selector(currentSession)] != nil;
+}
+
+static void rc_carplay_state_changed(BOOL connected, NSString *source) {
+    if (connected == g_carPlayConnected) return;
+    g_carPlayConnected = connected;
+    // Until the first session update has landed, a session that was already connected
+    // (e.g. after a respring) isn't a new connection
+    if (!g_carPlayReady) return;
+    SRLog(@"🚗 [RCSystem] Transition detected (%@): CARPLAY %@.", source, connected ? @"CONNECTED" : @"DISCONNECTED");
+    RCExecuteTrigger(connected ? @"trigger_carplay_connect" : @"trigger_carplay_disconnect");
+}
+
+@implementation RCCarPlayObserver
+- (void)sessionDidConnect:(id)session {
+    dispatch_async(dispatch_get_main_queue(), ^{ rc_carplay_state_changed(YES, @"sessionDidConnect"); });
+}
+- (void)sessionDidDisconnect:(id)session {
+    dispatch_async(dispatch_get_main_queue(), ^{ rc_carplay_state_changed(NO, @"sessionDidDisconnect"); });
+}
+@end
+
+static void rc_carplay_start_observing(void) {
+    dlopen("/System/Library/PrivateFrameworks/CarKit.framework/CarKit", RTLD_NOW);
+    Class statusClass = objc_getClass("CARSessionStatus");
+    if (!statusClass) {
+        SRLog(@"🚗 [RCSystem] CarKit's CARSessionStatus not found - no CarPlay triggers");
+        return;
+    }
+    g_carPlayStatus = [[statusClass alloc] init];
+    g_carPlayObserver = [RCCarPlayObserver new];
+    if ([g_carPlayStatus respondsToSelector:@selector(addSessionObserver:)]) {
+        [g_carPlayStatus performSelector:@selector(addSessionObserver:) withObject:g_carPlayObserver];
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        g_carPlayConnected = rc_carplay_connected();
+        g_carPlayReady = YES;
+        SRLog(@"🚗 [RCSystem] CarPlay state initialized to: %@", g_carPlayConnected ? @"CONNECTED" : @"DISCONNECTED");
+    });
+}
+
+// Whether this phone has a Home button: SpringBoard's lock button knows the Home button
+// type (2 = none, on Face ID phones)
+static BOOL rc_has_home_button(void) {
+    static long type = -1;
+    if (type == -1) {
+        rc_dispatch_sync_main_safe(^{
+            id app = [UIApplication sharedApplication];
+            SEL lockSel = NSSelectorFromString(@"lockHardwareButton"), typeSel = NSSelectorFromString(@"homeButtonType");
+            id lockButton = [app respondsToSelector:lockSel] ? ((id (*)(id, SEL))objc_msgSend)(app, lockSel) : nil;
+            if ([lockButton respondsToSelector:typeSel]) type = ((long (*)(id, SEL))objc_msgSend)(lockButton, typeSel);
+        });
+    }
+    return type != 2;
+}
+
 // Biometric / Touch ID / Lock State Globals
 static NSTimeInterval g_bioFingerDownTime = 0;
 static BOOL g_bioHoldTriggered = NO;
@@ -3504,6 +3576,7 @@ static void register_system_event_observers() {
     // Initialize initial lock state & power state
     initialize_lock_state();
     initialize_power_state();
+    rc_carplay_start_observing();
 
     // Power State: Cocoa Touch observers
     [nc addObserverForName:UIDeviceBatteryStateDidChangeNotification 
@@ -8616,6 +8689,8 @@ static NSString *handle_command(NSString *cmd) {
         }
         BOOL ring = get_system_vibration(NO), silent = get_system_vibration(YES);
         return [NSString stringWithFormat:@"Haptics: %@\n", ring ? (silent ? @"ALWAYS" : @"RING_ONLY") : (silent ? @"SILENT_ONLY" : @"NEVER")];
+    } else if ([cleanCmd isEqualToString:@"carplay"] || [cleanCmd isEqualToString:@"carplay status"]) {
+        return rc_carplay_connected() ? @"CarPlay: CONNECTED\n" : @"CarPlay: NOT_CONNECTED\n";
     } else if ([cleanCmd isEqualToString:@"ringer"] || [cleanCmd hasPrefix:@"ringer "]) {
         NSString *sub = cleanCmd.length > 7 ? [cleanCmd substringFromIndex:7] : @"status";
         // Ringtone & alerts volume, separate from the media volume (set-vol)
@@ -9747,7 +9822,8 @@ static void start_web_server() {
                                         @"sneakycam": @(is_sneakycam_installed()),
                                         @"snapper": @(is_snapper_installed()),
                                         @"audiostream": @(is_audiostream_installed()),
-                                        @"audiostream_running": @(is_audiostreamerd_running())
+                                        @"audiostream_running": @(is_audiostreamerd_running()),
+                                        @"home_button": @(rc_has_home_button())
                                     };
                                     NSData *jsonData = [NSJSONSerialization dataWithJSONObject:caps options:0 error:nil];
                                     NSString *jsonStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];

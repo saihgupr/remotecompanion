@@ -1,4 +1,5 @@
 #import "RCConfigManager.h"
+#import <LocalAuthentication/LocalAuthentication.h>
 #import <notify.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -516,6 +517,8 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         @"trigger_device_unlock": @"Device Unlocked",
         @"trigger_power_connect": @"Power Connected",
         @"trigger_power_disconnect": @"Power Disconnected",
+        @"trigger_carplay_connect": @"CarPlay Connected",
+        @"trigger_carplay_disconnect": @"CarPlay Disconnected",
         @"trigger_media_play": @"Media Playing",
         @"trigger_media_pause": @"Media Paused",
         @"trigger_media_track_change": @"Media Track Changed",
@@ -1515,6 +1518,19 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
     }
     
     return result ?: @"circle.fill";
+}
+
+// iPhones with Face ID are the ones without a Home button. biometryType is set by
+// canEvaluatePolicy: whatever it returns, so this holds without Face ID set up too.
++ (BOOL)hasHomeButton {
+    static BOOL hasHomeButton;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        LAContext *context = [[LAContext alloc] init];
+        [context canEvaluatePolicy:LAPolicyDeviceOwnerAuthenticationWithBiometrics error:nil];
+        hasHomeButton = context.biometryType != LABiometryTypeFaceID;
+    });
+    return hasHomeButton;
 }
 
 + (BOOL)usesHapticsMenu {
