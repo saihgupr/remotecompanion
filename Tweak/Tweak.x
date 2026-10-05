@@ -12934,7 +12934,20 @@ static NSString *get_bottom_swipe_trigger_for_touch(CGPoint loc, UIInterfaceOrie
     }
 }
 
+// The lock screen, or the cover sheet pulled down over the home screen or an app, keeps iOS's
+// own swipe up from the bottom edge: it's how you unlock (or open Control Center on a phone with
+// a Home button) and how you put the cover sheet away. The Bottom Swipe Up zones don't take it
+// there. Main thread.
+static BOOL rc_cover_sheet_showing(void) {
+    Class coverSheetClass = objc_getClass("SBCoverSheetPresentationManager");
+    id coverSheet = [coverSheetClass respondsToSelector:@selector(sharedInstance)] ? [coverSheetClass performSelector:@selector(sharedInstance)] : nil;
+    if ([coverSheet respondsToSelector:@selector(isVisible)] && ((BOOL (*)(id, SEL))objc_msgSend)(coverSheet, @selector(isVisible))) return YES;
+    SBLockScreenManager *lockScreen = [objc_getClass("SBLockScreenManager") sharedInstance];
+    return [lockScreen respondsToSelector:@selector(isUILocked)] && [lockScreen isUILocked];
+}
+
 static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientation orientation) {
+    if (rc_cover_sheet_showing()) return NO;
     if (!g_triggerConfig) {
         load_trigger_config();
     }
@@ -12954,6 +12967,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
 }
 
 static BOOL has_any_bottom_swipe_trigger_enabled() {
+    if (rc_cover_sheet_showing()) return NO;
     if (!g_triggerConfig) {
         load_trigger_config();
     }
@@ -13128,7 +13142,9 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
                     progress = loc.y / lh;
                 }
                 
-                if (progress < 0.33) {
+                if (rc_cover_sheet_showing()) {
+                    g_pendingBottomBarSwipeUpTrigger = nil; // iOS keeps this swipe (see rc_cover_sheet_showing)
+                } else if (progress < 0.33) {
                     g_pendingBottomBarSwipeUpTrigger = @"trigger_bottom_swipe_up_left";
                 } else if (progress > 0.67) {
                     g_pendingBottomBarSwipeUpTrigger = @"trigger_bottom_swipe_up_right";
