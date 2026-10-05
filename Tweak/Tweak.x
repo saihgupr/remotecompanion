@@ -11690,7 +11690,6 @@ static NSTimer *g_homeClickTimer = nil;
 // Power Button Multi-Click Globals
 static int g_powerClickCount = 0;
 static NSTimer *g_powerClickTimer = nil;
-static NSTimeInterval g_lastHIDTime = 0;
 static BOOL g_hidButtonDown = NO;
 static IOHIDEventSystemClientRef g_hidClient = NULL;
 
@@ -12048,7 +12047,6 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
             if (down) {
                 if (!g_hidButtonDown) {
                     g_hidButtonDown = YES;
-                    g_lastHIDTime = now;
 
                     
                     // SUPPRESS TOUCH ID HOLD:
@@ -12067,13 +12065,13 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
                     });
                 }
             } else { // UP
+                // Every press counts, however short: a quick click can be 25-50 ms. A 50 ms
+                // minimum here dropped those presses and left the button marked down, so the
+                // next press was lost too (four quick clicks read as three).
                 if (g_hidButtonDown) {
-                    if (now - g_lastHIDTime > 0.05) { // 50ms Debounce
-                        g_hidButtonDown = NO;
-                        g_lastHIDTime = now;
+                    g_hidButtonDown = NO;
 
-                        RC_ProcessHomeClick();
-                    }
+                    RC_ProcessHomeClick();
                 }
             }
         }
