@@ -1753,7 +1753,6 @@ static float get_flash_brightness() {
 // Forward declarations for gesture management functions
 static BOOL should_register_edge_gestures();
 static void register_edge_gestures();
-static void unregister_edge_gestures();
 static void update_edge_gestures();
 static void start_schedule_timer();
 static void start_mqtt_subscriber();
@@ -13497,42 +13496,22 @@ static void register_edge_gestures() {
     }
 }
 
-// Unregister gesture recognizers
-static void unregister_edge_gestures() {
-    if (leftEdgeRecognizer) {
-        if (leftEdgeRecognizer.view) {
-            [leftEdgeRecognizer.view removeGestureRecognizer:leftEdgeRecognizer];
-        }
-        leftEdgeRecognizer = nil;
-        SRLog(@"Unregistered LEFT edge gesture recognizer");
-    }
-    
-    if (rightEdgeRecognizer) {
-        if (rightEdgeRecognizer.view) {
-            [rightEdgeRecognizer.view removeGestureRecognizer:rightEdgeRecognizer];
-        }
-        rightEdgeRecognizer = nil;
-        SRLog(@"Unregistered RIGHT edge gesture recognizer");
-    }
-}
-
-// Update gesture registration based on config
+// Turn the edge recognizers on or off to match the config. They're registered with
+// SpringBoard's system gesture manager the first time they're needed and only turned off
+// after that: removing them from their view and registering new ones left edge swipes dead
+// once the edge triggers had been turned off and on again, until a respring.
 static void update_edge_gestures() {
     @try {
-        BOOL shouldRegister = should_register_edge_gestures();
-        BOOL currentlyRegistered = (leftEdgeRecognizer != nil || rightEdgeRecognizer != nil);
-        
-        if (shouldRegister && !currentlyRegistered) {
+        BOOL wanted = should_register_edge_gestures();
+        if (wanted && !leftEdgeRecognizer && !rightEdgeRecognizer) {
             SRLog(@"Edge gestures enabled - registering...");
             register_edge_gestures();
-        } else if (!shouldRegister && currentlyRegistered) {
-            SRLog(@"Edge gestures disabled - unregistering...");
-            unregister_edge_gestures();
-        } else if (shouldRegister && currentlyRegistered) {
-            // SRLog(@"Edge gestures already registered and should be");
-        } else {
-            // SRLog(@"Edge gestures not needed and not registered");
         }
+        if (leftEdgeRecognizer.enabled != wanted || rightEdgeRecognizer.enabled != wanted) {
+            SRLog(@"Edge gestures %@", wanted ? @"on" : @"off");
+        }
+        leftEdgeRecognizer.enabled = wanted;
+        rightEdgeRecognizer.enabled = wanted;
     } @catch (NSException *e) {
         SRLogMin(@"ERROR in update_edge_gestures: %@", e);
     }
