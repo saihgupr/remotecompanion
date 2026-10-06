@@ -142,6 +142,8 @@
             cell.accessoryType = self.isDisconnectTrigger ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
         }
         cell.detailTextLabel.text = nil;
+        // This cell may be the reused Loading row: its spinner would hide the checkmark
+        cell.accessoryView = nil;
     } else {
         if (self.isLoading) {
             cell.textLabel.text = @"Loading...";
