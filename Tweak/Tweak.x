@@ -15,6 +15,7 @@
 #import <sys/utsname.h>
 #import <objc/runtime.h>
 #import <dlfcn.h>
+#import <os/lock.h>
 #import <AudioToolbox/AudioToolbox.h>
 #import <AVFoundation/AVFoundation.h>
 #import <mach/mach_time.h>
@@ -1544,20 +1545,38 @@ static NSString *find_config_path() {
         return kTriggerConfigPath;
     }
     
-    // Search for RemoteCompanion app container
+    // Search for RemoteCompanion app container. That lists every app's data folder, and this
+    // runs many times per touch: before a config is first saved (a new install) it made
+    // SpringBoard sluggish on phones with many apps. So search at most every 30 s.
+    static os_unfair_lock searchLock = OS_UNFAIR_LOCK_INIT;
+    static CFAbsoluteTime lastSearch;
+    static NSString *lastFound;
+    CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+    os_unfair_lock_lock(&searchLock);
+    NSString *found = lastFound;
+    BOOL searchDue = lastSearch == 0 || now - lastSearch >= 30.0;
+    os_unfair_lock_unlock(&searchLock);
+    if (!searchDue && (!found || [fm fileExistsAtPath:found])) return found;
+
+    found = nil;
     NSString *containersPath = @"/var/mobile/Containers/Data/Application";
     NSArray *uuids = [fm contentsOfDirectoryAtPath:containersPath error:nil];
-    
+
     for (NSString *uuid in uuids) {
-        NSString *configPath = [NSString stringWithFormat:@"%@/%@/Documents/%@", 
+        NSString *configPath = [NSString stringWithFormat:@"%@/%@/Documents/%@",
                                 containersPath, uuid, kTriggerConfigFilename];
         if ([fm fileExistsAtPath:configPath]) {
             SRLog(@"Found config in container: %@", configPath);
-            return configPath;
+            found = configPath;
+            break;
         }
     }
-    
-    return nil;
+    os_unfair_lock_lock(&searchLock);
+    lastFound = found;
+    lastSearch = now;
+    os_unfair_lock_unlock(&searchLock);
+
+    return found;
 }
 // ============ BLACKLIST SYSTEM ============
 
@@ -1739,7 +1758,10 @@ static void load_trigger_config() {
                 SRLogMin(@"Failed to parse config at %@", path);
             }
         } else {
-            SRLog(@"No trigger config found at shared path or in app containers");
+            // Once, not on every call until a config is saved
+            static BOOL loggedMissing;
+            if (!loggedMissing) SRLog(@"No trigger config found at shared path or in app containers");
+            loggedMissing = YES;
         }
     }
 }
@@ -3149,6 +3171,7 @@ BOOL RCIsNFCEnabled() {
 
 // ============ SYSTEM EVENT HANDLERS (WiFi/BT Triggers) ============
 #import <notify.h>
+#import <os/lock.h>
 
 static NSString *g_lastKnownSSID = nil;
 
