@@ -22,6 +22,8 @@
 // sections come and go (Favorites, NFC, Wi-Fi, ... only appear when they have triggers).
 @property (nonatomic, strong) RCCategoryBar *categoryBar;
 @property (nonatomic, copy) NSString *selectedCategoryTitle;
+// The width the visible cells' card backgrounds were drawn for
+@property (nonatomic, assign) CGFloat cardStyleWidth;
 @end
 
 @implementation RCTriggersViewController
@@ -624,6 +626,17 @@
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
     [self.categoryBar layoutInScrollView:self.tableView];
+
+    // The card backgrounds are drawn for the cell's width when it's displayed: redraw the
+    // visible ones when the width changes (rotation), or they keep the old width
+    CGFloat width = CGRectGetWidth(self.tableView.bounds);
+    if (width != self.cardStyleWidth) {
+        self.cardStyleWidth = width;
+        for (NSIndexPath *indexPath in self.tableView.indexPathsForVisibleRows) {
+            UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
+            if (cell) [self applySectionCardStyleToCell:cell atIndexPath:indexPath];
+        }
+    }
 }
 
 #pragma mark - Display model
