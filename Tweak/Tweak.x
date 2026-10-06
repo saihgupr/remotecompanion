@@ -11,6 +11,8 @@
 #include <netdb.h>
 #import <spawn.h>
 #import <notify.h>
+#import <xpc/xpc.h>
+#import "RCShortcutsHelper.h"
 #import <sys/wait.h>
 #import <sys/utsname.h>
 #import <objc/runtime.h>
@@ -6119,6 +6121,85 @@ static NSString *rc_execute_mqtt_command(NSString *cmdArgs) {
     }
 }
 
+// SpringCuts hands a shortcut to its runner in siriactionsd with notifications, which can't start
+// a process: while iOS has siriactionsd stopped (idle, or short on memory), every request is lost,
+// and one sent while it's starting is lost too. So start it first (one message to its XPC service
+// does that) and wait until RCShortcutsHelper, loaded there, says it's ready.
+
+extern int proc_listallpids(void *buffer, int buffersize);
+extern int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
+
+static pid_t rc_siriactionsd_pid(void) {
+    int count = proc_listallpids(NULL, 0);
+    if (count <= 0) return 0;
+    pid_t *pids = calloc((size_t)count + 32, sizeof(pid_t));
+    if (!pids) return 0;
+    count = proc_listallpids(pids, (int)(((size_t)count + 32) * sizeof(pid_t)));
+    pid_t found = 0;
+    char path[PATH_MAX];
+    for (int i = 0; i < count && !found; i++) {
+        if (pids[i] <= 0 || proc_pidpath(pids[i], path, sizeof(path)) <= 0) continue;
+        const char *name = strrchr(path, '/');
+        if (name && strcmp(name + 1, "siriactionsd") == 0) found = pids[i];
+    }
+    free(pids);
+    return found;
+}
+
+// The siriactionsd the helper last said was ready
+static pid_t rc_shortcuts_helper_ready_pid(void) {
+    static int token = NOTIFY_TOKEN_INVALID;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        if (notify_register_check(kRCShortcutsHelperNotification, &token) != NOTIFY_STATUS_OK) token = NOTIFY_TOKEN_INVALID;
+    });
+    uint64_t state = 0;
+    if (token == NOTIFY_TOKEN_INVALID || notify_get_state(token, &state) != NOTIFY_STATUS_OK) return 0;
+    return (pid_t)state;
+}
+
+static void rc_wake_siriactionsd(void) {
+    // Marked unavailable in the iOS SDK, but there at runtime
+    typedef xpc_connection_t (*create_mach_service_t)(const char *, dispatch_queue_t, uint64_t);
+    static create_mach_service_t create;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ create = (create_mach_service_t)dlsym(RTLD_DEFAULT, "xpc_connection_create_mach_service"); });
+    if (!create) return;
+    xpc_connection_t conn = create("com.apple.siri.VoiceShortcuts.xpc", NULL, 0);
+    xpc_connection_set_event_handler(conn, ^(xpc_object_t event) {});
+    xpc_connection_resume(conn);
+    xpc_connection_send_message(conn, xpc_dictionary_create(NULL, NULL, 0));
+    xpc_connection_send_barrier(conn, ^{ xpc_connection_cancel(conn); });
+}
+
+// Not on the main thread: it can wait a few seconds
+static void rc_ensure_shortcuts_runner(void) {
+    pid_t running = rc_siriactionsd_pid();
+    if (running && running == rc_shortcuts_helper_ready_pid()) return;
+
+    dispatch_semaphore_t ready = dispatch_semaphore_create(0);
+    int token;
+    if (notify_register_dispatch(kRCShortcutsHelperNotification, &token, dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^(int t) {
+        dispatch_semaphore_signal(ready);
+    }) != NOTIFY_STATUS_OK) return;
+
+    if (!running) {
+        SRLog(@"[Shortcut] siriactionsd isn't running - starting it");
+        rc_wake_siriactionsd();
+    }
+    // Running without the helper saying so: it's starting, or it started before RemoteCompanion
+    // was installed (no helper in it) - don't wait long for that one
+    NSTimeInterval wait = running ? 1.0 : 5.0;
+    NSDate *start = [NSDate date];
+    BOOL signalled = dispatch_semaphore_wait(ready, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(wait * NSEC_PER_SEC))) == 0;
+    notify_cancel(token);
+    if (signalled) {
+        SRLog(@"[Shortcut] siriactionsd ready after %.2f s", -[start timeIntervalSinceNow]);
+    } else if (!running) {
+        SRLogMin(@"[Shortcut] siriactionsd didn't report ready within %.0f s (running: %@)", wait, rc_siriactionsd_pid() ? @"yes" : @"no");
+    }
+}
+
 static void rc_execute_shortcut(NSString *shortcutName, NSString *inputArg) {
     if (!shortcutName || shortcutName.length == 0) return;
     
@@ -6208,7 +6289,10 @@ static void rc_execute_shortcut(NSString *shortcutName, NSString *inputArg) {
             if (![[NSFileManager defaultManager] fileExistsAtPath:springcutsPath]) {
                 springcutsPath = @"/usr/bin/springcuts";
             }
-            
+            if ([[NSFileManager defaultManager] fileExistsAtPath:springcutsPath]) {
+                rc_ensure_shortcuts_runner();
+            }
+
             if ([[NSFileManager defaultManager] fileExistsAtPath:springcutsPath]) {
                 NSMutableArray *args = [NSMutableArray array];
                 [args addObject:springcutsPath];
@@ -6242,7 +6326,7 @@ static void rc_execute_shortcut(NSString *shortcutName, NSString *inputArg) {
                             }
                             usleep(500000);
                         }
-                        SRLog(@"[Shortcut] springcuts pid=%d timed out (15s limit) - terminating", pid);
+                        SRLogMin(@"[Shortcut] springcuts pid=%d timed out (15s limit) - terminating", pid);
                         kill(pid, SIGKILL);
                         waitpid(pid, &status, 0);
                     });
