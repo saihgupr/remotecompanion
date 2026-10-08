@@ -1,6 +1,7 @@
 #import "RCActionPickerViewController.h"
 #import "RCServerClient.h"
 #import "RCDevicePickerViewController.h"
+#import "RCFocusPickerViewController.h"
 #import "RCConfigManager.h"
 #import "RCHAEntityPickerViewController.h"
 #import "RCKMMacroPickerViewController.h"
@@ -173,6 +174,7 @@
             @{ @"name": @"Lock Device", @"command": @"lock", @"icon": @"lock.fill" },
             @{ @"name": @"Unlock Device", @"command": @"unlock", @"icon": @"lock.open.fill" },
             @{ @"name": @"Do Not Disturb", @"command": @"dnd toggle", @"icon": @"moon.circle.fill" },
+            @{ @"name": @"Set Focus...", @"command": @"__FOCUS__", @"icon": @"moon.circle" },
             @{ @"name": @"Low Power Mode", @"command": @"low power toggle", @"icon": @"battery.25" },
             @{ @"name": @"Auto-Lock", @"command": @"autolock toggle", @"icon": @"timer" }
         ],
@@ -295,6 +297,8 @@
         NSMutableArray *items = [NSMutableArray array];
         for (NSDictionary *item in section) {
             NSString *command = item[@"command"];
+            // Focus modes came with iOS 15
+            if ([command isEqualToString:@"__FOCUS__"] && ![RCConfigManager supportsFocus]) continue;
             BOOL silent = [command isEqualToString:@"vibration silent-toggle"], ring = [command isEqualToString:@"vibration ring-toggle"];
             if (!silent && !ring) { [items addObject:item]; continue; }
             if ([RCConfigManager usesHapticsMenu]) {
@@ -470,6 +474,7 @@
         [cmd isEqualToString:@"__BT_CONNECT__"] || 
         [cmd isEqualToString:@"__BT_DISCONNECT__"] || 
         [cmd isEqualToString:@"__AIRPLAY_CONNECT__"] || 
+        [cmd isEqualToString:@"__FOCUS__"] || 
         [cmd isEqualToString:@"__SHORTCUT_PICKER__"] || 
         [cmd isEqualToString:@"__OPEN_APP__"] || 
         [cmd isEqualToString:@"__KILL_APP__"] || 
@@ -532,6 +537,11 @@
     
     if ([command isEqualToString:@"__BT_CONNECT__"]) {
         [self handleBluetoothConnect];
+        return;
+    }
+
+    if ([command isEqualToString:@"__FOCUS__"]) {
+        [self handleFocus];
         return;
     }
     
@@ -805,6 +815,28 @@
         }
     };
     [self.navigationController pushViewController:picker animated:YES];
+}
+
+// Off adds "focus off"; a Focus is turned on or toggled (the picker asks which)
+- (void)handleFocus {
+    RCFocusPickerViewController *picker = [[RCFocusPickerViewController alloc] initWithTitle:@"Set Focus" fixedRows:@[ @{ @"name": @"Off", @"value": @"", @"icon": @"moon.zzz" } ]];
+    picker.buildsCommand = YES;
+    __weak typeof(self) weakSelf = self;
+    picker.onSelected = ^(NSDictionary *row) {
+        [weakSelf finishWithFocusCommand:row[@"command"]];
+    };
+    [self.navigationController pushViewController:picker animated:YES];
+}
+
+- (void)finishWithFocusCommand:(NSString *)command {
+    if (self.onActionSelected) self.onActionSelected(command);
+    if (self.searchController.isActive) {
+        [self.searchController dismissViewControllerAnimated:NO completion:^{
+            [self dismissViewControllerAnimated:YES completion:nil];
+        }];
+    } else {
+        [self dismissViewControllerAnimated:YES completion:nil];
+    }
 }
 
 #pragma mark - Search

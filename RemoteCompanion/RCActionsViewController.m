@@ -12,6 +12,7 @@
 #import "RCBluetoothTriggerViewController.h"
 #import "RCNFCTriggerViewController.h"
 #import "RCDevicePickerViewController.h"
+#import "RCFocusPickerViewController.h"
 #import "RCKMMacroPickerViewController.h"
 #import <notify.h>
 
@@ -201,6 +202,12 @@ static id g_actionClipboard = nil;
     } else if ([lower hasPrefix:@"bt disconnect "] || [lower hasPrefix:@"bluetooth disconnect "]) {
         baseText = @"Disconnect ";
         paramText = [cmd substringFromIndex:[lower hasPrefix:@"bt disconnect "] ? 14 : 21];
+    } else if ([lower hasPrefix:@"focus on "]) {
+        baseText = @"Turn On ";
+        paramText = [cmd substringFromIndex:9];
+    } else if ([lower hasPrefix:@"focus toggle "]) {
+        baseText = @"Toggle ";
+        paramText = [cmd substringFromIndex:13];
     } else if ([lower hasPrefix:@"toast "]) {
         baseText = @"Toast ";
         NSString *argString = [cmd substringFromIndex:6];
@@ -1161,6 +1168,13 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             ]
         },
         @{
+            // Values: Off, Any Focus, the Focus modes (the condition picker lists them)
+            @"key": @"focus",
+            @"title": @"Focus",
+            @"icon": @"moon.circle",
+            @"section": @"Sound"
+        },
+        @{
             @"key": @"lpm",
             @"title": @"Low Power Mode",
             @"icon": @"battery.25",
@@ -1558,7 +1572,11 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     if (existingIndex != NSNotFound && existingIndex >= 0 && existingIndex < (NSInteger)self.actions.count && [self.actions[existingIndex] isKindOfClass:[NSDictionary class]]) {
         existing = self.actions[existingIndex];
     }
-    RCConditionPickerViewController *picker = [[RCConditionPickerViewController alloc] initWithConditions:[self ifConditionDefinitions] title:title existing:existing];
+    NSArray *conditions = [self ifConditionDefinitions];
+    if (![RCConfigManager supportsFocus]) {
+        conditions = [conditions filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"key != 'focus'"]];
+    }
+    RCConditionPickerViewController *picker = [[RCConditionPickerViewController alloc] initWithConditions:conditions title:title existing:existing];
     __weak typeof(self) weakSelf = self;
     NSString *actionType = type ?: @"if";
     picker.onValueSelected = ^(NSDictionary *condition, NSDictionary *value) {
@@ -2104,6 +2122,8 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         [self editBluetoothConnectAtIndex:indexPath.row isDisconnect:NO];
     } else if ([currentAction hasPrefix:@"bt disconnect "] || [currentAction hasPrefix:@"bluetooth disconnect "] || [currentAction hasPrefix:@"bt-disconnect "]) {
         [self editBluetoothConnectAtIndex:indexPath.row isDisconnect:YES];
+    } else if ([currentAction hasPrefix:@"focus on "] || [currentAction hasPrefix:@"focus toggle "] || [currentAction isEqualToString:@"focus off"]) {
+        [self editFocusAtIndex:indexPath.row];
     } else if ([currentAction hasPrefix:@"km "] || [currentAction isEqualToString:@"km"]) {
         NSString *macroName = @"";
         NSString *paramVal = @"";
@@ -2233,6 +2253,31 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 
 - (void)dismissModalPicker {
     [self dismissViewControllerAnimated:YES completion:nil];
+}
+
+// Opens the Focus modes over the editor with the action's Focus ticked; choosing one asks Turn
+// On or Toggle again, choosing Off makes it "focus off"
+- (void)editFocusAtIndex:(NSInteger)index {
+    if (index < 0 || index >= (NSInteger)self.actions.count || ![self.actions[index] isKindOfClass:[NSString class]]) return;
+    NSString *action = self.actions[index];
+    BOOL toggle = [action hasPrefix:@"focus toggle "];
+    NSString *current = [action hasPrefix:@"focus on "] ? [action substringFromIndex:9] : toggle ? [action substringFromIndex:13] : @"";
+
+    RCFocusPickerViewController *picker = [[RCFocusPickerViewController alloc] initWithTitle:@"Set Focus"
+                                                                                  fixedRows:@[ @{ @"name": @"Off", @"value": @"", @"icon": @"moon.zzz" } ]];
+    picker.currentValue = current;
+    picker.buildsCommand = YES;
+    __weak typeof(self) weakSelf = self;
+    picker.onSelected = ^(NSDictionary *row) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf || index >= (NSInteger)strongSelf.actions.count) return;
+        strongSelf.actions[index] = row[@"command"];
+        [strongSelf saveActions];
+        [strongSelf.tableView reloadData];
+        [strongSelf dismissViewControllerAnimated:YES completion:nil];
+    };
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:picker];
+    [self presentViewController:nav animated:YES completion:nil];
 }
 
 - (void)editAirPlayConnectAtIndex:(NSInteger)index {

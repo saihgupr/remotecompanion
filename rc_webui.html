@@ -2623,6 +2623,7 @@ const CMD_NAMES = {
   'sneakycam photo':'SneakyCam Photo','sneakycam takephoto':'SneakyCam Photo','sneakycam video':'SneakyCam Video','sneakycam startstopvideo':'SneakyCam Video','sneakycam record':'SneakyCam Video',
   'lock':'Lock Device','unlock':'Unlock Device',
   'dnd on':'Do Not Disturb On','dnd off':'Do Not Disturb Off','dnd toggle':'Do Not Disturb Toggle',
+  'focus off':'Focus Off',
   'audiomix on':'AudioMix On','audiomix off':'AudioMix Off','audiomix toggle':'AudioMix Toggle',
   'respring':'Respring','safemode':'Safe Mode','safe-mode':'Safe Mode','siri':'Activate Siri','home':'Home Button','switcher':'App Switcher',
   'previous app':'Previous App',
@@ -2695,6 +2696,8 @@ function nameForCmd(cmd) {
   if (lowCmd.startsWith('root '))         return `[root] ${cmd.slice(5)}`;
   if (lowCmd.startsWith('bt connect '))   return `Connect ${cmd.slice(11)}`;
   if (lowCmd.startsWith('bt disconnect ')) return `Disconnect ${cmd.slice(14)}`;
+  if (lowCmd.startsWith('focus on '))     return `Turn On ${cmd.slice(9)}`;
+  if (lowCmd.startsWith('focus toggle ')) return `Toggle ${cmd.slice(13)}`;
   if (lowCmd.startsWith('airplay connect ')) return `AirPlay Connect ${cmd.slice(16)}`;
   if (lowCmd.startsWith('set-vol '))      return `Set Volume ${cmd.slice(8)}%`;
   if (lowCmd.startsWith('ringer volume ')) return `Set Ringer Volume ${cmd.slice(14)}%`;
@@ -2872,6 +2875,7 @@ function iconForCmd(cmd) {
   if (lowCmd.startsWith('lua:'))          return { icon:'doc_text_fill',         cls:'icon-purple' };
   if (lowCmd.startsWith('delay '))        return { icon:'hourglass',           cls:'icon-orange' };
   if (lowCmd.startsWith('bt connect '))   return { icon:'link',            cls:'icon-indigo' };
+  if (lowCmd.startsWith('focus '))        return { icon:'moon_circle_fill', cls:'icon-indigo' };
   if (lowCmd.startsWith('airplay connect ')) return { icon:'airplayvideo',     cls:'icon-blue' };
   if (lowCmd.startsWith('set-vol '))      return { icon:'slider_horizontal_3',  cls:'icon-blue' };
   if (lowCmd.startsWith('ringer volume ')) return { icon:'bell_fill',       cls:'icon-blue' };
@@ -2940,6 +2944,7 @@ const ACTION_SECTIONS = [
     { name:'Lock Device',       cmd:'lock',          icon:'lock_fill' },
     { name:'Unlock Device',     cmd:'unlock',        icon:'lock_open_fill' },
     { name:'Do Not Disturb',    cmd:'dnd toggle',    icon:'moon_circle_fill', is_toggle:true },
+    { name:'Set Focus…',        cmd:'__FOCUS__',     icon:'moon_circle_fill', needs_input:true },
     { name:'Low Power Mode',    cmd:'low power toggle',icon:'battery_25', is_toggle:true },
     { name:'Auto-Lock',         cmd:'autolock toggle', icon:'timer', is_toggle:true },
   ]},
@@ -3001,6 +3006,7 @@ const CONDITION_DEFS = [
   { key:'bt_device', title:'Bluetooth Device Connected', values:null, freeText:true },
   { key:'cellular',   title:'Cellular Data', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
   { key:'dnd',        title:'Do Not Disturb', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
+  { key:'focus',      title:'Focus is', values:null, freeText:true, hint:'Focus name, Off, or On for any Focus:' },
   { key:'lpm',        title:'Low Power Mode', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
   { key:'ringer',     title:'Ringer Switch', values:[{value:'SILENT',title:'Silent'},{value:'RING',title:'Ring'}] },
   { key:'rotation_lock', title:'Rotation Lock', values:[{value:'LOCKED',title:'Locked'},{value:'UNLOCKED',title:'Unlocked'}] },
@@ -4840,6 +4846,16 @@ function selectPickerAction(act) {
     showDialog('Connect Bluetooth', 'Device name or MAC address:', '', 'Add', val => {
       if (val) addActionToCurrent(`bt connect ${val}`);
     });
+  } else if (c === '__FOCUS__') {
+    showDialog('Set Focus', 'Focus name, or Off:', '', 'Next', val => {
+      const name = (val || '').trim();
+      if (!name) return;
+      if (name.toLowerCase() === 'off') { addActionToCurrent('focus off'); return; }
+      showSheet(name, [
+        { label: 'Turn On', action() { addActionToCurrent(`focus on ${name}`); } },
+        { label: 'Toggle', action() { addActionToCurrent(`focus toggle ${name}`); } },
+      ]);
+    });
   } else if (c === '__BT_DISCONNECT__') {
     showDialog('Disconnect Bluetooth', 'Device name or MAC address:', '', 'Add', val => {
       if (val) addActionToCurrent(`bt disconnect ${val}`);
@@ -5005,7 +5021,7 @@ function promptIfCondition(editIdx = null) {
           }
         })));
       } else if (d.freeText) {
-        showDialog(d.title, 'Enter value:', '', 'Next', val => {
+        showDialog(d.title, d.hint || 'Enter value:', '', 'Next', val => {
           if (val) promptIfConditionValue(d, val, editIdx);
         });
       } else {
@@ -5876,6 +5892,7 @@ const BANNER_PLACEHOLDERS = {
   '__BT_CONNECT__': ['bt connect ', 'bluetooth connect '],
   '__BT_DISCONNECT__': ['bt disconnect ', 'bluetooth disconnect '],
   '__AIRPLAY_CONNECT__': ['airplay connect '],
+  '__FOCUS__': ['focus on ', 'focus toggle ', 'focus off'],
   '__OPEN_APP__': ['uiopen '],
   '__KILL_APP__': ['kill '],
   '__HA_PICKER__': ['ha '],

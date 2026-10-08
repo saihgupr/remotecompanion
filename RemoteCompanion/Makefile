@@ -21,5 +21,6 @@ RemoteCompanion_FILES += RCDevicePickerViewController.m
 
 # Shared UI components
 RemoteCompanion_FILES += RCCategoryBar.m
+RemoteCompanion_FILES += RCFocusPickerViewController.m
 
 include $(THEOS_MAKE_PATH)/application.mk

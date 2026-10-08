@@ -823,7 +823,17 @@ static void toggle_location_services(BOOL state) {
     });
 }
 
+static BOOL rc_focus_supported(void);
+static NSString *rc_focus_active_identifier(BOOL *known);
+
 static BOOL get_dnd_state() {
+    // iOS 15+: Do Not Disturb is one Focus among others - on only while it's the active one
+    // (another Focus turned on from Control Center read as Do Not Disturb)
+    if (rc_focus_supported()) {
+        BOOL known = NO;
+        NSString *active = rc_focus_active_identifier(&known);
+        if (known) return [active isEqualToString:@"com.apple.donotdisturb.mode.default"];
+    }
     Class ServiceClass = objc_getClass("DNDModeAssertionService");
     if (ServiceClass) {
         id service = [ServiceClass serviceForClientIdentifier:@"com.apple.donotdisturb.control-center.module"];
@@ -832,6 +842,171 @@ static BOOL get_dnd_state() {
         return (assertion != nil);
     }
     return NO;
+}
+
+#pragma mark - Focus (iOS 15+)
+
+// A Focus is a Do Not Disturb mode with its own identifier. One is turned on the way Control
+// Center does it (a mode assertion for that mode), and DNDStateService says which one is
+// active, whatever turned it on (Control Center, a schedule, an automation).
+static NSString *rc_normalized_name(NSString *name);
+static NSString *const kRCFocusClient = @"com.apple.donotdisturb.control-center.module";
+
+static BOOL rc_focus_supported(void) {
+    return objc_getClass("DNDModeConfigurationService") && objc_getClass("DNDStateService") && objc_getClass("DNDModeAssertionService");
+}
+
+// Calls a method whose only argument is an NSError ** (e.g. availableModesReturningError:)
+static id rc_focus_call(id target, NSString *selectorName, NSError **error) {
+    SEL sel = NSSelectorFromString(selectorName);
+    if (![target respondsToSelector:sel]) return nil;
+    return ((id (*)(id, SEL, NSError **))objc_msgSend)(target, sel, error);
+}
+
+static id rc_focus_value(id object, NSString *selectorName) {
+    SEL sel = NSSelectorFromString(selectorName);
+    return [object respondsToSelector:sel] ? ((id (*)(id, SEL))objc_msgSend)(object, sel) : nil;
+}
+
+// The Focus modes set up on the phone: @{ name, identifier, symbol }, in Settings' order
+static NSArray<NSDictionary *> *rc_focus_modes(NSError **error) {
+    if (!rc_focus_supported()) return @[];
+    id service = [objc_getClass("DNDModeConfigurationService") serviceForClientIdentifier:kRCFocusClient];
+    id modes = rc_focus_call(service, @"availableModesReturningError:", error);
+    if (!modes) {
+        // Older releases: the configurations, keyed by mode identifier
+        id configurations = rc_focus_call(service, @"modeConfigurationsReturningError:", error);
+        if ([configurations isKindOfClass:[NSDictionary class]]) {
+            NSMutableArray *list = [NSMutableArray array];
+            for (id configuration in [configurations allValues]) {
+                id mode = rc_focus_value(configuration, @"mode");
+                if (mode) [list addObject:mode];
+            }
+            modes = list;
+        }
+    }
+    if ([modes isKindOfClass:[NSSet class]]) modes = [modes allObjects];
+    if ([modes isKindOfClass:[NSDictionary class]]) modes = [modes allValues];
+    if (![modes isKindOfClass:[NSArray class]]) return @[];
+
+    NSMutableArray *result = [NSMutableArray array];
+    for (id mode in modes) {
+        NSString *name = rc_focus_value(mode, @"name");
+        NSString *identifier = rc_focus_value(mode, @"modeIdentifier");
+        if (![name isKindOfClass:[NSString class]] || ![identifier isKindOfClass:[NSString class]] || name.length == 0) continue;
+        NSString *symbol = rc_focus_value(mode, @"symbolImageName");
+        [result addObject:@{ @"name": name, @"identifier": identifier, @"symbol": [symbol isKindOfClass:[NSString class]] ? symbol : @"" }];
+    }
+    return result;
+}
+
+static NSDictionary *rc_focus_mode_named(NSString *name, NSError **error) {
+    NSString *wanted = rc_normalized_name([name stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
+    for (NSDictionary *mode in rc_focus_modes(error)) {
+        if ([rc_normalized_name(mode[@"name"]) isEqualToString:wanted]) return mode;
+    }
+    return nil;
+}
+
+// The state while a Focus is on, or nil when none is. *known is NO when it can't be read.
+static id rc_focus_active_state(BOOL *known) {
+    if (known) *known = NO;
+    if (!rc_focus_supported()) return nil;
+    id service = [objc_getClass("DNDStateService") serviceForClientIdentifier:kRCFocusClient];
+    NSError *error = nil;
+    id state = rc_focus_call(service, @"queryCurrentStateWithError:", &error);
+    if (!state) return nil;
+    if (known) *known = YES;
+    SEL isActive = NSSelectorFromString(@"isActive");
+    if ([state respondsToSelector:isActive] && !((BOOL (*)(id, SEL))objc_msgSend)(state, isActive)) return nil;
+    return state;
+}
+
+static NSString *rc_focus_state_identifier(id state) {
+    NSString *identifier = rc_focus_value(state, @"activeModeIdentifier");
+    if (![identifier isKindOfClass:[NSString class]]) {
+        NSArray *identifiers = rc_focus_value(state, @"activeModeIdentifiers");
+        identifier = [identifiers isKindOfClass:[NSArray class]] ? identifiers.firstObject : nil;
+    }
+    return [identifier isKindOfClass:[NSString class]] ? identifier : nil;
+}
+
+// The active Focus's mode identifier, or nil when none is on
+static NSString *rc_focus_active_identifier(BOOL *known) {
+    return rc_focus_state_identifier(rc_focus_active_state(known));
+}
+
+// The active Focus's name, or nil when none is on. *known is NO when the state can't be read.
+static NSString *rc_focus_active_name(BOOL *known) {
+    id state = rc_focus_active_state(known);
+    if (!state) return nil;
+    NSString *identifier = rc_focus_state_identifier(state);
+    NSString *name = rc_focus_value(rc_focus_value(rc_focus_value(state, @"activeModeConfiguration"), @"mode"), @"name");
+    if ([name isKindOfClass:[NSString class]] && name.length) return name;
+    for (NSDictionary *mode in rc_focus_modes(nil)) {
+        if ([mode[@"identifier"] isEqualToString:identifier]) return mode[@"name"];
+    }
+    return identifier.length ? identifier : @"Focus";
+}
+
+// Turns a Focus on (replacing the one RemoteCompanion or Control Center turned on), or turns
+// those off with mode nil. One turned on by a schedule or an automation stays on.
+static BOOL rc_focus_set(NSDictionary *mode, NSError **error) {
+    id service = [objc_getClass("DNDModeAssertionService") serviceForClientIdentifier:kRCFocusClient];
+    NSError *invalidateError = nil;
+    [service invalidateAllActiveModeAssertionsWithError:&invalidateError];
+    if (!mode) {
+        if (invalidateError && error) *error = invalidateError;
+        return invalidateError == nil;
+    }
+    id details = [objc_getClass("DNDModeAssertionDetails") detailsWithIdentifier:@"com.apple.control-center.manual-toggle"
+                                                                 modeIdentifier:mode[@"identifier"]
+                                                                       lifetime:nil];
+    return [service takeModeAssertionWithDetails:details error:error] != nil;
+}
+
+static NSString *rc_focus_command(NSString *args) {
+    if (!rc_focus_supported()) return @"Focus requires iOS 15 or later\n";
+    NSString *trimmed = [args stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    NSRange space = [trimmed rangeOfString:@" "];
+    NSString *verb = (space.location == NSNotFound ? trimmed : [trimmed substringToIndex:space.location]).lowercaseString;
+    NSString *name = space.location == NSNotFound ? @"" : [[trimmed substringFromIndex:space.location + 1] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    NSError *error = nil;
+
+    if ([verb isEqualToString:@"list"]) {
+        // One per line: the name, then its SF Symbol after a tab
+        NSMutableString *out = [NSMutableString string];
+        for (NSDictionary *mode in rc_focus_modes(&error)) [out appendFormat:@"%@\t%@\n", mode[@"name"], mode[@"symbol"]];
+        if (out.length == 0) return error ? [NSString stringWithFormat:@"Error: %@\n", error.localizedDescription] : @"No Focus modes found\n";
+        return out;
+    }
+    if ([verb isEqualToString:@"status"]) {
+        BOOL known = NO;
+        NSString *active = rc_focus_active_name(&known);
+        if (!known) return @"Error: Focus state unavailable\n";
+        return [NSString stringWithFormat:@"%@\n", active ?: @"Off"];
+    }
+    if ([verb isEqualToString:@"off"]) {
+        if (!rc_focus_set(nil, &error)) return [NSString stringWithFormat:@"Error: %@\n", error.localizedDescription ?: @"Focus not turned off"];
+        BOOL known = NO;
+        NSString *still = rc_focus_active_name(&known);
+        if (still) return [NSString stringWithFormat:@"%@ is still on: a schedule or an automation turned it on\n", still];
+        return @"Focus Off\n";
+    }
+    if ([verb isEqualToString:@"on"] || [verb isEqualToString:@"toggle"]) {
+        if (name.length == 0) return @"Usage: focus on|toggle <name>\n";
+        NSDictionary *mode = rc_focus_mode_named(name, &error);
+        if (!mode) return [NSString stringWithFormat:@"Error: No Focus named '%@'\n", name];
+        if ([verb isEqualToString:@"toggle"]) {
+            NSString *active = rc_focus_active_name(NULL);
+            if (active && [rc_normalized_name(active) isEqualToString:rc_normalized_name(mode[@"name"])]) {
+                return rc_focus_command(@"off");
+            }
+        }
+        if (!rc_focus_set(mode, &error)) return [NSString stringWithFormat:@"Error: %@\n", error.localizedDescription ?: @"Focus not turned on"];
+        return [NSString stringWithFormat:@"%@ On\n", mode[@"name"]];
+    }
+    return @"Usage: focus list|status|off|on <name>|toggle <name>\n";
 }
 
 typedef struct __CTServerConnection *CTServerConnectionRef;
@@ -2091,6 +2266,14 @@ static BOOL rc_condition_direct_match(NSString *key, NSString *expected, BOOL *h
             if ([d isEqualToString:today]) return YES;
         }
         return NO;
+    } else if ([key isEqualToString:@"focus"]) {
+        // OFF: none on; ON: any; otherwise that Focus by name (case-insensitive)
+        BOOL known = NO;
+        NSString *active = rc_focus_active_name(&known);
+        if (!known) return NO;
+        if ([expected isEqualToString:@"OFF"]) return active == nil;
+        if ([expected isEqualToString:@"ON"]) return active != nil;
+        return active && [rc_normalized_name(active) isEqualToString:rc_normalized_name(expected)];
     } else if ([key isEqualToString:@"bt_device"]) {
         // A connected device with this name (case-insensitive)
         dlopen("/System/Library/PrivateFrameworks/BluetoothManager.framework/BluetoothManager", RTLD_NOW);
@@ -7866,13 +8049,16 @@ static NSString *handle_command(NSString *cmd) {
             rc_show_hud_toast(@"Playlist Queued", [NSString stringWithFormat:@"Shuffling '%@'", playlistName], @"music.note.list");
             return [NSString stringWithFormat:@"Play playlist '%@' command sent to AudioReceiver\n", playlistName];
         }
+    } else if ([cleanCmd hasPrefix:@"focus "] || [cleanCmd isEqualToString:@"focus"]) {
+        return rc_focus_command([cleanCmd substringFromIndex:MIN((NSUInteger)6, cleanCmd.length)]);
     } else if ([cleanCmd hasPrefix:@"dnd "]) {
         NSString *subCmd = [[cleanCmd substringFromIndex:4] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         if ([subCmd isEqualToString:@"on"]) {
             toggle_dnd(YES);
             return @"DND Enabled\n";
         } else if ([subCmd isEqualToString:@"off"]) {
-            toggle_dnd(NO);
+            // Only Do Not Disturb: another Focus stays on ("focus off" turns that off)
+            if (!rc_focus_supported() || get_dnd_state()) toggle_dnd(NO);
             return @"DND Disabled\n";
         } else if ([subCmd isEqualToString:@"status"]) {
             BOOL current = get_dnd_state();
@@ -10298,6 +10484,8 @@ static void start_web_server() {
                                     @{@"command": @"location on/off/toggle/status", @"desc": @"Toggles: Location Services (GPS)"},
                                     @{@"command": @"airplane on/off", @"desc": @"Toggles: Airplane Mode power"},
                                     @{@"command": @"dnd on/off", @"desc": @"Toggles: Do Not Disturb Mode"},
+                                    @{@"command": @"focus on/toggle <name>, focus off", @"desc": @"Focus: turns a Focus on or off (iOS 15+)"},
+                                    @{@"command": @"focus status/list", @"desc": @"Focus: the active Focus, or the Focus modes"},
                                     @{@"command": @"audiomix on/off", @"desc": @"Toggles: AudioMix simultaneous playback"},
                                     @{@"command": @"low power on/off", @"desc": @"Toggles: Low Power Mode"},
                                     @{@"command": @"mute", @"desc": @"Toggles: System mute/silent mode"},

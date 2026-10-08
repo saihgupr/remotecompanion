@@ -123,6 +123,7 @@ static NSArray<NSArray<NSDictionary *> *> *RCBannerCatalog(NSArray<NSString *> *
             @"__BT_CONNECT__": @[@"bt connect ", @"bluetooth connect "],
             @"__BT_DISCONNECT__": @[@"bt disconnect ", @"bluetooth disconnect "],
             @"__AIRPLAY_CONNECT__": @[@"airplay connect "],
+            @"__FOCUS__": @[@"focus on ", @"focus toggle ", @"focus off"],
             @"__OPEN_APP__": @[@"uiopen "],
             @"__KILL_APP__": @[@"kill "],
             @"__HA_PICKER__": @[@"ha "],
