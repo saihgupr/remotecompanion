@@ -18,6 +18,7 @@ RemoteCompanion_FILES += RCConditionPickerViewController.m
 RemoteCompanion_RESOURCE_FILES = Info.plist Icon.png AppIcon60x60@2x.png AppIcon60x60@3x.png Entitlements.plist
 RemoteCompanion_INSTALL_PATH = /Applications
 RemoteCompanion_FILES += RCDevicePickerViewController.m
+RemoteCompanion_FILES += RCTestKitViewController.m RCTestReportViewController.m RCTestKitSetupViewController.m
 
 # Shared UI components
 RemoteCompanion_FILES += RCCategoryBar.m

@@ -3,6 +3,7 @@
 #import "RCUITweaker.h"
 #import "RCIntegrationsViewController.h"
 #import "RCBannersViewController.h"
+#import "RCTestKitViewController.h"
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 @interface RCSettingsViewController () <UIDocumentPickerDelegate>
@@ -142,13 +143,14 @@
 #pragma mark - Table View Data Source
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    return 3;
+    return 4;
 }
 
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
     NSString *title;
     if (section == 0) title = @"General";
     else if (section == 1) title = @"Integrations";
+    else if (section == 3) title = @"Diagnostics";
     else title = @"Backup";
     
     UIView *headerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, tableView.bounds.size.width, 40)];
@@ -171,6 +173,8 @@
         return @"Configure connections to external services and automations.";
     } else if (section == 2) {
         return @"Export your configuration to share or backup. Import to restore.";
+    } else if (section == 3) {
+        return @"Tests RemoteCompanion on this device and shares the results.";
     }
     return nil;
 }
@@ -178,6 +182,7 @@
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if (section == 0) return 5; // Master + NFC + WebUI + Banners + Logging
     if (section == 1) return 1; // Integrations Submenu Row
+    if (section == 3) return 1; // Test Kit
     return 2; // Export, Import
 }
 
@@ -242,6 +247,11 @@
         cell.imageView.image = puzzleImg;
         cell.imageView.tintColor = [UIColor systemIndigoColor];
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    } else if (indexPath.section == 3) {
+        cell.textLabel.text = @"Test Kit";
+        cell.imageView.image = [UIImage systemImageNamed:@"checklist"] ?: [UIImage systemImageNamed:@"list.bullet.rectangle"]; // checklist: iOS 15+
+        cell.imageView.tintColor = [UIColor systemTealColor];
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     } else {
         if (indexPath.row == 0) {
             cell.textLabel.text = @"Export Configuration";
@@ -269,6 +279,8 @@
     } else if (indexPath.section == 1) {
         RCIntegrationsViewController *integrationsVC = [[RCIntegrationsViewController alloc] init];
         [self.navigationController pushViewController:integrationsVC animated:YES];
+    } else if (indexPath.section == 3) {
+        [self.navigationController pushViewController:[[RCTestKitViewController alloc] init] animated:YES];
     } else if (indexPath.section == 2) {
         if (indexPath.row == 0) {
             [self exportConfig];

@@ -22,6 +22,7 @@
 #import <mach/mach_host.h>
 #import <GraphicsServices/GraphicsServices.h>
 #import "native_curl.h"
+#import "RCTestKit.h"
 #import <CoreFoundation/CoreFoundation.h>
 #import <CoreLocation/CoreLocation.h>
 #import <objc/message.h>
@@ -922,7 +923,10 @@ static NSArray<NSString *> *rc_parse_quoted_arguments(NSString *argString) {
     return arguments;
 }
 
-static void rc_show_hud_toast(NSString *title, NSString *subtitle, NSString *iconSymbol) {
+// hold: how long it stays before sliding away. passThrough: touches go through it to
+// whatever is underneath (the test kit's prompts, which sit over the status bar while the
+// status-bar gestures are being tested).
+static void rc_show_hud_toast_ex(NSString *title, NSString *subtitle, NSString *iconSymbol, NSTimeInterval hold, BOOL passThrough) {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (g_rcHUDWindow) {
             [g_rcHUDWindow.layer removeAllAnimations];
@@ -970,6 +974,16 @@ static void rc_show_hud_toast(NSString *title, NSString *subtitle, NSString *ico
         // Determine height based on whether we have a subtitle
         BOOL hasSubtitle = (subtitle && ![subtitle isEqualToString:@""]);
         CGFloat pillHeight = hasSubtitle ? 50.0 : 40.0;
+        // A prompt's instruction wraps instead of being cut off, clear of the icon
+        CGFloat subtitleHeight = 16.0;
+        BOOL wrapSubtitle = passThrough && hasSubtitle;
+        if (wrapSubtitle) {
+            CGRect needed = [subtitle boundingRectWithSize:CGSizeMake(pillWidth - 2 * leftMargin, CGFLOAT_MAX)
+                                                   options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading
+                                                attributes:@{NSFontAttributeName: subtitleFont} context:nil];
+            subtitleHeight = MAX(16.0, ceil(needed.size.height));
+            pillHeight += subtitleHeight - 16.0;
+        }
         
         CGFloat pillX = (screenWidth - pillWidth) / 2.0;
         CGFloat startY = -pillHeight - 20.0;
@@ -1004,6 +1018,7 @@ static void rc_show_hud_toast(NSString *title, NSString *subtitle, NSString *ico
         CGFloat targetY = (!landscape && topInset > 24.0) ? topInset : 12.0;
 
         UIWindow *hudWindow = hudScene ? [[UIWindow alloc] initWithWindowScene:hudScene] : [[UIWindow alloc] init];
+        hudWindow.userInteractionEnabled = !passThrough;
         hudWindow.frame = CGRectMake(pillX, startY, pillWidth, pillHeight);
         g_rcHUDWindow = hudWindow;
         hudWindow.windowLevel = UIWindowLevelAlert + 3000.0;
@@ -1031,7 +1046,7 @@ static void rc_show_hud_toast(NSString *title, NSString *subtitle, NSString *ico
         UIBlurEffect *blurEffect = [UIBlurEffect effectWithStyle:blurStyle];
         UIVisualEffectView *blurView = [[UIVisualEffectView alloc] initWithEffect:blurEffect];
         blurView.frame = CGRectMake(0, 0, pillWidth, pillHeight);
-        blurView.layer.cornerRadius = pillHeight / 2.0;
+        blurView.layer.cornerRadius = MIN(pillHeight, 50.0) / 2.0;
         blurView.layer.masksToBounds = YES;
         [rootVC.view addSubview:blurView];
         
@@ -1064,7 +1079,9 @@ static void rc_show_hud_toast(NSString *title, NSString *subtitle, NSString *ico
             titleLabel.textAlignment = alignment;
             [rootVC.view addSubview:titleLabel];
             
-            UILabel *subLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 26.0, pillWidth, 16.0)];
+            UILabel *subLabel = [[UILabel alloc] initWithFrame:wrapSubtitle ? CGRectMake(leftMargin, 26.0, pillWidth - 2 * leftMargin, subtitleHeight)
+                                                                            : CGRectMake(0, 26.0, pillWidth, 16.0)];
+            subLabel.numberOfLines = wrapSubtitle ? 0 : 1;
             subLabel.text = subtitle;
             subLabel.textColor = subColor;
             subLabel.font = subtitleFont;
@@ -1095,7 +1112,7 @@ static void rc_show_hud_toast(NSString *title, NSString *subtitle, NSString *ico
                                  return;
                              }
                              [UIView animateWithDuration:0.4
-                                                   delay:2.0
+                                                   delay:hold
                                                  options:UIViewAnimationOptionCurveEaseInOut
                                               animations:^{
                                                   hudWindow.frame = CGRectMake(pillX, startY, pillWidth, pillHeight);
@@ -1108,6 +1125,35 @@ static void rc_show_hud_toast(NSString *title, NSString *subtitle, NSString *ico
                                               }];
                          }];
     });
+}
+
+static void rc_show_hud_toast(NSString *title, NSString *subtitle, NSString *iconSymbol) {
+    rc_show_hud_toast_ex(title, subtitle, iconSymbol, 2.0, NO);
+}
+
+// Slides the current toast away
+static void rc_hide_hud_toast(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIWindow *hudWindow = g_rcHUDWindow;
+        if (!hudWindow) return;
+        g_rcHUDWindow = nil;
+        [hudWindow.layer removeAllAnimations];
+        CGRect frame = hudWindow.frame;
+        [UIView animateWithDuration:0.3 animations:^{
+            hudWindow.frame = CGRectMake(frame.origin.x, -frame.size.height - 20.0, frame.size.width, frame.size.height);
+        } completion:^(BOOL finished) {
+            hudWindow.hidden = YES;
+        }];
+    });
+}
+
+// Test kit (RCTestKit.x): prompts that stay up for `hold` seconds and let touches through
+void RCShowPrompt(NSString *title, NSString *subtitle, NSString *iconSymbol, NSTimeInterval hold) {
+    rc_show_hud_toast_ex(title, subtitle, iconSymbol, hold, YES);
+}
+
+void RCHidePrompt(void) {
+    rc_hide_hud_toast();
 }
 
 // Settings > Banners switches for actions that show a banner of their own (defined below)
@@ -1535,6 +1581,30 @@ static void send_notification(NSString *title, NSString *message, BOOL urgent) {
 static NSDictionary *g_triggerConfig = nil;
 static NSString *g_resolvedConfigPath = nil;
 
+// g_triggerConfig is read on many threads (main, the web server, HID callbacks) without a lock.
+// Replacing it frees the old dictionary, so a reader that had just picked it up would use freed
+// memory (crashed SpringBoard on iOS 14 when the web UI saved the config). Replacements are
+// serialized by this lock, and the old dictionary is kept alive a while for those readers.
+static NSObject *rc_trigger_config_lock(void) {
+    static NSObject *lock;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ lock = [NSObject new]; });
+    return lock;
+}
+
+static void rc_set_trigger_config(NSDictionary *config) {
+    NSDictionary *old;
+    @synchronized (rc_trigger_config_lock()) {
+        old = g_triggerConfig;
+        g_triggerConfig = config;
+    }
+    if (old) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(10 * NSEC_PER_SEC)), dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+            (void)old;
+        });
+    }
+}
+
 // Find config file - check shared path first, then search app containers
 static NSString *find_config_path() {
     NSFileManager *fm = [NSFileManager defaultManager];
@@ -1714,27 +1784,32 @@ static void load_trigger_config() {
             static struct timespec loadedTime;
             static off_t loadedSize = -1;
             static ino_t loadedInode;
-            struct stat st;
-            BOOL haveStat = stat([path fileSystemRepresentation], &st) == 0;
-            if (haveStat && g_triggerConfig && [path isEqualToString:loadedPath] && st.st_ino == loadedInode && st.st_size == loadedSize &&
-                st.st_mtimespec.tv_sec == loadedTime.tv_sec && st.st_mtimespec.tv_nsec == loadedTime.tv_nsec) {
-                return;
-            }
-            NSDictionary *newConfig = [NSDictionary dictionaryWithContentsOfFile:path];
-            if (newConfig) {
-                // Thread-safe update: replace the pointer
-                g_triggerConfig = newConfig;
-                g_resolvedConfigPath = path;
-                g_rcLogLevel = rc_log_level_from_config(newConfig);
-                if (haveStat) {
-                    loadedPath = path;
-                    loadedTime = st.st_mtimespec;
-                    loadedSize = st.st_size;
-                    loadedInode = st.st_ino;
+            NSDictionary *newConfig;
+            // Called on several threads: one checks and reloads at a time
+            @synchronized (rc_trigger_config_lock()) {
+                struct stat st;
+                BOOL haveStat = stat([path fileSystemRepresentation], &st) == 0;
+                if (haveStat && g_triggerConfig && [path isEqualToString:loadedPath] && st.st_ino == loadedInode && st.st_size == loadedSize &&
+                    st.st_mtimespec.tv_sec == loadedTime.tv_sec && st.st_mtimespec.tv_nsec == loadedTime.tv_nsec) {
+                    return;
                 }
+                newConfig = [NSDictionary dictionaryWithContentsOfFile:path];
+                if (newConfig) {
+                    rc_set_trigger_config(newConfig);
+                    if (![g_resolvedConfigPath isEqualToString:path]) g_resolvedConfigPath = path;
+                    g_rcLogLevel = rc_log_level_from_config(newConfig);
+                    if (haveStat) {
+                        if (![loadedPath isEqualToString:path]) loadedPath = path;
+                        loadedTime = st.st_mtimespec;
+                        loadedSize = st.st_size;
+                        loadedInode = st.st_ino;
+                    }
+                }
+            }
+            if (newConfig) {
                 SRLogMin(@"Loaded trigger config from %@: triggers=%lu",
                       path,
-                      (unsigned long)[g_triggerConfig[@"triggers"] count]);
+                      (unsigned long)[newConfig[@"triggers"] count]);
             } else {
                 SRLogMin(@"Failed to parse config at %@", path);
             }
@@ -1784,10 +1859,12 @@ static void config_changed_callback(CFNotificationCenterRef center, void *observ
 }
 
 static void save_trigger_config() {
-    if (!g_triggerConfig) return;
+    NSDictionary *config;
+    @synchronized (rc_trigger_config_lock()) { config = g_triggerConfig; }
+    if (!config) return;
     NSString *sharedPath = @"/var/mobile/Documents/rc_triggers.plist";
     NSError *error = nil;
-    NSData *data = [NSPropertyListSerialization dataWithPropertyList:g_triggerConfig
+    NSData *data = [NSPropertyListSerialization dataWithPropertyList:config
                                                               format:NSPropertyListXMLFormat_v1_0
                                                              options:0
                                                                error:&error];
@@ -2479,6 +2556,7 @@ static void rc_execute_action_sequence(NSArray *actions, NSString *triggerKey, B
         if ([actionItem isKindOfClass:[NSString class]]) {
             NSString *action = (NSString *)actionItem;
             SRLogMin(@"[%@] -> %@", triggerKey, action);
+            RCTKEvent(@"action", @{ @"trigger": triggerKey ?: @"", @"command": action });
             handle_command(action);
             rc_maybe_show_action_banner(action);
             usleep(simulationMode ? 50000 : 10000);
@@ -2496,6 +2574,7 @@ static void rc_execute_action_sequence(NSArray *actions, NSString *triggerKey, B
         if ([type isEqualToString:@"if"]) {
             BOOL shouldRunBlock = rc_evaluate_if_condition(dictAction);
             SRLogMin(@"[%@] If %@ == %@ -> %@", triggerKey, dictAction[@"conditionKey"], dictAction[@"expectedValue"], shouldRunBlock ? @"TRUE" : @"FALSE");
+            RCTKEvent(@"condition", @{ @"key": [dictAction[@"conditionKey"] description] ?: @"", @"expected": [dictAction[@"expectedValue"] description] ?: @"", @"result": @(shouldRunBlock) });
             
             if (shouldRunBlock) {
                 // TRUE branch: just continue to next item. 
@@ -2519,6 +2598,7 @@ static void rc_execute_action_sequence(NSArray *actions, NSString *triggerKey, B
                             NSDictionary *elseIfDict = (NSDictionary *)item;
                             BOOL elseIfVal = rc_evaluate_if_condition(elseIfDict);
                             SRLogMin(@"[%@] Else If %@ == %@ -> %@", triggerKey, elseIfDict[@"conditionKey"], elseIfDict[@"expectedValue"], elseIfVal ? @"TRUE" : @"FALSE");
+                            RCTKEvent(@"condition", @{ @"key": [elseIfDict[@"conditionKey"] description] ?: @"", @"expected": [elseIfDict[@"expectedValue"] description] ?: @"", @"result": @(elseIfVal), @"elseIf": @YES });
                             if (elseIfVal) {
                                 idx = skipIdx;
                                 foundNextBranch = YES;
@@ -2643,7 +2723,43 @@ static void register_simulation_observers() {
 }
 
 // Execute all actions for a trigger
+// Test kit access (RCTestKit.x)
+NSString *RCHandleCommand(NSString *cmd) {
+    return handle_command(cmd);
+}
+
+// The test kit reads and saves the config on the main thread, where the reload a save posts
+// runs, so a read right after a save sees it (rc_set_trigger_config makes the swap itself safe
+// on any thread).
+static void RCOnMainThreadSync(dispatch_block_t block) {
+    if ([NSThread isMainThread]) block();
+    else dispatch_sync(dispatch_get_main_queue(), block);
+}
+
+NSDictionary *RCCopyTriggerConfig(void) {
+    __block NSDictionary *config = nil;
+    RCOnMainThreadSync(^{
+        load_trigger_config();
+        config = [g_triggerConfig copy];
+    });
+    return config;
+}
+
+void RCSetTriggerConfig(NSDictionary *config) {
+    RCOnMainThreadSync(^{
+        rc_set_trigger_config([config copy]);
+        save_trigger_config();
+    });
+}
+
+BOOL RCEvaluateIfCondition(NSDictionary *ifAction) {
+    return rc_evaluate_if_condition(ifAction);
+}
+
 void RCExecuteTrigger(NSString *triggerKey) {
+    RCTKEvent(@"trigger", @{ @"key": triggerKey ?: @"" });
+    if (RCTKCaptureTrigger(triggerKey)) return;
+
     // Check for foreground exclusions (Safety/Blacklist)
     if (RC_IsForegroundAppExcluded()) {
         SRLog(@"Triggers SUPPRESSED for frontmost application (Excluded/Blacklisted)");
@@ -2689,6 +2805,7 @@ void RCExecuteTrigger(NSString *triggerKey) {
     }
     
     SRLogMin(@"TRIGGER FIRED: '%@' -> Executing %lu actions", triggerKey, (unsigned long)actions.count);
+    RCTKEvent(@"trigger.fired", @{ @"key": triggerKey, @"actions": @(actions.count) });
     
     // Execute on background queue to allow for delays and blocking operations
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
@@ -4033,6 +4150,21 @@ static void rc_spawn_root_iohid(NSString *subcommand, NSArray *args) {
     free(argv);
 }
 
+// Set (on this thread) by RCTouchEventSystemGesture for its copy of a touch addressed to
+// SpringBoard's system gesture window instead of the window under the finger: that copy goes
+// only to SpringBoard's own queue, marked as a possible system gesture
+static __thread uint32_t g_rcTouchContextOverride = 0;
+
+// Extra event mask bits a real finger's touch carries when it lands on the bottom edge of a phone
+// without a Home button: with them UIKit marks the touch as a bottom-edge touch (UITouch
+// _edgeType 4), so iOS's home bar gesture can see it. Set by the test kit (RCTouchSetBottomEdge)
+// around its scripted bottom bar swipes.
+static uint32_t g_rcTouchEdgeMask = 0;
+
+void RCTouchSetBottomEdge(BOOL on) {
+    g_rcTouchEdgeMask = on ? 0x1040040 : 0;
+}
+
 static void perform_digitizer_touch(double x, double y, BOOL down) {
     if (!_IOHIDEventCreateDigitizerEvent || !_IOHIDEventCreateDigitizerFingerEvent ||
         !_IOHIDEventAppendEvent || !_IOHIDEventSystemClientCreate || !_IOHIDEventSystemClientDispatchEvent) {
@@ -4068,8 +4200,9 @@ static void perform_digitizer_touch(double x, double y, BOOL down) {
     SRLog(@"[Touch] Simulated touch: raw(%.1f, %.1f) screen(%.1f, %.1f) scale=%.1f -> normalized(%.4f, %.4f) down=%d",
           x, y, screenWidth, screenHeight, scale, rx, ry, down);
 
-    uint32_t contextID = rc_resolve_target_context(x, y);
-    BOOL targetIsLocal = rc_is_springboard_context(contextID);
+    uint32_t contextID = g_rcTouchContextOverride ?: rc_resolve_target_context(x, y);
+    BOOL targetIsLocal = g_rcTouchContextOverride || rc_is_springboard_context(contextID);
+    BOOL systemGestureCopy = g_rcTouchContextOverride != 0;
 
     uint32_t transducerType = 3;
     uint32_t parentIndex = 0;
@@ -4079,13 +4212,13 @@ static void perform_digitizer_touch(double x, double y, BOOL down) {
     uint64_t ts = mach_absolute_time();
     uint32_t fingerIndex = 1;
     uint32_t fingerIdentity = 2;
-    uint32_t fingerEventMask = 0x3; // kIOHIDDigitizerEventRange | kIOHIDDigitizerEventTouch
+    uint32_t fingerEventMask = 0x3 | (down ? g_rcTouchEdgeMask : 0); // kIOHIDDigitizerEventRange | kIOHIDDigitizerEventTouch
     double pressure = down ? 1.0 : 0.0;
     uint32_t handEventMask = 35;
     uint32_t handEventTouch = down ? 1 : 0;
 
     // Path 1: System-wide global event
-    IOHIDEventRef parentGlobal = _IOHIDEventCreateDigitizerEvent(
+    IOHIDEventRef parentGlobal = systemGestureCopy ? NULL : _IOHIDEventCreateDigitizerEvent(
         kCFAllocatorDefault, ts,
         transducerType, parentIndex, parentIdentity, parentEventMask, parentButtonMask,
         0.0, 0.0, 0.0, 0.0, 0.0,
@@ -4147,10 +4280,12 @@ static void perform_digitizer_touch(double x, double y, BOOL down) {
             0, 0, 0);
 
         if (parentLocal) {
+            // The system gesture window takes the location in pixels; other windows, in points
+            double lx = systemGestureCopy ? x * scale : x, ly = systemGestureCopy ? y * scale : y;
             IOHIDEventRef fingerLocal = _IOHIDEventCreateDigitizerFingerEvent(
                 kCFAllocatorDefault, ts,
                 fingerIndex, fingerIdentity, fingerEventMask,
-                x, y, 0.0, pressure, 0.0,
+                lx, ly, 0.0, pressure, 0.0,
                 (boolean_t)down, (boolean_t)down, 0);
 
             if (fingerLocal) {
@@ -4178,7 +4313,7 @@ static void perform_digitizer_touch(double x, double y, BOOL down) {
                 _IOHIDEventSetSenderID(parentLocal, 0xDEFACEDBEEFFECE5ULL);
             }
 
-            BKSHIDEventSetDigitizerInfo(parentLocal, contextID, false, false, NULL, 0, 0);
+            BKSHIDEventSetDigitizerInfo(parentLocal, contextID, systemGestureCopy, false, NULL, 0, 0);
 
             rc_dispatch_sync_main_safe(^{
                 [[UIApplication sharedApplication] _enqueueHIDEvent:parentLocal];
@@ -4189,6 +4324,34 @@ static void perform_digitizer_touch(double x, double y, BOOL down) {
     }
     
     SRLog(@"[Touch] Dispatched touch event (down=%d) to contextID=%u (frontApp: %@) at (%.1f, %.1f)", down, contextID, loggedBundleID, x, y);
+}
+
+// The test kit's scripted gestures: one finger event at (x, y) in points - a move is another
+// down=YES at a new spot - through the same path as tap / hold / swipe. Off the main thread.
+void RCTouchEvent(double x, double y, BOOL down) {
+    rc_load_touch_symbols();
+    perform_digitizer_touch(x, y, down);
+}
+
+// A touch delivered the way iOS delivers a real finger: twice - to SpringBoard's system gesture
+// window (_UISystemGestureWindow, where the system gesture manager's recognizers, the
+// screen-edge triggers among them, watch) and to the window under the finger.
+void RCTouchEventSystemGesture(double x, double y, BOOL down) {
+    rc_load_touch_symbols();
+    __block uint32_t gestureContext = 0;
+    rc_dispatch_sync_main_safe(^{
+        id manager = [%c(SBSystemGestureManager) mainDisplayManager];
+        SEL windowSel = NSSelectorFromString(@"windowForSystemGestures");
+        id window = [manager respondsToSelector:windowSel] ? ((id (*)(id, SEL))objc_msgSend)(manager, windowSel) : nil;
+        SEL contextSel = NSSelectorFromString(@"_contextId");
+        if ([window respondsToSelector:contextSel]) gestureContext = ((uint32_t (*)(id, SEL))objc_msgSend)(window, contextSel);
+    });
+    if (gestureContext) {
+        g_rcTouchContextOverride = gestureContext;
+        perform_digitizer_touch(x, y, down);
+        g_rcTouchContextOverride = 0;
+    }
+    perform_digitizer_touch(x, y, down);
 }
 
 // Simulate a tap at absolute pixel coordinates (x, y).
@@ -5267,6 +5430,57 @@ static NSString *evaluate_lua_code(NSString *code) {
     
     lua_close(L);
     return output;
+}
+
+// Test kit (RCTestKit.x): runs Lua and returns what it printed and returned - the
+// lua_eval command discards both. Lua states are separate, but print's buffer is shared,
+// so runs are serialized.
+static NSMutableString *g_rctkLuaOutput;
+
+static int rctk_lua_print(lua_State *L) {
+    int n = lua_gettop(L);
+    for (int i = 1; i <= n; i++) {
+        size_t len = 0;
+        const char *s = luaL_tolstring(L, i, &len);
+        if (i > 1) [g_rctkLuaOutput appendString:@"\t"];
+        [g_rctkLuaOutput appendString:[[NSString alloc] initWithBytes:s length:len encoding:NSUTF8StringEncoding] ?: @""];
+        lua_pop(L, 1);
+    }
+    [g_rctkLuaOutput appendString:@"\n"];
+    return 0;
+}
+
+NSDictionary *RCEvaluateLuaCapturing(NSString *code) {
+    static NSObject *lock;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ lock = [NSObject new]; });
+    @synchronized (lock) {
+        lua_State *L = setup_lua_environment();
+        if (!L) return @{ @"error": @"Could not create Lua state" };
+        g_rctkLuaOutput = [NSMutableString string];
+        lua_pushcfunction(L, rctk_lua_print);
+        lua_setglobal(L, "print");
+        NSMutableArray *returns = [NSMutableArray array];
+        NSString *error = nil;
+        int base = lua_gettop(L);
+        if (luaL_loadstring(L, code.UTF8String) == LUA_OK && lua_pcall(L, 0, LUA_MULTRET, 0) == LUA_OK) {
+            for (int i = base + 1; i <= lua_gettop(L); i++) {
+                size_t len = 0;
+                const char *s = luaL_tolstring(L, i, &len);
+                [returns addObject:[[NSString alloc] initWithBytes:s length:len encoding:NSUTF8StringEncoding] ?: @""];
+                lua_pop(L, 1);
+            }
+        } else {
+            const char *message = lua_tostring(L, -1);
+            error = message ? @(message) : @"unknown error";
+        }
+        lua_close(L);
+        NSString *output = [g_rctkLuaOutput copy];
+        g_rctkLuaOutput = nil;
+        NSMutableDictionary *result = [@{ @"output": output ?: @"", @"returns": returns } mutableCopy];
+        if (error) result[@"error"] = error;
+        return result;
+    }
 }
 
 static NSArray* RCFetchAirPlayDeviceNames() {
@@ -6703,6 +6917,13 @@ static NSString *rc_handle_autolock(NSString *arg) {
     return [NSString stringWithFormat:@"Auto-Lock: %@\n", rc_autolock_label(target)];
 }
 
+// Set while the UNIX socket's handler runs a command: it came from this phone (the app, rc),
+// not the network (the web server's /api/command also calls handle_command)
+static __thread BOOL g_rcCommandFromLocalSocket = NO;
+BOOL RCCommandFromLocalSocket(void) {
+    return g_rcCommandFromLocalSocket;
+}
+
 static NSString *handle_command(NSString *cmd) {
     if (!cmd || ![cmd isKindOfClass:[NSString class]]) {
         SRLogMin(@"ERROR: handle_command received nil or invalid command string");
@@ -6710,6 +6931,11 @@ static NSString *handle_command(NSString *cmd) {
     }
     NSString *cleanCmd = [cmd stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     if (cleanCmd.length == 0) return @"Error: Empty command\n";
+    // The test kit's passcode never reaches the log (see RCTestKit.x)
+    if ([cleanCmd hasPrefix:@"testkit passcode/set"]) {
+        SRLog(@"Received command: testkit passcode/set (redacted)");
+        return RCTKHandleCommand([cleanCmd substringFromIndex:7]);
+    }
     SRLog(@"Received command: %@", cleanCmd);
     
     if ([cleanCmd isEqualToString:@"ha"] || [cleanCmd hasPrefix:@"ha "]) {
@@ -6739,6 +6965,8 @@ static NSString *handle_command(NSString *cmd) {
     if ([cleanCmd isEqualToString:@"log"]) {
         SRLog(@"Log request");
         return nil;
+    } else if ([cleanCmd isEqualToString:@"testkit"] || [cleanCmd hasPrefix:@"testkit "]) {
+        return RCTKHandleCommand([cleanCmd substringFromIndex:7]);
     } else if ([[cleanCmd lowercaseString] hasPrefix:@"autolock "] || [[cleanCmd lowercaseString] hasPrefix:@"auto-lock "]) {
         return rc_handle_autolock([cleanCmd substringFromIndex:[cleanCmd rangeOfString:@" "].location + 1]);
     } else if ([cleanCmd isEqualToString:@"proximity"] || [cleanCmd hasPrefix:@"proximity "]) {
@@ -9137,12 +9365,12 @@ static NSString *handle_command(NSString *cmd) {
         
         if ([sub isEqualToString:@"on"] || [sub isEqualToString:@"enable"]) {
             mConfig[@"webUIEnabled"] = @YES;
-            g_triggerConfig = [mConfig copy];
+            rc_set_trigger_config([mConfig copy]);
             save_trigger_config();
             return @"Web UI Enabled\n";
         } else if ([sub isEqualToString:@"off"] || [sub isEqualToString:@"disable"]) {
             mConfig[@"webUIEnabled"] = @NO;
-            g_triggerConfig = [mConfig copy];
+            rc_set_trigger_config([mConfig copy]);
             save_trigger_config();
             return @"Web UI Disabled\n";
         } else if ([sub isEqualToString:@"status"]) {
@@ -9717,7 +9945,7 @@ static void start_web_server() {
                                             NSError *err;
                                             id jsonObj = [NSJSONSerialization JSONObjectWithData:bodyData options:NSJSONReadingMutableContainers error:&err];
                                             if (jsonObj && [jsonObj isKindOfClass:[NSDictionary class]]) {
-                                                g_triggerConfig = [jsonObj mutableCopy];
+                                                rc_set_trigger_config([jsonObj copy]);
                                                 save_trigger_config();
                                                 responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: 12\r\n\r\n{\"ok\": true}", cors];
                                             } else {
@@ -10314,6 +10542,13 @@ static void start_web_server() {
                                 // Remove backslash escaping for forward slashes
                                 jsonStr = [jsonStr stringByReplacingOccurrencesOfString:@"\\/" withString:@"/"];
                                 responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)[jsonStr lengthOfBytesUsingEncoding:NSUTF8StringEncoding], jsonStr];
+                            } else if ([path hasPrefix:@"/api/testkit/"]) {
+                                load_trigger_config();
+                                if (![g_triggerConfig[@"webUIEnabled"] boolValue]) {
+                                    responseString = [NSString stringWithFormat:@"HTTP/1.1 403 Forbidden\r\n%@Content-Length: 17\r\n\r\nWeb UI is disabled", cors];
+                                } else {
+                                    responseString = RCTKHandleHTTP(new_socket, buffer, (long)valread, method, path, cors);
+                                }
                             } else if ([path hasPrefix:@"/api/command"]) {
                                 load_trigger_config();
                                 if (![g_triggerConfig[@"webUIEnabled"] boolValue]) {
@@ -10490,7 +10725,9 @@ static void start_server() {
                 if (valread > 0) {
                     NSString *cmd = [[NSString alloc] initWithBytes:local_buffer length:valread encoding:NSUTF8StringEncoding];
                     // UNIX Sockets are inherently local, no need to check IP or tcpEnabled config
+                    g_rcCommandFromLocalSocket = YES;
                     NSString *response = handle_command(cmd);
+                    g_rcCommandFromLocalSocket = NO;
                     if (response) {
                         write(new_socket, [response UTF8String], [response lengthOfBytesUsingEncoding:NSUTF8StringEncoding]);
                     }
@@ -10900,6 +11137,7 @@ static void RC_ReplayPowerTimeline(NSArray<NSNumber *> *downs, NSArray<NSNumber 
     if (!downs.count) return;
     dispatch_async(dispatch_get_main_queue(), ^{
         SRLog(@"[Power] ▶️ Replaying %lu system power press(es) (HID injection, original timing)", (unsigned long)downs.count);
+        RCTKEvent(@"replay.inject", nil);
         NSUInteger generation = ++g_replayGeneration;
         g_powerIsReplaying = YES;
         g_replayPressCount = downs.count;
@@ -11819,6 +12057,7 @@ static void RC_CheckAndFirePower() {
         int count = g_powerClickCount;
         g_powerClickCount = 0;
         SRLog(@"POWER SEQUENCE ENDED. Final count: %d", count);
+        RCTKEvent(@"power.sequence", @{ @"count": @(count), @"iosSinglePresses": @(g_nativeSinglePressCount) });
 
         NSString *triggerKey = nil;
 
@@ -11875,13 +12114,16 @@ static void RC_CheckAndFirePower() {
                     NSUInteger presses = MIN(g_nativeSinglePressCount, (NSUInteger)count);
                     if (presses == 0) {
                         SRLog(@"[Power] iOS treated none of the %d press(es) as presses of their own (a chord or gesture) - not replaying", count);
+                        RCTKEvent(@"power.notReplayed", @{ @"count": @(count) });
                         return;
                     }
                     SRLog(@"[Power] iOS treated %lu of %d presses as presses of their own - replaying those", (unsigned long)presses, count);
+                    RCTKEvent(@"power.replaying", @{ @"presses": @(presses), @"count": @(count) });
                     RC_ReplayPowerPresses(presses);
                 });
                 return;
             }
+            RCTKEvent(@"power.replaying", @{ @"presses": @(count), @"count": @(count) });
             RC_ReplayPowerPresses(count);
         }
     }];
@@ -11896,9 +12138,17 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
         int level = IOHIDEventGetIntegerValue(event, (14 << 16) | 1);
         SRLog(@"[HID Proximity] Event type 14 detected! detection=%d, level=%d", detection, level);
         g_latestHIDProximityState = (detection != 0) ? 1 : 0;
+        RCTKNoteProximity(detection != 0);
     }
     
     if (type == 29) { // Biometric Event (Finger on sensor)
+        // The event's first fields (event type, level, ...), to tell a finger landing from a
+        // lift or a finished scan
+        if (RCTKJournalOn()) {
+            NSMutableArray *fields = [NSMutableArray array];
+            for (int field = 0; field < 6; field++) [fields addObject:@(IOHIDEventGetIntegerValue(event, (29 << 16) | field))];
+            RCTKEvent(@"hid.biometric", @{ @"fields": fields });
+        }
         // Toggle Logic for "Hold" (Fire by itself after 1.0s)
         // Assumption: Sensor sends event on DOWN ... (Silence) ... and UP.
         
@@ -12040,6 +12290,7 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
         
         // Home Button (Page 0x0C, Usage 0x40)
         if (usagePage == kHIDPage_Consumer && usage == kHIDUsage_Csmr_Menu) {
+            RCTKEvent(@"hid.home", @{ @"down": @((BOOL)(down != 0)) });
             NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
             g_homeHeldOnHID = !!down;
             if (down && g_powerHeldOnHID) RC_NoteHomePowerChord();
@@ -12090,6 +12341,7 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
             if (g_powerIsReplaying) {
                 SRLog(@"[HID] (replay) Power %@ seen on the HID bus", down ? @"DOWN" : @"UP");
                 if (down) g_replayDownsSeen++;
+                RCTKEvent(@"hid.power", @{ @"down": @((BOOL)(down != 0)), @"replay": @YES });
                 return;
             }
             NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
@@ -12128,6 +12380,7 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
                     g_powerIsDown = YES;
                     lastPowerDownTime = now;
                     SRLog(@"[HID] ⚡️ Power DOWN");
+                    RCTKEvent(@"hid.power", @{ @"down": @YES });
                     
                     // SUPPRESS TOUCH ID HOLD (on Power Wake/Press):
                     // If user is pressing power, they might be waking to unlock.
@@ -12177,6 +12430,7 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
                 }
             } else { // UP
                 g_powerReleasedWithVolumeHeld = g_volDownHeldOnHID || g_volUpHeldOnHID;
+                RCTKEvent(@"hid.power", @{ @"down": @NO });
                 // Power is up, so the screenshot gesture can no longer fire.
                 dispatch_async(dispatch_get_main_queue(), ^{
                     RC_SetScreenshotRecognizerSuppressed(NO);
@@ -12242,6 +12496,7 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
             if (down && g_powerIsDown) g_volPressedDuringPower = YES;
             if (mappedUsage == kHIDUsage_Csmr_VolumeDecrement) g_volDownHeldOnHID = !!down;
             if (mappedUsage == kHIDUsage_Csmr_VolumeIncrement) g_volUpHeldOnHID = !!down;
+            RCTKEvent(@"hid.volume", @{ @"button": mappedUsage == kHIDUsage_Csmr_VolumeIncrement ? @"up" : @"down", @"down": @((BOOL)(down != 0)) });
             
             // Check for Power + Volume combination.
             // FALLBACK ONLY. volumeIncreasePressDownWithModifiers:/volumeDecreasePress-
@@ -12503,6 +12758,7 @@ static void setup_background_hid_listener() {
             g_replaySinglePressesAllowed++;
             if (g_replayUpsHandled >= g_replayPressCount) g_powerIsReplaying = NO;
             SRLog(@"[Power] Replay: injected release %lu of %lu reached performButtonUpPreActions", (unsigned long)g_replayUpsHandled, (unsigned long)g_replayPressCount);
+            RCTKEvent(@"replay.complete", nil);
             %orig;
             return;
         }
@@ -12583,6 +12839,7 @@ static void setup_background_hid_listener() {
     // listener entirely - the count and the %orig decision can no longer disagree.
     if (g_powerDeferActive) {
         g_powerClickCount++;
+        RCTKEvent(@"power.click", @{ @"count": @(g_powerClickCount) });
         SRLog(@"⚡️ POWER CLICK (hook). Count: %d - deferring system UP", g_powerClickCount);
         g_powerSuppressPostUp = YES;
         RC_CheckAndFirePower();
@@ -12618,6 +12875,7 @@ static void setup_background_hid_listener() {
 
 - (void)performLongPressActions {
     SRLog(@"performLongPressActions called - g_lockButtonTriggered=%d, force=%d", g_lockButtonTriggered, g_forceSystemLongPress);
+    RCTKEvent(@"ios.longPress", nil);
     
     if (g_forceSystemLongPress) {
         SRLog(@"Allowing System Power Off (Stage 2)");
@@ -12675,6 +12933,7 @@ static void setup_background_hid_listener() {
     }
 
     SRLog(@"performDoublePressActions called (System)");
+    RCTKEvent(@"ios.doublePress", nil);
     // We handle double press manually in performButtonUpPreActions to support Triple/Quad clicks.
     // So we do NOT fire "power_double_tap" here to avoid duplicates - our manual
     // counter fires it independently if configured.
@@ -12750,6 +13009,7 @@ static void setup_background_hid_listener() {
     if (g_replaySinglePressesAllowed > 0) {
         g_replaySinglePressesAllowed--;
         SRLog(@"[Power] Native singlePress: fired for a replayed press");
+        RCTKEvent(@"ios.singlePress", @{ @"press": @"replayed" });
         %orig;
         return;
     }
@@ -12766,6 +13026,7 @@ static void setup_background_hid_listener() {
     // this one waits on) also frees it to fire sooner during the combo.
     if (g_powerPressIsCombo && !RC_IsForegroundAppExcluded()) {
         SRLog(@"Suppressing native singlePress: - a Power + Volume combo consumed this press");
+        RCTKEvent(@"ios.singlePress", @{ @"press": @"combo" });
         return;
     }
     // A Volume button still held when this press was released: it never sleeps the phone (see
@@ -12777,6 +13038,7 @@ static void setup_background_hid_listener() {
         load_trigger_config();
         if ([g_triggerConfig[@"masterEnabled"] boolValue]) {
             SRLog(@"Suppressing native singlePress: - a Volume button was still held at its release, so it doesn't sleep");
+            RCTKEvent(@"ios.singlePress", @{ @"press": @"volumeDownHeld" });
             return;
         }
     }
@@ -12788,6 +13050,7 @@ static void setup_background_hid_listener() {
     // off, excluded app) pass through untouched.
     if (g_powerDeferActive && !RC_IsForegroundAppExcluded()) {
         g_nativeSinglePressCount++;
+        RCTKEvent(@"ios.singlePress", @{ @"press": @"heldBack", @"count": @(g_nativeSinglePressCount) });
         // The press's sequence already ended and was waiting on this
         if (g_replayAwaitingSequenceCount && g_nativeSinglePressCount >= g_replayAwaitingSequenceCount) {
             NSUInteger presses = g_replayAwaitingSequenceCount;
@@ -12800,6 +13063,7 @@ static void setup_background_hid_listener() {
         return;
     }
     SRLog(@"[Power] Native singlePress: fired");
+    RCTKEvent(@"ios.singlePress", @{ @"press": @"passed" });
     %orig;
 }
 
@@ -13612,6 +13876,7 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
                     s_last_camera_app_trigger = [[NSDate date] timeIntervalSince1970];
                 }
                 SRLog(@"[AppLaunch] App became Active: %@", effectiveBundleId);
+                RCTKEvent(@"app.foreground", @{ @"bundle": effectiveBundleId ?: @"" });
                 NSString *triggerKey = [NSString stringWithFormat:@"app_launch_%@", effectiveBundleId];
                 RCExecuteTrigger(triggerKey);
             }
