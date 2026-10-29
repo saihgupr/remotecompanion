@@ -495,7 +495,9 @@ extern void BKSTerminateApplicationForReasonAndReportWithDescription(NSString *b
 - (void)addObserver:(id)arg1;
 - (void)removeObserver:(id)arg1;
 - (BOOL)isFingerOn;
+- (BOOL)isFingerDetectEnabled;
 - (BOOL)hasBiometricAuthenticationCapabilityEnabled;
+- (id)acquireFingerDetectionWantedAssertionForReason:(NSString *)reason;
 @end
 
 @interface SpringBoard : UIApplication
@@ -2096,6 +2098,7 @@ static void update_edge_gestures();
 static void start_schedule_timer();
 static void start_mqtt_subscriber();
 static void stop_mqtt_subscriber();
+static void RC_UpdateBioFingerDetectionWanted(void);
 
 void RCNFCConfigChanged(void);
 NSString *RCNFCScannerCommand(NSString *what);
@@ -2118,6 +2121,7 @@ static void config_changed_callback(CFNotificationCenterRef center, void *observ
             start_schedule_timer();
             SRLog(@"Checking MQTT subscriber...");
             start_mqtt_subscriber();
+            RC_UpdateBioFingerDetectionWanted();
             SRLog(@"Config reload complete.");
         } @catch (NSException *e) {
             SRLogMin(@"CRITICAL ERROR in config_changed_callback: %@\nStack: %@", e, e.callStackSymbols);
@@ -4046,6 +4050,11 @@ static NSTimeInterval g_bioIgnoreUntil = 0;
 static BOOL g_bioWasLocked = NO;
 static BOOL g_lastLockedState = NO;
 static BOOL g_lockStateInitialized = NO;
+// Top-button Touch ID (iPad mini 6, iPad Air 4/5) power-gates the sensor: HID
+// type 29 only flows while something holds a finger-detection assertion
+// (Settings > Touch ID does this, which is why triggers work while that page
+// is open). Hold one ourselves while touchid triggers are enabled.
+static id g_rcFingerDetectAssertion = nil;
 
 // Whether the phone is locked. iOS 17 also locks the UI while Notification Center is pulled down
 // over an unlocked phone, and unlocks it when it's put away - that isn't a lock. A real lock
@@ -13716,6 +13725,36 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
     }
 }
 
+static void RC_UpdateBioFingerDetectionWanted(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        @try {
+            load_trigger_config();
+            BOOL want = [g_triggerConfig[@"masterEnabled"] boolValue] &&
+                ([g_triggerConfig[@"triggers"][@"touchid_hold"][@"enabled"] boolValue] ||
+                 [g_triggerConfig[@"triggers"][@"touchid_tap"][@"enabled"] boolValue]);
+            Class cls = objc_getClass("SBUIBiometricResource");
+            id res = (cls && [cls respondsToSelector:@selector(sharedInstance)]) ? [cls sharedInstance] : nil;
+            if (want) {
+                if (!g_rcFingerDetectAssertion && res &&
+                    [res respondsToSelector:@selector(acquireFingerDetectionWantedAssertionForReason:)]) {
+                    g_rcFingerDetectAssertion = [res acquireFingerDetectionWantedAssertionForReason:@"RemoteCompanionTouchIDTriggers"];
+                    int detect = [res respondsToSelector:@selector(isFingerDetectEnabled)] ? (int)[res isFingerDetectEnabled] : -1;
+                    int on = [res respondsToSelector:@selector(isFingerOn)] ? (int)[res isFingerOn] : -1;
+                    SRLog(@"🔐 [Bio] Finger detection assertion acquired (detect=%d fingerOn=%d)", detect, on);
+                }
+            } else if (g_rcFingerDetectAssertion) {
+                if ([g_rcFingerDetectAssertion respondsToSelector:@selector(invalidate)]) {
+                    [g_rcFingerDetectAssertion invalidate];
+                }
+                g_rcFingerDetectAssertion = nil;
+                SRLog(@"🔐 [Bio] Finger detection assertion released (touchid triggers disabled)");
+            }
+        } @catch (NSException *e) {
+            SRLogMin(@"⚠️ [Bio] RC_UpdateBioFingerDetectionWanted failed: %@", e);
+        }
+    });
+}
+
 static void setup_background_hid_listener() {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         SRLog(@"🔌 Setting up BACKGROUND HID Listener...");
@@ -16534,6 +16573,7 @@ static NSTimeInterval s_last_camera_launch_notify = 0;
             
             // Conditionally register edge gestures based on config
             update_edge_gestures();
+            RC_UpdateBioFingerDetectionWanted();
             
             SRLog(@"Initialization Complete.");
         });
