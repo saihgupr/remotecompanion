@@ -47,7 +47,7 @@
     return [[RCConfigManager sharedManager] nameForCommand:cmd truncate:shouldTruncate];
 }
 
-- (NSString *)iconNameForTrigger:(NSString *)triggerKey {
++ (NSString *)iconNameForTrigger:(NSString *)triggerKey {
     if ([triggerKey isEqualToString:@"volume_up_then_down"] || [triggerKey isEqualToString:@"volume_down_then_up"]) return @"arrow.up.and.down.circle.fill";
     if ([triggerKey hasPrefix:@"trigger_bottom_swipe_up"]) return @"chevron.compact.up";
     if ([triggerKey hasPrefix:@"trigger_bottombar"]) return @"square.stack.3d.up.fill";
@@ -816,7 +816,7 @@
     
     // Add Icon with tint based on section or type?
     // Using dark gray tint for a "premium" but subtle look
-    UIImage *icon = [UIImage systemImageNamed:[self iconNameForTrigger:triggerKey]];
+    UIImage *icon = [UIImage systemImageNamed:[RCTriggersViewController iconNameForTrigger:triggerKey]];
     cell.imageView.image = icon;
     cell.imageView.tintColor = [UIColor systemGrayColor];
 
