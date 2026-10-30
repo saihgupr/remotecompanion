@@ -1590,6 +1590,9 @@
     </div>
     <div class="rc-navbar-center" id="navbar-small-title">RemoteCompanion</div>
     <div class="rc-navbar-right">
+      <button class="nav-btn" id="nav-running-btn" onclick="openRunning()" title="Running">
+        <i class="f7-icons">list_bullet</i>
+      </button>
       <button class="nav-btn" id="nav-logs-btn" onclick="toggleLogPanel()" title="Live System Logs">
         <i class="f7-icons">list_dash</i>
       </button>
@@ -1684,6 +1687,21 @@
 </div>
 
 <!-- ══ CONDITION PICKER DIALOG ═════════════════════════════════════════════ -->
+<!-- Running: the triggers running now, like a task manager -->
+<div class="dialog-backdrop" id="running-dialog-backdrop" onclick="if (event.target === this) closeRunning()">
+  <div class="dialog-box app-launch-dialog" style="max-width: 480px; width: 90%;">
+    <div class="dialog-title">Running</div>
+    <div class="dialog-msg" style="text-align:center;padding:0 16px 6px">Stop ends that run, even during a wait or a loop.</div>
+    <div style="padding:0 14px 10px; display:flex; flex-direction:column; flex:1; min-height:0;">
+      <div class="app-picker-list" id="running-content" style="max-height: 52vh; max-height: 52dvh; overflow-y: auto;"></div>
+    </div>
+    <div class="dialog-btns">
+      <button onclick="stopAllRuns()" id="running-stop-all" style="color:#ff453a">Stop All</button>
+      <button onclick="closeRunning()">Done</button>
+    </div>
+  </div>
+</div>
+
 <div class="dialog-backdrop" id="cond-picker-dialog-backdrop" onclick="_condPickerBackdropClick(event)">
   <div class="dialog-box app-launch-dialog" style="max-width: 480px; width: 90%;">
     <div class="dialog-title">Select Condition</div>
@@ -2826,6 +2844,180 @@ function iconForKey(key) {
   return { icon:'hand_tap', cls:'icon-gray' };
 }
 
+// ── Running ───────────────────────────────────────────────────────────────
+// The runs going: the navbar button turns green while there are any (checked every few seconds
+// while this page is visible); the Running sheet lists them with the step each is on, refreshed
+// every second while it's open.
+let runningRuns = [];
+let runningTimer = null;
+
+async function fetchRunning() {
+  try {
+    const res = await fetch('/api/running', { cache: 'no-store' });
+    if (!res.ok) return null;
+    const runs = await res.json();
+    return Array.isArray(runs) ? runs : [];
+  } catch (e) { return null; }
+}
+
+function runElapsedText(seconds) {
+  const s = Math.floor(seconds || 0);
+  if (s < 60) return `${s} s`;
+  if (s < 3600) return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  return `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+}
+
+function runStepText(run) {
+  let text = run.step ? nameForCmd(run.step) : 'Starting';
+  const loop = run.loop;
+  if (loop && loop.repeat) {
+    const count = parseInt(loop.repeat.count, 10) || 0;
+    const round = count > 0 ? `Round ${loop.round} of ${count}` : `Round ${loop.round}`;
+    const onRepeat = typeof run.step === 'object' && JSON.stringify(run.step) === JSON.stringify(loop.repeat);
+    text = onRepeat ? `${nameForCmd(loop.repeat)} · ${round}` : `${text} · ${round}`;
+  }
+  return text;
+}
+
+function updateRunningButton(runs) {
+  const btn = document.getElementById('nav-running-btn');
+  if (btn) btn.style.color = (runs && runs.length) ? '#30d158' : '';
+}
+
+// The last runs that ended, from Run History: fetched on opening and when a run starts or ends
+let recentRuns = [];
+let recentRunCount = -1;
+
+async function refreshRecent() {
+  try {
+    const res = await fetch('/api/history', { cache: 'no-store' });
+    if (!res.ok) return;
+    const runs = await res.json();
+    recentRuns = Array.isArray(runs) ? runs : [];
+  } catch (e) {}
+  renderRunning();
+}
+
+function runWhenText(started) {
+  const d = new Date((started || 0) * 1000);
+  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+  const today = new Date();
+  if (d.toDateString() === today.toDateString()) return `Today ${time}`;
+  const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return `Yesterday ${time}`;
+  return d.toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
+}
+
+function runDurationText(seconds) {
+  const s = seconds || 0;
+  return s < 10 ? `${s.toFixed(1)} s` : runElapsedText(Math.round(s));
+}
+
+function renderRecent(box) {
+  if (!recentRuns.length) return;
+  const head = document.createElement('div');
+  head.style.cssText = 'padding:14px 4px 6px;font-size:13px;font-weight:600;color:#8e8e93;text-transform:uppercase';
+  head.textContent = 'Recent';
+  box.appendChild(head);
+  recentRuns.forEach(run => {
+    const stopped = run.outcome === 'stopped';
+    const row = document.createElement('div');
+    row.className = 'app-picker-row';
+    row.style.cursor = 'default';
+    row.innerHTML = `
+      <div class="app-picker-row-inner" style="display:flex; align-items:center; gap:10px;">
+        <i class="f7-icons" style="font-size:22px;flex-shrink:0;color:${stopped ? '#ff9f0a' : '#30d158'}">${stopped ? 'stop_circle' : 'checkmark_circle'}</i>
+        <div style="min-width:0; flex:1;">
+          <div class="app-picker-name">${escHtml(nameForKey(run.key || ''))}</div>
+          <div class="app-picker-bid">${escHtml(runWhenText(run.started))} · ${runDurationText(run.seconds)} · ${run.test ? 'Test · ' : ''}${stopped ? 'Stopped' : 'Finished'}</div>
+        </div>
+      </div>
+    `;
+    box.appendChild(row);
+  });
+}
+
+function renderRunning() {
+  const box = document.getElementById('running-content');
+  if (!box) return;
+  document.getElementById('running-stop-all').disabled = !runningRuns.length;
+  if (!runningRuns.length) {
+    box.innerHTML = '<div style="padding:22px 16px;color:#8e8e93;text-align:center">No triggers are running</div>';
+    renderRecent(box);
+    return;
+  }
+  box.innerHTML = '';
+  runningRuns.forEach(run => {
+    const row = document.createElement('div');
+    row.className = 'app-picker-row';
+    row.style.cursor = 'default';
+    const { icon, cls } = iconForKey(run.key);
+    row.innerHTML = `
+      <div class="app-picker-row-inner" style="display:flex; align-items:center; gap:10px;">
+        <div class="row-icon ${cls}" style="flex-shrink:0"><i class="f7-icons">${icon}</i></div>
+        <div style="min-width:0; flex:1;">
+          <div class="app-picker-name">${escHtml(nameForKey(run.key))}</div>
+          <div class="app-picker-bid">${run.test ? 'Test · ' : ''}${runElapsedText(run.seconds)} · ${escHtml(runStepText(run))}</div>
+        </div>
+      </div>
+      <button class="nav-btn" title="Stop" style="color:#ff453a;flex-shrink:0"><i class="f7-icons" style="font-size:22px">stop_circle_fill</i></button>
+    `;
+    row.querySelector('button').onclick = () => stopRun(run.id);
+    box.appendChild(row);
+  });
+  renderRecent(box);
+}
+
+async function refreshRunning() {
+  const runs = await fetchRunning();
+  if (runs === null) return;
+  runningRuns = runs;
+  updateRunningButton(runs);
+  renderRunning();
+  // A run started or ended: Recent may have a new one
+  if (runs.length !== recentRunCount) {
+    recentRunCount = runs.length;
+    refreshRecent();
+  }
+}
+
+function openRunning() {
+  runningRuns = [];
+  recentRunCount = -1;
+  renderRunning();
+  document.getElementById('running-dialog-backdrop').classList.add('visible');
+  refreshRunning();
+  clearInterval(runningTimer);
+  runningTimer = setInterval(refreshRunning, 1000);
+}
+
+function closeRunning() {
+  clearInterval(runningTimer);
+  runningTimer = null;
+  document.getElementById('running-dialog-backdrop').classList.remove('visible');
+}
+
+async function stopRun(id) {
+  if (!id) return;
+  try { await fetch(`/api/command?cmd=${encodeURIComponent('stop run ' + id)}`, { method: 'POST' }); } catch (e) {}
+  refreshRunning();
+}
+
+async function stopAllRuns() {
+  const keys = [...new Set(runningRuns.map(r => r.key))];
+  for (const key of keys) {
+    try { await fetch(`/api/command?cmd=${encodeURIComponent('stop trigger ' + key)}`, { method: 'POST' }); } catch (e) {}
+  }
+  refreshRunning();
+}
+
+// The navbar button's colour, every 3 s while the page is visible and the sheet is closed
+setInterval(async () => {
+  if (document.hidden || runningTimer) return;
+  const runs = await fetchRunning();
+  if (runs !== null) updateRunningButton(runs);
+}, 3000);
+
 function nameForKey(key) {
   if (TRIGGER_NAMES[key]) return TRIGGER_NAMES[key];
   const t = config.triggers[key];
@@ -2947,7 +3139,15 @@ function nameForCmd(cmd) {
     if (t === 'else_if') return isTime ? `Else If Time is Between ${cmd.expectedTitle||cmd.expectedValue||'Time Range'}` : `Else If ${cmd.conditionTitle||'Condition'} is ${cmd.expectedTitle||'Value'}`;
     if (t === 'else') return 'Else';
     if (t === 'end_if' || t === 'end') return 'End If';
-    if (t === 'repeat') return `Repeat ${cmd.count||''}`;
+    if (t === 'repeat') { const n = parseInt(cmd.count, 10) || 0; return n === 1 ? 'Repeat 1 Time' : `Repeat ${n} Times`; }
+    if (t === 'repeat_while') return (cmd.conditionKey === 'time_between') ? `Repeat While Time is Between ${cmd.expectedTitle||cmd.expectedValue||''}` : `Repeat While ${cmd.conditionTitle||'Condition'} is ${cmd.expectedTitle||'Value'}`;
+    if (t === 'end_repeat') return 'End Repeat';
+    if (t === 'exit_repeat') return 'Exit Repeat';
+    if (t === 'wait_until') {
+      const lim = parseInt(cmd.timeout, 10) > 0 ? parseInt(cmd.timeout, 10) : 60;
+      const limText = (lim >= 60 && lim % 60 === 0) ? `${lim / 60} min` : `${lim} s`;
+      return (cmd.conditionKey === 'time_between') ? `Wait Until Time is Between ${cmd.expectedTitle||cmd.expectedValue||''} (up to ${limText})` : `Wait Until ${cmd.conditionTitle||'Condition'} is ${cmd.expectedTitle||'Value'} (up to ${limText})`;
+    }
     return 'Block';
   }
   const toggleInfo = parseToggleCmd(cmd);
@@ -3124,6 +3324,9 @@ function iconForCmd(cmd) {
     const t = (cmd.type||'').toLowerCase();
     if (t === 'if' || t === 'else_if' || t === 'else') return { icon:'arrow_triangle_branch', cls:'icon-purple' };
     if (t === 'end_if' || t === 'end') return { icon:'arrow_turn_up_left', cls:'icon-purple' };
+    if (t === 'end_repeat') return { icon:'arrow_turn_up_left', cls:'icon-green' };
+    if (t === 'exit_repeat') return { icon:'arrow_right_to_line', cls:'icon-green' };
+    if (t === 'wait_until') return { icon:'hourglass', cls:'icon-orange' };
     return { icon:'repeat', cls:'icon-green' };
   }
   const map = {
@@ -3289,6 +3492,10 @@ const ACTION_SECTIONS = [
   ]},
   { title:'Scripting & Logic', actions:[
     { name:'If Condition…',     cmd:'__IF_CONDITION__',icon:'arrow_triangle_branch', needs_input:true },
+    { name:'Repeat…',           cmd:'__REPEAT__',      icon:'repeat', needs_input:true },
+    { name:'Repeat While…',     cmd:'__REPEAT_WHILE__',icon:'repeat', needs_input:true },
+    { name:'Exit Repeat',       cmd:'__EXIT_REPEAT__', icon:'arrow_right_to_line', needs_input:true },
+    { name:'Wait Until…',       cmd:'__WAIT_UNTIL__',  icon:'hourglass', needs_input:true },
     { name:'Delay…',            cmd:'__DELAY__',     icon:'hourglass', needs_input:true },
     { name:'Terminal Command…', cmd:'__CUSTOM__',    icon:'chevron_right_square_fill', needs_input:true },
     { name:'Lua Script…',       cmd:'__LUA_SCRIPT__',icon:'doc_text_fill', needs_input:true },
@@ -3949,7 +4156,7 @@ function renderActionList() {
   actions.forEach((action, idx) => {
     const isCtrl = typeof action === 'object';
     const type   = isCtrl ? (action.type||'').toLowerCase() : null;
-    const isEnd  = type === 'end_if' || type === 'end';
+    const isEnd  = type === 'end_if' || type === 'end' || type === 'end_repeat';
     const isElse = type === 'else';
     const isElseIf = type === 'else_if';
     const isIf   = type === 'if';
@@ -4112,7 +4319,7 @@ function renderActionList() {
     card.appendChild(row);
 
     // Update indent level for subsequent rows
-    if (isIf || type === 'repeat') indent++;
+    if (isIf || type === 'repeat' || type === 'repeat_while') indent++;
     else if (isEnd) indent = Math.max(0, indent - 1);
   });
 
@@ -4335,7 +4542,9 @@ function removeAction(idx) {
   const actions = triggerData(currentKey).actions || [];
   if (idx < 0 || idx >= actions.length) return;
   const action = actions[idx];
-  const isIf = typeof action === 'object' && action !== null && (action.type || '').toLowerCase() === 'if';
+  const startType = typeof action === 'object' && action !== null ? (action.type || '').toLowerCase() : '';
+  // An If or Repeat takes its End marker with it
+  const isIf = startType === 'if' || startType === 'repeat' || startType === 'repeat_while';
 
   if (isIf) {
     let depth = 1;
@@ -4344,9 +4553,9 @@ function removeAction(idx) {
       const a = actions[i];
       if (typeof a === 'object' && a !== null) {
         const t = (a.type || '').toLowerCase();
-        if (t === 'if') {
+        if (t === 'if' || t === 'repeat' || t === 'repeat_while') {
           depth++;
-        } else if (t === 'end_if' || t === 'end') {
+        } else if (t === 'end_if' || t === 'end' || t === 'end_repeat') {
           depth--;
           if (depth === 0) {
             matchingEndIdx = i;
@@ -4964,13 +5173,20 @@ function editAction(idx) {
   const act = actions[idx];
   if (typeof act === 'object') {
     const type = (act.type||'').toLowerCase();
-    if (type === 'if' || type === 'else_if') {
+    if (type === 'if' || type === 'else_if' || type === 'repeat_while') {
       openCondPicker(idx);
     }
-    else if (type === 'repeat') {
-      showDialog('Edit Repeat Count', 'Times to loop:', String(act.count||1), 'Save', val => {
+    else if (type === 'wait_until') {
+      showDialog('Time Limit', 'Seconds to wait at most before the actions go on anyway (up to a day):', String(act.timeout||60), 'Save', val => {
         if (!val) return;
-        act.count = parseInt(val, 10) || 1;
+        act.timeout = Math.max(1, Math.min(86400, parseInt(val, 10) || 60));
+        saveConfig(); renderActionList();
+      }, true);
+    }
+    else if (type === 'repeat') {
+      showDialog('Repeat', 'Runs the actions inside this many times (up to 1,000). In their text, {round} becomes the round number:', String(act.count||1), 'Save', val => {
+        if (!val) return;
+        act.count = Math.max(1, Math.min(1000, parseInt(val, 10) || 1));
         saveConfig(); renderActionList();
       }, true);
     }
@@ -5322,7 +5538,30 @@ function selectPickerAction(act) {
       if (val) addActionToCurrent(`airplay connect ${val}`);
     });
   } else if (c === '__IF_CONDITION__') {
+    condPickerNewType = 'if';
     openCondPicker(null);
+  } else if (c === '__REPEAT_WHILE__') {
+    condPickerNewType = 'repeat_while';
+    openCondPicker(null);
+  } else if (c === '__EXIT_REPEAT__') {
+    const actions = triggerData(currentKey).actions || [];
+    actions.push({ type: 'exit_repeat' });
+    triggerData(currentKey).actions = actions;
+    saveConfig();
+    renderActionList();
+  } else if (c === '__WAIT_UNTIL__') {
+    condPickerNewType = 'wait_until';
+    openCondPicker(null);
+  } else if (c === '__REPEAT__') {
+    showDialog('Repeat', 'Runs the actions inside this many times (up to 1,000). In their text, {round} becomes the round number:', '', 'Add', val => {
+      if (!val || !(parseInt(val, 10) > 0)) return;
+      const actions = triggerData(currentKey).actions || [];
+      actions.push({ type: 'repeat', count: Math.max(1, Math.min(1000, parseInt(val, 10) || 1)) });
+      actions.push({ type: 'end_repeat' });
+      triggerData(currentKey).actions = actions;
+      saveConfig();
+      renderActionList();
+    }, true);
   } else if (c === '__SET_FLASHLIGHT__') {
     showDialog('Flashlight Intensity', 'Brightness percentage (1-100):', '100', 'Add', val => {
       if (val) addActionToCurrent(`flashlight ${val}`);
@@ -5753,9 +5992,12 @@ function renderCondPicker() {
   });
 }
 
+// The kind of block a new condition makes: 'if', or 'repeat_while' (Repeat While)
+let condPickerNewType = 'if';
+
 function finishIfCondition(def, value, valueTitle, editIdx) {
   const actions = triggerData(currentKey).actions || [];
-  let existingType = 'if';
+  let existingType = editIdx === null ? condPickerNewType : 'if';
   if (editIdx !== null && actions[editIdx] && actions[editIdx].type) {
     existingType = actions[editIdx].type;
   }
@@ -5770,12 +6012,33 @@ function finishIfCondition(def, value, valueTitle, editIdx) {
     expectedTitle: valueTitle
   };
 
+  if (existingType === 'wait_until') {
+    // Wait Until: one row, no End; a new one asks for its time limit, an edited one keeps it
+    condPickerNewType = 'if';
+    if (editIdx !== null) {
+      item.timeout = actions[editIdx].timeout || 60;
+      actions[editIdx] = item;
+      triggerData(currentKey).actions = actions;
+      saveConfig();
+      renderActionList();
+      return;
+    }
+    setTimeout(() => showDialog('Time Limit', 'Seconds to wait at most before the actions go on anyway (up to a day):', '60', 'Add', val => {
+      item.timeout = Math.max(1, Math.min(86400, parseInt(val, 10) || 60));
+      actions.push(item);
+      triggerData(currentKey).actions = actions;
+      saveConfig();
+      renderActionList();
+    }, true), 300);
+    return;
+  }
   if (editIdx !== null) {
     actions[editIdx] = item;
   } else {
     actions.push(item);
-    actions.push({ type: 'end_if' });
+    actions.push({ type: existingType === 'repeat_while' ? 'end_repeat' : 'end_if' });
   }
+  condPickerNewType = 'if';
   triggerData(currentKey).actions = actions;
   saveConfig();
   renderActionList();
@@ -6769,7 +7032,7 @@ function promptManualHAEntity() {
 // toggle, match, exclude }. "match"/"exclude" patterns ending in " ", ":" or "-"
 // are prefixes; anything else must equal the (lowercased) command.
 // Not offered: entries that don't run an action of their own, and Set Flashlight (covered by Flashlight)
-const BANNER_SKIP = new Set(['__IF_CONDITION__', '__DELAY__', '__TOAST__', '__SET_FLASHLIGHT__']);
+const BANNER_SKIP = new Set(['__IF_CONDITION__', '__REPEAT__', '__REPEAT_WHILE__', '__EXIT_REPEAT__', '__WAIT_UNTIL__', '__DELAY__', '__TOAST__', '__SET_FLASHLIGHT__']);
 // The app's names for the same actions, so both UIs share one setting
 const BANNER_ID_ALIASES = { '__SHORTCUT__': '__SHORTCUT_PICKER__', 'queuealbum': 'queue album', 'queueartist': 'queue artist',
   'shuffleall': 'shuffle all songs', 'deletesong': 'delete current song' };

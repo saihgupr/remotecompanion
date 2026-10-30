@@ -360,6 +360,16 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
     return [_config[@"nfcEnabled"] boolValue];
 }
 
+- (NSInteger)runHistoryCount {
+    id count = _config[@"runHistoryCount"];
+    return count ? [count integerValue] : 10;
+}
+
+- (void)setRunHistoryCount:(NSInteger)count {
+    _config[@"runHistoryCount"] = @(MAX(0, MIN(100, count)));
+    [self saveConfig];
+}
+
 - (BOOL)nfcBackgroundReading {
     return [RCConfigManager nfcBackgroundReadingSupported] && [_config[@"nfcBackgroundReading"] boolValue];
 }
@@ -990,7 +1000,24 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         } else if ([type isEqualToString:@"else"]) {
             return @"Else";
         } else if ([type isEqualToString:@"repeat"]) {
-            return [NSString stringWithFormat:@"Repeat %@", dict[@"count"] ?: @""];
+            NSInteger count = [dict[@"count"] integerValue];
+            return count == 1 ? @"Repeat 1 Time" : [NSString stringWithFormat:@"Repeat %ld Times", (long)count];
+        } else if ([type isEqualToString:@"repeat_while"]) {
+            NSString *conditionTitle = dict[@"conditionTitle"] ?: @"Condition";
+            NSString *expectedTitle = dict[@"expectedTitle"] ?: dict[@"expectedValue"] ?: @"";
+            if ([dict[@"conditionKey"] isEqualToString:@"time_between"]) return [NSString stringWithFormat:@"Repeat While Time is Between %@", expectedTitle];
+            return [NSString stringWithFormat:@"Repeat While %@ is %@", conditionTitle, expectedTitle];
+        } else if ([type isEqualToString:@"end_repeat"]) {
+            return @"End Repeat";
+        } else if ([type isEqualToString:@"exit_repeat"]) {
+            return @"Exit Repeat";
+        } else if ([type isEqualToString:@"wait_until"]) {
+            NSString *conditionTitle = dict[@"conditionTitle"] ?: @"Condition";
+            NSString *expectedTitle = dict[@"expectedTitle"] ?: dict[@"expectedValue"] ?: @"";
+            NSInteger limit = [dict[@"timeout"] integerValue] > 0 ? [dict[@"timeout"] integerValue] : 60;
+            NSString *limitText = limit % 60 == 0 && limit >= 60 ? [NSString stringWithFormat:@"%ld min", (long)(limit / 60)] : [NSString stringWithFormat:@"%ld s", (long)limit];
+            if ([dict[@"conditionKey"] isEqualToString:@"time_between"]) return [NSString stringWithFormat:@"Wait Until Time is Between %@ (up to %@)", expectedTitle, limitText];
+            return [NSString stringWithFormat:@"Wait Until %@ is %@ (up to %@)", conditionTitle, expectedTitle, limitText];
         } else if ([type isEqualToString:@"end"] || [type isEqualToString:@"end_if"]) {
             return @"End If";
         }
@@ -1474,10 +1501,14 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         NSString *type = [[dict[@"type"] description] lowercaseString];
         if ([type isEqualToString:@"if"] || [type isEqualToString:@"else_if"] || [type isEqualToString:@"else"]) {
             return @"arrow.triangle.branch";
-        } else if ([type isEqualToString:@"repeat"]) {
+        } else if ([type isEqualToString:@"repeat"] || [type isEqualToString:@"repeat_while"]) {
             return @"repeat";
-        } else if ([type isEqualToString:@"end"] || [type isEqualToString:@"end_if"]) {
+        } else if ([type isEqualToString:@"end"] || [type isEqualToString:@"end_if"] || [type isEqualToString:@"end_repeat"]) {
             return @"arrow.turn.up.left";
+        } else if ([type isEqualToString:@"exit_repeat"]) {
+            return @"arrow.right.to.line";
+        } else if ([type isEqualToString:@"wait_until"]) {
+            return @"hourglass";
         }
         return @"square.grid.2x2";
     }

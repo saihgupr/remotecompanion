@@ -34,6 +34,8 @@
 // Experimental NFC: the system's own background reader reads tags while the screen is on (iPhone XS and later)
 @property (nonatomic, assign) BOOL nfcBackgroundReading;
 + (BOOL)nfcBackgroundReadingSupported;
+// Run History: how many runs of each trigger are kept (0 for none; 10 unless set)
+@property (nonatomic, assign) NSInteger runHistoryCount;
 @property (nonatomic, assign) BOOL rootEnabled;
 @property (nonatomic, assign) BOOL haEnabled;
 @property (nonatomic, copy) NSString *haUrl;

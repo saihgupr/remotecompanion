@@ -2411,6 +2411,33 @@ static BOOL rc_is_end_if_action_item(id item) {
     return [type isEqualToString:@"end_if"] || [type isEqualToString:@"end"];
 }
 
+// Repeat blocks: "repeat" (count) or "repeat_while" (a condition, as for If) ... "end_repeat"
+static BOOL rc_is_repeat_action_item(id item) {
+    if (![item isKindOfClass:[NSDictionary class]]) return NO;
+    NSString *type = [[((NSDictionary *)item)[@"type"] description] lowercaseString];
+    return [type isEqualToString:@"repeat"] || [type isEqualToString:@"repeat_while"];
+}
+
+static BOOL rc_is_end_repeat_action_item(id item) {
+    if (![item isKindOfClass:[NSDictionary class]]) return NO;
+    return [[[((NSDictionary *)item)[@"type"] description] lowercaseString] isEqualToString:@"end_repeat"];
+}
+
+// The End Repeat of the Repeat at start, or NSNotFound
+static NSInteger rc_matching_end_repeat(NSArray *actions, NSInteger start) {
+    NSInteger depth = 0;
+    for (NSInteger i = start; i < (NSInteger)actions.count; i++) {
+        if (rc_is_repeat_action_item(actions[i])) depth++;
+        else if (rc_is_end_repeat_action_item(actions[i]) && --depth == 0) return i;
+    }
+    return NSNotFound;
+}
+
+// A loop can't run away: at most this many rounds, and a round that took less than the minimum
+// (no delay in it) waits out the rest before the next one
+#define RC_REPEAT_MAX_ROUNDS 1000
+#define RC_REPEAT_MIN_ROUND 0.1
+
 
 
 static NSString *rc_trimmed_uppercase_string(NSString *value) {
@@ -3053,6 +3080,14 @@ static void rc_maybe_show_action_banner(NSString *action) {
 static NSMutableDictionary<NSString *, NSNumber *> *g_runGeneration;
 static NSMutableDictionary<NSString *, NSNumber *> *g_runCount;
 static NSMutableDictionary<NSString *, NSHashTable *> *g_runWaits; // dispatch semaphores of the runs' waits
+// The runs going, by an ID of their own, for the app's Running page ("running" command):
+// @{ key, started, step (the action item it's on), loop (@{ repeat, round } of the innermost Repeat) }
+static NSMutableDictionary<NSString *, NSMutableDictionary *> *g_runInfo;
+// One run stopped on its own ("stop run <id>", the Running page's Stop) - the others of its trigger
+// go on - and each run's wait, to cut it short
+static NSMutableSet<NSString *> *g_stoppedRunIDs;
+static NSMutableDictionary<NSString *, dispatch_semaphore_t> *g_runWaitByID;
+#define kRCRunsChangedNotification "com.pizzaman.rc.runs_changed"
 
 static NSObject *rc_run_lock(void) {
     static NSObject *lock;
@@ -3062,8 +3097,221 @@ static NSObject *rc_run_lock(void) {
         g_runGeneration = [NSMutableDictionary dictionary];
         g_runCount = [NSMutableDictionary dictionary];
         g_runWaits = [NSMutableDictionary dictionary];
+        g_runInfo = [NSMutableDictionary dictionary];
+        g_stoppedRunIDs = [NSMutableSet set];
+        g_runWaitByID = [NSMutableDictionary dictionary];
     });
     return lock;
+}
+
+// What a run did, for its trigger's Run History, by action row: an If's or Else If's "true"/"false"
+// counts, a loop's "rounds" (and "cap" when it hit the limit), a Wait Until's "met" and "seconds",
+// an Exit Repeat's "exit" count. Counted, not listed, so a long loop keeps it small.
+static void rc_run_trace(NSInteger index, NSString *field, id value) {
+    NSMutableDictionary *info = [NSThread currentThread].threadDictionary[@"rcRunInfo"];
+    if (!info || index < 0) return;
+    @synchronized (rc_run_lock()) {
+        NSMutableDictionary *trace = info[@"trace"];
+        if (!trace) info[@"trace"] = trace = [NSMutableDictionary dictionary];
+        NSString *row = [NSString stringWithFormat:@"%ld", (long)index];
+        NSMutableDictionary *entry = trace[row];
+        if (!entry) trace[row] = entry = [NSMutableDictionary dictionary];
+        if (value) entry[field] = value;
+        else entry[field] = @([entry[field] integerValue] + 1);
+    }
+}
+
+// Run History: the last runs of each trigger (newest first; how many is the runHistoryCount
+// setting, 10 unless set, 0 for none), kept in a file so they outlast a respring
+#define kRCRunHistoryPath @"/var/mobile/Documents/rc_run_history.json"
+static NSMutableDictionary<NSString *, NSMutableArray *> *g_runHistory;
+
+static NSInteger rc_run_history_count(void) {
+    id count = g_triggerConfig[@"runHistoryCount"];
+    return count ? MAX(0, MIN(100, [count integerValue])) : 10;
+}
+
+// With rc_run_lock held
+static NSMutableDictionary<NSString *, NSMutableArray *> *rc_run_history_locked(void) {
+    if (!g_runHistory) {
+        g_runHistory = [NSMutableDictionary dictionary];
+        NSData *data = [NSData dataWithContentsOfFile:kRCRunHistoryPath];
+        NSDictionary *saved = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+        if ([saved isKindOfClass:[NSDictionary class]]) {
+            for (NSString *key in saved) if ([saved[key] isKindOfClass:[NSArray class]]) g_runHistory[key] = [saved[key] mutableCopy];
+        }
+    }
+    return g_runHistory;
+}
+
+// Writes the history a moment after the last change (several runs ending together write once)
+static void rc_run_history_save_soon(void) {
+    static BOOL pending = NO;
+    @synchronized (rc_run_lock()) {
+        if (pending) return;
+        pending = YES;
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        NSData *data;
+        @synchronized (rc_run_lock()) {
+            pending = NO;
+            data = [NSJSONSerialization dataWithJSONObject:rc_run_history_locked() options:0 error:nil];
+        }
+        [data writeToFile:kRCRunHistoryPath atomically:YES];
+    });
+}
+
+// A run has ended: its record goes to the top of its trigger's history
+static void rc_run_history_add(NSDictionary *info, BOOL stopped) {
+    NSInteger keep = rc_run_history_count();
+    NSString *key = info[@"key"];
+    if (!key.length) return;
+    @synchronized (rc_run_lock()) {
+        NSMutableDictionary<NSString *, NSMutableArray *> *history = rc_run_history_locked();
+        if (keep == 0) {
+            if (history.count) { [history removeAllObjects]; }
+            else return;
+        } else {
+            NSMutableDictionary *record = [NSMutableDictionary dictionary];
+            record[@"started"] = info[@"started"] ?: @0;
+            record[@"seconds"] = @(MAX(0, [[NSDate date] timeIntervalSince1970] - [info[@"started"] doubleValue]));
+            record[@"outcome"] = stopped ? @"stopped" : @"finished";
+            if (info[@"test"]) record[@"test"] = @YES;
+            if ([info[@"trace"] count] && [NSJSONSerialization isValidJSONObject:info[@"trace"]]) record[@"trace"] = [info[@"trace"] copy];
+            // The actions as they were for this run, so the record still reads right after the
+            // trigger is edited; the trigger, for the Running page's list of every trigger's runs;
+            // and the step a stopped run was on
+            record[@"key"] = key;
+            if ([info[@"actions"] isKindOfClass:[NSArray class]] && [NSJSONSerialization isValidJSONObject:info[@"actions"]]) record[@"actions"] = info[@"actions"];
+            if (stopped && info[@"index"]) record[@"index"] = info[@"index"];
+            NSMutableArray *runs = history[key] ?: [NSMutableArray array];
+            [runs insertObject:record atIndex:0];
+            while ((NSInteger)runs.count > keep) [runs removeLastObject];
+            history[key] = runs;
+            // A smaller setting trims the others too
+            for (NSString *other in history.allKeys) {
+                NSMutableArray *list = history[other];
+                while ((NSInteger)list.count > keep) [list removeLastObject];
+            }
+        }
+    }
+    rc_run_history_save_soon();
+}
+
+// "run history <key>" (JSON, newest first) and "clear run history <key>"
+static NSString *rc_run_history_json(NSString *key) {
+    NSArray *runs;
+    @synchronized (rc_run_lock()) { runs = [rc_run_history_locked()[key] copy] ?: @[]; }
+    NSData *data = [NSJSONSerialization dataWithJSONObject:runs options:0 error:nil];
+    return [[NSString alloc] initWithData:data ?: [NSData data] encoding:NSUTF8StringEncoding] ?: @"[]";
+}
+
+// "run history" alone: every trigger's runs together, newest first, at most limit of them
+static NSString *rc_run_history_all_json(NSInteger limit) {
+    NSMutableArray *runs = [NSMutableArray array];
+    @synchronized (rc_run_lock()) {
+        NSDictionary *history = rc_run_history_locked();
+        for (NSString *key in history) {
+            for (NSDictionary *run in history[key]) {
+                if (run[@"key"]) { [runs addObject:run]; continue; }
+                NSMutableDictionary *withKey = [run mutableCopy]; // a record from before records kept their trigger
+                withKey[@"key"] = key;
+                [runs addObject:withKey];
+            }
+        }
+    }
+    [runs sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) { return [b[@"started"] compare:a[@"started"]]; }];
+    if (limit > 0 && (NSInteger)runs.count > limit) [runs removeObjectsInRange:NSMakeRange(limit, runs.count - limit)];
+    NSData *data = [NSJSONSerialization dataWithJSONObject:runs options:0 error:nil];
+    return [[NSString alloc] initWithData:data ?: [NSData data] encoding:NSUTF8StringEncoding] ?: @"[]";
+}
+
+// One run ("delete run history <started> <key>"), by the time it started; returns whether it was there
+static BOOL rc_run_history_delete(NSString *key, double started) {
+    BOOL found = NO;
+    @synchronized (rc_run_lock()) {
+        NSMutableArray *runs = rc_run_history_locked()[key];
+        for (NSInteger i = (NSInteger)runs.count - 1; i >= 0; i--) {
+            if (fabs([runs[i][@"started"] doubleValue] - started) < 0.001) { [runs removeObjectAtIndex:i]; found = YES; }
+        }
+        if (runs && !runs.count) [rc_run_history_locked() removeObjectForKey:key];
+    }
+    if (found) rc_run_history_save_soon();
+    return found;
+}
+
+// One trigger's ("clear run history <key>") or every trigger's ("clear run history")
+static void rc_run_history_clear(NSString *key) {
+    @synchronized (rc_run_lock()) {
+        if (key.length) [rc_run_history_locked() removeObjectForKey:key];
+        else [rc_run_history_locked() removeAllObjects];
+    }
+    rc_run_history_save_soon();
+}
+
+// Stops one run, by its ID; returns whether it was going
+static BOOL rc_stop_run(NSString *runID) {
+    @synchronized (rc_run_lock()) {
+        if (!g_runInfo[runID]) return NO;
+        [g_stoppedRunIDs addObject:runID];
+        dispatch_semaphore_t wait = g_runWaitByID[runID];
+        if (wait) dispatch_semaphore_signal(wait);
+        return YES;
+    }
+}
+
+// Registers the run on this thread under its ID (its wait, for rc_stop_run), and forgets it again
+static void rc_run_register_id(NSString *runID, dispatch_semaphore_t wait) {
+    [NSThread currentThread].threadDictionary[@"rcRunID"] = runID;
+    @synchronized (rc_run_lock()) { g_runWaitByID[runID] = wait; }
+}
+
+static void rc_run_forget_id(NSString *runID) {
+    [[NSThread currentThread].threadDictionary removeObjectForKey:@"rcRunID"];
+    @synchronized (rc_run_lock()) {
+        [g_runWaitByID removeObjectForKey:runID];
+        [g_stoppedRunIDs removeObject:runID];
+    }
+}
+
+// What the run on this thread is doing now (its step, and the round of the loop it's in)
+static void rc_run_note_step(id item, NSInteger index, NSDictionary *loop) {
+    NSMutableDictionary *info = [NSThread currentThread].threadDictionary[@"rcRunInfo"];
+    if (!info) return;
+    @synchronized (rc_run_lock()) {
+        if (item) info[@"step"] = item;
+        info[@"index"] = @(index); // its row in the trigger's actions (the editor highlights it)
+        if (loop) info[@"loop"] = loop; else [info removeObjectForKey:@"loop"];
+    }
+    // The editor follows each step as it happens - only while one is on screen (the app sets
+    // com.pizzaman.rc.run_watch), so a run nobody watches sends nothing
+    static int watchToken = NOTIFY_TOKEN_INVALID;
+    if (watchToken == NOTIFY_TOKEN_INVALID) notify_register_check("com.pizzaman.rc.run_watch", &watchToken);
+    uint64_t watching = 0;
+    if (watchToken != NOTIFY_TOKEN_INVALID) notify_get_state(watchToken, &watching);
+    if (watching) notify_post("com.pizzaman.rc.run_step");
+}
+
+// "running": the runs going, as JSON - [{ key, seconds, step, loop }]
+static NSString *rc_running_runs_json(void) {
+    NSMutableArray *runs = [NSMutableArray array];
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    @synchronized (rc_run_lock()) {
+        for (NSDictionary *info in g_runInfo.allValues) {
+            NSMutableDictionary *run = [NSMutableDictionary dictionary];
+            run[@"key"] = info[@"key"];
+            run[@"id"] = info[@"id"];
+            run[@"seconds"] = @(MAX(0, now - [info[@"started"] doubleValue]));
+            if (info[@"index"]) run[@"index"] = info[@"index"];
+            if (info[@"test"]) run[@"test"] = info[@"test"];
+            if (info[@"step"] && [NSJSONSerialization isValidJSONObject:@[info[@"step"]]]) run[@"step"] = info[@"step"];
+            if (info[@"loop"] && [NSJSONSerialization isValidJSONObject:info[@"loop"]]) run[@"loop"] = info[@"loop"];
+            [runs addObject:run];
+        }
+    }
+    [runs sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) { return [b[@"seconds"] compare:a[@"seconds"]]; }];
+    NSData *data = [NSJSONSerialization dataWithJSONObject:runs options:0 error:nil];
+    return [[NSString alloc] initWithData:data ?: [NSData data] encoding:NSUTF8StringEncoding] ?: @"[]";
 }
 
 // Whether the run on this thread has been stopped
@@ -3072,6 +3320,8 @@ static BOOL rc_run_stopped(void) {
     NSString *key = thread[@"rcRunKey"];
     if (!key) return NO;
     @synchronized (rc_run_lock()) {
+        NSString *runID = thread[@"rcRunID"];
+        if (runID && [g_stoppedRunIDs containsObject:runID]) return YES;
         return ![g_runGeneration[key] isEqual:thread[@"rcRunGeneration"]];
     }
 }
@@ -3100,8 +3350,21 @@ static BOOL rc_run_wait(double seconds) {
     return !rc_run_stopped();
 }
 
+static BOOL rc_evaluate_if_condition(NSDictionary *ifAction);
+
+// {round} in an action inside a Repeat: the round the innermost loop is on (1, 2, 3...), so an
+// action can count ("Reminder {round}") or step a value ("brightness {round}0"). Outside a loop
+// the text is left as it is.
+static NSString *rc_fill_round(NSString *action, NSArray<NSDictionary *> *loops) {
+    if (!loops.count || [action rangeOfString:@"{round}"].location == NSNotFound) return action;
+    NSString *round = [NSString stringWithFormat:@"%ld", (long)[loops.lastObject[@"rounds"] integerValue]];
+    return [action stringByReplacingOccurrencesOfString:@"{round}" withString:round];
+}
+
 static void rc_execute_action_sequence(NSArray *actions, NSString *triggerKey, BOOL simulationMode) {
     if (![actions isKindOfClass:[NSArray class]] || actions.count == 0) return;
+    // Repeat blocks running, innermost last: @{ start, rounds, roundStart }
+    NSMutableArray<NSMutableDictionary *> *loops = [NSMutableArray array];
     
     for (NSInteger idx = 0; idx < (NSInteger)actions.count; idx++) {
         id actionItem = actions[idx];
@@ -3115,9 +3378,13 @@ static void rc_execute_action_sequence(NSArray *actions, NSString *triggerKey, B
             SRLog(@"[%@] Skipping disabled action: %@", triggerKey, actionItem);
             continue;
         }
+        if (!rc_is_end_repeat_action_item(actionItem) && !rc_is_repeat_action_item(actionItem)) {
+            NSDictionary *loop = loops.lastObject;
+            rc_run_note_step(actionItem, idx, loop ? @{ @"repeat": actions[[loop[@"start"] integerValue]], @"round": loop[@"rounds"] } : nil);
+        }
         
         if ([actionItem isKindOfClass:[NSString class]]) {
-            NSString *action = (NSString *)actionItem;
+            NSString *action = rc_fill_round((NSString *)actionItem, loops);
             SRLogMin(@"[%@] -> %@", triggerKey, action);
             RCTKEvent(@"action", @{ @"trigger": triggerKey ?: @"", @"command": action });
             handle_command(action);
@@ -3137,6 +3404,7 @@ static void rc_execute_action_sequence(NSArray *actions, NSString *triggerKey, B
         if ([type isEqualToString:@"if"]) {
             BOOL shouldRunBlock = rc_evaluate_if_condition(dictAction);
             SRLogMin(@"[%@] If %@ == %@ -> %@", triggerKey, dictAction[@"conditionKey"], dictAction[@"expectedValue"], shouldRunBlock ? @"TRUE" : @"FALSE");
+            rc_run_trace(idx, shouldRunBlock ? @"true" : @"false", nil);
             RCTKEvent(@"condition", @{ @"key": [dictAction[@"conditionKey"] description] ?: @"", @"expected": [dictAction[@"expectedValue"] description] ?: @"", @"result": @(shouldRunBlock) });
             
             if (shouldRunBlock) {
@@ -3161,6 +3429,7 @@ static void rc_execute_action_sequence(NSArray *actions, NSString *triggerKey, B
                             NSDictionary *elseIfDict = (NSDictionary *)item;
                             BOOL elseIfVal = rc_evaluate_if_condition(elseIfDict);
                             SRLogMin(@"[%@] Else If %@ == %@ -> %@", triggerKey, elseIfDict[@"conditionKey"], elseIfDict[@"expectedValue"], elseIfVal ? @"TRUE" : @"FALSE");
+                            rc_run_trace(skipIdx, elseIfVal ? @"true" : @"false", nil);
                             RCTKEvent(@"condition", @{ @"key": [elseIfDict[@"conditionKey"] description] ?: @"", @"expected": [elseIfDict[@"expectedValue"] description] ?: @"", @"result": @(elseIfVal), @"elseIf": @YES });
                             if (elseIfVal) {
                                 idx = skipIdx;
@@ -3197,6 +3466,89 @@ static void rc_execute_action_sequence(NSArray *actions, NSString *triggerKey, B
             }
         } else if ([type isEqualToString:@"end_if"] || [type isEqualToString:@"end"]) {
             continue;
+        } else if ([type isEqualToString:@"repeat"] || [type isEqualToString:@"repeat_while"]) {
+            BOOL isWhile = [type isEqualToString:@"repeat_while"];
+            BOOL enter;
+            if (isWhile) {
+                enter = rc_evaluate_if_condition(dictAction);
+                SRLogMin(@"[%@] Repeat While %@ == %@ -> %@", triggerKey, dictAction[@"conditionKey"], dictAction[@"expectedValue"], enter ? @"TRUE" : @"FALSE");
+            } else {
+                enter = [dictAction[@"count"] integerValue] > 0;
+                SRLogMin(@"[%@] Repeat %ld times", triggerKey, (long)[dictAction[@"count"] integerValue]);
+            }
+            if (!enter) {
+                rc_run_trace(idx, @"rounds", @0);
+                NSInteger end = rc_matching_end_repeat(actions, idx);
+                if (end == NSNotFound) {
+                    SRLog(@"[%@] Missing End Repeat marker; stopping action execution.", triggerKey);
+                    break;
+                }
+                idx = end;
+                continue;
+            }
+            [loops addObject:[@{ @"start": @(idx), @"rounds": @1, @"roundStart": @(CFAbsoluteTimeGetCurrent()) } mutableCopy]];
+            rc_run_note_step(dictAction, idx, @{ @"repeat": dictAction, @"round": @1 });
+        } else if ([type isEqualToString:@"exit_repeat"]) {
+            // Exit Repeat: leave the innermost loop now, after its End Repeat
+            NSMutableDictionary *loop = loops.lastObject;
+            if (!loop) {
+                SRLog(@"[%@] Exit Repeat outside a Repeat - ignored", triggerKey);
+                continue;
+            }
+            NSInteger start = [loop[@"start"] integerValue];
+            NSInteger end = rc_matching_end_repeat(actions, start);
+            SRLogMin(@"[%@] Exit Repeat in round %ld", triggerKey, (long)[loop[@"rounds"] integerValue]);
+            rc_run_trace(idx, @"exit", nil);
+            rc_run_trace(start, @"rounds", loop[@"rounds"]);
+            [loops removeLastObject];
+            if (end == NSNotFound) break;
+            idx = end;
+        } else if ([type isEqualToString:@"wait_until"]) {
+            // Wait Until: until the condition (as for If) is true, checked twice a second, for at most
+            // its time limit; then the actions go on either way
+            double limit = [dictAction[@"timeout"] doubleValue];
+            if (limit <= 0) limit = 60;
+            limit = MIN(limit, 24 * 3600);
+            CFAbsoluteTime started = CFAbsoluteTimeGetCurrent();
+            BOOL met = rc_evaluate_if_condition(dictAction);
+            while (!met && CFAbsoluteTimeGetCurrent() - started < limit) {
+                if (!rc_run_wait(0.5)) break; // stopped
+                met = rc_evaluate_if_condition(dictAction);
+            }
+            if (rc_run_stopped()) continue; // the top of the loop ends the run
+            rc_run_trace(idx, @"met", @(met));
+            rc_run_trace(idx, @"seconds", @(round((CFAbsoluteTimeGetCurrent() - started) * 10) / 10));
+            SRLogMin(@"[%@] Wait Until %@ == %@ -> %@ after %.1f s", triggerKey, dictAction[@"conditionKey"], dictAction[@"expectedValue"],
+                     met ? @"TRUE" : @"time limit", CFAbsoluteTimeGetCurrent() - started);
+        } else if ([type isEqualToString:@"end_repeat"]) {
+            NSMutableDictionary *loop = loops.lastObject;
+            if (!loop) continue; // an End Repeat without its Repeat
+            NSInteger start = [loop[@"start"] integerValue];
+            NSDictionary *repeat = actions[start];
+            NSInteger rounds = [loop[@"rounds"] integerValue];
+            BOOL isWhile = [[[repeat[@"type"] description] lowercaseString] isEqualToString:@"repeat_while"];
+            BOOL again = isWhile ? YES : rounds < [repeat[@"count"] integerValue];
+            if (again && rounds >= RC_REPEAT_MAX_ROUNDS) {
+                SRLogMin(@"[%@] Repeat stopped after %d rounds (the most a loop runs)", triggerKey, RC_REPEAT_MAX_ROUNDS);
+                rc_run_trace(start, @"cap", @YES);
+                again = NO;
+            }
+            if (again) {
+                CFTimeInterval took = CFAbsoluteTimeGetCurrent() - [loop[@"roundStart"] doubleValue];
+                if (took < RC_REPEAT_MIN_ROUND) usleep((useconds_t)((RC_REPEAT_MIN_ROUND - took) * 1000000));
+                if (rc_run_stopped()) continue; // the top of the loop ends the run
+                if (isWhile) again = rc_evaluate_if_condition(repeat);
+            }
+            if (again) {
+                loop[@"rounds"] = @(rounds + 1);
+                loop[@"roundStart"] = @(CFAbsoluteTimeGetCurrent());
+                idx = start; // the loop's next step is the block's first action
+                rc_run_note_step(repeat, start, @{ @"repeat": repeat, @"round": @(rounds + 1) });
+            } else {
+                SRLogMin(@"[%@] %@ ended after %ld round%@", triggerKey, isWhile ? @"Repeat While" : @"Repeat", (long)rounds, rounds == 1 ? @"" : @"s");
+                rc_run_trace(start, @"rounds", @(rounds));
+                [loops removeLastObject];
+            }
         } else {
             SRLog(@"[%@] Skipping unsupported dictionary action type: %@", triggerKey, type);
         }
@@ -3228,7 +3580,38 @@ static void execute_actions_for_simulation(NSString *triggerKey) {
     }
     
     SRLog(@"SIMULATE: Executing %lu actions for '%@'", (unsigned long)actions.count, triggerKey);
+    // A test run is a run of the trigger too: listed on the Running page, highlighted in the
+    // editor, and stopped by Stop
+    NSMutableDictionary *thread = [NSThread currentThread].threadDictionary;
+    dispatch_semaphore_t wait = dispatch_semaphore_create(0);
+    NSString *runID = [NSUUID UUID].UUIDString;
+    NSMutableDictionary *info = [@{ @"id": runID, @"key": triggerKey, @"started": @([[NSDate date] timeIntervalSince1970]), @"test": @YES, @"actions": [actions copy] } mutableCopy];
+    NSNumber *generation;
+    @synchronized (rc_run_lock()) {
+        generation = g_runGeneration[triggerKey] ?: @0;
+        g_runGeneration[triggerKey] = generation;
+        g_runCount[triggerKey] = @(g_runCount[triggerKey].unsignedIntegerValue + 1);
+        if (!g_runWaits[triggerKey]) g_runWaits[triggerKey] = [NSHashTable weakObjectsHashTable];
+        [g_runWaits[triggerKey] addObject:wait];
+        g_runInfo[runID] = info;
+    }
+    notify_post(kRCRunsChangedNotification);
+    thread[@"rcRunKey"] = triggerKey;
+    thread[@"rcRunGeneration"] = generation;
+    thread[@"rcRunWait"] = wait;
+    thread[@"rcRunInfo"] = info;
+    rc_run_register_id(runID, wait);
     rc_execute_action_sequence(actions, [NSString stringWithFormat:@"SIMULATE:%@", triggerKey], YES);
+    rc_run_history_add(info, rc_run_stopped());
+    rc_run_forget_id(runID);
+    [thread removeObjectsForKeys:@[@"rcRunKey", @"rcRunGeneration", @"rcRunWait", @"rcRunInfo"]];
+    @synchronized (rc_run_lock()) {
+        [g_runInfo removeObjectForKey:runID];
+        [g_runWaits[triggerKey] removeObject:wait];
+        NSUInteger left = g_runCount[triggerKey].unsignedIntegerValue;
+        g_runCount[triggerKey] = @(left ? left - 1 : 0);
+    }
+    notify_post(kRCRunsChangedNotification);
 }
 
 // Callback for simulation notifications
@@ -3400,16 +3783,26 @@ void RCExecuteTrigger(NSString *triggerKey) {
             if (!g_runWaits[triggerKey]) g_runWaits[triggerKey] = [NSHashTable weakObjectsHashTable];
             [g_runWaits[triggerKey] addObject:wait];
         }
+        NSString *runID = [NSUUID UUID].UUIDString;
+        NSMutableDictionary *info = [@{ @"id": runID, @"key": triggerKey, @"started": @([[NSDate date] timeIntervalSince1970]), @"actions": [actions copy] } mutableCopy];
+        @synchronized (rc_run_lock()) { g_runInfo[runID] = info; }
+        rc_run_register_id(runID, wait);
+        notify_post(kRCRunsChangedNotification);
         thread[@"rcRunKey"] = triggerKey;
         thread[@"rcRunGeneration"] = generation;
         thread[@"rcRunWait"] = wait;
+        thread[@"rcRunInfo"] = info;
         rc_execute_action_sequence(actions, triggerKey, NO);
-        [thread removeObjectsForKeys:@[@"rcRunKey", @"rcRunGeneration", @"rcRunWait"]];
+        rc_run_history_add(info, rc_run_stopped());
+        rc_run_forget_id(runID);
+        [thread removeObjectsForKeys:@[@"rcRunKey", @"rcRunGeneration", @"rcRunWait", @"rcRunInfo"]];
         @synchronized (rc_run_lock()) {
+            [g_runInfo removeObjectForKey:runID];
             [g_runWaits[triggerKey] removeObject:wait];
             NSUInteger left = g_runCount[triggerKey].unsignedIntegerValue;
             g_runCount[triggerKey] = @(left ? left - 1 : 0);
         }
+        notify_post(kRCRunsChangedNotification);
     });
 }
 
@@ -10130,6 +10523,37 @@ static NSString *handle_command(NSString *cmd) {
             arg = [[cleanCmd substringFromIndex:8] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         }
         return rc_handle_snapper(arg);
+    } else if ([cleanCmd isEqualToString:@"run history"] || [cleanCmd isEqualToString:@"run history all"] || [cleanCmd hasPrefix:@"run history all "]) {
+        // Every trigger's runs, newest first ("run history all 50" for at most 50)
+        NSInteger limit = [cleanCmd hasPrefix:@"run history all "] ? [[cleanCmd substringFromIndex:16] integerValue] : 0;
+        return [rc_run_history_all_json(limit) stringByAppendingString:@"\n"];
+    } else if ([cleanCmd hasPrefix:@"delete run history "]) {
+        // The start time first: a trigger's key can have spaces
+        NSString *rest = [[cleanCmd substringFromIndex:19] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        NSRange space = [rest rangeOfString:@" "];
+        if (space.location == NSNotFound) return @"Usage: delete run history <started> <key>\n";
+        NSString *key = [[rest substringFromIndex:space.location + 1] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        BOOL found = rc_run_history_delete(key, [[rest substringToIndex:space.location] doubleValue]);
+        return found ? @"Run deleted\n" : @"Run not found\n";
+    } else if ([cleanCmd isEqualToString:@"clear run history"]) {
+        rc_run_history_clear(nil);
+        return @"Run history cleared\n";
+    } else if ([cleanCmd hasPrefix:@"run history "]) {
+        NSString *key = [[cleanCmd substringFromIndex:12] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        return [rc_run_history_json(key) stringByAppendingString:@"\n"];
+    } else if ([cleanCmd hasPrefix:@"clear run history "]) {
+        NSString *key = [[cleanCmd substringFromIndex:18] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        rc_run_history_clear(key);
+        return @"Run history cleared\n";
+    } else if ([cleanCmd hasPrefix:@"stop run "]) {
+        // One run, by its ID from "running" (the Running page's Stop): the trigger's other runs go on
+        NSString *runID = [[cmd stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] substringFromIndex:9];
+        BOOL stopped = rc_stop_run([runID stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]]);
+        SRLogMin(@"[Stop] Run %@: %@", runID, stopped ? @"stopped" : @"not running");
+        return stopped ? @"Stopped the run\n" : @"That run isn't running\n";
+    } else if ([cleanCmd isEqualToString:@"running"]) {
+        // The runs going, for the app's Running page
+        return [rc_running_runs_json() stringByAppendingString:@"\n"];
     } else if ([cleanCmd hasPrefix:@"stop trigger "]) {
         NSString *key = [[cleanCmd substringFromIndex:13] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         NSUInteger running = rc_stop_trigger_runs(key);
@@ -11469,6 +11893,24 @@ static void start_web_server() {
                                     // Remove backslash escaping for forward slashes
                                     jsonStr = [jsonStr stringByReplacingOccurrencesOfString:@"\\/" withString:@"/"];
                                     responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)[jsonStr lengthOfBytesUsingEncoding:NSUTF8StringEncoding], jsonStr];
+                                }
+                            } else if ([path isEqualToString:@"/api/running"] && [method isEqualToString:@"GET"]) {
+                                // The runs going (the Web UI's Running page), as the "running" command lists them
+                                load_trigger_config();
+                                if (![g_triggerConfig[@"webUIEnabled"] boolValue]) {
+                                    responseString = [NSString stringWithFormat:@"HTTP/1.1 403 Forbidden\r\n%@Content-Length: 17\r\n\r\nWeb UI is disabled", cors];
+                                } else {
+                                    NSString *jsonStr = rc_running_runs_json();
+                                    responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nCache-Control: no-store\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)[jsonStr lengthOfBytesUsingEncoding:NSUTF8StringEncoding], jsonStr];
+                                }
+                            } else if ([path isEqualToString:@"/api/history"] && [method isEqualToString:@"GET"]) {
+                                // The last runs that ended, every trigger's, newest first (the Running sheet's Recent)
+                                load_trigger_config();
+                                if (![g_triggerConfig[@"webUIEnabled"] boolValue]) {
+                                    responseString = [NSString stringWithFormat:@"HTTP/1.1 403 Forbidden\r\n%@Content-Length: 17\r\n\r\nWeb UI is disabled", cors];
+                                } else {
+                                    NSString *jsonStr = rc_run_history_all_json(10);
+                                    responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nCache-Control: no-store\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)[jsonStr lengthOfBytesUsingEncoding:NSUTF8StringEncoding], jsonStr];
                                 }
                             } else if ([path isEqualToString:@"/api/taprecordstatus"] && ([method isEqualToString:@"GET"] || [method isEqualToString:@"POST"])) {
                                 load_trigger_config();

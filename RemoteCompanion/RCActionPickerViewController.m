@@ -21,6 +21,19 @@
 
 @implementation RCActionPickerViewController
 
+// One pick per opening: a second tap while the list is closing (easy on a slower iPhone) would
+// otherwise add the action twice, or ask for its details twice
+- (void)setOnActionSelected:(void (^)(NSString *))onActionSelected {
+    if (!onActionSelected) { _onActionSelected = nil; return; }
+    __block BOOL picked = NO;
+    void (^once)(NSString *) = ^(NSString *action) {
+        if (picked) return;
+        picked = YES;
+        onActionSelected(action);
+    };
+    _onActionSelected = [once copy];
+}
+
 - (instancetype)init {
     self = [super initWithStyle:UITableViewStyleInsetGrouped];
     if (self) _selectedCategory = -1;
@@ -303,6 +316,10 @@
         @[
             @{ @"name": @"Custom Lua Script", @"command": @"__LUA_SCRIPT__", @"icon": @"scroll.fill" },
             @{ @"name": @"If Condition...", @"command": @"__IF_CONDITION__", @"icon": @"arrow.triangle.branch" },
+            @{ @"name": @"Repeat...", @"command": @"__REPEAT__", @"icon": @"repeat" },
+            @{ @"name": @"Repeat While...", @"command": @"__REPEAT_WHILE__", @"icon": @"repeat" },
+            @{ @"name": @"Exit Repeat", @"command": @"__EXIT_REPEAT__", @"icon": @"arrow.right.to.line" },
+            @{ @"name": @"Wait Until...", @"command": @"__WAIT_UNTIL__", @"icon": @"hourglass" },
             @{ @"name": @"Delay", @"command": @"__DELAY__", @"icon": @"hourglass" },
             @{ @"name": @"Stop Trigger...", @"command": @"__STOP_TRIGGER__", @"icon": @"stop.circle" },
             @{ @"name": @"Terminal Command", @"command": @"__CUSTOM__", @"icon": @"terminal.fill" },
@@ -502,6 +519,10 @@
         [cmd isEqualToString:@"__LUA_SCRIPT__"] || 
         [cmd isEqualToString:@"__TOAST__"] || 
         [cmd isEqualToString:@"__IF_CONDITION__"] ||
+        [cmd isEqualToString:@"__REPEAT__"] ||
+        [cmd isEqualToString:@"__REPEAT_WHILE__"] ||
+        [cmd isEqualToString:@"__EXIT_REPEAT__"] ||
+        [cmd isEqualToString:@"__WAIT_UNTIL__"] ||
         [cmd isEqualToString:@"__DELAY__"] ||
         [cmd isEqualToString:@"__STOP_TRIGGER__"] ||
         [cmd isEqualToString:@"__CUSTOM__"] ||
@@ -521,6 +542,7 @@
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    if (self.isBeingDismissed || self.navigationController.isBeingDismissed) return; // already picked, closing
     
     NSDictionary *action = [self actionAtIndexPath:indexPath];
     NSString *command = action[@"command"];
