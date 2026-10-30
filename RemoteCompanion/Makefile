@@ -23,6 +23,7 @@ RemoteCompanion_FILES += RCTestKitViewController.m RCTestReportViewController.m 
 # Shared UI components
 RemoteCompanion_FILES += RCCategoryBar.m
 RemoteCompanion_FILES += RCFocusPickerViewController.m
+RemoteCompanion_FILES += RCTriggerPickerViewController.m
 
 # Reorganized Settings submenus
 RemoteCompanion_FILES += RCAdvancedSettingsViewController.m
