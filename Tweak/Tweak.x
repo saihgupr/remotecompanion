@@ -1,3 +1,4 @@
+#include <poll.h>
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <netinet/in.h>
@@ -11703,10 +11704,25 @@ static void start_server() {
                 setsockopt(new_socket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
                 setsockopt(new_socket, SOL_SOCKET, SO_SNDTIMEO, (const char*)&tv, sizeof tv);
 
-                char local_buffer[1024] = {0};
-                ssize_t valread = read(new_socket, local_buffer, 1024);
+                // A command longer than one read (a long variable value) arrives in pieces. When the
+                // first read fills the buffer, keep reading while more comes within 100 ms (at most
+                // 256 KB); a short command is still read in one go, with no wait.
+                NSMutableData *received = [NSMutableData data];
+                char local_buffer[4096];
+                ssize_t chunk = read(new_socket, local_buffer, sizeof(local_buffer));
+                if (chunk > 0) [received appendBytes:local_buffer length:chunk];
+                if (chunk == (ssize_t)sizeof(local_buffer)) {
+                    while (received.length < 256 * 1024) {
+                        struct pollfd pfd = { .fd = new_socket, .events = POLLIN, .revents = 0 };
+                        if (poll(&pfd, 1, 100) <= 0) break;
+                        chunk = read(new_socket, local_buffer, sizeof(local_buffer));
+                        if (chunk <= 0) break;
+                        [received appendBytes:local_buffer length:chunk];
+                    }
+                }
+                ssize_t valread = (ssize_t)received.length;
                 if (valread > 0) {
-                    NSString *cmd = [[NSString alloc] initWithBytes:local_buffer length:valread encoding:NSUTF8StringEncoding];
+                    NSString *cmd = [[NSString alloc] initWithData:received encoding:NSUTF8StringEncoding];
                     // UNIX Sockets are inherently local, no need to check IP or tcpEnabled config
                     g_rcCommandFromLocalSocket = YES;
                     NSString *response = handle_command(cmd);
