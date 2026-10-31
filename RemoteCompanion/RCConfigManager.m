@@ -780,6 +780,8 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         @"trigger_power_disconnect": @"Power Disconnected",
         @"trigger_carplay_connect": @"CarPlay Connected",
         @"trigger_carplay_disconnect": @"CarPlay Disconnected",
+        @"trigger_device_rotated_landscape": @"Rotated to Landscape",
+        @"trigger_device_rotated_portrait": @"Rotated to Portrait",
         @"trigger_media_play": @"Media Playing",
         @"trigger_media_pause": @"Media Paused",
         @"trigger_media_track_change": @"Media Track Changed",
