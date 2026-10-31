@@ -6,6 +6,10 @@
 @property (nonatomic, assign) BOOL masterEnabled;
 @property (nonatomic, assign) BOOL tcpEnabled;
 @property (nonatomic, assign) BOOL webUIEnabled;
+// Who can reach the Web UI: @"any" (the default), @"networks" (only on webUINetworks) or @"local" (this iPhone only)
+@property (nonatomic, copy) NSString *webUIAccess;
+// Wi-Fi network names the Web UI can be reached on when webUIAccess is @"networks"
+@property (nonatomic, copy) NSArray<NSString *> *webUINetworks;
 // Hold lists (and row swipe actions) still while a status bar, bottom bar,
 // or edge swipe gesture is being executed. Off by default.
 @property (nonatomic, assign) BOOL freezeListsDuringGestures;

@@ -24,6 +24,7 @@ RemoteCompanion_FILES += RCTestKitViewController.m RCTestReportViewController.m 
 RemoteCompanion_FILES += RCCategoryBar.m
 RemoteCompanion_FILES += RCToastPill.m
 RemoteCompanion_FILES += RCFocusPickerViewController.m
+RemoteCompanion_FILES += RCWebUIAccessViewController.m
 
 # Reorganized Settings submenus
 RemoteCompanion_FILES += RCAdvancedSettingsViewController.m

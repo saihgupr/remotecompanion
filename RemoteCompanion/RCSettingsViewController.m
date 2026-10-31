@@ -4,6 +4,7 @@
 #import "RCIntegrationsViewController.h"
 #import "RCAdvancedSettingsViewController.h"
 #import "RCTestKitViewController.h"
+#import "RCWebUIAccessViewController.h"
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #include <ifaddrs.h>
 #include <arpa/inet.h>
@@ -184,6 +185,7 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
 }
 
 - (NSString *)webUIUrlString {
+    if ([[RCConfigManager sharedManager].webUIAccess isEqualToString:@"local"]) return @"http://localhost:8080";
     NSString *ip = [self deviceIPAddress];
     if (ip.length) {
         return [NSString stringWithFormat:@"http://%@:8080", ip];
@@ -235,7 +237,7 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if (section == RCSettingsSectionGeneral) {
-        return [RCConfigManager sharedManager].webUIEnabled ? 3 : 2;
+        return [RCConfigManager sharedManager].webUIEnabled ? 4 : 2; // with Access and Open Web UI
     }
     if (section == RCSettingsSectionBackup) {
         return 2;
@@ -246,7 +248,7 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     RCConfigManager *cm = [RCConfigManager sharedManager];
     
-    BOOL isLinkRow = (indexPath.section == RCSettingsSectionGeneral && indexPath.row == 2);
+    BOOL isLinkRow = (indexPath.section == RCSettingsSectionGeneral && indexPath.row >= 2);
     UITableViewCellStyle style = isLinkRow ? UITableViewCellStyleValue1 : UITableViewCellStyleDefault;
     UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:style reuseIdentifier:nil];
     cell.backgroundColor = [cm tweakColorForKey:@"blockBackground" defaultVal:0.12];
@@ -280,6 +282,10 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
             cell.accessoryView = _webUISwitch;
             cell.selectionStyle = UITableViewCellSelectionStyleNone;
         } else if (indexPath.row == 2) {
+            cell.textLabel.text = @"Access";
+            cell.detailTextLabel.text = [RCWebUIAccessViewController titleForAccess:cm.webUIAccess];
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        } else if (indexPath.row == 3) {
             cell.textLabel.text = @"Open Web UI";
             cell.detailTextLabel.text = [self webUIUrlString];
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
@@ -326,6 +332,8 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
 
     if (indexPath.section == RCSettingsSectionGeneral && indexPath.row == 2) {
+        [self.navigationController pushViewController:[[RCWebUIAccessViewController alloc] init] animated:YES];
+    } else if (indexPath.section == RCSettingsSectionGeneral && indexPath.row == 3) {
         [self openWebUI];
     } else if (indexPath.section == RCSettingsSectionIntegrations) {
         RCIntegrationsViewController *integrationsVC = [[RCIntegrationsViewController alloc] init];

@@ -2957,6 +2957,42 @@ static void rc_maybe_show_action_banner(NSString *action) {
     rc_show_hud_toast(title, subtitle, icon);
 }
 
+// Who can reach the Web UI's server, the webUIAccess setting: "any" (the default), "networks" (only
+// while this iPhone is on one of the webUINetworks Wi-Fi networks), or "local" (only this iPhone,
+// such as its own Safari). This iPhone itself always can.
+static BOOL rc_web_client_is_local(const struct sockaddr_storage *addr) {
+    if (addr->ss_family == AF_INET) return (ntohl(((const struct sockaddr_in *)addr)->sin_addr.s_addr) >> 24) == 127;
+    if (addr->ss_family == AF_INET6) {
+        const struct in6_addr *a = &((const struct sockaddr_in6 *)addr)->sin6_addr;
+        if (IN6_IS_ADDR_LOOPBACK(a)) return YES;
+        if (IN6_IS_ADDR_V4MAPPED(a)) return a->s6_addr[12] == 127;
+    }
+    return NO;
+}
+
+static NSString *rc_current_wifi_name(void) {
+    __block id name = nil;
+    void (^read)(void) = ^{ name = [[objc_getClass("SBWiFiManager") sharedInstance] currentNetworkName]; };
+    if ([NSThread isMainThread]) read();
+    else dispatch_sync(dispatch_get_main_queue(), read);
+    return [name isKindOfClass:[NSString class]] && [name length] ? name : nil;
+}
+
+static NSString *rc_web_access(void) {
+    NSString *access = g_triggerConfig[@"webUIAccess"];
+    return [access isKindOfClass:[NSString class]] && ([access isEqualToString:@"networks"] || [access isEqualToString:@"local"]) ? access : @"any";
+}
+
+static BOOL rc_web_client_allowed(const struct sockaddr_storage *addr) {
+    if (rc_web_client_is_local(addr)) return YES;
+    NSString *access = rc_web_access();
+    if ([access isEqualToString:@"any"]) return YES;
+    if ([access isEqualToString:@"local"]) return NO;
+    NSArray *networks = g_triggerConfig[@"webUINetworks"];
+    NSString *wifi = rc_current_wifi_name();
+    return wifi && [networks isKindOfClass:[NSArray class]] && [networks containsObject:wifi];
+}
+
 // A trigger's runs. Each firing runs the actions on a thread of its own; a run carries its
 // trigger's generation and stops (before its next step, or out of a wait) once that changes - when
 // the trigger is fired again in Restart mode, or stopped by a "stop trigger" action.
@@ -10365,9 +10401,20 @@ static NSString *handle_command(NSString *cmd) {
             return @"Web UI Disabled\n";
         } else if ([sub isEqualToString:@"status"]) {
             BOOL enabled = [mConfig[@"webUIEnabled"] boolValue];
-            return [NSString stringWithFormat:@"Web UI is %@\n", enabled ? @"ENABLED" : @"DISABLED"];
+            return [NSString stringWithFormat:@"Web UI is %@ (access: %@)\n", enabled ? @"ENABLED" : @"DISABLED", rc_web_access()];
+        } else if ([sub isEqualToString:@"access any"] || [sub isEqualToString:@"access networks"] || [sub isEqualToString:@"access local"]) {
+            // Who can reach it: any network, only the trusted Wi-Fi networks, or only this iPhone
+            NSString *access = [sub substringFromIndex:7];
+            if ([access isEqualToString:@"any"]) [mConfig removeObjectForKey:@"webUIAccess"];
+            else mConfig[@"webUIAccess"] = access;
+            rc_set_trigger_config([mConfig copy]);
+            save_trigger_config();
+            return [NSString stringWithFormat:@"Web UI access: %@\n", access];
+        } else if ([sub isEqualToString:@"wifi"]) {
+            // The Wi-Fi network this iPhone is on, for adding it as a trusted network
+            return [NSString stringWithFormat:@"%@\n", rc_current_wifi_name() ?: @""];
         }
-        return @"Usage: rc webui <on|off|status>\n";
+        return @"Usage: rc webui <on|off|status|access any|access networks|access local|wifi>\n";
     } else if ([cleanCmd isEqualToString:@"respring"]) {
         SRLog(@"Triggering Respring");
         
@@ -10835,6 +10882,14 @@ static void start_web_server() {
                 tv.tv_usec = 0;
                 setsockopt(new_socket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
                 setsockopt(new_socket, SOL_SOCKET, SO_SNDTIMEO, (const char*)&tv, sizeof tv);
+
+                // Not from a network the Web UI is allowed on: every request is turned away
+                if (!rc_web_client_allowed(&client_addr)) {
+                    static const char refused[] = "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nContent-Length: 39\r\nConnection: close\r\n\r\nWeb UI is not available on this network";
+                    write(new_socket, refused, sizeof(refused) - 1);
+                    close(new_socket);
+                    return;
+                }
 
                 char buffer[16384] = {0};
                 ssize_t valread = read(new_socket, buffer, 16384 - 1);

@@ -257,6 +257,28 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
     [self saveConfig];
 }
 
+- (NSString *)webUIAccess {
+    NSString *access = _config[@"webUIAccess"];
+    return [access isKindOfClass:[NSString class]] && ([access isEqualToString:@"networks"] || [access isEqualToString:@"local"]) ? access : @"any";
+}
+
+- (void)setWebUIAccess:(NSString *)access {
+    if ([access isEqualToString:@"networks"] || [access isEqualToString:@"local"]) _config[@"webUIAccess"] = access;
+    else [_config removeObjectForKey:@"webUIAccess"];
+    [self saveConfig];
+}
+
+- (NSArray<NSString *> *)webUINetworks {
+    NSArray *networks = _config[@"webUINetworks"];
+    return [networks isKindOfClass:[NSArray class]] ? networks : @[];
+}
+
+- (void)setWebUINetworks:(NSArray<NSString *> *)networks {
+    if (networks.count) _config[@"webUINetworks"] = [networks copy];
+    else [_config removeObjectForKey:@"webUINetworks"];
+    [self saveConfig];
+}
+
 - (BOOL)freezeListsDuringGestures {
     if (!_config[@"freezeListsDuringGestures"]) {
         return YES;
