@@ -360,6 +360,16 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
     return [_config[@"nfcEnabled"] boolValue];
 }
 
+- (NSInteger)runHistoryCount {
+    id count = _config[@"runHistoryCount"];
+    return count ? [count integerValue] : 10;
+}
+
+- (void)setRunHistoryCount:(NSInteger)count {
+    _config[@"runHistoryCount"] = @(MAX(0, MIN(100, count)));
+    [self saveConfig];
+}
+
 - (BOOL)nfcBackgroundReading {
     return [RCConfigManager nfcBackgroundReadingSupported] && [_config[@"nfcBackgroundReading"] boolValue];
 }
@@ -967,6 +977,17 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
     return actionItem;
 }
 
+// "count is above 5": a Variable condition (If, Repeat While, Wait Until) in words
+static NSString *RCVariableConditionText(NSDictionary *dict) {
+    NSString *name = [dict[@"variable"] description] ?: @"Variable";
+    NSString *value = [dict[@"expectedValue"] description] ?: @"";
+    NSString *comparison = [[dict[@"comparison"] description] lowercaseString] ?: @"is";
+    NSDictionary *words = @{ @"is": @"is", @"is_not": @"is not", @"contains": @"contains", @"above": @"is above", @"below": @"is below" };
+    if ([comparison isEqualToString:@"empty"]) return [NSString stringWithFormat:@"%@ has no value", name];
+    if ([comparison isEqualToString:@"not_empty"]) return [NSString stringWithFormat:@"%@ has any value", name];
+    return [NSString stringWithFormat:@"%@ %@ %@", name, words[comparison] ?: @"is", value];
+}
+
 - (NSString *)nameForCommand:(id)cmdId truncate:(BOOL)shouldTruncate {
     if ([cmdId isKindOfClass:[NSDictionary class]]) {
         NSDictionary *dict = (NSDictionary *)cmdId;
@@ -974,6 +995,11 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
             return [self nameForCommand:dict[@"command"] truncate:shouldTruncate];
         }
         NSString *type = [[dict[@"type"] description] lowercaseString];
+        BOOL variableCondition = [[dict[@"conditionKey"] description] isEqualToString:@"variable"];
+        if (variableCondition && ([type isEqualToString:@"if"] || [type isEqualToString:@"else_if"] || [type isEqualToString:@"repeat_while"])) {
+            NSString *prefix = [type isEqualToString:@"else_if"] ? @"Else If" : [type isEqualToString:@"if"] ? @"If" : @"Repeat While";
+            return [NSString stringWithFormat:@"%@ %@", prefix, RCVariableConditionText(dict)];
+        }
         if ([type isEqualToString:@"if"] || [type isEqualToString:@"else_if"]) {
             NSString *conditionTitle = dict[@"conditionTitle"] ?: dict[@"conditionName"];
             NSString *expectedTitle = dict[@"expectedTitle"] ?: dict[@"expectedLabel"] ?: dict[@"expectedValue"];
@@ -990,7 +1016,31 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         } else if ([type isEqualToString:@"else"]) {
             return @"Else";
         } else if ([type isEqualToString:@"repeat"]) {
-            return [NSString stringWithFormat:@"Repeat %@", dict[@"count"] ?: @""];
+            NSString *count = [dict[@"count"] description] ?: @"0";
+            return [count isEqualToString:@"1"] ? @"Repeat 1 Time" : [NSString stringWithFormat:@"Repeat %@ Times", count]; // a number or "{times}"
+        } else if ([type isEqualToString:@"repeat_while"]) {
+            NSString *conditionTitle = dict[@"conditionTitle"] ?: @"Condition";
+            NSString *expectedTitle = dict[@"expectedTitle"] ?: dict[@"expectedValue"] ?: @"";
+            if ([dict[@"conditionKey"] isEqualToString:@"time_between"]) return [NSString stringWithFormat:@"Repeat While Time is Between %@", expectedTitle];
+            return [NSString stringWithFormat:@"Repeat While %@ is %@", conditionTitle, expectedTitle];
+        } else if ([type isEqualToString:@"end_repeat"]) {
+            return @"End Repeat";
+        } else if ([type isEqualToString:@"exit_repeat"]) {
+            return @"Exit Repeat";
+        } else if ([type isEqualToString:@"set_variable"]) {
+            NSString *text = [RCConfigManager setVariableText:dict];
+            if ([[dict[@"scope"] description] isEqualToString:@"run"]) text = [text stringByAppendingString:@" (this run)"];
+            if (shouldTruncate && text.length > 60) text = [[text substringToIndex:59] stringByAppendingString:@"…"];
+            return text;
+        } else if ([type isEqualToString:@"wait_until"]) {
+            NSString *conditionTitle = dict[@"conditionTitle"] ?: @"Condition";
+            NSString *expectedTitle = dict[@"expectedTitle"] ?: dict[@"expectedValue"] ?: @"";
+            NSInteger limit = [dict[@"timeout"] integerValue] > 0 ? [dict[@"timeout"] integerValue] : 60;
+            NSString *limitText = limit % 60 == 0 && limit >= 60 ? [NSString stringWithFormat:@"%ld min", (long)(limit / 60)] : [NSString stringWithFormat:@"%ld s", (long)limit];
+            if ([dict[@"timeout"] isKindOfClass:[NSString class]] && [dict[@"timeout"] rangeOfString:@"{"].location != NSNotFound) limitText = [dict[@"timeout"] stringByAppendingString:@" s"];
+            if ([dict[@"conditionKey"] isEqualToString:@"time_between"]) return [NSString stringWithFormat:@"Wait Until Time is Between %@ (up to %@)", expectedTitle, limitText];
+            if (variableCondition) return [NSString stringWithFormat:@"Wait Until %@ (up to %@)", RCVariableConditionText(dict), limitText];
+            return [NSString stringWithFormat:@"Wait Until %@ is %@ (up to %@)", conditionTitle, expectedTitle, limitText];
         } else if ([type isEqualToString:@"end"] || [type isEqualToString:@"end_if"]) {
             return @"End If";
         }
@@ -1474,10 +1524,16 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         NSString *type = [[dict[@"type"] description] lowercaseString];
         if ([type isEqualToString:@"if"] || [type isEqualToString:@"else_if"] || [type isEqualToString:@"else"]) {
             return @"arrow.triangle.branch";
-        } else if ([type isEqualToString:@"repeat"]) {
+        } else if ([type isEqualToString:@"repeat"] || [type isEqualToString:@"repeat_while"]) {
             return @"repeat";
-        } else if ([type isEqualToString:@"end"] || [type isEqualToString:@"end_if"]) {
+        } else if ([type isEqualToString:@"end"] || [type isEqualToString:@"end_if"] || [type isEqualToString:@"end_repeat"]) {
             return @"arrow.turn.up.left";
+        } else if ([type isEqualToString:@"exit_repeat"]) {
+            return @"arrow.right.to.line";
+        } else if ([type isEqualToString:@"set_variable"]) {
+            return @"x.squareroot";
+        } else if ([type isEqualToString:@"wait_until"]) {
+            return @"hourglass";
         }
         return @"square.grid.2x2";
     }
@@ -2121,4 +2177,25 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
     return newKey;
 }
 
+@end
+
+// A Set Variable action in words: "Set x to 5", "Add 1 to x", "Set x to Random 1–6"...
+@implementation RCConfigManager (SetVariableText)
++ (NSString *)setVariableText:(NSDictionary *)dict {
+    NSString *name = [dict[@"name"] description] ?: @"Variable";
+    NSString *value = [dict[@"value"] description] ?: @"";
+    NSString *op = [[dict[@"op"] description] lowercaseString] ?: @"set";
+    if ([op isEqualToString:@"add"]) return [NSString stringWithFormat:@"Add %@ to %@", value, name];
+    if ([op isEqualToString:@"subtract"]) return [NSString stringWithFormat:@"Subtract %@ from %@", value, name];
+    if ([op isEqualToString:@"multiply"]) return [NSString stringWithFormat:@"Multiply %@ by %@", name, value];
+    if ([op isEqualToString:@"divide"]) return [NSString stringWithFormat:@"Divide %@ by %@", name, value];
+    if ([op isEqualToString:@"round"]) {
+        if (!value.length || [value isEqualToString:@"0"]) return [NSString stringWithFormat:@"Round %@", name];
+        return [NSString stringWithFormat:@"Round %@ to %@ Decimal%@", name, value, [value isEqualToString:@"1"] ? @"" : @"s"];
+    }
+    if ([op isEqualToString:@"random"]) return [NSString stringWithFormat:@"Set %@ to Random %@–%@", name, dict[@"min"] ?: @"?", dict[@"max"] ?: @"?"];
+    if ([op isEqualToString:@"command"]) return [NSString stringWithFormat:@"Set %@ to Output of %@", name, value];
+    if ([op isEqualToString:@"command_number"]) return [NSString stringWithFormat:@"Set %@ to Number from %@", name, value];
+    return [NSString stringWithFormat:@"Set %@ to %@", name, value.length ? value : @"nothing"];
+}
 @end

@@ -1380,6 +1380,126 @@
     .toggle-switch input:checked + .toggle-slider { background-color: #34c759; }
     .toggle-switch input:checked + .toggle-slider:before { transform: translateX(20px); }
 
+    /* ── Variable editors ── */
+    .var-editor-box { width: 92%; max-width: 460px; display: flex; flex-direction: column; max-height: 88vh; max-height: 88dvh; }
+    .var-editor-body { overflow-y: auto; padding: 4px 14px 6px; text-align: left; -webkit-overflow-scrolling: touch; }
+    .var-ed-section { margin-bottom: 10px; }
+    .var-ed-header { font-size: 13px; font-weight: 500; letter-spacing: 0.05em; color: #8e8e93; text-transform: uppercase; margin: 10px 4px 6px; }
+    .var-ed-note { font-size: 12px; color: #8e8e93; line-height: 1.35; margin: 6px 4px 0; }
+    .var-ed-note:empty { display: none; }
+    .var-ed-note.bad { color: #ff453a; }
+    .var-ed-grid { display: grid; gap: 8px; }
+    .var-ed-tile {
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
+      min-height: 64px; padding: 8px 4px; border-radius: 12px; cursor: pointer;
+      background: rgba(255,255,255,0.07); border: 1.5px solid transparent; color: #fff;
+      font-family: inherit; font-size: 12px; font-weight: 500; line-height: 1.15; text-align: center;
+      transition: background 0.12s, border-color 0.12s, transform 0.1s;
+    }
+    .var-ed-tile i.f7-icons { font-size: 22px; color: #0a84ff; }
+    .var-ed-grid.compact .var-ed-tile { min-height: 54px; font-size: 11px; }
+    .var-ed-grid.compact .var-ed-tile i.f7-icons { font-size: 19px; }
+    .var-ed-tile:active { transform: scale(0.96); }
+    .var-ed-tile.selected { background: rgba(10,132,255,0.22); border-color: #0a84ff; }
+    .var-ed-card { background: rgba(255,255,255,0.07); border-radius: 12px; overflow: hidden; }
+    .var-ed-row { display: flex; align-items: center; gap: 12px; min-height: 46px; padding: 0 12px 0 14px; position: relative; }
+    .var-ed-card > .var-ed-row + .var-ed-row::before, .var-ed-card > .var-ed-row + .var-ed-chips::before {
+      content: ''; position: absolute; top: 0; left: 14px; right: 0; height: 0.5px; background: rgba(255,255,255,0.12);
+    }
+    label.var-ed-row { cursor: pointer; justify-content: space-between; }
+    .var-ed-label { font-size: 15px; color: #fff; min-width: 84px; flex-shrink: 0; }
+    .var-ed-input {
+      flex: 1; min-width: 0; background: transparent; border: none; outline: none; color: #fff;
+      font-size: 15px; font-family: inherit; padding: 12px 0; caret-color: #0a84ff;
+    }
+    .var-ed-input::placeholder { color: rgba(235,235,245,0.3); }
+    .var-ed-insert { background: none; border: none; padding: 6px; margin-right: -4px; color: #0a84ff; cursor: pointer; display: flex; }
+    .var-ed-insert i.f7-icons { font-size: 22px; }
+    .var-ed-select-wrap { flex: 1; min-width: 0; position: relative; display: flex; align-items: center; }
+    .var-ed-select {
+      flex: 1; min-width: 0; -webkit-appearance: none; appearance: none; background: transparent; border: none; outline: none;
+      color: #0a84ff; font-size: 15px; font-family: inherit; padding: 12px 34px 12px 0; text-align: left; cursor: pointer;
+    }
+    .var-ed-select option, .var-ed-select optgroup { color: #000; }
+    .var-ed-select-icon { position: absolute; right: 6px; font-size: 15px; color: #0a84ff; pointer-events: none; }
+    .var-ed-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 12px 12px 14px; position: relative; }
+    .var-ed-chip {
+      background: rgba(10,132,255,0.18); color: #0a84ff; border: none; border-radius: 14px;
+      padding: 5px 11px; font-size: 13px; font-family: inherit; cursor: pointer;
+    }
+    .var-ed-chip:active { background: rgba(10,132,255,0.32); }
+    .var-ed-seg { display: flex; background: rgba(118,118,128,0.24); border-radius: 9px; padding: 2px; margin-top: 6px; }
+    .var-ed-seg button {
+      flex: 1; background: none; border: none; color: #fff; font-family: inherit; font-size: 14px; font-weight: 500;
+      padding: 7px 0; border-radius: 7px; cursor: pointer; transition: background 0.15s;
+    }
+    .var-ed-seg button.selected { background: #636366; box-shadow: 0 2px 6px rgba(0,0,0,0.25); }
+    .toast-var-wrap { position: relative; }
+    .toast-var-wrap .dialog-input { padding-left: 38px; padding-right: 38px; }
+    .toast-var-insert { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); margin: 0; }
+    .toast-var-insert i.f7-icons { font-size: 20px; }
+    .terminal-var-insert { position: absolute; right: 4px; top: 4px; margin: 0; }
+    .terminal-var-insert i.f7-icons { font-size: 20px; }
+    #symbol-picker-backdrop { z-index: 960; }
+    .sym-box { width: 92%; max-width: 480px; display: flex; flex-direction: column; max-height: 86vh; max-height: 86dvh; }
+    .sym-top { padding: 0 14px; }
+    .sym-search { margin: 0 0 10px; width: 100%; text-align: left; padding: 8px 12px; font-size: 15px; }
+    .sym-cats { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 10px; scrollbar-width: none; }
+    .sym-cats::-webkit-scrollbar { display: none; }
+    .sym-cat {
+      flex-shrink: 0; border: none; border-radius: 15px; padding: 6px 12px; font-size: 13px; font-weight: 600; font-family: inherit;
+      background: rgba(255,255,255,0.12); color: #fff; cursor: pointer;
+    }
+    .sym-cat.active { background: #fff; color: #000; }
+    .sym-grid {
+      overflow-y: auto; padding: 4px 14px 14px; display: grid; gap: 8px;
+      grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); -webkit-overflow-scrolling: touch;
+    }
+    .sym-tile {
+      aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+      background: rgba(255,255,255,0.07); border: 1.5px solid transparent; border-radius: 12px; color: #fff; cursor: pointer;
+      font-family: inherit; padding: 4px; min-width: 0; transition: transform 0.1s, background 0.12s;
+    }
+    .sym-tile i.f7-icons { font-size: 24px; }
+    .sym-tile span { font-size: 9.5px; color: #8e8e93; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sym-tile:hover { background: rgba(255,255,255,0.12); }
+    .sym-tile:active { transform: scale(0.94); }
+    .sym-tile.selected { background: rgba(10,132,255,0.22); border-color: #0a84ff; }
+    .sym-tile.selected i.f7-icons { color: #0a84ff; }
+    .sym-empty { grid-column: 1 / -1; text-align: center; color: #8e8e93; font-size: 13px; padding: 24px 0; }
+    #cmd-picker-backdrop { z-index: 960; }
+    .cmd-list { display: block; padding-top: 0; }
+    .cmd-head { font-size: 13px; font-weight: 500; letter-spacing: 0.05em; color: #8e8e93; text-transform: uppercase; margin: 12px 4px 6px; }
+    .cmd-card { background: rgba(255,255,255,0.07); border-radius: 12px; overflow: hidden; }
+    .cmd-row { display: flex; align-items: center; gap: 12px; padding: 9px 12px; cursor: pointer; position: relative; }
+    .cmd-row + .cmd-row::before { content: ''; position: absolute; top: 0; left: 46px; right: 0; height: 0.5px; background: rgba(255,255,255,0.12); }
+    .cmd-row:hover { background: rgba(255,255,255,0.05); }
+    .cmd-row > i.f7-icons { font-size: 20px; color: #0a84ff; width: 22px; text-align: center; }
+    .cmd-text { flex: 1; min-width: 0; text-align: left; }
+    .cmd-title { font-size: 15px; color: #fff; }
+    .cmd-sub { font-size: 12px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .cmd-sub code { font-family: ui-monospace, Menlo, monospace; color: #8e8e93; }
+    .cmd-sub span { color: #0a84ff; font-weight: 500; margin-left: 8px; }
+    .cmd-check { color: #0a84ff; font-size: 17px; }
+    .cmd-note { font-size: 12px; color: #8e8e93; margin: 6px 4px 0; line-height: 1.35; }
+    #var-editor-save:disabled { color: rgba(235,235,245,0.3); cursor: default; }
+    .var-ed-menu {
+      position: fixed; z-index: 3000; min-width: 220px; max-width: 300px; max-height: 60vh; overflow-y: auto;
+      background: rgba(44,44,46,0.96); backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px);
+      border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.5); padding: 6px 5px 8px;
+      opacity: 0; transform: scale(0.96); transition: opacity 0.12s, transform 0.12s; transform-origin: top right;
+    }
+    .var-ed-menu.show { opacity: 1; transform: scale(1); }
+    .var-ed-menu-header { font-size: 12px; color: #8e8e93; padding: 8px 12px 4px; }
+    .var-ed-menu-gap { height: 6px; margin: 4px 8px 4px; border-bottom: 0.5px solid rgba(255,255,255,0.12); }
+    .var-ed-menu-item {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 10px 12px; border-radius: 8px; font-size: 15px; color: #fff; cursor: pointer;
+    }
+    .var-ed-menu-item:active, .var-ed-menu-item:hover { background: rgba(255,255,255,0.1); }
+    .var-ed-menu-item i.f7-icons { font-size: 17px; opacity: 0.9; }
+    .var-ed-menu-sub { font-size: 12px; color: #8e8e93; margin-top: 2px; }
+
     /* Live Log Viewer Styling - iOS Native Design Language */
     #logs-panel {
       background: #121214 !important;
@@ -1590,6 +1710,9 @@
     </div>
     <div class="rc-navbar-center" id="navbar-small-title">RemoteCompanion</div>
     <div class="rc-navbar-right">
+      <button class="nav-btn" id="nav-running-btn" onclick="openRunning()" title="Running">
+        <i class="f7-icons">list_bullet</i>
+      </button>
       <button class="nav-btn" id="nav-logs-btn" onclick="toggleLogPanel()" title="Live System Logs">
         <i class="f7-icons">list_dash</i>
       </button>
@@ -1684,6 +1807,21 @@
 </div>
 
 <!-- ══ CONDITION PICKER DIALOG ═════════════════════════════════════════════ -->
+<!-- Running: the triggers running now, like a task manager -->
+<div class="dialog-backdrop" id="running-dialog-backdrop" onclick="if (event.target === this) closeRunning()">
+  <div class="dialog-box app-launch-dialog" style="max-width: 480px; width: 90%;">
+    <div class="dialog-title">Running</div>
+    <div class="dialog-msg" style="text-align:center;padding:0 16px 6px">Stop ends that run, even during a wait or a loop.</div>
+    <div style="padding:0 14px 10px; display:flex; flex-direction:column; flex:1; min-height:0;">
+      <div class="app-picker-list" id="running-content" style="max-height: 52vh; max-height: 52dvh; overflow-y: auto;"></div>
+    </div>
+    <div class="dialog-btns">
+      <button onclick="stopAllRuns()" id="running-stop-all" style="color:#ff453a">Stop All</button>
+      <button onclick="closeRunning()">Done</button>
+    </div>
+  </div>
+</div>
+
 <div class="dialog-backdrop" id="cond-picker-dialog-backdrop" onclick="_condPickerBackdropClick(event)">
   <div class="dialog-box app-launch-dialog" style="max-width: 480px; width: 90%;">
     <div class="dialog-title">Select Condition</div>
@@ -2166,6 +2304,40 @@
   </div>
 </div>
 
+<!-- ══ VARIABLE EDITOR (Set Variable, Variable condition) ══════════════ -->
+<div class="dialog-backdrop" id="var-editor-backdrop" onclick="_varEditorBackdropClick(event)">
+  <div class="dialog-box var-editor-box">
+    <div class="dialog-title" id="var-editor-title">Set Variable</div>
+    <div class="var-editor-body" id="var-editor-body"></div>
+    <div class="dialog-btns">
+      <button onclick="closeVarEditor()">Cancel</button>
+      <button id="var-editor-save" onclick="varEditorSave()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ ICON PICKER (Toast) ═════════════════════════════════════════════ -->
+<div class="dialog-backdrop" id="symbol-picker-backdrop" onclick="if (event.target === this) closeSymbolPicker()">
+  <div class="dialog-box sym-box">
+    <div class="dialog-title">Icon</div>
+    <div class="sym-top">
+      <input class="dialog-input sym-search" id="symbol-picker-search" type="text" placeholder="Search Icons" autocorrect="off" autocapitalize="none" spellcheck="false" oninput="renderSymbolPicker()">
+      <div class="sym-cats" id="symbol-picker-cats"></div>
+    </div>
+    <div class="sym-grid" id="symbol-picker-grid"></div>
+    <div class="dialog-btns"><button onclick="closeSymbolPicker()">Cancel</button></div>
+  </div>
+</div>
+
+<!-- ══ COMMAND LIST (Set Variable's RC Command) ═══════════════════════ -->
+<div class="dialog-backdrop" id="cmd-picker-backdrop" onclick="if (event.target === this) closeCommandPicker()">
+  <div class="dialog-box sym-box">
+    <div class="dialog-title">Command</div>
+    <div class="sym-grid cmd-list" id="cmd-picker-list"></div>
+    <div class="dialog-btns"><button onclick="closeCommandPicker()">Cancel</button></div>
+  </div>
+</div>
+
 <!-- ══ HOME ASSISTANT ACTION DIALOG ═════════════════════════════════════ -->
 <div class="dialog-backdrop" id="ha-dialog-backdrop">
   <div class="dialog-box app-launch-dialog" style="max-width: 560px; width: 90%;">
@@ -2216,11 +2388,12 @@
 <div class="dialog-backdrop" id="terminal-dialog-backdrop">
   <div class="dialog-box" style="max-width: 480px; width: 90%;">
     <div class="dialog-title" id="terminal-dialog-title">Terminal Action</div>
-    <div class="dialog-msg" style="padding-bottom: 8px;">Enter shell command to execute on device:</div>
+    <div class="dialog-msg" id="terminal-dialog-msg" style="padding-bottom: 8px;">Enter shell command to execute on device:</div>
     <div style="position: relative; margin: 0 16px 12px; width: calc(100% - 32px); box-sizing: border-box;">
-      <textarea class="dialog-input" id="terminal-dialog-textarea" rows="4" placeholder="killall SpringBoard" style="height:100px; text-align:left; resize:vertical; font-family:monospace; font-size:13px; margin:0; width:100%; box-sizing:border-box; padding: 10px;"></textarea>
+      <textarea class="dialog-input" id="terminal-dialog-textarea" rows="4" placeholder="killall SpringBoard" style="height:100px; text-align:left; resize:vertical; font-family:monospace; font-size:13px; margin:0; width:100%; box-sizing:border-box; padding: 10px 40px 10px 10px;"></textarea>
+      <button type="button" class="var-ed-insert terminal-var-insert" title="Insert Variable" onclick="terminalInsertVariable(event)"><i class="f7-icons">plus_circle</i></button>
     </div>
-    <div style="margin: 0 16px 16px; display: flex; align-items: center; justify-content: space-between; background: rgba(255,255,255,0.06); padding: 10px 14px; border-radius: 10px;">
+    <div id="terminal-dialog-root-row" style="margin: 0 16px 16px; display: flex; align-items: center; justify-content: space-between; background: rgba(255,255,255,0.06); padding: 10px 14px; border-radius: 10px;">
       <div style="display:flex; flex-direction:column; text-align:left;">
         <span style="font-size:14px; font-weight:600; color:#fff;">Root Privileges</span>
         <span style="font-size:12px; color:#8e8e93;">Run command as root user (`root`)</span>
@@ -2243,19 +2416,17 @@
     <div class="dialog-title" id="toast-dialog-title">Toast Notification</div>
     <div class="dialog-msg" style="padding-bottom: 8px;">Configure HUD toast alert displayed on device:</div>
     <div style="padding:0 14px 12px; display:flex; flex-direction:column; gap:10px;">
-      <input class="dialog-input" id="toast-title-input" type="text" placeholder="Title (e.g. Silent Vibrate)" autocorrect="off" autocapitalize="words" spellcheck="false" style="margin:0; width:100%" oninput="updateToastPreview()">
-      <input class="dialog-input" id="toast-subtitle-input" type="text" placeholder="Subtitle (optional, e.g. ON)" autocorrect="off" autocapitalize="none" spellcheck="false" style="margin:0; width:100%" oninput="updateToastPreview()">
-      <input class="dialog-input" id="toast-icon-input" type="text" placeholder="SF Symbol Icon (optional, e.g. bell.fill)" autocorrect="off" autocapitalize="none" spellcheck="false" style="margin:0; width:100%" oninput="updateToastPreview()">
-      
-      <!-- Preset Icon Selector Chips -->
-      <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top: 2px;" id="toast-icon-presets">
-        <span class="toast-preset-chip" onclick="setToastIconPreset('bell.fill')">🔔 bell</span>
-        <span class="toast-preset-chip" onclick="setToastIconPreset('bell.slash.fill')">🔕 bell.slash</span>
-        <span class="toast-preset-chip" onclick="setToastIconPreset('checkmark.circle.fill')">✅ checkmark</span>
-        <span class="toast-preset-chip" onclick="setToastIconPreset('xmark.circle.fill')">❌ xmark</span>
-        <span class="toast-preset-chip" onclick="setToastIconPreset('star.fill')">⭐ star</span>
-        <span class="toast-preset-chip" onclick="setToastIconPreset('speaker.wave.3.fill')">🔊 speaker</span>
-        <span class="toast-preset-chip" onclick="setToastIconPreset('camera.fill')">📷 camera</span>
+      <div class="toast-var-wrap">
+        <input class="dialog-input" id="toast-title-input" type="text" placeholder="Title (e.g. Silent Vibrate)" autocorrect="off" autocapitalize="words" spellcheck="false" style="margin:0; width:100%" oninput="updateToastPreview()">
+        <button type="button" class="var-ed-insert toast-var-insert" title="Insert Variable" onclick="toastInsertVariable(event, 'toast-title-input')"><i class="f7-icons">plus_circle</i></button>
+      </div>
+      <div class="toast-var-wrap">
+        <input class="dialog-input" id="toast-subtitle-input" type="text" placeholder="Subtitle (optional, e.g. ON)" autocorrect="off" autocapitalize="none" spellcheck="false" style="margin:0; width:100%" oninput="updateToastPreview()">
+        <button type="button" class="var-ed-insert toast-var-insert" title="Insert Variable" onclick="toastInsertVariable(event, 'toast-subtitle-input')"><i class="f7-icons">plus_circle</i></button>
+      </div>
+      <div class="toast-var-wrap">
+        <input class="dialog-input" id="toast-icon-input" type="text" placeholder="Icon (optional)" autocorrect="off" autocapitalize="none" spellcheck="false" style="margin:0; width:100%" oninput="updateToastPreview()">
+        <button type="button" class="var-ed-insert toast-var-insert" title="Choose Icon" onclick="openSymbolPicker()"><i class="f7-icons">square_grid_2x2</i></button>
       </div>
 
       <!-- Live Toast Preview Box -->
@@ -2826,6 +2997,180 @@ function iconForKey(key) {
   return { icon:'hand_tap', cls:'icon-gray' };
 }
 
+// ── Running ───────────────────────────────────────────────────────────────
+// The runs going: the navbar button turns green while there are any (checked every few seconds
+// while this page is visible); the Running sheet lists them with the step each is on, refreshed
+// every second while it's open.
+let runningRuns = [];
+let runningTimer = null;
+
+async function fetchRunning() {
+  try {
+    const res = await fetch('/api/running', { cache: 'no-store' });
+    if (!res.ok) return null;
+    const runs = await res.json();
+    return Array.isArray(runs) ? runs : [];
+  } catch (e) { return null; }
+}
+
+function runElapsedText(seconds) {
+  const s = Math.floor(seconds || 0);
+  if (s < 60) return `${s} s`;
+  if (s < 3600) return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  return `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+}
+
+function runStepText(run) {
+  let text = run.step ? nameForCmd(run.step) : 'Starting';
+  const loop = run.loop;
+  if (loop && loop.repeat) {
+    const count = parseInt(loop.count ?? loop.repeat.count, 10) || 0;
+    const round = count > 0 ? `Round ${loop.round} of ${count}` : `Round ${loop.round}`;
+    const onRepeat = typeof run.step === 'object' && JSON.stringify(run.step) === JSON.stringify(loop.repeat);
+    text = onRepeat ? `${nameForCmd(loop.repeat)} · ${round}` : `${text} · ${round}`;
+  }
+  return text;
+}
+
+function updateRunningButton(runs) {
+  const btn = document.getElementById('nav-running-btn');
+  if (btn) btn.style.color = (runs && runs.length) ? '#30d158' : '';
+}
+
+// The last runs that ended, from Run History: fetched on opening and when a run starts or ends
+let recentRuns = [];
+let recentRunCount = -1;
+
+async function refreshRecent() {
+  try {
+    const res = await fetch('/api/history', { cache: 'no-store' });
+    if (!res.ok) return;
+    const runs = await res.json();
+    recentRuns = Array.isArray(runs) ? runs : [];
+  } catch (e) {}
+  renderRunning();
+}
+
+function runWhenText(started) {
+  const d = new Date((started || 0) * 1000);
+  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+  const today = new Date();
+  if (d.toDateString() === today.toDateString()) return `Today ${time}`;
+  const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return `Yesterday ${time}`;
+  return d.toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
+}
+
+function runDurationText(seconds) {
+  const s = seconds || 0;
+  return s < 10 ? `${s.toFixed(1)} s` : runElapsedText(Math.round(s));
+}
+
+function renderRecent(box) {
+  if (!recentRuns.length) return;
+  const head = document.createElement('div');
+  head.style.cssText = 'padding:14px 4px 6px;font-size:13px;font-weight:600;color:#8e8e93;text-transform:uppercase';
+  head.textContent = 'Recent';
+  box.appendChild(head);
+  recentRuns.forEach(run => {
+    const stopped = run.outcome === 'stopped';
+    const row = document.createElement('div');
+    row.className = 'app-picker-row';
+    row.style.cursor = 'default';
+    row.innerHTML = `
+      <div class="app-picker-row-inner" style="display:flex; align-items:center; gap:10px;">
+        <i class="f7-icons" style="font-size:22px;flex-shrink:0;color:${stopped ? '#ff9f0a' : '#30d158'}">${stopped ? 'stop_circle' : 'checkmark_circle'}</i>
+        <div style="min-width:0; flex:1;">
+          <div class="app-picker-name">${escHtml(nameForKey(run.key || ''))}</div>
+          <div class="app-picker-bid">${escHtml(runWhenText(run.started))} · ${runDurationText(run.seconds)} · ${run.test ? 'Test · ' : ''}${stopped ? 'Stopped' : 'Finished'}</div>
+        </div>
+      </div>
+    `;
+    box.appendChild(row);
+  });
+}
+
+function renderRunning() {
+  const box = document.getElementById('running-content');
+  if (!box) return;
+  document.getElementById('running-stop-all').disabled = !runningRuns.length;
+  if (!runningRuns.length) {
+    box.innerHTML = '<div style="padding:22px 16px;color:#8e8e93;text-align:center">No triggers are running</div>';
+    renderRecent(box);
+    return;
+  }
+  box.innerHTML = '';
+  runningRuns.forEach(run => {
+    const row = document.createElement('div');
+    row.className = 'app-picker-row';
+    row.style.cursor = 'default';
+    const { icon, cls } = iconForKey(run.key);
+    row.innerHTML = `
+      <div class="app-picker-row-inner" style="display:flex; align-items:center; gap:10px;">
+        <div class="row-icon ${cls}" style="flex-shrink:0"><i class="f7-icons">${icon}</i></div>
+        <div style="min-width:0; flex:1;">
+          <div class="app-picker-name">${escHtml(nameForKey(run.key))}</div>
+          <div class="app-picker-bid">${run.test ? 'Test · ' : ''}${runElapsedText(run.seconds)} · ${escHtml(runStepText(run))}</div>
+        </div>
+      </div>
+      <button class="nav-btn" title="Stop" style="color:#ff453a;flex-shrink:0"><i class="f7-icons" style="font-size:22px">stop_circle_fill</i></button>
+    `;
+    row.querySelector('button').onclick = () => stopRun(run.id);
+    box.appendChild(row);
+  });
+  renderRecent(box);
+}
+
+async function refreshRunning() {
+  const runs = await fetchRunning();
+  if (runs === null) return;
+  runningRuns = runs;
+  updateRunningButton(runs);
+  renderRunning();
+  // A run started or ended: Recent may have a new one
+  if (runs.length !== recentRunCount) {
+    recentRunCount = runs.length;
+    refreshRecent();
+  }
+}
+
+function openRunning() {
+  runningRuns = [];
+  recentRunCount = -1;
+  renderRunning();
+  document.getElementById('running-dialog-backdrop').classList.add('visible');
+  refreshRunning();
+  clearInterval(runningTimer);
+  runningTimer = setInterval(refreshRunning, 1000);
+}
+
+function closeRunning() {
+  clearInterval(runningTimer);
+  runningTimer = null;
+  document.getElementById('running-dialog-backdrop').classList.remove('visible');
+}
+
+async function stopRun(id) {
+  if (!id) return;
+  try { await fetch(`/api/command?cmd=${encodeURIComponent('stop run ' + id)}`, { method: 'POST' }); } catch (e) {}
+  refreshRunning();
+}
+
+async function stopAllRuns() {
+  const keys = [...new Set(runningRuns.map(r => r.key))];
+  for (const key of keys) {
+    try { await fetch(`/api/command?cmd=${encodeURIComponent('stop trigger ' + key)}`, { method: 'POST' }); } catch (e) {}
+  }
+  refreshRunning();
+}
+
+// The navbar button's colour, every 3 s while the page is visible and the sheet is closed
+setInterval(async () => {
+  if (document.hidden || runningTimer) return;
+  const runs = await fetchRunning();
+  if (runs !== null) updateRunningButton(runs);
+}, 3000);
+
 function nameForKey(key) {
   if (TRIGGER_NAMES[key]) return TRIGGER_NAMES[key];
   const t = config.triggers[key];
@@ -2935,6 +3280,41 @@ function buildShortcutAction(name, silent, input) {
   return action;
 }
 
+// The Variable condition's comparisons: code, menu title, words in an action's name
+const VARIABLE_COMPARISONS = [
+  ['is', 'Is', 'is'], ['is_not', 'Is Not', 'is not'], ['contains', 'Contains', 'contains'],
+  ['above', 'Is Above', 'is above'], ['below', 'Is Below', 'is below'],
+  ['not_empty', 'Has Any Value', 'has any value'], ['empty', 'Has No Value', 'has no value'],
+];
+
+// "count is above 5": a Variable condition (If, Repeat While, Wait Until) in words
+function variableConditionText(cmd) {
+  const c = VARIABLE_COMPARISONS.find(x => x[0] === (cmd.comparison || 'is')) || VARIABLE_COMPARISONS[0];
+  const needsValue = c[0] !== 'empty' && c[0] !== 'not_empty';
+  return `${cmd.variable || 'Variable'} ${c[2]}${needsValue ? ' ' + (cmd.expectedValue || '') : ''}`;
+}
+
+// A Set Variable action in words: "Set x to 5", "Add 1 to x", "Set x to Random 1–6"...
+function setVariableText(cmd) {
+  const name = cmd.name || 'Variable', v = cmd.value || '';
+  switch (cmd.op || 'set') {
+    case 'add': return `Add ${v} to ${name}`;
+    case 'subtract': return `Subtract ${v} from ${name}`;
+    case 'multiply': return `Multiply ${name} by ${v}`;
+    case 'divide': return `Divide ${name} by ${v}`;
+    case 'round': return (!v || v === '0') ? `Round ${name}` : `Round ${name} to ${v} Decimal${v === '1' ? '' : 's'}`;
+    case 'random': return `Set ${name} to Random ${cmd.min ?? '?'}–${cmd.max ?? '?'}`;
+    case 'command': return `Set ${name} to Output of ${v}`;
+    case 'command_number': return `Set ${name} to Number from ${v}`;
+    default: return `Set ${name} to ${v ? v : 'nothing'}`;
+  }
+}
+
+// Variable names: letters, digits and _, not starting with a digit; "round" is taken
+function variableNameValid(name) {
+  return /^[A-Za-z_][A-Za-z0-9_]{0,39}$/.test(name || '') && name !== 'round';
+}
+
 function nameForCmd(cmd) {
   if (!cmd) return 'Unknown';
   if (typeof cmd === 'object') {
@@ -2943,11 +3323,28 @@ function nameForCmd(cmd) {
     }
     const t = (cmd.type||'').toLowerCase();
     const isTime = (cmd.conditionKey === 'time_between' || cmd.conditionName === 'time_between' || (cmd.conditionTitle||'').toLowerCase().includes('time'));
+    if (cmd.conditionKey === 'variable' && ['if', 'else_if', 'repeat_while'].includes(t)) {
+      return `${t === 'if' ? 'If' : t === 'else_if' ? 'Else If' : 'Repeat While'} ${variableConditionText(cmd)}`;
+    }
+    if (t === 'set_variable') {
+      const text = setVariableText(cmd);
+      return cmd.scope === 'run' ? `${text} (this run)` : text;
+    }
     if (t === 'if') return isTime ? `If Time is Between ${cmd.expectedTitle||cmd.expectedValue||'Time Range'}` : `If ${cmd.conditionTitle||'Condition'} is ${cmd.expectedTitle||'Value'}`;
     if (t === 'else_if') return isTime ? `Else If Time is Between ${cmd.expectedTitle||cmd.expectedValue||'Time Range'}` : `Else If ${cmd.conditionTitle||'Condition'} is ${cmd.expectedTitle||'Value'}`;
     if (t === 'else') return 'Else';
     if (t === 'end_if' || t === 'end') return 'End If';
-    if (t === 'repeat') return `Repeat ${cmd.count||''}`;
+    if (t === 'repeat') { const n = String(cmd.count ?? 0); return n === '1' ? 'Repeat 1 Time' : `Repeat ${n} Times`; } // a number or "{times}"
+    if (t === 'repeat_while') return (cmd.conditionKey === 'time_between') ? `Repeat While Time is Between ${cmd.expectedTitle||cmd.expectedValue||''}` : `Repeat While ${cmd.conditionTitle||'Condition'} is ${cmd.expectedTitle||'Value'}`;
+    if (t === 'end_repeat') return 'End Repeat';
+    if (t === 'exit_repeat') return 'Exit Repeat';
+    if (t === 'wait_until') {
+      const lim = parseInt(cmd.timeout, 10) > 0 ? parseInt(cmd.timeout, 10) : 60;
+      let limText = (lim >= 60 && lim % 60 === 0) ? `${lim / 60} min` : `${lim} s`;
+      if (typeof cmd.timeout === 'string' && cmd.timeout.includes('{')) limText = `${cmd.timeout} s`;
+      if (cmd.conditionKey === 'variable') return `Wait Until ${variableConditionText(cmd)} (up to ${limText})`;
+      return (cmd.conditionKey === 'time_between') ? `Wait Until Time is Between ${cmd.expectedTitle||cmd.expectedValue||''} (up to ${limText})` : `Wait Until ${cmd.conditionTitle||'Condition'} is ${cmd.expectedTitle||'Value'} (up to ${limText})`;
+    }
     return 'Block';
   }
   const toggleInfo = parseToggleCmd(cmd);
@@ -3124,6 +3521,10 @@ function iconForCmd(cmd) {
     const t = (cmd.type||'').toLowerCase();
     if (t === 'if' || t === 'else_if' || t === 'else') return { icon:'arrow_triangle_branch', cls:'icon-purple' };
     if (t === 'end_if' || t === 'end') return { icon:'arrow_turn_up_left', cls:'icon-purple' };
+    if (t === 'end_repeat') return { icon:'arrow_turn_up_left', cls:'icon-green' };
+    if (t === 'exit_repeat') return { icon:'arrow_right_to_line', cls:'icon-green' };
+    if (t === 'wait_until') return { icon:'hourglass', cls:'icon-orange' };
+    if (t === 'set_variable') return { icon:'function', cls:'icon-orange' };
     return { icon:'repeat', cls:'icon-green' };
   }
   const map = {
@@ -3289,6 +3690,11 @@ const ACTION_SECTIONS = [
   ]},
   { title:'Scripting & Logic', actions:[
     { name:'If Condition…',     cmd:'__IF_CONDITION__',icon:'arrow_triangle_branch', needs_input:true },
+    { name:'Repeat…',           cmd:'__REPEAT__',      icon:'repeat', needs_input:true },
+    { name:'Repeat While…',     cmd:'__REPEAT_WHILE__',icon:'repeat', needs_input:true },
+    { name:'Exit Repeat',       cmd:'__EXIT_REPEAT__', icon:'arrow_right_to_line', needs_input:true },
+    { name:'Wait Until…',       cmd:'__WAIT_UNTIL__',  icon:'hourglass', needs_input:true },
+    { name:'Set Variable…',     cmd:'__SET_VARIABLE__', icon:'function', needs_input:true },
     { name:'Delay…',            cmd:'__DELAY__',     icon:'hourglass', needs_input:true },
     { name:'Terminal Command…', cmd:'__CUSTOM__',    icon:'chevron_right_square_fill', needs_input:true },
     { name:'Lua Script…',       cmd:'__LUA_SCRIPT__',icon:'doc_text_fill', needs_input:true },
@@ -3326,6 +3732,7 @@ const CONDITION_DEFS = [
   { key:'wifi',       title:'Wi-Fi',        icon:'wifi', section:'Connectivity', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
   { key:'wifi_network', title:'Wi-Fi Network', icon:'wifi', section:'Connectivity', freeText:true, hint:'Network name:' },
   { key:'bluetooth',  title:'Bluetooth',    icon:'bolt_horizontal_fill', section:'Connectivity', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
+  { key:'variable', title:'Variable', icon:'function', section:'Variables' },
   { key:'bt_device', title:'Bluetooth Device Connected', icon:'headphones', section:'Connectivity', freeText:true, hint:'Device name:' },
   { key:'carplay',    title:'CarPlay', icon:'car_fill', section:'Connectivity', values:[{value:'CONNECTED',title:'Connected'},{value:'NOT_CONNECTED',title:'Not Connected'}] },
   { key:'cellular',   title:'Cellular Data', icon:'antenna_radiowaves_left_right', section:'Connectivity', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
@@ -3949,7 +4356,7 @@ function renderActionList() {
   actions.forEach((action, idx) => {
     const isCtrl = typeof action === 'object';
     const type   = isCtrl ? (action.type||'').toLowerCase() : null;
-    const isEnd  = type === 'end_if' || type === 'end';
+    const isEnd  = type === 'end_if' || type === 'end' || type === 'end_repeat';
     const isElse = type === 'else';
     const isElseIf = type === 'else_if';
     const isIf   = type === 'if';
@@ -4112,7 +4519,7 @@ function renderActionList() {
     card.appendChild(row);
 
     // Update indent level for subsequent rows
-    if (isIf || type === 'repeat') indent++;
+    if (isIf || type === 'repeat' || type === 'repeat_while') indent++;
     else if (isEnd) indent = Math.max(0, indent - 1);
   });
 
@@ -4335,7 +4742,9 @@ function removeAction(idx) {
   const actions = triggerData(currentKey).actions || [];
   if (idx < 0 || idx >= actions.length) return;
   const action = actions[idx];
-  const isIf = typeof action === 'object' && action !== null && (action.type || '').toLowerCase() === 'if';
+  const startType = typeof action === 'object' && action !== null ? (action.type || '').toLowerCase() : '';
+  // An If or Repeat takes its End marker with it
+  const isIf = startType === 'if' || startType === 'repeat' || startType === 'repeat_while';
 
   if (isIf) {
     let depth = 1;
@@ -4344,9 +4753,9 @@ function removeAction(idx) {
       const a = actions[i];
       if (typeof a === 'object' && a !== null) {
         const t = (a.type || '').toLowerCase();
-        if (t === 'if') {
+        if (t === 'if' || t === 'repeat' || t === 'repeat_while') {
           depth++;
-        } else if (t === 'end_if' || t === 'end') {
+        } else if (t === 'end_if' || t === 'end' || t === 'end_repeat') {
           depth--;
           if (depth === 0) {
             matchingEndIdx = i;
@@ -4393,10 +4802,22 @@ function pasteAction(insertIdx) {
 }
 
 // ── Terminal Action Modal ──
-function promptTerminalModal(initialCmd = '', editIdx = null) {
+// plain: any other command, as it is stored (no root switch)
+let g_terminalPlain = false;
+function promptTerminalModal(initialCmd = '', editIdx = null, plain = false) {
   g_editingTerminalIdx = editIdx;
-  const title = (editIdx !== null) ? 'Edit Terminal Command' : 'Terminal Action';
+  g_terminalPlain = plain;
+  varEdStart({ mode: 'toast', typed: {}, nameText: '', picked: null, typingNew: false }, null); // names for the + menu
+  const title = plain ? 'Edit Action' : (editIdx !== null) ? 'Edit Terminal Command' : 'Terminal Action';
   document.getElementById('terminal-dialog-title').textContent = title;
+  document.getElementById('terminal-dialog-msg').textContent = plain ? 'The command to run. Use + to insert a variable.' : 'Shell command to run on the phone. Use + to insert a variable.';
+  document.getElementById('terminal-dialog-root-row').style.display = plain ? 'none' : 'flex';
+  if (plain) {
+    document.getElementById('terminal-dialog-textarea').value = initialCmd || '';
+    document.getElementById('terminal-dialog-backdrop').classList.add('visible');
+    setTimeout(() => document.getElementById('terminal-dialog-textarea').focus(), 100);
+    return;
+  }
   
   let rawCmd = initialCmd || '';
   let isRoot = false;
@@ -4428,11 +4849,11 @@ function terminalDialogOk() {
     return;
   }
   const isRoot = document.getElementById('terminal-dialog-root-toggle').checked;
-  const formattedCmd = `${isRoot ? 'root' : 'exec'} ${cmdText}`;
+  const formattedCmd = g_terminalPlain ? cmdText : `${isRoot ? 'root' : 'exec'} ${cmdText}`;
   
   const actions = triggerData(currentKey).actions || [];
   if (g_editingTerminalIdx !== null && g_editingTerminalIdx < actions.length) {
-    actions[g_editingTerminalIdx] = formattedCmd;
+    storeCommandAt(actions, g_editingTerminalIdx, formattedCmd);
   } else {
     addActionToCurrent(formattedCmd);
   }
@@ -4442,9 +4863,55 @@ function terminalDialogOk() {
   renderActionList();
 }
 
+// The + on the command: the variable goes in at the cursor
+function terminalInsertVariable(e) {
+  e.stopPropagation();
+  const input = document.getElementById('terminal-dialog-textarea');
+  varEdOpenMenu(e.currentTarget, name => {
+    const token = `{${name}}`;
+    const s = input.selectionStart ?? input.value.length, en = input.selectionEnd ?? input.value.length;
+    input.value = input.value.slice(0, s) + token + input.value.slice(en);
+    input.focus();
+    input.setSelectionRange(s + token.length, s + token.length);
+  });
+}
+
+// Puts a command at idx, keeping any settings around it
+function storeCommandAt(actions, idx, command) {
+  if (actions[idx] && typeof actions[idx] === 'object' && typeof actions[idx].command === 'string') actions[idx].command = command;
+  else actions[idx] = command;
+}
+
+// ── Volume, Ringer Volume, Brightness, Flashlight: a level on the number panel ──
+const LEVEL_ACTIONS = {
+  'set-vol ': ['Volume', 'The media volume to set, from 0 to 100.', 0],
+  'ringer volume ': ['Ringer Volume', 'The ringer and alerts volume to set, from 0 to 100.', 0],
+  'brightness ': ['Brightness', 'The screen brightness to set, from 0 to 100.', 0],
+  'flashlight ': ['Flashlight Intensity', 'The flashlight brightness to set, from 1 to 100.', 1],
+};
+// A level command: the prefix, then a number or a variable
+function isLevelCommand(low, prefix) {
+  return low.startsWith(prefix) && /^(\d+(\.\d+)?|\{[a-z_][a-z0-9_]*\})$/i.test(low.slice(prefix.length).trim());
+}
+// Adds the level action (idx null) or edits the one at idx
+function promptLevelAction(prefix, idx) {
+  const [title, note, min] = LEVEL_ACTIONS[prefix];
+  const actions = triggerData(currentKey).actions || [];
+  const act = idx === null ? '' : actions[idx];
+  const cmd = act && typeof act === 'object' ? String(act.command || '') : String(act || '');
+  const current = cmd.toLowerCase().startsWith(prefix) ? cmd.slice(prefix.length).trim() : '';
+  promptNumberSetting({ title, label: 'Percent', value: current, placeholder: prefix === 'flashlight ' ? '100' : '50', min, max: 100, note,
+    saveLabel: idx === null ? 'Add' : 'Save', allowsRound: roundAvailableAt(idx) }, n => {
+    if (idx === null) { addActionToCurrent(`${prefix}${n}`); return; }
+    storeCommandAt(actions, idx, `${prefix}${n}`);
+    saveConfig(); renderActionList();
+  });
+}
+
 // ── Toast Action Modal ──
 function promptToastModal(initialCmd = '', editIdx = null) {
   g_editingToastIdx = editIdx;
+  varEdStart({ mode: 'toast', typed: {}, nameText: '', picked: null, typingNew: false }, null); // names for the + menus
   const title = (editIdx !== null) ? 'Edit Toast Notification' : 'Toast Notification';
   document.getElementById('toast-dialog-title').textContent = title;
   
@@ -4454,7 +4921,7 @@ function promptToastModal(initialCmd = '', editIdx = null) {
   
   if (initialCmd && initialCmd.toLowerCase().startsWith('toast ')) {
     const argStr = initialCmd.slice(6).trim();
-    const match = argStr.match(/^"([^"]+)"(?:\s+"([^"]+)")?(?:\s+"([^"]+)")?/);
+    const match = argStr.match(/^"([^"]*)"(?:\s+"([^"]*)")?(?:\s+"([^"]*)")?/);
     if (match) {
       tTitle = match[1] || '';
       tSub = match[2] || '';
@@ -4496,7 +4963,95 @@ function updateToastPreview() {
   document.getElementById('toast-preview-icon').textContent = f7Icon || 'text_bubble';
 }
 
+// The + on a Toast field: the variable goes in at the cursor
+function toastInsertVariable(e, id) {
+  e.stopPropagation();
+  const input = document.getElementById(id);
+  varEdOpenMenu(e.currentTarget, name => {
+    const token = `{${name}}`;
+    const s = input.selectionStart ?? input.value.length, en = input.selectionEnd ?? input.value.length;
+    input.value = input.value.slice(0, s) + token + input.value.slice(en);
+    input.focus();
+    input.setSelectionRange(s + token.length, s + token.length);
+    updateToastPreview();
+  });
+}
+
+// ── Icon picker for the Toast: SF Symbol names the web icon font also has, by category ──
+const SYMBOL_CATEGORIES = [
+  ['Common', 'bell.fill bell.slash.fill checkmark.circle.fill xmark.circle.fill exclamationmark.triangle.fill exclamationmark.circle.fill info.circle.fill star.fill heart.fill flag.fill bolt.fill sparkles hand.thumbsup.fill hand.thumbsdown.fill hand.raised.fill lightbulb.fill flame.fill gift.fill tag.fill bookmark.fill pin.fill eye.fill eye.slash.fill lock.fill lock.open.fill shield.fill person.fill person.2.fill house.fill trash.fill pencil paperplane.fill envelope.fill text.bubble.fill phone.fill link doc.fill folder.fill'],
+  ['Media', 'play.fill pause.fill stop.fill playpause.fill forward.fill backward.fill forward.end.fill backward.end.fill shuffle repeat repeat.1 music.note music.note.list music.mic headphones speaker.fill speaker.slash.fill mic.fill mic.slash.fill camera.fill photo.fill film.fill tv.fill hifispeaker.fill waveform'],
+  ['Devices', 'desktopcomputer keyboard printer.fill gamecontroller.fill battery.100 battery.25 battery.0 bolt.circle.fill lock.rotation rotate.right.fill car.fill'],
+  ['Connectivity', 'wifi wifi.slash wifi.exclamationmark airplane personalhotspot globe location.fill location.slash.fill cloud.fill arrow.down.circle.fill arrow.up.circle.fill'],
+  ['Home', 'house.fill lightbulb.fill lightbulb.slash.fill thermometer bed.double.fill lock.shield.fill'],
+  ['Weather & Time', 'sun.max.fill moon.fill moon.stars.fill cloud.sun.fill cloud.rain.fill cloud.bolt.fill cloud.snow.fill wind tornado umbrella.fill sunrise.fill sunset.fill moon.zzz.fill zzz alarm.fill clock.fill timer hourglass stopwatch.fill calendar'],
+  ['Life', 'waveform.path.ecg drop.fill bandage.fill cart.fill bag.fill creditcard.fill briefcase.fill book.fill gamecontroller.fill'],
+  ['Symbols', 'plus.circle.fill minus.circle.fill multiply.circle.fill number textformat checkmark xmark exclamationmark arrow.right arrow.left arrow.up arrow.down arrow.clockwise arrow.counterclockwise chevron.right circle.fill square.fill triangle.fill hexagon.fill power slider.horizontal.3'],
+].map(([title, names]) => [title, names.split(' ')]);
+let symbolPickerCategory = -1;
+
+function openSymbolPicker() {
+  symbolPickerCategory = -1;
+  document.getElementById('symbol-picker-search').value = '';
+  const cats = document.getElementById('symbol-picker-cats');
+  cats.innerHTML = '';
+  [['All'], ...SYMBOL_CATEGORIES].forEach(([title], i) => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'sym-cat' + (i === 0 ? ' active' : '');
+    chip.textContent = title;
+    chip.onclick = () => {
+      symbolPickerCategory = i - 1;
+      cats.querySelectorAll('.sym-cat').forEach((c, j) => c.classList.toggle('active', j === i));
+      renderSymbolPicker();
+      document.getElementById('symbol-picker-grid').scrollTop = 0;
+    };
+    cats.appendChild(chip);
+  });
+  renderSymbolPicker();
+  document.getElementById('symbol-picker-backdrop').classList.add('visible');
+  const sel = document.querySelector('#symbol-picker-grid .sym-tile.selected');
+  if (sel) setTimeout(() => sel.scrollIntoView({ block: 'center' }), 50);
+}
+
+function closeSymbolPicker() {
+  document.getElementById('symbol-picker-backdrop').classList.remove('visible');
+}
+
+function renderSymbolPicker() {
+  const q = document.getElementById('symbol-picker-search').value.trim().toLowerCase();
+  const current = document.getElementById('toast-icon-input').value.trim();
+  const terms = q.split(/[ .]+/).filter(Boolean);
+  const names = [];
+  SYMBOL_CATEGORIES.forEach(([, list], i) => {
+    if (symbolPickerCategory >= 0 && i !== symbolPickerCategory) return;
+    list.forEach(n => {
+      if (names.includes(n)) return;
+      if (!terms.length || terms.some(t => n.replaceAll('.', ' ').includes(t))) names.push(n);
+    });
+  });
+  const shown = (!q && symbolPickerCategory < 0) ? ['', ...names] : names;
+  const grid = document.getElementById('symbol-picker-grid');
+  grid.innerHTML = '';
+  shown.forEach(n => {
+    const tile = document.createElement('button');
+    tile.type = 'button';
+    tile.className = 'sym-tile' + (n === current ? ' selected' : '');
+    tile.title = n || 'None';
+    tile.innerHTML = `<i class="f7-icons">${n ? n.replaceAll('.', '_') : 'nosign'}</i><span>${escHtml(n || 'None')}</span>`;
+    tile.onclick = () => {
+      document.getElementById('toast-icon-input').value = n;
+      updateToastPreview();
+      closeSymbolPicker();
+    };
+    grid.appendChild(tile);
+  });
+  if (!shown.length) grid.innerHTML = '<div class="sym-empty">No matching icons. Type any SF Symbol name in the Icon field.</div>';
+}
+
 function closeToastDialog() {
+  varEdCloseMenu();
+  if (varEd && varEd.mode === 'toast') varEd = null;
   document.getElementById('toast-dialog-backdrop').classList.remove('visible');
   g_editingToastIdx = null;
 }
@@ -4507,12 +5062,12 @@ function toastDialogOk() {
     closeToastDialog();
     return;
   }
-  const tSub = document.getElementById('toast-subtitle-input').value.trim();
-  const tIcon = document.getElementById('toast-icon-input').value.trim();
+  const tSub = document.getElementById('toast-subtitle-input').value.trim().replaceAll('"', "'");
+  const tIcon = document.getElementById('toast-icon-input').value.trim().replaceAll('"', "'");
   
   let formattedCmd = '';
   if (tSub || tIcon) {
-    formattedCmd = `toast "${tTitle}" "${tSub}" "${tIcon}"`;
+    formattedCmd = `toast "${tTitle.replaceAll('"', "'")}" "${tSub}" "${tIcon}"`;
   } else {
     formattedCmd = `toast ${tTitle}`;
   }
@@ -4964,24 +5519,31 @@ function editAction(idx) {
   const act = actions[idx];
   if (typeof act === 'object') {
     const type = (act.type||'').toLowerCase();
-    if (type === 'if' || type === 'else_if') {
+    if (type === 'if' || type === 'else_if' || type === 'repeat_while') {
       openCondPicker(idx);
     }
-    else if (type === 'repeat') {
-      showDialog('Edit Repeat Count', 'Times to loop:', String(act.count||1), 'Save', val => {
-        if (!val) return;
-        act.count = parseInt(val, 10) || 1;
+    else if (type === 'wait_until') {
+      promptTimeLimit(String(act.timeout || 60), 'Save', n => {
+        act.timeout = n;
         saveConfig(); renderActionList();
-      }, true);
+      }, idx);
+    }
+    else if (type === 'set_variable') {
+      promptSetVariable(idx);
+    }
+    else if (type === 'repeat') {
+      promptRepeatCount(String(act.count || 1), 'Save', n => {
+        act.count = n;
+        saveConfig(); renderActionList();
+      }, idx);
     }
   } else if (typeof act === 'string') {
     const low = act.toLowerCase();
     if (low.startsWith('delay ')) {
-      showDialog('Edit Delay', 'Seconds:', act.slice(6), 'Save', val => {
-        if (!val) return;
-        actions[idx] = `delay ${val}`;
+      promptDelay(act.slice(6).trim(), 'Save', n => {
+        actions[idx] = `delay ${n}`;
         saveConfig(); renderActionList();
-      }, true);
+      }, idx);
     } else if (low.startsWith('toast ')) {
       promptToastModal(act, idx);
     } else if (low.startsWith('exec ') || low.startsWith('root ')) {
@@ -5008,30 +5570,14 @@ function editAction(idx) {
         actions[idx] = `kill ${val}`;
         saveConfig(); renderActionList();
       });
-    } else if (low.startsWith('flashlight ')) {
-      showDialog('Edit Flashlight Level', 'Intensity % (1-100):', act.slice(11), 'Save', val => {
-        if (!val) return;
-        actions[idx] = `flashlight ${val}`;
-        saveConfig(); renderActionList();
-      }, true);
-    } else if (low.startsWith('set-vol ')) {
-      showDialog('Edit Volume Level', 'Volume % (0-100):', act.slice(8), 'Save', val => {
-        if (!val) return;
-        actions[idx] = `set-vol ${val}`;
-        saveConfig(); renderActionList();
-      }, true);
-    } else if (low.startsWith('ringer volume ')) {
-      showDialog('Edit Ringer Volume', 'Ringer volume % (0-100):', act.slice(14), 'Save', val => {
-        if (!val) return;
-        actions[idx] = `ringer volume ${val}`;
-        saveConfig(); renderActionList();
-      }, true);
-    } else if (low.startsWith('brightness ')) {
-      showDialog('Edit Brightness Level', 'Brightness % (0-100):', act.slice(11), 'Save', val => {
-        if (!val) return;
-        actions[idx] = `brightness ${val}`;
-        saveConfig(); renderActionList();
-      }, true);
+    } else if (isLevelCommand(low, 'flashlight ')) {
+      promptLevelAction('flashlight ', idx);
+    } else if (isLevelCommand(low, 'set-vol ')) {
+      promptLevelAction('set-vol ', idx);
+    } else if (isLevelCommand(low, 'ringer volume ')) {
+      promptLevelAction('ringer volume ', idx);
+    } else if (isLevelCommand(low, 'brightness ')) {
+      promptLevelAction('brightness ', idx);
     } else if (low === 'unlock' || low.startsWith('unlock ')) {
       const currentPin = low.startsWith('unlock ') ? act.slice(7).trim() : '';
       promptUnlockDialog(currentPin, val => {
@@ -5048,6 +5594,8 @@ function editAction(idx) {
       });
     } else if (low.startsWith('km ') || low === 'km') {
       editKMAction(idx);
+    } else {
+      promptTerminalModal(act, idx, true); // any other command, as text with the + menu
     }
   }
 }
@@ -5272,17 +5820,11 @@ function selectPickerAction(act) {
   closePickerPanel();
   const c = act.cmd;
   if (c === '__DELAY__') {
-    showDialog('Add Delay', 'Delay duration in seconds:', '1', 'Add', val => {
-      if (val) addActionToCurrent(`delay ${val}`);
-    }, true);
+    promptDelay('', 'Add', n => addActionToCurrent(`delay ${n}`));
   } else if (c === '__TOAST__') {
-    showDialog('Add HUD Toast', 'Message text:', '', 'Add', val => {
-      if (val) addActionToCurrent(`toast ${val}`);
-    });
+    promptToastModal('', null);
   } else if (c === '__CUSTOM__') {
-    showDialog('Terminal Command', 'Shell command to execute:', '', 'Add', val => {
-      if (val) addActionToCurrent(`exec ${val}`);
-    });
+    promptTerminalModal('', null);
   } else if (c === '__LUA_SCRIPT__') {
     showDialog('Lua Script', 'Lua expression or script:', '', 'Add', val => {
       if (val) addActionToCurrent(`lua:${val}`);
@@ -5322,23 +5864,39 @@ function selectPickerAction(act) {
       if (val) addActionToCurrent(`airplay connect ${val}`);
     });
   } else if (c === '__IF_CONDITION__') {
+    condPickerNewType = 'if';
     openCondPicker(null);
+  } else if (c === '__REPEAT_WHILE__') {
+    condPickerNewType = 'repeat_while';
+    openCondPicker(null);
+  } else if (c === '__EXIT_REPEAT__') {
+    const actions = triggerData(currentKey).actions || [];
+    actions.push({ type: 'exit_repeat' });
+    triggerData(currentKey).actions = actions;
+    saveConfig();
+    renderActionList();
+  } else if (c === '__WAIT_UNTIL__') {
+    condPickerNewType = 'wait_until';
+    openCondPicker(null);
+  } else if (c === '__SET_VARIABLE__') {
+    promptSetVariable(null);
+  } else if (c === '__REPEAT__') {
+    promptRepeatCount('', 'Add', n => {
+      const actions = triggerData(currentKey).actions || [];
+      actions.push({ type: 'repeat', count: n });
+      actions.push({ type: 'end_repeat' });
+      triggerData(currentKey).actions = actions;
+      saveConfig();
+      renderActionList();
+    });
   } else if (c === '__SET_FLASHLIGHT__') {
-    showDialog('Flashlight Intensity', 'Brightness percentage (1-100):', '100', 'Add', val => {
-      if (val) addActionToCurrent(`flashlight ${val}`);
-    }, true);
+    promptLevelAction('flashlight ', null);
   } else if (c === '__SET_VOLUME__') {
-    showDialog('Set Volume', 'Volume percentage (0-100):', '50', 'Add', val => {
-      if (val) addActionToCurrent(`set-vol ${val}`);
-    }, true);
+    promptLevelAction('set-vol ', null);
   } else if (c === '__SET_RINGER_VOLUME__') {
-    showDialog('Set Ringer Volume', 'Ringer volume percentage (0-100):', '50', 'Add', val => {
-      if (val) addActionToCurrent(`ringer volume ${val}`);
-    }, true);
+    promptLevelAction('ringer volume ', null);
   } else if (c === '__SET_BRIGHTNESS__') {
-    showDialog('Set Brightness', 'Brightness percentage (0-100):', '50', 'Add', val => {
-      if (val) addActionToCurrent(`brightness ${val}`);
-    }, true);
+    promptLevelAction('brightness ', null);
   } else if (c === '__HA_PICKER__') {
     promptHAActionPicker();
   } else if (c === '__HA_TOGGLE__') {
@@ -5417,11 +5975,15 @@ function updateTimeCondPreview() {
   } else {
     hintEl.textContent = `Actions will only run between ${s12} and ${e12}.`;
   }
+  // Variables ("{wake} - 09:00") can't show in the time fields: Save replaces them
+  if (timeCondVariableRange) hintEl.textContent = `Now “${timeCondVariableRange}”, which uses variables. Save replaces it with these times; Cancel keeps it.`;
 }
 
+let timeCondVariableRange = null;
 function showTimeConditionDialog(def, editIdx = null) {
   timeCondDef = def;
   timeCondEditIdx = editIdx;
+  timeCondVariableRange = null;
   
   let startVal = '09:00';
   let endVal = '17:00';
@@ -5431,6 +5993,7 @@ function showTimeConditionDialog(def, editIdx = null) {
     const act = actions[editIdx];
     if (act) {
       const raw = act.expectedValue || act.expected || act.expectedLabel || '';
+      if (String(raw).includes('{')) timeCondVariableRange = String(raw);
       const parts = raw.split(/[-–—]| to | and /i);
       if (parts.length >= 2) {
         const p0 = parts[0].trim();
@@ -5470,7 +6033,7 @@ function saveTimeCondDialog() {
 
 // ── Condition picker (mirrors iOS RCConditionPickerViewController: grouped, ──
 // searchable sections; tapping a condition expands its options inline beneath it)
-const COND_SECTION_ORDER = ['Time', 'Device', 'Power', 'Sound', 'Connectivity', 'Other'];
+const COND_SECTION_ORDER = ['Time', 'Device', 'Power', 'Sound', 'Connectivity', 'Variables', 'Other'];
 const COND_DAY_CODES = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
 const COND_DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 let condPickerEditIdx = null;
@@ -5515,7 +6078,7 @@ function condDaysValue() {
 function openCondPicker(editIdx = null) {
   condPickerEditIdx = editIdx;
   const exKey = condPickerExistingKey();
-  condPickerExpandedKey = (exKey && CONDITION_DEFS.some(d => d.key === exKey)) ? exKey : null;
+  condPickerExpandedKey = (exKey && CONDITION_DEFS.some(d => d.key === exKey && d.key !== 'variable' && !d.threshold)) ? exKey : null;
   condPickerTicked = [];
   if (condPickerExpandedKey === 'day_of_week') {
     const ex = condPickerExisting();
@@ -5553,6 +6116,13 @@ function loadCondBtDevices() {
 }
 
 function selectCond(key) {
+  const def = CONDITION_DEFS.find(d => d.key === key);
+  if (key === 'variable' || (def && def.threshold)) { // their own panels
+    const editIdx = condPickerEditIdx;
+    closeCondPicker();
+    setTimeout(() => key === 'variable' ? promptVariableCondition(editIdx) : promptThresholdSetting(def, editIdx), 200);
+    return;
+  }
   if (condPickerExpandedKey === key) {
     condPickerExpandedKey = null; // collapse it
   } else {
@@ -5587,22 +6157,737 @@ function finishCondValue(def, value, title) {
   finishIfCondition(def, value, title, editIdx);
 }
 
-function promptCondThreshold(def, direction) {
-  const ex = condPickerExisting();
-  let current = '50';
-  if (ex && (ex.conditionKey || ex.conditionName) === def.key) {
-    const raw = String(ex.expectedValue || ex.expected || '');
-    if (raw.toUpperCase().startsWith(direction.toUpperCase())) {
-      const n = raw.slice(direction.length).trim();
-      if (n) current = n;
-    }
-  }
-  const editIdx = condPickerEditIdx;
-  closeCondPicker();
-  showDialog(`${def.title} ${direction.toLowerCase()}`, 'Percentage (0-100):', current, 'Save', val => {
-    const n = Math.max(0, Math.min(100, parseInt(val, 10) || 0));
-    finishIfCondition(def, `${direction.toUpperCase()} ${n}`, `${direction.toLowerCase()} ${n}%`, editIdx);
+// ── Variable editors: Set Variable and the Variable condition on one panel each, like the app's ──
+const VAR_NUMBER_HINT = 'Number or {variable}';
+
+// Set Variable's kinds: op, tile title, icon, whether it changes an existing number, the note under
+// the fields, and the fields ([label, key, placeholder, number]). "command" saves as command_number with Number Only.
+const SET_VARIABLE_KINDS = [
+  { op: 'set', title: 'Text or Number', icon: 'textformat',
+    message: 'Stores this text or number, replacing the current value. {name} inserts another variable\'s value; {round} inserts the repeat round.',
+    fields: [['Value', 'value', 'Text, number or {variable}', false]] },
+  { op: 'random', title: 'Random Number', icon: 'shuffle',
+    message: 'Stores a random whole number from From to To, both included. Each can be a number or a {variable}.',
+    fields: [['From', 'min', VAR_NUMBER_HINT, true], ['To', 'max', VAR_NUMBER_HINT, true]] },
+  { op: 'command', title: 'RC Command', icon: 'chevron_left_slash_chevron_right',
+    message: 'Runs an RC command and stores its answer. For example, wifi status stores "WiFi ON".',
+    numberMessage: 'Runs an RC command and stores the first number in its answer. For example, volume answers "Volume: 100%" and stores 100.',
+    fields: [['Command', 'value', 'volume', false]] },
+  { op: 'add', title: 'Add', icon: 'plus', change: true,
+    message: 'Adds the amount to the variable. A variable without a value starts at 0, so Add 1 works as a counter.',
+    fields: [['Amount', 'value', VAR_NUMBER_HINT, true]] },
+  { op: 'subtract', title: 'Subtract', icon: 'minus', change: true,
+    message: 'Subtracts the amount from the variable. A variable without a value starts at 0.',
+    fields: [['Amount', 'value', VAR_NUMBER_HINT, true]] },
+  { op: 'multiply', title: 'Multiply', icon: 'multiply', change: true,
+    message: 'Multiplies the variable by this number.',
+    fields: [['By', 'value', VAR_NUMBER_HINT, true]] },
+  { op: 'divide', title: 'Divide', icon: 'divide', change: true,
+    message: 'Divides the variable by this number. Dividing by 0 leaves it unchanged.',
+    fields: [['By', 'value', VAR_NUMBER_HINT, true]] },
+  { op: 'round', title: 'Round', icon: 'number', change: true,
+    message: 'Rounds the variable to this many decimal places; empty rounds to a whole number. For example, 2 turns 3.14159 into 3.14.',
+    fields: [['Decimals', 'value', '0', true]] },
+];
+
+// The Variable condition's comparisons as tiles: op, tile title, icon, needs a value, compares numbers, note
+const VARIABLE_COMPARE_KINDS = [
+  { op: 'is', title: 'Is', icon: 'equal', value: true, message: 'True when the variable equals this text or number. Letter case doesn\'t matter.' },
+  { op: 'is_not', title: 'Is Not', icon: 'xmark', value: true, message: 'True when the variable doesn\'t equal this text or number. Letter case doesn\'t matter.' },
+  { op: 'contains', title: 'Contains', icon: 'search', value: true, message: 'True when this text appears anywhere in the variable. Letter case doesn\'t matter.' },
+  { op: 'above', title: 'Above', icon: 'greaterthan', value: true, number: true, message: 'True when the variable is a number greater than this one.' },
+  { op: 'below', title: 'Below', icon: 'lessthan', value: true, number: true, message: 'True when the variable is a number less than this one.' },
+  { op: 'not_empty', title: 'Has Value', icon: 'checkmark_circle', message: 'True when the variable has any value.' },
+  { op: 'empty', title: 'No Value', icon: 'circle', message: 'True when the variable has no value or was never set.' },
+];
+
+let varEd = null; // the open editor's state
+
+function varEdSort(list) {
+  return [...list].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+}
+
+// The trigger's This Run and saved names (without the action at skipIdx), and the saved ones on the phone
+function varEdStart(state, skipIdx) {
+  const actions = triggerData(currentKey).actions || [];
+  const run = new Set(), saved = new Set();
+  actions.forEach((a, i) => {
+    if (i === skipIdx || !a || typeof a !== 'object' || a.type !== 'set_variable' || !variableNameValid(a.name)) return;
+    (a.scope === 'run' ? run : saved).add(a.name);
   });
+  state.runNames = varEdSort(run);
+  state.triggerSaved = [...saved];
+  state.phoneNames = [];
+  varEd = state;
+  varEdMergeSaved();
+  fetch('/api/variables', { cache: 'no-store' }).then(r => r.ok ? r.json() : {}).then(all => {
+    if (varEd !== state || !all || typeof all !== 'object') return;
+    state.phoneNames = Object.keys(all).filter(variableNameValid);
+    varEdMergeSaved();
+    varEdRenderVariable();
+    varEdUpdate();
+  }).catch(() => {});
+}
+
+function varEdMergeSaved() {
+  const all = new Set([...varEd.phoneNames, ...varEd.triggerSaved]);
+  varEd.runNames.forEach(n => all.delete(n));
+  varEd.savedNames = varEdSort(all);
+}
+
+function varEdKind() {
+  return varEd.mode === 'set' ? SET_VARIABLE_KINDS.find(k => k.op === varEd.op) : VARIABLE_COMPARE_KINDS.find(k => k.op === varEd.op);
+}
+
+// Set Variable: a kind that changes an existing variable's number
+function varEdIsChange() {
+  return varEd.mode === 'set' && !!varEdKind().change;
+}
+
+// Whether the Variable row is a menu (true) or a typed name
+function varEdUsesMenu() {
+  return varEd.mode === 'cond' || varEdIsChange();
+}
+
+function varEdShowsName() {
+  return !varEdUsesMenu() || varEd.typingNew;
+}
+
+function varEdName() {
+  if (varEdUsesMenu() && !varEd.typingNew) return varEd.picked ? varEd.picked.name : null;
+  const typed = varEd.nameText.trim();
+  return variableNameValid(typed) ? typed : null;
+}
+
+function varEdFields() {
+  if (varEd.mode === 'number') return [[varEd.opts.label, 'value', varEd.opts.placeholder || '', true]];
+  if (varEd.mode === 'cond') {
+    const k = varEdKind();
+    return k.value ? [['Value', 'value', k.number ? VAR_NUMBER_HINT : 'Text, number or {variable}', !!k.number]] : [];
+  }
+  return varEdKind().fields;
+}
+
+function varEdTyped(key) {
+  const own = varEd.typed[varEd.op] || {};
+  return own[key] ?? '';
+}
+
+function openVarEditor(title, saveLabel) {
+  document.getElementById('var-editor-title').textContent = title;
+  document.getElementById('var-editor-save').textContent = saveLabel || 'Save';
+  varEdRenderAll();
+  document.getElementById('var-editor-backdrop').classList.add('visible');
+  const body = document.getElementById('var-editor-body');
+  body.scrollTop = 0;
+}
+
+function closeVarEditor() {
+  varEdCloseMenu();
+  document.getElementById('var-editor-backdrop').classList.remove('visible');
+  varEd = null;
+}
+
+function _varEditorBackdropClick(e) {
+  if (e.target === document.getElementById('var-editor-backdrop')) closeVarEditor();
+}
+
+// Set Variable: edits the action at idx, or adds one
+function promptSetVariable(idx) {
+  const actions = triggerData(currentKey).actions || [];
+  const ex = (idx !== null && actions[idx] && typeof actions[idx] === 'object') ? actions[idx] : null;
+  let op = ex ? (ex.op || 'set') : 'set';
+  let numberOnly = false;
+  if (op === 'command_number') { op = 'command'; numberOnly = true; }
+  if (!SET_VARIABLE_KINDS.some(k => k.op === op)) op = 'set';
+  const mine = {};
+  ['value', 'min', 'max'].forEach(k => { if (ex && ex[k] !== undefined && ex[k] !== null) mine[k] = String(ex[k]); });
+  varEdStart({ mode: 'set', idx, ex, op, typed: { [op]: mine }, numberOnly,
+    nameText: ex ? String(ex.name || '') : '', runOnly: !!(ex && ex.scope === 'run'), picked: null, typingNew: false }, idx);
+  if (varEdIsChange() && ex && ex.name) varEd.picked = { name: String(ex.name), run: ex.scope === 'run' };
+  openVarEditor('Set Variable', ex ? 'Save' : 'Add');
+}
+
+// The Variable condition for an If, Else If, Repeat While or Wait Until
+function promptVariableCondition(editIdx) {
+  const actions = triggerData(currentKey).actions || [];
+  const act = editIdx !== null ? actions[editIdx] : null;
+  const ex = (act && typeof act === 'object' && act.conditionKey === 'variable') ? act : null;
+  const op = ex && VARIABLE_COMPARE_KINDS.some(k => k.op === ex.comparison) ? ex.comparison : 'is';
+  varEdStart({ mode: 'cond', idx: editIdx, ex, op, typed: {}, numberOnly: false, nameText: '', runOnly: false,
+    picked: null, typingNew: false, value: ex ? String(ex.expectedValue || '') : '' }, null);
+  if (ex && variableNameValid(ex.variable)) {
+    const name = String(ex.variable);
+    if (varEd.runNames.includes(name) || varEd.savedNames.includes(name)) varEd.picked = { name, run: varEd.runNames.includes(name) };
+    else { varEd.typingNew = true; varEd.nameText = name; }
+  } else if (!varEd.runNames.length && !varEd.savedNames.length) {
+    varEd.typingNew = true; // nothing to choose yet
+  }
+  openVarEditor('Variable', editIdx === null ? 'Add' : 'Save');
+}
+
+// ── Building the panel ──
+
+function varEdRenderAll() {
+  const body = document.getElementById('var-editor-body');
+  body.innerHTML = '';
+  if (varEd.mode === 'number') { numSettingRender(body); numSettingUpdate(); return; }
+  if (varEd.mode === 'set') {
+    body.appendChild(varEdSection('Set Value', varEdGrid(SET_VARIABLE_KINDS.filter(k => !k.change), 3, false)));
+    body.appendChild(varEdSection('Change Value', varEdGrid(SET_VARIABLE_KINDS.filter(k => k.change), 5, true)));
+  } else {
+    body.appendChild(varEdSection('Compare', varEdGrid(VARIABLE_COMPARE_KINDS, 4, true), 'var-ed-compare-note'));
+  }
+  const variable = varEdSection(null, document.createElement('div'), 'var-ed-variable-note');
+  variable.id = 'var-ed-variable';
+  body.appendChild(variable);
+  const fields = varEdSection(null, document.createElement('div'), 'var-ed-fields-note');
+  fields.id = 'var-ed-fields';
+  body.appendChild(fields);
+  if (varEd.mode === 'set') {
+    const scope = varEdSection(null, varEdSwitchRow('This Run Only', varEd.runOnly, on => { varEd.runOnly = on; }),
+      null, 'Off: the value is saved for every trigger. On: it is forgotten when this run ends.');
+    scope.id = 'var-ed-scope';
+    body.appendChild(scope);
+  }
+  varEdRenderVariable();
+  varEdRenderFields();
+  varEdUpdate();
+}
+
+// A titled group: header, a card, then a note
+function varEdSection(title, content, noteId, noteText) {
+  const sec = document.createElement('div');
+  sec.className = 'var-ed-section';
+  if (title) {
+    const h = document.createElement('div');
+    h.className = 'var-ed-header';
+    h.textContent = title;
+    sec.appendChild(h);
+  }
+  if (!content.classList.contains('var-ed-grid')) content.classList.add('var-ed-card');
+  sec.appendChild(content);
+  const note = document.createElement('div');
+  note.className = 'var-ed-note';
+  if (noteId) note.id = noteId;
+  if (noteText) note.textContent = noteText;
+  sec.appendChild(note);
+  return sec;
+}
+
+function varEdGrid(kinds, perRow, compact) {
+  const grid = document.createElement('div');
+  grid.className = 'var-ed-grid' + (compact ? ' compact' : '');
+  grid.style.gridTemplateColumns = `repeat(${perRow}, minmax(0, 1fr))`;
+  kinds.forEach(k => {
+    const tile = document.createElement('button');
+    tile.type = 'button';
+    tile.className = 'var-ed-tile' + (k.op === varEd.op ? ' selected' : '');
+    tile.dataset.op = k.op;
+    tile.innerHTML = `<i class="f7-icons">${k.icon}</i><span>${escHtml(k.title)}</span>`;
+    tile.onclick = () => varEdTileTapped(k.op);
+    grid.appendChild(tile);
+  });
+  return grid;
+}
+
+function varEdSwitchRow(label, on, onChange) {
+  const row = document.createElement('label');
+  row.className = 'var-ed-row';
+  row.innerHTML = `<span class="var-ed-label">${escHtml(label)}</span>
+    <span class="toggle-switch"><input type="checkbox"${on ? ' checked' : ''}><span class="toggle-slider"></span></span>`;
+  row.querySelector('input').onchange = e => { onChange(e.target.checked); varEdUpdate(); };
+  return row;
+}
+
+// The Variable row: a menu of known variables (plus a typed name), or a name with chips of known ones
+function varEdRenderVariable() {
+  if (!varEd) return;
+  const sec = document.getElementById('var-ed-variable');
+  if (!sec) return;
+  const card = sec.querySelector('.var-ed-card');
+  const focused = document.activeElement && card.contains(document.activeElement) && document.activeElement.tagName === 'INPUT';
+  if (focused && !varEdUsesMenu()) { varEdRenderChips(card); return; } // keep the caret where it is
+  card.innerHTML = '';
+  if (varEdUsesMenu()) {
+    const row = document.createElement('div');
+    row.className = 'var-ed-row';
+    row.innerHTML = '<span class="var-ed-label">Variable</span>';
+    const wrap = document.createElement('div');
+    wrap.className = 'var-ed-select-wrap';
+    const sel = document.createElement('select');
+    sel.className = 'var-ed-select';
+    const newLabel = varEd.mode === 'cond' ? 'Other Name' : 'New Name';
+    const run = [...varEd.runNames], saved = [...varEd.savedNames];
+    if (varEd.picked && !run.includes(varEd.picked.name) && !saved.includes(varEd.picked.name)) (varEd.picked.run ? run : saved).push(varEd.picked.name);
+    let html = '';
+    if (!varEd.picked && !varEd.typingNew) html += '<option value="" selected disabled>Choose</option>';
+    const group = (title, names, isRun) => {
+      if (!names.length) return;
+      html += `<optgroup label="${title}">` + names.map(n => {
+        const on = varEd.picked && !varEd.typingNew && varEd.picked.name === n && varEd.picked.run === isRun;
+        return `<option value="${isRun ? 'r' : 's'}:${escHtml(n)}"${on ? ' selected' : ''}>${escHtml(n)}</option>`;
+      }).join('') + '</optgroup>';
+    };
+    group('This Run', run, true);
+    group('Saved', saved, false);
+    html += `<option value="new"${varEd.typingNew ? ' selected' : ''}>${newLabel}</option>`;
+    sel.innerHTML = html;
+    sel.onchange = () => {
+      const v = sel.value;
+      if (v === 'new') {
+        varEd.typingNew = true;
+      } else {
+        varEd.typingNew = false;
+        varEd.picked = { name: v.slice(2), run: v.startsWith('r:') };
+      }
+      varEdRenderVariable();
+      varEdUpdate();
+      if (varEd.typingNew) { const f = document.getElementById('var-ed-name'); if (f) f.focus(); }
+    };
+    wrap.appendChild(sel);
+    wrap.insertAdjacentHTML('beforeend', '<i class="f7-icons var-ed-select-icon">chevron_up_chevron_down</i>');
+    row.appendChild(wrap);
+    card.appendChild(row);
+  }
+  if (varEdShowsName()) {
+    const row = document.createElement('div');
+    row.className = 'var-ed-row';
+    row.innerHTML = `<span class="var-ed-label">Name</span>
+      <input id="var-ed-name" class="var-ed-input" type="text" placeholder="count" autocorrect="off" autocapitalize="none" spellcheck="false">`;
+    const input = row.querySelector('input');
+    input.value = varEd.nameText;
+    input.oninput = () => { varEd.nameText = input.value; varEdUpdate(); };
+    input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); const next = document.querySelector('#var-ed-fields input'); if (next) next.focus(); } };
+    card.appendChild(row);
+  }
+  if (!varEdUsesMenu()) varEdRenderChips(card);
+}
+
+// Set Value kinds: the known names as chips under the name
+function varEdRenderChips(card) {
+  const old = card.querySelector('.var-ed-chips');
+  if (old) old.remove();
+  const names = [...new Set([...varEd.runNames, ...varEd.savedNames])];
+  if (!names.length) return;
+  const chips = document.createElement('div');
+  chips.className = 'var-ed-chips';
+  names.forEach(n => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'var-ed-chip';
+    chip.textContent = n;
+    chip.onclick = () => {
+      varEd.nameText = n;
+      const f = document.getElementById('var-ed-name');
+      if (f) f.value = n;
+      // A This Run variable's name keeps it This Run Only
+      if (varEd.runNames.includes(n)) varEd.runOnly = true;
+      else if (varEd.savedNames.includes(n)) varEd.runOnly = false;
+      const sw = document.querySelector('#var-ed-scope input');
+      if (sw) sw.checked = varEd.runOnly;
+      varEdUpdate();
+    };
+    chips.appendChild(chip);
+  });
+  card.appendChild(chips);
+}
+
+// The kind's fields, each with a + menu that inserts a variable
+function varEdRenderFields() {
+  const sec = document.getElementById('var-ed-fields');
+  const card = sec.querySelector('.var-ed-card');
+  card.innerHTML = '';
+  const fields = varEdFields();
+  sec.style.display = fields.length ? '' : 'none';
+  fields.forEach(([label, key, placeholder, numeric], i) => {
+    const row = document.createElement('div');
+    row.className = 'var-ed-row';
+    row.innerHTML = `<span class="var-ed-label">${escHtml(label)}</span>
+      <input class="var-ed-input" type="text" autocorrect="off" autocapitalize="none" spellcheck="false">
+      <button type="button" class="var-ed-insert" title="Insert Variable"><i class="f7-icons">plus_circle</i></button>`;
+    const input = row.querySelector('input');
+    input.placeholder = placeholder;
+    input.value = varEd.mode !== 'set' ? varEd.value : varEdTyped(key);
+    const store = () => {
+      if (varEd.mode !== 'set') varEd.value = input.value;
+      else (varEd.typed[varEd.op] = varEd.typed[varEd.op] || {})[key] = input.value;
+      varEdUpdate();
+    };
+    input.oninput = store;
+    input.onkeydown = e => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      const inputs = [...card.querySelectorAll('input.var-ed-input')];
+      if (inputs[i + 1]) inputs[i + 1].focus();
+      else if (varEd.mode === 'number') { if (!document.getElementById('var-editor-save').disabled) varEditorSave(); }
+      else input.blur();
+    };
+    if (varEd.mode === 'set' && varEd.op === 'command' && i === 0) {
+      const list = document.createElement('button');
+      list.type = 'button';
+      list.className = 'var-ed-insert';
+      list.title = 'Choose Command';
+      list.innerHTML = '<i class="f7-icons">list_bullet</i>';
+      list.onclick = e => { e.stopPropagation(); openCommandPicker(input.value.trim()); };
+      row.insertBefore(list, row.querySelector('.var-ed-insert'));
+    }
+    row.querySelector('.var-ed-insert').onclick = e => {
+      e.stopPropagation();
+      varEdOpenMenu(e.currentTarget, name => {
+        const token = `{${name}}`;
+        if (numeric) {
+          input.value = token; // a number field takes one number or one variable
+        } else {
+          const s = input.selectionStart ?? input.value.length, en = input.selectionEnd ?? input.value.length;
+          input.value = input.value.slice(0, s) + token + input.value.slice(en);
+          input.setSelectionRange(s + token.length, s + token.length);
+        }
+        input.focus();
+        store();
+      });
+    };
+    card.appendChild(row);
+  });
+  if (varEd.mode === 'set' && varEd.op === 'command') {
+    card.appendChild(varEdSwitchRow('Number Only', varEd.numberOnly, on => { varEd.numberOnly = on; }));
+  }
+}
+
+function varEdTileTapped(op) {
+  if (op === varEd.op) return;
+  const wasChange = varEdIsChange();
+  varEd.op = op;
+  document.querySelectorAll('#var-editor-body .var-ed-tile').forEach(t => t.classList.toggle('selected', t.dataset.op === op));
+  if (varEd.mode === 'set' && wasChange !== varEdIsChange()) {
+    const typed = varEd.nameText.trim();
+    if (varEdIsChange()) {
+      // A typed name carries over: picked when it's a known variable (or the one picked before),
+      // otherwise kept as a new name
+      if (varEd.runNames.includes(typed)) { varEd.picked = { name: typed, run: true }; varEd.typingNew = false; }
+      else if (varEd.savedNames.includes(typed)) { varEd.picked = { name: typed, run: false }; varEd.typingNew = false; }
+      else if (varEd.picked && typed === varEd.picked.name) { varEd.picked.run = varEd.runOnly; varEd.typingNew = false; }
+      else varEd.typingNew = typed.length > 0;
+    } else {
+      if (!varEd.typingNew && varEd.picked) { varEd.nameText = varEd.picked.name; varEd.runOnly = varEd.picked.run; }
+      varEd.typingNew = false;
+      const sw = document.querySelector('#var-ed-scope input');
+      if (sw) sw.checked = varEd.runOnly;
+    }
+    varEdRenderVariable();
+  }
+  varEdRenderFields();
+  varEdUpdate();
+}
+
+// Notes, which rows show, and whether Save is on
+function varEdUpdate() {
+  if (!varEd) return;
+  if (varEd.mode === 'number') { numSettingUpdate(); return; }
+  if (varEd.mode === 'toast') return;
+  const kind = varEdKind();
+  const typed = varEd.nameText.trim();
+  let note = '', bad = false;
+  if (varEdShowsName() && typed && !variableNameValid(typed)) {
+    note = typed === 'round' ? '"round" is reserved.' : 'Letters, digits and _ only, not starting with a digit.';
+    bad = true;
+  } else if (varEd.mode === 'cond') {
+    note = varEd.typingNew ? 'A variable this trigger doesn\'t set, such as one another trigger saves.' : 'The variable to check.';
+  } else if (varEdIsChange() && !varEd.typingNew) {
+    note = !varEd.picked ? 'Choose the variable to change. Its value must be a number; otherwise it stays unchanged and Run History shows why.'
+      : (varEd.picked.run ? 'Changes the value this run set. It is forgotten when the run ends.' : 'Changes the saved value, which every trigger can use.');
+  } else if (varEdIsChange()) {
+    note = 'A new variable starts at 0.';
+  } else {
+    note = 'Letters, digits and _. Write {name} in any action\'s text to insert the value.';
+  }
+  const vNote = document.getElementById('var-ed-variable-note');
+  vNote.textContent = note;
+  vNote.classList.toggle('bad', bad);
+
+  let ok = !!varEdName();
+  if (varEd.mode === 'set') {
+    document.getElementById('var-ed-fields-note').textContent = (kind.op === 'command' && varEd.numberOnly) ? kind.numberMessage : kind.message;
+    document.getElementById('var-ed-scope').style.display = varEdShowsName() ? '' : 'none';
+    if (kind.op !== 'set' && kind.op !== 'round') {
+      kind.fields.forEach(([, key]) => { if (!String(varEdTyped(key)).trim()) ok = false; });
+    }
+  } else {
+    document.getElementById('var-ed-compare-note').textContent = kind.message;
+    if (kind.value && !varEd.value.trim()) ok = false;
+  }
+  document.getElementById('var-editor-save').disabled = !ok;
+}
+
+function varEditorSave() {
+  if (!varEd) return;
+  if (varEd.mode === 'number') { numSettingSave(); return; }
+  const name = varEdName();
+  if (!name) return;
+  const st = varEd;
+  if (st.mode === 'cond') {
+    const kind = varEdKind();
+    const phrase = (VARIABLE_COMPARISONS.find(c => c[0] === kind.op) || VARIABLE_COMPARISONS[0])[1];
+    const value = kind.value ? st.value.trim() : '';
+    const def = CONDITION_DEFS.find(d => d.key === 'variable');
+    closeVarEditor();
+    finishIfCondition(def, value, kind.value ? `${phrase.toLowerCase()} ${value}` : phrase.toLowerCase(), st.idx,
+      { conditionTitle: name, variable: name, comparison: kind.op });
+    return;
+  }
+  const item = { type: 'set_variable', name, value: '' };
+  let op = st.op;
+  if (op === 'command' && st.numberOnly) op = 'command_number';
+  if (op !== 'set') item.op = op;
+  varEdKind().fields.forEach(([, key]) => {
+    const text = String(varEdTyped(key));
+    item[key] = st.op === 'set' ? text : text.trim(); // a Set value is kept as typed; spaces may matter
+  });
+  const runOnly = (varEdIsChange() && !st.typingNew) ? st.picked.run : st.runOnly;
+  if (runOnly) item.scope = 'run';
+  if (st.ex && st.ex.disabled) item.disabled = st.ex.disabled;
+  closeVarEditor();
+  const actions = triggerData(currentKey).actions || [];
+  if (st.ex) actions[st.idx] = item; else actions.push(item);
+  triggerData(currentKey).actions = actions;
+  saveConfig();
+  renderActionList();
+}
+
+// ── Number settings (Delay, Repeat, Time Limit, a percentage): one small panel ──
+// opts: title, label, value, placeholder, note, min, max, decimals, choices, choice, saveLabel.
+// onSave(value, choiceIndex): a number in range, or "{name}".
+function promptNumberSetting(opts, onSave) {
+  varEdStart({ mode: 'number', idx: null, opts, onSave, choice: opts.choice || 0,
+    value: opts.value === undefined || opts.value === null ? '' : String(opts.value),
+    typed: {}, nameText: '', picked: null, typingNew: false }, null);
+  openVarEditor(opts.title, opts.saveLabel || 'Save');
+  if (!varEd.value) setTimeout(() => { const f = document.querySelector('#var-ed-fields input'); if (f) f.focus(); }, 150);
+}
+
+function numFormat(n) {
+  return Number(n).toLocaleString(undefined, { maximumFractionDigits: 3 });
+}
+
+// The number panel's value: a number in range, "{name}", or null with why
+function numSettingValue() {
+  const o = varEd.opts, text = varEd.value.trim();
+  if (!text) return { value: null };
+  const m = text.match(/^\{([A-Za-z_][A-Za-z0-9_]*)\}$/);
+  if (m && m[1] === 'round') return o.allowsRound === false ? { value: null, problem: 'Repeat Round only has a value inside a Repeat.' } : { value: text };
+  if (m) return variableNameValid(m[1]) ? { value: text } : { value: null, problem: 'Variable names use letters, digits and _ only.' };
+  const n = Number(text.replace(',', '.'));
+  const min = o.min ?? 0, max = o.max ?? 1000000;
+  if (!/^-?\d*[.,]?\d+$/.test(text) || isNaN(n) || (!o.decimals && !Number.isInteger(n)) || n < min || n > max) {
+    return { value: null, problem: `Enter a ${o.decimals ? 'number' : 'whole number'} from ${numFormat(min)} to ${numFormat(max)}, or choose a variable with +.` };
+  }
+  return { value: n };
+}
+
+function numSettingRender(body) {
+  const o = varEd.opts;
+  if (o.choices && o.choices.length) {
+    const seg = document.createElement('div');
+    seg.className = 'var-ed-seg';
+    o.choices.forEach((c, i) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = c;
+      b.className = i === varEd.choice ? 'selected' : '';
+      b.onclick = () => {
+        varEd.choice = i;
+        seg.querySelectorAll('button').forEach((x, j) => x.classList.toggle('selected', j === i));
+      };
+      seg.appendChild(b);
+    });
+    const sec = document.createElement('div');
+    sec.className = 'var-ed-section';
+    sec.appendChild(seg);
+    body.appendChild(sec);
+  }
+  const fields = varEdSection(null, document.createElement('div'), 'var-ed-fields-note');
+  fields.id = 'var-ed-fields';
+  body.appendChild(fields);
+  varEdRenderFields();
+  const input = fields.querySelector('input');
+  if (input) input.setAttribute('inputmode', o.decimals ? 'decimal' : 'numeric');
+}
+
+function numSettingUpdate() {
+  const r = numSettingValue();
+  const note = document.getElementById('var-ed-fields-note');
+  note.textContent = r.problem || varEd.opts.note || '';
+  note.classList.toggle('bad', !!r.problem);
+  document.getElementById('var-editor-save').disabled = r.value === null;
+}
+
+function numSettingSave() {
+  const r = numSettingValue();
+  if (r.value === null) return;
+  const st = varEd;
+  closeVarEditor();
+  st.onSave(r.value, st.choice);
+}
+
+// Battery, Volume...: above or below a percentage, on the number panel
+function promptThresholdSetting(def, editIdx) {
+  const actions = triggerData(currentKey).actions || [];
+  const ex = editIdx !== null ? actions[editIdx] : null;
+  let value = '', choice = 0;
+  if (ex && typeof ex === 'object' && (ex.conditionKey || ex.conditionName) === def.key) {
+    const raw = String(ex.expectedValue || ex.expected || '');
+    if (/^\s*below/i.test(raw)) choice = 1;
+    value = raw.replace(/^\s*(above|below)\s*/i, '');
+  }
+  promptNumberSetting({ title: def.title, label: 'Percent', value, placeholder: '50', min: 0, max: 100,
+    choices: ['Above', 'Below'], choice, note: 'True when the level is above or below this percentage.',
+    saveLabel: editIdx === null ? 'Add' : 'Save', allowsRound: roundAvailableAt(editIdx) }, (n, c) => {
+    const word = c === 1 ? 'Below' : 'Above';
+    finishIfCondition(def, `${word.toUpperCase()} ${n}`, `${word.toLowerCase()} ${n}%`, editIdx);
+  });
+}
+
+// Whether an action at idx (null: the end) sits inside a Repeat or Repeat While, where {round} has a value
+function roundAvailableAt(idx) {
+  const actions = triggerData(currentKey).actions || [];
+  const end = idx === null || idx === undefined ? actions.length : Math.max(0, Math.min(idx, actions.length));
+  let depth = 0;
+  for (let i = 0; i < end; i++) {
+    const t = actions[i] && typeof actions[i] === 'object' ? String(actions[i].type || '').toLowerCase() : '';
+    if (t === 'repeat' || t === 'repeat_while') depth++;
+    else if (t === 'end_repeat') depth = Math.max(0, depth - 1);
+  }
+  return depth > 0;
+}
+
+// Wait Until's time limit; Repeat's count; Delay's seconds. idx: the action's place (null: the end)
+function promptTimeLimit(current, saveLabel, onSave, idx = null) {
+  promptNumberSetting({ title: 'Time Limit', label: 'Seconds', value: current, placeholder: '60', min: 1, max: 86400,
+    note: 'The longest to wait, up to a day. Then the actions go on anyway.', saveLabel, allowsRound: roundAvailableAt(idx) }, n => onSave(n));
+}
+
+function promptRepeatCount(current, saveLabel, onSave, idx = null) {
+  promptNumberSetting({ title: 'Repeat', label: 'Times', value: current, placeholder: '3', min: 1, max: 1000,
+    note: 'Runs the actions inside this many times, up to 1,000. In their text, {round} becomes the current round.', saveLabel, allowsRound: roundAvailableAt(idx) }, n => onSave(n));
+}
+
+function promptDelay(current, saveLabel, onSave, idx = null) {
+  promptNumberSetting({ title: 'Delay', label: 'Seconds', value: current, placeholder: '1', min: 0, max: 86400, decimals: true,
+    note: 'How long to wait before the next action, up to a day.', saveLabel, allowsRound: roundAvailableAt(idx) }, n => onSave(n));
+}
+
+// ── Set Variable's RC Command: commands that answer with a value, with their answer now ──
+const VALUE_COMMANDS = [
+  ['Levels', [['Battery Level', 'battery', 'battery_100', true], ['Volume', 'volume', 'speaker_2_fill', true]]],
+  ['Connectivity', [['Wi-Fi', 'wifi status', 'wifi'], ['Bluetooth', 'bt status', 'antenna_radiowaves_left_right'],
+    ['Cellular Data', 'cell status', 'antenna_radiowaves_left_right'], ['Airplane Mode', 'airplane status', 'airplane'],
+    ['Location Services', 'location status', 'location_fill'], ['CarPlay', 'carplay status', 'car_fill']]],
+  ['Sound', [['Ringer', 'ringer status', 'bell_fill'], ['Silent Vibrate', 'vibration silent-status', 'iphone'],
+    ['Haptics', 'haptics status', 'hand_draw'], ['Media Playing', 'is-playing', 'play_fill']]],
+  ['Device', [['Lock State', 'lock status', 'lock_fill'], ['Low Power Mode', 'low power status', 'battery_25'],
+    ['Flashlight', 'flashlight status', 'lightbulb_fill'], ['Do Not Disturb', 'dnd status', 'moon_fill'],
+    ['Focus', 'focus status', 'moon_circle_fill'], ['Screen Recording', 'screenrecord status', 'record_circle_fill'],
+    ['Proximity', 'proximity status', 'hand_raised_fill']]],
+  ['Display', [['Orientation', 'orientation status', 'rotate_right_fill'], ['Appearance', 'appearance status', 'circle_lefthalf_fill'],
+    ['Auto-Lock', 'autolock status', 'timer']]],
+];
+let commandPickerAnswers = {};
+
+function openCommandPicker(current) {
+  renderCommandPicker(current);
+  document.getElementById('cmd-picker-backdrop').classList.add('visible');
+  fetch('/api/answers', { cache: 'no-store' }).then(r => r.ok ? r.json() : {}).then(a => {
+    commandPickerAnswers = a || {};
+    if (document.getElementById('cmd-picker-backdrop').classList.contains('visible')) renderCommandPicker(current);
+  }).catch(() => {});
+}
+
+function closeCommandPicker() {
+  document.getElementById('cmd-picker-backdrop').classList.remove('visible');
+}
+
+function renderCommandPicker(current) {
+  const list = document.getElementById('cmd-picker-list');
+  list.innerHTML = '';
+  VALUE_COMMANDS.forEach(([title, rows], si) => {
+    list.insertAdjacentHTML('beforeend', `<div class="cmd-head">${title}</div>`);
+    const card = document.createElement('div');
+    card.className = 'cmd-card';
+    rows.forEach(([name, cmd, icon, number]) => {
+      const row = document.createElement('div');
+      row.className = 'cmd-row';
+      const answer = commandPickerAnswers[cmd];
+      row.innerHTML = `<i class="f7-icons">${icon}</i>
+        <div class="cmd-text"><div class="cmd-title">${escHtml(name)}</div>
+        <div class="cmd-sub"><code>${escHtml(cmd)}</code><span>${answer === undefined ? '…' : escHtml(answer || '—')}</span></div></div>
+        ${cmd === (current || '').toLowerCase() ? '<i class="f7-icons cmd-check">checkmark_alt</i>' : ''}`;
+      row.onclick = () => {
+        closeCommandPicker();
+        if (!varEd || varEd.op !== 'command') return;
+        (varEd.typed.command = varEd.typed.command || {}).value = cmd;
+        varEd.numberOnly = !!number;
+        varEdRenderFields();
+        varEdUpdate();
+      };
+      card.appendChild(row);
+    });
+    list.appendChild(card);
+    if (si === 0) list.insertAdjacentHTML('beforeend', '<div class="cmd-note">Levels are stored as a number, such as 85.</div>');
+  });
+  list.insertAdjacentHTML('beforeend', '<div class="cmd-note">Each row shows the answer this phone gives now; the variable stores the answer at run time.</div>');
+}
+
+// ── The + menu: This Run and saved variables, then the Repeat round ──
+
+function varEdOpenMenu(anchor, onPick) {
+  varEdCloseMenu();
+  const menu = document.createElement('div');
+  menu.id = 'var-ed-menu';
+  menu.className = 'var-ed-menu';
+  const section = (title, names) => {
+    if (!names.length) return;
+    menu.insertAdjacentHTML('beforeend', `<div class="var-ed-menu-header">${title}</div>`);
+    names.forEach(n => {
+      const item = document.createElement('div');
+      item.className = 'var-ed-menu-item';
+      item.innerHTML = `<span>${escHtml(n)}</span>`;
+      item.onclick = () => { varEdCloseMenu(); onPick(n); };
+      menu.appendChild(item);
+    });
+  };
+  section('This Run', varEd.runNames);
+  section('Saved', varEd.savedNames);
+  const withRound = !(varEd.mode === 'number' && varEd.opts.allowsRound === false); // {round} has a value only inside a Repeat
+  if (withRound) {
+    if (menu.childElementCount) menu.insertAdjacentHTML('beforeend', '<div class="var-ed-menu-gap"></div>');
+    const round = document.createElement('div');
+    round.className = 'var-ed-menu-item';
+    round.innerHTML = '<div><span>Repeat Round</span><div class="var-ed-menu-sub">The current pass of a Repeat: 1, 2, 3…</div></div><i class="f7-icons">repeat</i>';
+    round.onclick = () => { varEdCloseMenu(); onPick('round'); };
+    menu.appendChild(round);
+  }
+  if (!menu.childElementCount) menu.insertAdjacentHTML('beforeend', '<div class="var-ed-menu-header">No Variables Yet</div>');
+  document.body.appendChild(menu);
+  const r = anchor.getBoundingClientRect();
+  const w = menu.offsetWidth, h = menu.offsetHeight;
+  const left = Math.max(8, Math.min(window.innerWidth - w - 8, r.right - w));
+  let top = r.bottom + 6;
+  if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 6);
+  menu.style.left = left + 'px';
+  menu.style.top = top + 'px';
+  requestAnimationFrame(() => menu.classList.add('show'));
+  setTimeout(() => document.addEventListener('pointerdown', varEdMenuOutside, true), 0);
+}
+
+function varEdMenuOutside(e) {
+  const menu = document.getElementById('var-ed-menu');
+  if (menu && !menu.contains(e.target)) varEdCloseMenu();
+}
+
+function varEdCloseMenu() {
+  document.removeEventListener('pointerdown', varEdMenuOutside, true);
+  const menu = document.getElementById('var-ed-menu');
+  if (menu) menu.remove();
 }
 
 function promptCondText(def) {
@@ -5647,14 +6932,6 @@ function condOptionsFor(d, exKey, exValue, exTitle) {
     } else {
       rows.push(condOptionRow('Tick at least one day', 'dim', '', null));
     }
-    return rows;
-  }
-  if (d.threshold) {
-    ['Above', 'Below'].forEach(dir => {
-      let label = `${dir}…`;
-      if (exKey === d.key && String(exValue).toUpperCase().startsWith(dir.toUpperCase())) label += ` (now: ${exTitle})`;
-      rows.push(condOptionRow(label, 'blue', '', () => promptCondThreshold(d, dir)));
-    });
     return rows;
   }
   if (d.key === 'bt_device') {
@@ -5753,9 +7030,12 @@ function renderCondPicker() {
   });
 }
 
-function finishIfCondition(def, value, valueTitle, editIdx) {
+// The kind of block a new condition makes: 'if', or 'repeat_while' (Repeat While)
+let condPickerNewType = 'if';
+
+function finishIfCondition(def, value, valueTitle, editIdx, extra) {
   const actions = triggerData(currentKey).actions || [];
-  let existingType = 'if';
+  let existingType = editIdx === null ? condPickerNewType : 'if';
   if (editIdx !== null && actions[editIdx] && actions[editIdx].type) {
     existingType = actions[editIdx].type;
   }
@@ -5769,13 +7049,36 @@ function finishIfCondition(def, value, valueTitle, editIdx) {
     expectedLabel: value,
     expectedTitle: valueTitle
   };
+  if (extra) Object.assign(item, extra);
+  if (editIdx !== null && actions[editIdx] && actions[editIdx].disabled) item.disabled = actions[editIdx].disabled; // stays disabled
 
+  if (existingType === 'wait_until') {
+    // Wait Until: one row, no End; a new one asks for its time limit, an edited one keeps it
+    condPickerNewType = 'if';
+    if (editIdx !== null) {
+      item.timeout = actions[editIdx].timeout || 60;
+      actions[editIdx] = item;
+      triggerData(currentKey).actions = actions;
+      saveConfig();
+      renderActionList();
+      return;
+    }
+    setTimeout(() => promptTimeLimit('60', 'Add', n => {
+      item.timeout = n;
+      actions.push(item);
+      triggerData(currentKey).actions = actions;
+      saveConfig();
+      renderActionList();
+    }), 300);
+    return;
+  }
   if (editIdx !== null) {
     actions[editIdx] = item;
   } else {
     actions.push(item);
-    actions.push({ type: 'end_if' });
+    actions.push({ type: existingType === 'repeat_while' ? 'end_repeat' : 'end_if' });
   }
+  condPickerNewType = 'if';
   triggerData(currentKey).actions = actions;
   saveConfig();
   renderActionList();
@@ -6769,7 +8072,7 @@ function promptManualHAEntity() {
 // toggle, match, exclude }. "match"/"exclude" patterns ending in " ", ":" or "-"
 // are prefixes; anything else must equal the (lowercased) command.
 // Not offered: entries that don't run an action of their own, and Set Flashlight (covered by Flashlight)
-const BANNER_SKIP = new Set(['__IF_CONDITION__', '__DELAY__', '__TOAST__', '__SET_FLASHLIGHT__']);
+const BANNER_SKIP = new Set(['__IF_CONDITION__', '__REPEAT__', '__REPEAT_WHILE__', '__EXIT_REPEAT__', '__WAIT_UNTIL__', '__SET_VARIABLE__', '__DELAY__', '__TOAST__', '__SET_FLASHLIGHT__']);
 // The app's names for the same actions, so both UIs share one setting
 const BANNER_ID_ALIASES = { '__SHORTCUT__': '__SHORTCUT_PICKER__', 'queuealbum': 'queue album', 'queueartist': 'queue artist',
   'shuffleall': 'shuffle all songs', 'deletesong': 'delete current song' };

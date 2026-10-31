@@ -21,6 +21,19 @@
 
 @implementation RCActionPickerViewController
 
+// One pick per opening: a second tap while the list is closing (easy on a slower iPhone) would
+// otherwise add the action twice, or ask for its details twice
+- (void)setOnActionSelected:(void (^)(NSString *))onActionSelected {
+    if (!onActionSelected) { _onActionSelected = nil; return; }
+    __block BOOL picked = NO;
+    void (^once)(NSString *) = ^(NSString *action) {
+        if (picked) return;
+        picked = YES;
+        onActionSelected(action);
+    };
+    _onActionSelected = [once copy];
+}
+
 - (instancetype)init {
     self = [super initWithStyle:UITableViewStyleInsetGrouped];
     if (self) _selectedCategory = -1;
@@ -303,6 +316,11 @@
         @[
             @{ @"name": @"Custom Lua Script", @"command": @"__LUA_SCRIPT__", @"icon": @"scroll.fill" },
             @{ @"name": @"If Condition...", @"command": @"__IF_CONDITION__", @"icon": @"arrow.triangle.branch" },
+            @{ @"name": @"Repeat...", @"command": @"__REPEAT__", @"icon": @"repeat" },
+            @{ @"name": @"Repeat While...", @"command": @"__REPEAT_WHILE__", @"icon": @"repeat" },
+            @{ @"name": @"Exit Repeat", @"command": @"__EXIT_REPEAT__", @"icon": @"arrow.right.to.line" },
+            @{ @"name": @"Wait Until...", @"command": @"__WAIT_UNTIL__", @"icon": @"hourglass" },
+            @{ @"name": @"Set Variable...", @"command": @"__SET_VARIABLE__", @"icon": @"x.squareroot" },
             @{ @"name": @"Delay", @"command": @"__DELAY__", @"icon": @"hourglass" },
             @{ @"name": @"Stop Trigger...", @"command": @"__STOP_TRIGGER__", @"icon": @"stop.circle" },
             @{ @"name": @"Terminal Command", @"command": @"__CUSTOM__", @"icon": @"terminal.fill" },
@@ -502,6 +520,11 @@
         [cmd isEqualToString:@"__LUA_SCRIPT__"] || 
         [cmd isEqualToString:@"__TOAST__"] || 
         [cmd isEqualToString:@"__IF_CONDITION__"] ||
+        [cmd isEqualToString:@"__REPEAT__"] ||
+        [cmd isEqualToString:@"__REPEAT_WHILE__"] ||
+        [cmd isEqualToString:@"__EXIT_REPEAT__"] ||
+        [cmd isEqualToString:@"__WAIT_UNTIL__"] ||
+        [cmd isEqualToString:@"__SET_VARIABLE__"] ||
         [cmd isEqualToString:@"__DELAY__"] ||
         [cmd isEqualToString:@"__STOP_TRIGGER__"] ||
         [cmd isEqualToString:@"__CUSTOM__"] ||
@@ -521,6 +544,7 @@
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    if (self.isBeingDismissed || self.navigationController.isBeingDismissed) return; // already picked, closing
     
     NSDictionary *action = [self actionAtIndexPath:indexPath];
     NSString *command = action[@"command"];
@@ -536,11 +560,6 @@
         return;
     }
 
-    if ([command isEqualToString:@"__SET_VOLUME__"] || [command isEqualToString:@"__SET_RINGER_VOLUME__"] || [command isEqualToString:@"__SET_BRIGHTNESS__"] || [command isEqualToString:@"__SET_FLASHLIGHT__"]) {
-        [self handleValueInputForCommand:command];
-        return;
-    }
-    
     // Touch gesture handlers
     if ([command isEqualToString:@"__TAP__"]) {
         [self handleTouchCoordInputWithTitle:@"Tap" placeholder:@"x y  (e.g. 195 422)" build:^NSString *(NSString *v) {
@@ -766,56 +785,6 @@
             }
         }];
     }
-}
-
-- (void)handleValueInputForCommand:(NSString *)commandPlaceholder {
-    NSDictionary *inputs = @{
-        @"__SET_VOLUME__": @[@"Set Volume", @"set-vol"],
-        @"__SET_RINGER_VOLUME__": @[@"Set Ringer Volume", @"ringer volume"],
-        @"__SET_BRIGHTNESS__": @[@"Set Brightness", @"brightness"],
-        @"__SET_FLASHLIGHT__": @[@"Set Flashlight", @"flashlight"],
-    };
-    NSString *title = inputs[commandPlaceholder][0] ?: @"Set Flashlight";
-    NSString *prefix = inputs[commandPlaceholder][1] ?: @"flashlight";
-
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:title                                                                   message:@"Enter a value (0-100)" 
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    
-    [alert addTextFieldWithConfigurationHandler:^(UITextField * _Nonnull textField) {
-        textField.keyboardType = UIKeyboardTypeNumberPad;
-        textField.textAlignment = NSTextAlignmentCenter;
-    }];
-    
-    UIAlertAction *okAction = [UIAlertAction actionWithTitle:@"Set" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
-        UITextField *textField = alert.textFields.firstObject;
-        NSString *value = textField.text;
-        // Basic validation
-        int val = [value intValue];
-        if (val < 0) val = 0;
-        if (val > 100) val = 100;
-        
-        NSString *finalCommand = [NSString stringWithFormat:@"%@ %d", prefix, val];
-        
-        if (self.onActionSelected) {
-            self.onActionSelected(finalCommand);
-        }
-        if (self.searchController.isActive) {
-            [self.searchController dismissViewControllerAnimated:NO completion:^{
-                [self dismissViewControllerAnimated:YES completion:nil];
-            }];
-        } else {
-            [self dismissViewControllerAnimated:YES completion:nil];
-        }
-    }];
-    
-    UIAlertAction *cancelAction = [UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(UIAlertAction * _Nonnull action) {
-        [self.tableView deselectRowAtIndexPath:[self.tableView indexPathForSelectedRow] animated:YES];
-    }];
-    
-    [alert addAction:cancelAction];
-    [alert addAction:okAction];
-    
-    [self presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)handleUnlockDevice {

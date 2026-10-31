@@ -1,9 +1,15 @@
 #import "RCTextInputViewController.h"
+#import "RCVariableEditorParts.h"
+#import "RCServerClient.h"
 
 @interface RCTextInputViewController () <UITextViewDelegate>
 
 @property (nonatomic, strong) UITextView *textView;
 @property (nonatomic, strong) UISwitch *rootSwitch;
+@property (nonatomic, strong) UIBarButtonItem *insertItem;
+@property (nonatomic, strong) NSArray<NSString *> *runNames;
+@property (nonatomic, strong) NSArray<NSString *> *triggerSavedNames;
+@property (nonatomic, strong) NSArray<NSString *> *savedNames;
 @end
 
 @implementation RCTextInputViewController
@@ -48,7 +54,16 @@
     UIToolbar *toolbar = [[UIToolbar alloc] initWithFrame:CGRectMake(0, 0, self.view.frame.size.width, 44)];
     UIBarButtonItem *flexSpace = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil];
     UIBarButtonItem *doneButton = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:_textView action:@selector(resignFirstResponder)];
-    [toolbar setItems:@[flexSpace, doneButton]];
+    if (self.variableActions) {
+        self.insertItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"plus.circle"] style:UIBarButtonItemStylePlain target:nil action:nil];
+        self.insertItem.accessibilityLabel = @"Insert Variable";
+        [self gatherNames];
+        [self rebuildMenu];
+        [self loadSavedNames];
+        [toolbar setItems:@[self.insertItem, flexSpace, doneButton]];
+    } else {
+        [toolbar setItems:@[flexSpace, doneButton]];
+    }
     _textView.inputAccessoryView = toolbar;
     
     if (_initialText) {
@@ -100,6 +115,57 @@
             [_textView.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-20]
         ]];
     }
+}
+
+#pragma mark - Variables
+
+// The variables this trigger sets, by kind
+- (void)gatherNames {
+    NSMutableOrderedSet *run = [NSMutableOrderedSet orderedSet], *saved = [NSMutableOrderedSet orderedSet];
+    for (id item in self.variableActions) {
+        if (![item isKindOfClass:[NSDictionary class]] || ![[item[@"type"] description] isEqualToString:@"set_variable"]) continue;
+        NSString *name = [item[@"name"] description];
+        if (!RCSetVariableNameValid(name)) continue;
+        if ([[item[@"scope"] description] isEqualToString:@"run"]) [run addObject:name];
+        else [saved addObject:name];
+    }
+    self.runNames = [run.array sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
+    self.triggerSavedNames = saved.array;
+    self.savedNames = [self mergedSaved:@[]];
+}
+
+- (NSArray<NSString *> *)mergedSaved:(NSArray<NSString *> *)phoneNames {
+    NSMutableOrderedSet *all = [NSMutableOrderedSet orderedSetWithArray:phoneNames];
+    [all addObjectsFromArray:self.triggerSavedNames ?: @[]];
+    [all minusSet:[NSSet setWithArray:self.runNames ?: @[]]];
+    return [all.array sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
+}
+
+// Saved variables already on the phone, from other triggers
+- (void)loadSavedNames {
+    __weak typeof(self) weakSelf = self;
+    [[RCServerClient sharedClient] executeCommand:@"var list" completion:^(NSString *output, NSError *error) {
+        NSData *data = [output dataUsingEncoding:NSUTF8StringEncoding];
+        id parsed = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+        if (![parsed isKindOfClass:[NSDictionary class]] || ![parsed count]) return;
+        NSArray *phoneNames = [parsed allKeys];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf || !strongSelf.isViewLoaded) return;
+            strongSelf.savedNames = [strongSelf mergedSaved:phoneNames];
+            [strongSelf rebuildMenu];
+        });
+    }];
+}
+
+// A picked variable goes in at the cursor, as {name}
+- (void)rebuildMenu {
+    __weak typeof(self) weakSelf = self;
+    self.insertItem.menu = RCVariableInsertMenu(self.runNames, self.savedNames, ^(NSString *name) {
+        UITextView *textView = weakSelf.textView;
+        UITextRange *range = textView.selectedTextRange ?: [textView textRangeFromPosition:textView.endOfDocument toPosition:textView.endOfDocument];
+        [textView replaceRange:range withText:[NSString stringWithFormat:@"{%@}", name]];
+    });
 }
 
 - (void)viewDidAppear:(BOOL)animated {

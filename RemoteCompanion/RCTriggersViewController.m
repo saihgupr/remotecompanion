@@ -14,6 +14,7 @@
 #import "RCScheduledTriggerViewController.h"
 #import "RCMQTTTriggerViewController.h"
 #import "RCCategoryBar.h"
+#import "RCRunningViewController.h"
 #import "RCServerClient.h"
 
 #define kSimulateNotificationPrefix "com.pizzaman.rc.simulate."
@@ -35,6 +36,7 @@
 // Category bar: the section shown on its own, or nil for all. Kept by title because
 // sections come and go (Favorites, NFC, Wi-Fi, ... only appear when they have triggers).
 @property (nonatomic, strong) RCCategoryBar *categoryBar;
+@property (nonatomic, strong) UIBarButtonItem *runningItem;
 @property (nonatomic, copy) NSString *selectedCategoryTitle;
 // The width the visible cells' card backgrounds were drawn for
 @property (nonatomic, assign) CGFloat cardStyleWidth;
@@ -47,7 +49,7 @@
     return [[RCConfigManager sharedManager] nameForCommand:cmd truncate:shouldTruncate];
 }
 
-- (NSString *)iconNameForTrigger:(NSString *)triggerKey {
++ (NSString *)iconNameForTrigger:(NSString *)triggerKey {
     if ([triggerKey isEqualToString:@"volume_up_then_down"] || [triggerKey isEqualToString:@"volume_down_then_up"]) return @"arrow.up.and.down.circle.fill";
     if ([triggerKey hasPrefix:@"trigger_bottom_swipe_up"]) return @"chevron.compact.up";
     if ([triggerKey hasPrefix:@"trigger_bottombar"]) return @"square.stack.3d.up.fill";
@@ -114,7 +116,18 @@
         target:self
         action:@selector(addNewItem)];
 
-    self.navigationItem.rightBarButtonItems = @[settingsItem, addItem];
+    // Running: the triggers running now (green while any is)
+    self.runningItem = [[UIBarButtonItem alloc]
+        initWithImage:[UIImage systemImageNamed:@"list.bullet.rectangle"]
+        style:UIBarButtonItemStylePlain
+        target:self
+        action:@selector(openRunning)];
+    self.runningItem.accessibilityLabel = @"Running";
+
+    self.navigationItem.rightBarButtonItems = @[settingsItem, addItem, self.runningItem];
+    __weak typeof(self) weakRunSelf = self;
+    int runsToken;
+    notify_register_dispatch("com.pizzaman.rc.runs_changed", &runsToken, dispatch_get_main_queue(), ^(int t) { [weakRunSelf updateRunningItem]; });
     
     // Long names (a device or app name, a chain of actions) wrap, and the row grows with them
     self.tableView.rowHeight = [[NSUserDefaults standardUserDefaults] boolForKey:@"RCWrapLongNamesEnabled"] ? UITableViewAutomaticDimension : 64.0;
@@ -258,8 +271,27 @@
     });
 }
 
+- (void)openRunning {
+    [self.navigationController pushViewController:[[RCRunningViewController alloc] init] animated:YES];
+}
+
+// Tints the Running button while any trigger is running
+- (void)updateRunningItem {
+    __weak typeof(self) weakSelf = self;
+    [[RCServerClient sharedClient] executeCommand:@"running" completion:^(NSString *output, NSError *error) {
+        NSData *data = [output dataUsingEncoding:NSUTF8StringEncoding];
+        NSArray *runs = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+        BOOL any = [runs isKindOfClass:[NSArray class]] && runs.count > 0;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            // Set outright, not left to the bar: nil could leave it a dimmed grey that still opens the page
+            weakSelf.runningItem.tintColor = any ? [UIColor systemGreenColor] : [UIColor labelColor];
+        });
+    }];
+}
+
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
+    [self updateRunningItem];
     [self reloadTableData];
     [self updatePauseState];
 }
@@ -816,7 +848,7 @@
     
     // Add Icon with tint based on section or type?
     // Using dark gray tint for a "premium" but subtle look
-    UIImage *icon = [UIImage systemImageNamed:[self iconNameForTrigger:triggerKey]];
+    UIImage *icon = [UIImage systemImageNamed:[RCTriggersViewController iconNameForTrigger:triggerKey]];
     cell.imageView.image = icon;
     cell.imageView.tintColor = [UIColor systemGrayColor];
 

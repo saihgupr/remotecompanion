@@ -1590,6 +1590,9 @@
     </div>
     <div class="rc-navbar-center" id="navbar-small-title">RemoteCompanion</div>
     <div class="rc-navbar-right">
+      <button class="nav-btn" id="nav-running-btn" onclick="openRunning()" title="Running">
+        <i class="f7-icons">list_bullet</i>
+      </button>
       <button class="nav-btn" id="nav-logs-btn" onclick="toggleLogPanel()" title="Live System Logs">
         <i class="f7-icons">list_dash</i>
       </button>
@@ -1684,6 +1687,21 @@
 </div>
 
 <!-- ══ CONDITION PICKER DIALOG ═════════════════════════════════════════════ -->
+<!-- Running: the triggers running now, like a task manager -->
+<div class="dialog-backdrop" id="running-dialog-backdrop" onclick="if (event.target === this) closeRunning()">
+  <div class="dialog-box app-launch-dialog" style="max-width: 480px; width: 90%;">
+    <div class="dialog-title">Running</div>
+    <div class="dialog-msg" style="text-align:center;padding:0 16px 6px">Stop ends that run, even during a wait or a loop.</div>
+    <div style="padding:0 14px 10px; display:flex; flex-direction:column; flex:1; min-height:0;">
+      <div class="app-picker-list" id="running-content" style="max-height: 52vh; max-height: 52dvh; overflow-y: auto;"></div>
+    </div>
+    <div class="dialog-btns">
+      <button onclick="stopAllRuns()" id="running-stop-all" style="color:#ff453a">Stop All</button>
+      <button onclick="closeRunning()">Done</button>
+    </div>
+  </div>
+</div>
+
 <div class="dialog-backdrop" id="cond-picker-dialog-backdrop" onclick="_condPickerBackdropClick(event)">
   <div class="dialog-box app-launch-dialog" style="max-width: 480px; width: 90%;">
     <div class="dialog-title">Select Condition</div>
@@ -2826,6 +2844,180 @@ function iconForKey(key) {
   return { icon:'hand_tap', cls:'icon-gray' };
 }
 
+// ── Running ───────────────────────────────────────────────────────────────
+// The runs going: the navbar button turns green while there are any (checked every few seconds
+// while this page is visible); the Running sheet lists them with the step each is on, refreshed
+// every second while it's open.
+let runningRuns = [];
+let runningTimer = null;
+
+async function fetchRunning() {
+  try {
+    const res = await fetch('/api/running', { cache: 'no-store' });
+    if (!res.ok) return null;
+    const runs = await res.json();
+    return Array.isArray(runs) ? runs : [];
+  } catch (e) { return null; }
+}
+
+function runElapsedText(seconds) {
+  const s = Math.floor(seconds || 0);
+  if (s < 60) return `${s} s`;
+  if (s < 3600) return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  return `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+}
+
+function runStepText(run) {
+  let text = run.step ? nameForCmd(run.step) : 'Starting';
+  const loop = run.loop;
+  if (loop && loop.repeat) {
+    const count = parseInt(loop.count ?? loop.repeat.count, 10) || 0;
+    const round = count > 0 ? `Round ${loop.round} of ${count}` : `Round ${loop.round}`;
+    const onRepeat = typeof run.step === 'object' && JSON.stringify(run.step) === JSON.stringify(loop.repeat);
+    text = onRepeat ? `${nameForCmd(loop.repeat)} · ${round}` : `${text} · ${round}`;
+  }
+  return text;
+}
+
+function updateRunningButton(runs) {
+  const btn = document.getElementById('nav-running-btn');
+  if (btn) btn.style.color = (runs && runs.length) ? '#30d158' : '';
+}
+
+// The last runs that ended, from Run History: fetched on opening and when a run starts or ends
+let recentRuns = [];
+let recentRunCount = -1;
+
+async function refreshRecent() {
+  try {
+    const res = await fetch('/api/history', { cache: 'no-store' });
+    if (!res.ok) return;
+    const runs = await res.json();
+    recentRuns = Array.isArray(runs) ? runs : [];
+  } catch (e) {}
+  renderRunning();
+}
+
+function runWhenText(started) {
+  const d = new Date((started || 0) * 1000);
+  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+  const today = new Date();
+  if (d.toDateString() === today.toDateString()) return `Today ${time}`;
+  const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return `Yesterday ${time}`;
+  return d.toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
+}
+
+function runDurationText(seconds) {
+  const s = seconds || 0;
+  return s < 10 ? `${s.toFixed(1)} s` : runElapsedText(Math.round(s));
+}
+
+function renderRecent(box) {
+  if (!recentRuns.length) return;
+  const head = document.createElement('div');
+  head.style.cssText = 'padding:14px 4px 6px;font-size:13px;font-weight:600;color:#8e8e93;text-transform:uppercase';
+  head.textContent = 'Recent';
+  box.appendChild(head);
+  recentRuns.forEach(run => {
+    const stopped = run.outcome === 'stopped';
+    const row = document.createElement('div');
+    row.className = 'app-picker-row';
+    row.style.cursor = 'default';
+    row.innerHTML = `
+      <div class="app-picker-row-inner" style="display:flex; align-items:center; gap:10px;">
+        <i class="f7-icons" style="font-size:22px;flex-shrink:0;color:${stopped ? '#ff9f0a' : '#30d158'}">${stopped ? 'stop_circle' : 'checkmark_circle'}</i>
+        <div style="min-width:0; flex:1;">
+          <div class="app-picker-name">${escHtml(nameForKey(run.key || ''))}</div>
+          <div class="app-picker-bid">${escHtml(runWhenText(run.started))} · ${runDurationText(run.seconds)} · ${run.test ? 'Test · ' : ''}${stopped ? 'Stopped' : 'Finished'}</div>
+        </div>
+      </div>
+    `;
+    box.appendChild(row);
+  });
+}
+
+function renderRunning() {
+  const box = document.getElementById('running-content');
+  if (!box) return;
+  document.getElementById('running-stop-all').disabled = !runningRuns.length;
+  if (!runningRuns.length) {
+    box.innerHTML = '<div style="padding:22px 16px;color:#8e8e93;text-align:center">No triggers are running</div>';
+    renderRecent(box);
+    return;
+  }
+  box.innerHTML = '';
+  runningRuns.forEach(run => {
+    const row = document.createElement('div');
+    row.className = 'app-picker-row';
+    row.style.cursor = 'default';
+    const { icon, cls } = iconForKey(run.key);
+    row.innerHTML = `
+      <div class="app-picker-row-inner" style="display:flex; align-items:center; gap:10px;">
+        <div class="row-icon ${cls}" style="flex-shrink:0"><i class="f7-icons">${icon}</i></div>
+        <div style="min-width:0; flex:1;">
+          <div class="app-picker-name">${escHtml(nameForKey(run.key))}</div>
+          <div class="app-picker-bid">${run.test ? 'Test · ' : ''}${runElapsedText(run.seconds)} · ${escHtml(runStepText(run))}</div>
+        </div>
+      </div>
+      <button class="nav-btn" title="Stop" style="color:#ff453a;flex-shrink:0"><i class="f7-icons" style="font-size:22px">stop_circle_fill</i></button>
+    `;
+    row.querySelector('button').onclick = () => stopRun(run.id);
+    box.appendChild(row);
+  });
+  renderRecent(box);
+}
+
+async function refreshRunning() {
+  const runs = await fetchRunning();
+  if (runs === null) return;
+  runningRuns = runs;
+  updateRunningButton(runs);
+  renderRunning();
+  // A run started or ended: Recent may have a new one
+  if (runs.length !== recentRunCount) {
+    recentRunCount = runs.length;
+    refreshRecent();
+  }
+}
+
+function openRunning() {
+  runningRuns = [];
+  recentRunCount = -1;
+  renderRunning();
+  document.getElementById('running-dialog-backdrop').classList.add('visible');
+  refreshRunning();
+  clearInterval(runningTimer);
+  runningTimer = setInterval(refreshRunning, 1000);
+}
+
+function closeRunning() {
+  clearInterval(runningTimer);
+  runningTimer = null;
+  document.getElementById('running-dialog-backdrop').classList.remove('visible');
+}
+
+async function stopRun(id) {
+  if (!id) return;
+  try { await fetch(`/api/command?cmd=${encodeURIComponent('stop run ' + id)}`, { method: 'POST' }); } catch (e) {}
+  refreshRunning();
+}
+
+async function stopAllRuns() {
+  const keys = [...new Set(runningRuns.map(r => r.key))];
+  for (const key of keys) {
+    try { await fetch(`/api/command?cmd=${encodeURIComponent('stop trigger ' + key)}`, { method: 'POST' }); } catch (e) {}
+  }
+  refreshRunning();
+}
+
+// The navbar button's colour, every 3 s while the page is visible and the sheet is closed
+setInterval(async () => {
+  if (document.hidden || runningTimer) return;
+  const runs = await fetchRunning();
+  if (runs !== null) updateRunningButton(runs);
+}, 3000);
+
 function nameForKey(key) {
   if (TRIGGER_NAMES[key]) return TRIGGER_NAMES[key];
   const t = config.triggers[key];
@@ -2935,6 +3127,64 @@ function buildShortcutAction(name, silent, input) {
   return action;
 }
 
+// The Variable condition's comparisons: code, menu title, words in an action's name
+const VARIABLE_COMPARISONS = [
+  ['is', 'Is', 'is'], ['is_not', 'Is Not', 'is not'], ['contains', 'Contains', 'contains'],
+  ['above', 'Is Above', 'is above'], ['below', 'Is Below', 'is below'],
+  ['not_empty', 'Has Any Value', 'has any value'], ['empty', 'Has No Value', 'has no value'],
+];
+
+// "count is above 5": a Variable condition (If, Repeat While, Wait Until) in words
+function variableConditionText(cmd) {
+  const c = VARIABLE_COMPARISONS.find(x => x[0] === (cmd.comparison || 'is')) || VARIABLE_COMPARISONS[0];
+  const needsValue = c[0] !== 'empty' && c[0] !== 'not_empty';
+  return `${cmd.variable || 'Variable'} ${c[2]}${needsValue ? ' ' + (cmd.expectedValue || '') : ''}`;
+}
+
+// Set Variable's kinds: op, menu title, the fields after the name ([prompt, key]), a note
+const SET_VARIABLE_KINDS = [
+  { op: 'set', title: 'Text or Number', fields: [['Value (can include other variables and {round}):', 'value']] },
+  { op: 'add', title: 'Add', fields: [['Number or {variable} to add (0 when the variable isn\'t set):', 'value']] },
+  { op: 'subtract', title: 'Subtract', fields: [['Number or {variable} to subtract (0 when the variable isn\'t set):', 'value']] },
+  { op: 'multiply', title: 'Multiply', fields: [['Multiply by (number or {variable}):', 'value']] },
+  { op: 'divide', title: 'Divide', fields: [['Divide by (number or {variable}; 0 leaves it as it is):', 'value']] },
+  { op: 'round', title: 'Round', fields: [['Decimals (0 if empty):', 'value']] },
+  { op: 'random', title: 'Random Number', fields: [['A whole number from (number or {variable}):', 'min'], ['To (included):', 'max']] },
+  { op: 'command', title: 'RC Command Output', fields: [['RC command (e.g. "wifi status" gives "WiFi ON"):', 'value']] },
+  { op: 'command_number', title: 'Number from RC Command', fields: [['RC command (keeps the first number, e.g. "volume" gives 100):', 'value']] },
+];
+
+// A Set Variable action in words: "Set x to 5", "Add 1 to x", "Set x to Random 1–6"...
+function setVariableText(cmd) {
+  const name = cmd.name || 'Variable', v = cmd.value || '';
+  switch (cmd.op || 'set') {
+    case 'add': return `Add ${v} to ${name}`;
+    case 'subtract': return `Subtract ${v} from ${name}`;
+    case 'multiply': return `Multiply ${name} by ${v}`;
+    case 'divide': return `Divide ${name} by ${v}`;
+    case 'round': return (!v || v === '0') ? `Round ${name}` : `Round ${name} to ${v} Decimal${v === '1' ? '' : 's'}`;
+    case 'random': return `Set ${name} to Random ${cmd.min ?? '?'}–${cmd.max ?? '?'}`;
+    case 'command': return `Set ${name} to Output of ${v}`;
+    case 'command_number': return `Set ${name} to Number from ${v}`;
+    default: return `Set ${name} to ${v ? v : 'nothing'}`;
+  }
+}
+
+// A number typed for a setting (lo..hi), or one variable in braces ("{times}"): what to store, or null
+function numberOrVariable(text, lo, hi) {
+  text = String(text || '').trim();
+  const m = text.match(/^\{([A-Za-z_][A-Za-z0-9_]*)\}$/);
+  if (m) return variableNameValid(m[1]) ? text : null;
+  const n = parseInt(text, 10);
+  if (isNaN(n) || n < lo) return null;
+  return Math.min(hi, n);
+}
+
+// Variable names: letters, digits and _, not starting with a digit; "round" is taken
+function variableNameValid(name) {
+  return /^[A-Za-z_][A-Za-z0-9_]{0,39}$/.test(name || '') && name !== 'round';
+}
+
 function nameForCmd(cmd) {
   if (!cmd) return 'Unknown';
   if (typeof cmd === 'object') {
@@ -2943,11 +3193,28 @@ function nameForCmd(cmd) {
     }
     const t = (cmd.type||'').toLowerCase();
     const isTime = (cmd.conditionKey === 'time_between' || cmd.conditionName === 'time_between' || (cmd.conditionTitle||'').toLowerCase().includes('time'));
+    if (cmd.conditionKey === 'variable' && ['if', 'else_if', 'repeat_while'].includes(t)) {
+      return `${t === 'if' ? 'If' : t === 'else_if' ? 'Else If' : 'Repeat While'} ${variableConditionText(cmd)}`;
+    }
+    if (t === 'set_variable') {
+      const text = setVariableText(cmd);
+      return cmd.scope === 'run' ? `${text} (this run)` : text;
+    }
     if (t === 'if') return isTime ? `If Time is Between ${cmd.expectedTitle||cmd.expectedValue||'Time Range'}` : `If ${cmd.conditionTitle||'Condition'} is ${cmd.expectedTitle||'Value'}`;
     if (t === 'else_if') return isTime ? `Else If Time is Between ${cmd.expectedTitle||cmd.expectedValue||'Time Range'}` : `Else If ${cmd.conditionTitle||'Condition'} is ${cmd.expectedTitle||'Value'}`;
     if (t === 'else') return 'Else';
     if (t === 'end_if' || t === 'end') return 'End If';
-    if (t === 'repeat') return `Repeat ${cmd.count||''}`;
+    if (t === 'repeat') { const n = String(cmd.count ?? 0); return n === '1' ? 'Repeat 1 Time' : `Repeat ${n} Times`; } // a number or "{times}"
+    if (t === 'repeat_while') return (cmd.conditionKey === 'time_between') ? `Repeat While Time is Between ${cmd.expectedTitle||cmd.expectedValue||''}` : `Repeat While ${cmd.conditionTitle||'Condition'} is ${cmd.expectedTitle||'Value'}`;
+    if (t === 'end_repeat') return 'End Repeat';
+    if (t === 'exit_repeat') return 'Exit Repeat';
+    if (t === 'wait_until') {
+      const lim = parseInt(cmd.timeout, 10) > 0 ? parseInt(cmd.timeout, 10) : 60;
+      let limText = (lim >= 60 && lim % 60 === 0) ? `${lim / 60} min` : `${lim} s`;
+      if (typeof cmd.timeout === 'string' && cmd.timeout.includes('{')) limText = `${cmd.timeout} s`;
+      if (cmd.conditionKey === 'variable') return `Wait Until ${variableConditionText(cmd)} (up to ${limText})`;
+      return (cmd.conditionKey === 'time_between') ? `Wait Until Time is Between ${cmd.expectedTitle||cmd.expectedValue||''} (up to ${limText})` : `Wait Until ${cmd.conditionTitle||'Condition'} is ${cmd.expectedTitle||'Value'} (up to ${limText})`;
+    }
     return 'Block';
   }
   const toggleInfo = parseToggleCmd(cmd);
@@ -3124,6 +3391,10 @@ function iconForCmd(cmd) {
     const t = (cmd.type||'').toLowerCase();
     if (t === 'if' || t === 'else_if' || t === 'else') return { icon:'arrow_triangle_branch', cls:'icon-purple' };
     if (t === 'end_if' || t === 'end') return { icon:'arrow_turn_up_left', cls:'icon-purple' };
+    if (t === 'end_repeat') return { icon:'arrow_turn_up_left', cls:'icon-green' };
+    if (t === 'exit_repeat') return { icon:'arrow_right_to_line', cls:'icon-green' };
+    if (t === 'wait_until') return { icon:'hourglass', cls:'icon-orange' };
+    if (t === 'set_variable') return { icon:'function', cls:'icon-orange' };
     return { icon:'repeat', cls:'icon-green' };
   }
   const map = {
@@ -3289,6 +3560,11 @@ const ACTION_SECTIONS = [
   ]},
   { title:'Scripting & Logic', actions:[
     { name:'If Condition…',     cmd:'__IF_CONDITION__',icon:'arrow_triangle_branch', needs_input:true },
+    { name:'Repeat…',           cmd:'__REPEAT__',      icon:'repeat', needs_input:true },
+    { name:'Repeat While…',     cmd:'__REPEAT_WHILE__',icon:'repeat', needs_input:true },
+    { name:'Exit Repeat',       cmd:'__EXIT_REPEAT__', icon:'arrow_right_to_line', needs_input:true },
+    { name:'Wait Until…',       cmd:'__WAIT_UNTIL__',  icon:'hourglass', needs_input:true },
+    { name:'Set Variable…',     cmd:'__SET_VARIABLE__', icon:'function', needs_input:true },
     { name:'Delay…',            cmd:'__DELAY__',     icon:'hourglass', needs_input:true },
     { name:'Terminal Command…', cmd:'__CUSTOM__',    icon:'chevron_right_square_fill', needs_input:true },
     { name:'Lua Script…',       cmd:'__LUA_SCRIPT__',icon:'doc_text_fill', needs_input:true },
@@ -3326,6 +3602,7 @@ const CONDITION_DEFS = [
   { key:'wifi',       title:'Wi-Fi',        icon:'wifi', section:'Connectivity', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
   { key:'wifi_network', title:'Wi-Fi Network', icon:'wifi', section:'Connectivity', freeText:true, hint:'Network name:' },
   { key:'bluetooth',  title:'Bluetooth',    icon:'bolt_horizontal_fill', section:'Connectivity', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
+  { key:'variable', title:'Variable', icon:'function', section:'Variables' },
   { key:'bt_device', title:'Bluetooth Device Connected', icon:'headphones', section:'Connectivity', freeText:true, hint:'Device name:' },
   { key:'carplay',    title:'CarPlay', icon:'car_fill', section:'Connectivity', values:[{value:'CONNECTED',title:'Connected'},{value:'NOT_CONNECTED',title:'Not Connected'}] },
   { key:'cellular',   title:'Cellular Data', icon:'antenna_radiowaves_left_right', section:'Connectivity', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
@@ -3949,7 +4226,7 @@ function renderActionList() {
   actions.forEach((action, idx) => {
     const isCtrl = typeof action === 'object';
     const type   = isCtrl ? (action.type||'').toLowerCase() : null;
-    const isEnd  = type === 'end_if' || type === 'end';
+    const isEnd  = type === 'end_if' || type === 'end' || type === 'end_repeat';
     const isElse = type === 'else';
     const isElseIf = type === 'else_if';
     const isIf   = type === 'if';
@@ -4112,7 +4389,7 @@ function renderActionList() {
     card.appendChild(row);
 
     // Update indent level for subsequent rows
-    if (isIf || type === 'repeat') indent++;
+    if (isIf || type === 'repeat' || type === 'repeat_while') indent++;
     else if (isEnd) indent = Math.max(0, indent - 1);
   });
 
@@ -4335,7 +4612,9 @@ function removeAction(idx) {
   const actions = triggerData(currentKey).actions || [];
   if (idx < 0 || idx >= actions.length) return;
   const action = actions[idx];
-  const isIf = typeof action === 'object' && action !== null && (action.type || '').toLowerCase() === 'if';
+  const startType = typeof action === 'object' && action !== null ? (action.type || '').toLowerCase() : '';
+  // An If or Repeat takes its End marker with it
+  const isIf = startType === 'if' || startType === 'repeat' || startType === 'repeat_while';
 
   if (isIf) {
     let depth = 1;
@@ -4344,9 +4623,9 @@ function removeAction(idx) {
       const a = actions[i];
       if (typeof a === 'object' && a !== null) {
         const t = (a.type || '').toLowerCase();
-        if (t === 'if') {
+        if (t === 'if' || t === 'repeat' || t === 'repeat_while') {
           depth++;
-        } else if (t === 'end_if' || t === 'end') {
+        } else if (t === 'end_if' || t === 'end' || t === 'end_repeat') {
           depth--;
           if (depth === 0) {
             matchingEndIdx = i;
@@ -4964,24 +5243,35 @@ function editAction(idx) {
   const act = actions[idx];
   if (typeof act === 'object') {
     const type = (act.type||'').toLowerCase();
-    if (type === 'if' || type === 'else_if') {
+    if (type === 'if' || type === 'else_if' || type === 'repeat_while') {
       openCondPicker(idx);
     }
-    else if (type === 'repeat') {
-      showDialog('Edit Repeat Count', 'Times to loop:', String(act.count||1), 'Save', val => {
+    else if (type === 'wait_until') {
+      showDialog('Time Limit', 'Seconds to wait at most before the actions go on anyway (up to a day), or a variable like {limit}:', String(act.timeout||60), 'Save', val => {
         if (!val) return;
-        act.count = parseInt(val, 10) || 1;
+        act.timeout = numberOrVariable(val, 1, 86400) ?? 60;
         saveConfig(); renderActionList();
-      }, true);
+      });
+    }
+    else if (type === 'set_variable') {
+      promptSetVariable(idx);
+    }
+    else if (type === 'repeat') {
+      showDialog('Repeat', 'Runs the actions inside this many times (up to 1,000), or as many as a variable says, like {times}. In their text, {round} becomes the round number:', String(act.count||1), 'Save', val => {
+        const n = numberOrVariable(val, 1, 1000);
+        if (n === null) return;
+        act.count = n;
+        saveConfig(); renderActionList();
+      });
     }
   } else if (typeof act === 'string') {
     const low = act.toLowerCase();
     if (low.startsWith('delay ')) {
-      showDialog('Edit Delay', 'Seconds:', act.slice(6), 'Save', val => {
+      showDialog('Edit Delay', 'Seconds, or a variable like {wait}:', act.slice(6), 'Save', val => {
         if (!val) return;
         actions[idx] = `delay ${val}`;
         saveConfig(); renderActionList();
-      }, true);
+      });
     } else if (low.startsWith('toast ')) {
       promptToastModal(act, idx);
     } else if (low.startsWith('exec ') || low.startsWith('root ')) {
@@ -5272,9 +5562,9 @@ function selectPickerAction(act) {
   closePickerPanel();
   const c = act.cmd;
   if (c === '__DELAY__') {
-    showDialog('Add Delay', 'Delay duration in seconds:', '1', 'Add', val => {
+    showDialog('Add Delay', 'Delay duration in seconds, or a variable like {wait}:', '1', 'Add', val => {
       if (val) addActionToCurrent(`delay ${val}`);
-    }, true);
+    });
   } else if (c === '__TOAST__') {
     showDialog('Add HUD Toast', 'Message text:', '', 'Add', val => {
       if (val) addActionToCurrent(`toast ${val}`);
@@ -5322,7 +5612,33 @@ function selectPickerAction(act) {
       if (val) addActionToCurrent(`airplay connect ${val}`);
     });
   } else if (c === '__IF_CONDITION__') {
+    condPickerNewType = 'if';
     openCondPicker(null);
+  } else if (c === '__REPEAT_WHILE__') {
+    condPickerNewType = 'repeat_while';
+    openCondPicker(null);
+  } else if (c === '__EXIT_REPEAT__') {
+    const actions = triggerData(currentKey).actions || [];
+    actions.push({ type: 'exit_repeat' });
+    triggerData(currentKey).actions = actions;
+    saveConfig();
+    renderActionList();
+  } else if (c === '__WAIT_UNTIL__') {
+    condPickerNewType = 'wait_until';
+    openCondPicker(null);
+  } else if (c === '__SET_VARIABLE__') {
+    promptSetVariable(null);
+  } else if (c === '__REPEAT__') {
+    showDialog('Repeat', 'Runs the actions inside this many times (up to 1,000), or as many as a variable says, like {times}. In their text, {round} becomes the round number:', '', 'Add', val => {
+      const n = numberOrVariable(val, 1, 1000);
+      if (n === null) return;
+      const actions = triggerData(currentKey).actions || [];
+      actions.push({ type: 'repeat', count: n });
+      actions.push({ type: 'end_repeat' });
+      triggerData(currentKey).actions = actions;
+      saveConfig();
+      renderActionList();
+    });
   } else if (c === '__SET_FLASHLIGHT__') {
     showDialog('Flashlight Intensity', 'Brightness percentage (1-100):', '100', 'Add', val => {
       if (val) addActionToCurrent(`flashlight ${val}`);
@@ -5470,7 +5786,7 @@ function saveTimeCondDialog() {
 
 // ── Condition picker (mirrors iOS RCConditionPickerViewController: grouped, ──
 // searchable sections; tapping a condition expands its options inline beneath it)
-const COND_SECTION_ORDER = ['Time', 'Device', 'Power', 'Sound', 'Connectivity', 'Other'];
+const COND_SECTION_ORDER = ['Time', 'Device', 'Power', 'Sound', 'Connectivity', 'Variables', 'Other'];
 const COND_DAY_CODES = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
 const COND_DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 let condPickerEditIdx = null;
@@ -5599,9 +5915,78 @@ function promptCondThreshold(def, direction) {
   }
   const editIdx = condPickerEditIdx;
   closeCondPicker();
-  showDialog(`${def.title} ${direction.toLowerCase()}`, 'Percentage (0-100):', current, 'Save', val => {
-    const n = Math.max(0, Math.min(100, parseInt(val, 10) || 0));
+  showDialog(`${def.title} ${direction.toLowerCase()}`, 'Percentage (0-100), or a variable like {limit}:', current, 'Save', val => {
+    const n = numberOrVariable(val, 0, 100);
+    if (n === null) return;
     finishIfCondition(def, `${direction.toUpperCase()} ${n}`, `${direction.toLowerCase()} ${n}%`, editIdx);
+  });
+}
+
+// The Variable condition: the name, then (unless it's Has Any / No Value) the value to compare with
+function promptVariableCondition(code, title) {
+  const ex = condPickerExisting();
+  const same = ex && ex.conditionKey === 'variable';
+  const editIdx = condPickerEditIdx;
+  const def = CONDITION_DEFS.find(d => d.key === 'variable');
+  const needsValue = code !== 'empty' && code !== 'not_empty';
+  closeCondPicker();
+  showDialog(`Variable ${title}`, 'Variable name:', same ? String(ex.variable || '') : '', needsValue ? 'Next' : 'Save', name => {
+    name = (name || '').trim();
+    if (!variableNameValid(name)) { if (name) showToast('Names use letters, digits and _'); return; }
+    const finish = value => finishIfCondition(def, value, needsValue ? `${title.toLowerCase()} ${value}` : title.toLowerCase(), editIdx,
+      { conditionTitle: name, variable: name, comparison: code });
+    if (!needsValue) { finish(''); return; }
+    showDialog(`Variable ${title}`, 'Value (can include other variables, like {limit}). Text compares without regard to case; Is Above and Is Below compare numbers:',
+      same ? String(ex.expectedValue || '') : '', 'Save', value => finish((value || '').trim()));
+  });
+}
+
+// Set Variable: its kind, the name, the kind's fields, then saved (all triggers) or this run only.
+// Edits the one at idx, or adds one.
+function promptSetVariable(idx) {
+  const actions = triggerData(currentKey).actions || [];
+  const ex = (idx !== null && actions[idx] && typeof actions[idx] === 'object') ? actions[idx] : null;
+  const exOp = ex ? (ex.op || 'set') : null;
+  showSheet('Set Variable', SET_VARIABLE_KINDS.map(kind => ({
+    label: kind.title + (kind.op === exOp ? ' ✓' : ''),
+    action() { setTimeout(() => promptSetVariableFields(idx, ex, kind), 250); }
+  })));
+}
+
+function promptSetVariableFields(idx, ex, kind) {
+  const same = ex && (ex.op || 'set') === kind.op;
+  showDialog(`Set Variable: ${kind.title}`, 'Name (letters, digits and _). In an action\'s text, {name} becomes the value:', ex ? String(ex.name || '') : '', 'Next', name => {
+    name = (name || '').trim();
+    if (!name) return;
+    if (!variableNameValid(name)) { showToast('Names use letters, digits and _, not starting with a digit'); return; }
+    const item = { type: 'set_variable', name, value: '' };
+    if (kind.op !== 'set') item.op = kind.op;
+    const ask = i => {
+      if (i >= kind.fields.length) {
+        const optional = kind.op === 'set' || kind.op === 'round';
+        if (!optional && kind.fields.some(([, key]) => !String(item[key] || '').length)) { showToast('Enter every field'); return; }
+        const save = runOnly => {
+          const actions = triggerData(currentKey).actions || [];
+          if (runOnly) item.scope = 'run';
+          if (ex && ex.disabled) item.disabled = ex.disabled;
+          if (ex) actions[idx] = item; else actions.push(item);
+          triggerData(currentKey).actions = actions;
+          saveConfig();
+          renderActionList();
+        };
+        showSheet(`Keep ${name}`, [
+          { label: 'Saved (All Triggers)', action() { save(false); } },
+          { label: 'This Run Only', action() { save(true); } },
+        ]);
+        return;
+      }
+      const [prompt, key] = kind.fields[i];
+      showDialog(`Set ${name}`, prompt, same ? String(ex[key] ?? '') : '', 'Next', val => {
+        item[key] = val || '';
+        ask(i + 1);
+      });
+    };
+    ask(0);
   });
 }
 
@@ -5673,6 +6058,14 @@ function condOptionsFor(d, exKey, exValue, exTitle) {
     rows.push(condValueRow(d, { value: 'OFF', title: 'Off' }, exKey, exValue));
     rows.push(condValueRow(d, { value: 'ON', title: 'Any Focus' }, exKey, exValue));
     rows.push(condOptionRow('Other Name…', 'blue', '', () => promptCondText({ key: d.key, title: d.title, hint: 'Focus name, Off, or On for any Focus:' })));
+    return rows;
+  }
+  if (d.key === 'variable') {
+    VARIABLE_COMPARISONS.forEach(([code, title]) => {
+      const ex = condPickerExisting();
+      const now = (exKey === 'variable' && ex && (ex.comparison || 'is') === code) ? ` (now: ${variableConditionText(ex)})` : '';
+      rows.push(condOptionRow(`${title}…${now}`, 'blue', '', () => promptVariableCondition(code, title)));
+    });
     return rows;
   }
   if (d.key === 'time_between') {
@@ -5753,9 +6146,12 @@ function renderCondPicker() {
   });
 }
 
-function finishIfCondition(def, value, valueTitle, editIdx) {
+// The kind of block a new condition makes: 'if', or 'repeat_while' (Repeat While)
+let condPickerNewType = 'if';
+
+function finishIfCondition(def, value, valueTitle, editIdx, extra) {
   const actions = triggerData(currentKey).actions || [];
-  let existingType = 'if';
+  let existingType = editIdx === null ? condPickerNewType : 'if';
   if (editIdx !== null && actions[editIdx] && actions[editIdx].type) {
     existingType = actions[editIdx].type;
   }
@@ -5769,13 +6165,35 @@ function finishIfCondition(def, value, valueTitle, editIdx) {
     expectedLabel: value,
     expectedTitle: valueTitle
   };
+  if (extra) Object.assign(item, extra);
 
+  if (existingType === 'wait_until') {
+    // Wait Until: one row, no End; a new one asks for its time limit, an edited one keeps it
+    condPickerNewType = 'if';
+    if (editIdx !== null) {
+      item.timeout = actions[editIdx].timeout || 60;
+      actions[editIdx] = item;
+      triggerData(currentKey).actions = actions;
+      saveConfig();
+      renderActionList();
+      return;
+    }
+    setTimeout(() => showDialog('Time Limit', 'Seconds to wait at most before the actions go on anyway (up to a day), or a variable like {limit}:', '60', 'Add', val => {
+      item.timeout = numberOrVariable(val, 1, 86400) ?? 60;
+      actions.push(item);
+      triggerData(currentKey).actions = actions;
+      saveConfig();
+      renderActionList();
+    }), 300);
+    return;
+  }
   if (editIdx !== null) {
     actions[editIdx] = item;
   } else {
     actions.push(item);
-    actions.push({ type: 'end_if' });
+    actions.push({ type: existingType === 'repeat_while' ? 'end_repeat' : 'end_if' });
   }
+  condPickerNewType = 'if';
   triggerData(currentKey).actions = actions;
   saveConfig();
   renderActionList();
@@ -6769,7 +7187,7 @@ function promptManualHAEntity() {
 // toggle, match, exclude }. "match"/"exclude" patterns ending in " ", ":" or "-"
 // are prefixes; anything else must equal the (lowercased) command.
 // Not offered: entries that don't run an action of their own, and Set Flashlight (covered by Flashlight)
-const BANNER_SKIP = new Set(['__IF_CONDITION__', '__DELAY__', '__TOAST__', '__SET_FLASHLIGHT__']);
+const BANNER_SKIP = new Set(['__IF_CONDITION__', '__REPEAT__', '__REPEAT_WHILE__', '__EXIT_REPEAT__', '__WAIT_UNTIL__', '__SET_VARIABLE__', '__DELAY__', '__TOAST__', '__SET_FLASHLIGHT__']);
 // The app's names for the same actions, so both UIs share one setting
 const BANNER_ID_ALIASES = { '__SHORTCUT__': '__SHORTCUT_PICKER__', 'queuealbum': 'queue album', 'queueartist': 'queue artist',
   'shuffleall': 'shuffle all songs', 'deletesong': 'delete current song' };
