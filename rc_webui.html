@@ -1350,29 +1350,125 @@
       background: #3a3a3c; transition: background 0.15s, color 0.15s;
     }
     .day-pill input:checked + span { background: #007aff; color: #fff; }
-    /* Toast icon presets — quiet pill row */
-    .toast-preset-chip {
-      background: transparent;
-      border: 0.5px solid rgba(255,255,255,0.18);
-      border-radius: 999px;
-      padding: 5px 11px;
-      font-size: 12px;
-      font-weight: 500;
-      color: #aeaeb2;
+
+    /* ── Toast action dialog (iOS inset-grouped, mirrors condition picker) ── */
+    .toast-dialog {
+      width: 92%; max-width: 420px;
+      max-height: min(640px, calc(100vh - 48px));
+      display: flex; flex-direction: column;
+    }
+    .toast-dialog .dialog-msg { padding: 0 24px 6px; }
+    .toast-dialog .dialog-btns { flex-shrink: 0; }
+    .toast-dialog-body {
+      flex: 1; min-height: 0;
+      padding: 0 14px 14px;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .toast-section-header {
+      font-size: 13px; font-weight: 500;
+      letter-spacing: 0.05em; text-transform: uppercase;
+      color: #8e8e93;
+      padding: 0 18px; margin: 20px 0 6px;
+    }
+    .toast-section-header:first-child { margin-top: 8px; }
+
+    /* 52px rows with a fixed 30px icon rail; dividers inset to the text */
+    .toast-row {
+      position: relative;
+      display: flex; align-items: center;
+      min-height: 52px; padding: 0 16px;
+      cursor: text;
+      transition: background 0.15s ease;
+    }
+    .toast-row + .toast-row::after {
+      content: ''; position: absolute; top: 0; left: 60px; right: 0;
+      height: 0.5px; background: rgba(255,255,255,0.12);
+    }
+    .toast-row:focus-within { background: rgba(255,255,255,0.03); }
+    .toast-row .dialog-row-icon { transition: color 0.18s ease; }
+    .toast-row:focus-within .dialog-row-icon { color: #0a84ff; }
+    .toast-row-label {
+      flex: 0 0 auto; margin-right: 10px;
+      font-size: 17px; color: #fff; letter-spacing: -0.01em;
+      white-space: nowrap;
+    }
+    .toast-row-hint {
+      flex: 0 0 auto; margin-right: 10px;
+      font-size: 13px; color: #636366;
+      white-space: nowrap;
+    }
+    .toast-row-input {
+      flex: 1; min-width: 0;
+      margin: 0; padding: 0; border: none; outline: none; background: none;
+      font-family: inherit; font-size: 17px; color: #fff;
+      text-align: right;
+      caret-color: #0a84ff;
+      -webkit-appearance: none; appearance: none;
+    }
+    .toast-row-input::placeholder { color: #636366; }
+    .toast-row-input::-webkit-outer-spin-button,
+    .toast-row-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+    /* Quiet icon suggestion tiles — always all visible, sized to the card */
+    .toast-icon-strip {
+      display: flex; gap: 6px; align-items: center;
+      padding: 2px 16px 4px;
+    }
+    .toast-icon-tile {
+      flex: 1 1 0; min-width: 0;
+      aspect-ratio: 1 / 1;
+      display: flex; align-items: center; justify-content: center;
+      padding: 0;
+      background: #1c1c1e;
+      border: 0.5px solid rgba(255,255,255,0.08);
+      border-radius: 11px;
+      color: #d1d1d6;
       cursor: pointer;
-      user-select: none;
-      -webkit-user-select: none;
-      transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+      -webkit-appearance: none; appearance: none;
+      -webkit-tap-highlight-color: transparent;
+      transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
     }
-    .toast-preset-chip:hover { background: rgba(255,255,255,0.08); color: #fff; border-color: rgba(255,255,255,0.28); }
-    .toast-preset-chip:active { transform: scale(0.95); background: rgba(10,132,255,0.25); color: #fff; border-color: rgba(10,132,255,0.5); }
-    .toast-field-label {
-      font-size: 11px; font-weight: 600;
-      letter-spacing: 0.06em; text-transform: uppercase;
-      color: #8e8e93; margin: 0 2px -6px;
+    .toast-icon-tile i { font-size: 19px; }
+    .toast-icon-tile:hover { background: #26262a; color: #fff; }
+    .toast-icon-tile:active {
+      transform: scale(0.94);
+      background: rgba(10,132,255,0.16);
+      border-color: rgba(10,132,255,0.4);
+      color: #0a84ff;
     }
-    .toast-field-hint {
-      font-size: 11px; color: #636366; font-weight: 400;
+
+    /* Preview reads as a quiet card, not a floating mock */
+    .toast-preview-card {
+      display: flex; align-items: center; justify-content: center;
+      padding: 14px;
+    }
+    .toast-preview-chip {
+      display: flex; align-items: center; gap: 10px;
+      max-width: 100%;
+      padding: 9px 16px;
+      background: #2c2c2e;
+      border: 0.5px solid rgba(255,255,255,0.08);
+      border-radius: 16px;
+    }
+    .toast-preview-icon { display: flex; flex-shrink: 0; color: #8e8e93; }
+    .toast-preview-icon i { font-size: 20px; }
+    .toast-preview-text {
+      display: flex; flex-direction: column; align-items: flex-start;
+      min-width: 0; line-height: 1.25;
+    }
+    .toast-preview-title {
+      max-width: 100%;
+      font-size: 15px; font-weight: 600; color: #fff;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .toast-preview-subtitle {
+      max-width: 100%;
+      font-size: 13px; color: #8e8e93;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    @media (max-width: 380px) {
+      .toast-row-hint { display: none; }
     }
 
     .toggle-switch {
@@ -2250,51 +2346,62 @@
 
 <!-- ══ TOAST ACTION DIALOG ═════════════════════════════════════════════ -->
 <div class="dialog-backdrop" id="toast-dialog-backdrop">
-  <div class="dialog-box" style="max-width: 400px; width: 90%;">
+  <div class="dialog-box toast-dialog">
     <div class="dialog-title" id="toast-dialog-title">Toast Notification</div>
-    <div class="dialog-msg" style="padding-bottom: 12px;">Shows a small alert on the device.</div>
-    <div style="padding:0 16px 16px; display:flex; flex-direction:column; gap:12px;">
-      <div style="display:flex; flex-direction:column; gap:5px;">
-        <div class="toast-field-label">Title</div>
-        <input class="dialog-input" id="toast-title-input" type="text" placeholder="e.g. Silent Vibrate" autocorrect="off" autocapitalize="words" spellcheck="false" style="margin:0; width:100%; text-align:left;" oninput="updateToastPreview()">
-      </div>
-      <div style="display:flex; flex-direction:column; gap:5px;">
-        <div class="toast-field-label">Message <span class="toast-field-hint" style="text-transform:none; letter-spacing:0;">— optional</span></div>
-        <input class="dialog-input" id="toast-subtitle-input" type="text" placeholder="e.g. ON" autocorrect="off" autocapitalize="none" spellcheck="false" style="margin:0; width:100%; text-align:left;" oninput="updateToastPreview()">
-      </div>
-      <div style="display:flex; flex-direction:column; gap:5px;">
-        <div class="toast-field-label">Icon <span class="toast-field-hint" style="text-transform:none; letter-spacing:0;">— optional</span></div>
-        <input class="dialog-input" id="toast-icon-input" type="text" placeholder="e.g. bell.fill" autocorrect="off" autocapitalize="none" spellcheck="false" style="margin:0; width:100%; text-align:left;" oninput="updateToastPreview()">
-        <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top: 3px;" id="toast-icon-presets">
-          <span class="toast-preset-chip" onclick="setToastIconPreset('bell.fill')">Bell</span>
-          <span class="toast-preset-chip" onclick="setToastIconPreset('bell.slash.fill')">Muted</span>
-          <span class="toast-preset-chip" onclick="setToastIconPreset('checkmark.circle.fill')">Check</span>
-          <span class="toast-preset-chip" onclick="setToastIconPreset('xmark.circle.fill')">Dismiss</span>
-          <span class="toast-preset-chip" onclick="setToastIconPreset('star.fill')">Star</span>
-          <span class="toast-preset-chip" onclick="setToastIconPreset('speaker.wave.3.fill')">Volume</span>
-          <span class="toast-preset-chip" onclick="setToastIconPreset('camera.fill')">Camera</span>
-        </div>
+    <div class="dialog-msg">Shows a small alert on the device.</div>
+
+    <div class="toast-dialog-body">
+      <div class="toast-section-header">Content</div>
+      <div class="dialog-card">
+        <label class="toast-row">
+          <span class="dialog-row-icon" aria-hidden="true"><i class="f7-icons">textformat</i></span>
+          <span class="toast-row-label">Title</span>
+          <input class="toast-row-input" id="toast-title-input" type="text" placeholder="Silent Vibrate" autocorrect="off" autocapitalize="words" spellcheck="false" oninput="updateToastPreview()">
+        </label>
+        <label class="toast-row">
+          <span class="dialog-row-icon" aria-hidden="true"><i class="f7-icons">text_bubble</i></span>
+          <span class="toast-row-label">Message</span>
+          <span class="toast-row-hint" aria-hidden="true">Optional</span>
+          <input class="toast-row-input" id="toast-subtitle-input" type="text" placeholder="ON" autocorrect="off" autocapitalize="none" spellcheck="false" oninput="updateToastPreview()">
+        </label>
+        <label class="toast-row">
+          <span class="dialog-row-icon" aria-hidden="true"><i class="f7-icons">square_grid_2x2</i></span>
+          <span class="toast-row-label">Icon</span>
+          <span class="toast-row-hint" aria-hidden="true">Optional</span>
+          <input class="toast-row-input" id="toast-icon-input" type="text" placeholder="bell.fill" autocorrect="off" autocapitalize="none" spellcheck="false" oninput="updateToastPreview()">
+        </label>
       </div>
 
-      <div style="display:flex; flex-direction:column; gap:6px; margin-top:2px;">
-        <div class="toast-field-label" style="text-align:center;">Preview</div>
-        <div style="display:flex; justify-content:center;">
-          <div id="toast-live-preview" style="background:#1c1c1e; border:0.5px solid rgba(255,255,255,0.12); border-radius:18px; padding:8px 14px; display:flex; align-items:center; gap:9px; box-shadow:0 4px 14px rgba(0,0,0,0.35); max-width:100%;">
-            <i class="f7-icons" id="toast-preview-icon" style="font-size:19px; color:#8e8e93;">text_bubble</i>
-            <div style="display:flex; flex-direction:column; text-align:left; line-height:1.25;">
-              <span id="toast-preview-title" style="font-size:13px; font-weight:600; color:#fff;">Toast Title</span>
-              <span id="toast-preview-subtitle" style="font-size:12px; color:#8e8e93;">Subtitle</span>
-            </div>
+      <div class="toast-section-header">Suggestions</div>
+      <div class="toast-icon-strip" id="toast-icon-presets">
+        <button type="button" class="toast-icon-tile" title="Bell" aria-label="Bell" onclick="setToastIconPreset('bell.fill')"><i class="f7-icons" aria-hidden="true">bell_fill</i></button>
+        <button type="button" class="toast-icon-tile" title="Muted" aria-label="Muted" onclick="setToastIconPreset('bell.slash.fill')"><i class="f7-icons" aria-hidden="true">bell_slash_fill</i></button>
+        <button type="button" class="toast-icon-tile" title="Check" aria-label="Check" onclick="setToastIconPreset('checkmark.circle.fill')"><i class="f7-icons" aria-hidden="true">checkmark_circle_fill</i></button>
+        <button type="button" class="toast-icon-tile" title="Dismiss" aria-label="Dismiss" onclick="setToastIconPreset('xmark.circle.fill')"><i class="f7-icons" aria-hidden="true">xmark_circle_fill</i></button>
+        <button type="button" class="toast-icon-tile" title="Star" aria-label="Star" onclick="setToastIconPreset('star.fill')"><i class="f7-icons" aria-hidden="true">star_fill</i></button>
+        <button type="button" class="toast-icon-tile" title="Volume" aria-label="Volume" onclick="setToastIconPreset('speaker.wave.3.fill')"><i class="f7-icons" aria-hidden="true">speaker_3</i></button>
+        <button type="button" class="toast-icon-tile" title="Camera" aria-label="Camera" onclick="setToastIconPreset('camera.fill')"><i class="f7-icons" aria-hidden="true">camera_fill</i></button>
+      </div>
+
+      <div class="toast-section-header">Preview</div>
+      <div class="dialog-card toast-preview-card">
+        <div class="toast-preview-chip" id="toast-live-preview">
+          <span class="toast-preview-icon"><i class="f7-icons" id="toast-preview-icon">text_bubble</i></span>
+          <div class="toast-preview-text">
+            <span class="toast-preview-title" id="toast-preview-title">Toast Title</span>
+            <span class="toast-preview-subtitle" id="toast-preview-subtitle">Subtitle</span>
           </div>
         </div>
       </div>
     </div>
+
     <div class="dialog-btns">
-      <button onclick="closeToastDialog()" style="color:#ff3b30;">Cancel</button>
-      <button onclick="toastDialogOk()" style="font-weight:600;">Save</button>
+      <button onclick="closeToastDialog()">Cancel</button>
+      <button onclick="toastDialogOk()">Save</button>
     </div>
   </div>
 </div>
+
 
 <!-- ══ BANNERS PANEL (Settings > Banners) ═══════════════════════════════════ -->
 <div class="rc-panel" id="banners-panel">
