@@ -27,6 +27,7 @@
 #import <GraphicsServices/GraphicsServices.h>
 #import "native_curl.h"
 #import "RCTestKit.h"
+#import "RCToastPill.h"
 #import <CoreFoundation/CoreFoundation.h>
 #import <CoreLocation/CoreLocation.h>
 #import <objc/message.h>
@@ -1132,54 +1133,19 @@ static void rc_show_hud_toast_ex(NSString *title, NSString *subtitle, NSString *
         CGRect screenBounds = [UIScreen mainScreen].bounds;
         CGFloat screenWidth = screenBounds.size.width;
         
-        // Define fonts matching native iOS 15 Ringer HUD
-        UIFont *titleFont = [UIFont systemFontOfSize:13.0 weight:UIFontWeightMedium];
-        UIFont *subtitleFont = [UIFont systemFontOfSize:12.0 weight:UIFontWeightRegular];
-        
-        // Measure text to determine dynamic width
-        CGFloat maxTextWidth = 0;
-        if (title) {
-            CGSize titleSize = [title sizeWithAttributes:@{NSFontAttributeName: titleFont}];
-            maxTextWidth = titleSize.width;
-        }
-        if (subtitle) {
-            CGSize subSize = [subtitle sizeWithAttributes:@{NSFontAttributeName: subtitleFont}];
-            if (subSize.width > maxTextWidth) {
-                maxTextWidth = subSize.width;
-            }
-        }
-        
-        // Check if icon exists and is a valid symbol image
-        BOOL hasIcon = NO;
-        if (iconSymbol && ![iconSymbol isEqualToString:@""] && ![iconSymbol isEqualToString:@"none"]) {
-            if ([UIImage systemImageNamed:iconSymbol]) {
-                hasIcon = YES;
-            }
-        }
-        
-        CGFloat leftPadding = 16.0;
-        CGFloat iconWidth = hasIcon ? 20.0 : 0.0;
-        CGFloat iconGap = hasIcon ? 10.0 : 0.0;
-        CGFloat leftMargin = leftPadding + iconWidth + iconGap;
-        
-        CGFloat pillWidth = maxTextWidth + 2 * leftMargin;
-        // Enforce native-looking bounds (min 140, max screenWidth - 32)
-        pillWidth = MAX(140.0, MIN(pillWidth, screenWidth - 32.0));
-        
-        // Determine height based on whether we have a subtitle
-        BOOL hasSubtitle = (subtitle && ![subtitle isEqualToString:@""]);
-        CGFloat pillHeight = hasSubtitle ? 50.0 : 40.0;
+        // The pill's size comes from the shared RCToastPillView, so the
+        // on-device toast and the app's editor preview always agree.
+        CGFloat maxPillWidth = [RCToastPillView maxPillWidthForScreenWidth:screenWidth];
         // A prompt's instruction wraps instead of being cut off, clear of the icon
-        CGFloat subtitleHeight = 16.0;
-        BOOL wrapSubtitle = passThrough && hasSubtitle;
-        if (wrapSubtitle) {
-            CGRect needed = [subtitle boundingRectWithSize:CGSizeMake(pillWidth - 2 * leftMargin, CGFLOAT_MAX)
-                                                   options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading
-                                                attributes:@{NSFontAttributeName: subtitleFont} context:nil];
-            subtitleHeight = MAX(16.0, ceil(needed.size.height));
-            pillHeight += subtitleHeight - 16.0;
-        }
-        
+        BOOL wrapSubtitle = (passThrough && subtitle && ![subtitle isEqualToString:@""]);
+        CGSize pillSize = [RCToastPillView sizeForTitle:title
+                                               message:subtitle
+                                              iconName:iconSymbol
+                                          wrapsMessage:wrapSubtitle
+                                              maxWidth:maxPillWidth];
+        CGFloat pillWidth = pillSize.width;
+        CGFloat pillHeight = pillSize.height;
+
         CGFloat pillX = (screenWidth - pillWidth) / 2.0;
         CGFloat startY = -pillHeight - 20.0;
         
@@ -1225,72 +1191,15 @@ static void rc_show_hud_toast_ex(NSString *title, NSString *subtitle, NSString *
         rootVC.view.backgroundColor = [UIColor clearColor];
         hudWindow.rootViewController = rootVC;
         
-        BOOL isDarkMode = YES;
-        if (@available(iOS 12.0, *)) {
-            if ([UIScreen mainScreen].traitCollection.userInterfaceStyle == UIUserInterfaceStyleLight) {
-                isDarkMode = NO;
-            }
-        }
-        
-        UIBlurEffectStyle blurStyle = isDarkMode ? UIBlurEffectStyleSystemMaterialDark : UIBlurEffectStyleSystemMaterialLight;
-        UIColor *titleColor = isDarkMode ? [UIColor whiteColor] : [UIColor colorWithWhite:0.0 alpha:0.8];
-        UIColor *subColor = isDarkMode ? [UIColor colorWithWhite:1.0 alpha:0.6] : [UIColor colorWithWhite:0.0 alpha:0.48];
-        UIColor *iconColor = isDarkMode ? [UIColor whiteColor] : [UIColor colorWithWhite:0.0 alpha:0.7];
-        
-        // Blur background (matching native ringer HUD pill - no border)
-        UIBlurEffect *blurEffect = [UIBlurEffect effectWithStyle:blurStyle];
-        UIVisualEffectView *blurView = [[UIVisualEffectView alloc] initWithEffect:blurEffect];
-        blurView.frame = CGRectMake(0, 0, pillWidth, pillHeight);
-        blurView.layer.cornerRadius = MIN(pillHeight, 50.0) / 2.0;
-        blurView.layer.masksToBounds = YES;
-        [rootVC.view addSubview:blurView];
-        
-        if (hasIcon) {
-            UIImage *iconImage = nil;
-            if (@available(iOS 13.0, *)) {
-                UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:16.0 weight:UIImageSymbolWeightMedium];
-                iconImage = [UIImage systemImageNamed:iconSymbol withConfiguration:config];
-            } else {
-                iconImage = [UIImage systemImageNamed:iconSymbol];
-            }
-            
-            if (iconImage) {
-                UIImageView *iconView = [[UIImageView alloc] initWithImage:iconImage];
-                iconView.tintColor = iconColor;
-                iconView.contentMode = UIViewContentModeScaleAspectFit;
-                iconView.frame = CGRectMake(leftPadding, (pillHeight - 20) / 2.0, 20, 20);
-                [rootVC.view addSubview:iconView];
-            }
-        }
-        
-        // Text alignment: Center relative to the entire bubble
-        NSTextAlignment alignment = NSTextAlignmentCenter;
-        
-        if (hasSubtitle) {
-            UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 8.0, pillWidth, 18.0)];
-            titleLabel.text = title;
-            titleLabel.textColor = titleColor;
-            titleLabel.font = titleFont;
-            titleLabel.textAlignment = alignment;
-            [rootVC.view addSubview:titleLabel];
-            
-            UILabel *subLabel = [[UILabel alloc] initWithFrame:wrapSubtitle ? CGRectMake(leftMargin, 26.0, pillWidth - 2 * leftMargin, subtitleHeight)
-                                                                            : CGRectMake(0, 26.0, pillWidth, 16.0)];
-            subLabel.numberOfLines = wrapSubtitle ? 0 : 1;
-            subLabel.text = subtitle;
-            subLabel.textColor = subColor;
-            subLabel.font = subtitleFont;
-            subLabel.textAlignment = alignment;
-            [rootVC.view addSubview:subLabel];
-        } else {
-            UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, pillWidth, pillHeight)];
-            titleLabel.text = title;
-            titleLabel.textColor = titleColor;
-            titleLabel.font = titleFont;
-            titleLabel.textAlignment = alignment;
-            [rootVC.view addSubview:titleLabel];
-        }
-        
+        // One shared pill: background, icon, fonts, colors and layout all live
+        // in RCToastPillView, which the editor preview uses too.
+        RCToastPillView *pillView = [[RCToastPillView alloc] initWithTitle:title
+                                                                   message:subtitle
+                                                                  iconName:iconSymbol];
+        pillView.wrapsMessage = wrapSubtitle;
+        pillView.frame = CGRectMake(0, 0, pillWidth, pillHeight);
+        [rootVC.view addSubview:pillView];
+
         hudWindow.hidden = NO;
         
         [UIView animateWithDuration:0.5

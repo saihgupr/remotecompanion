@@ -12,6 +12,7 @@
 #import "RCBluetoothTriggerViewController.h"
 #import "RCAudioOutputTriggerViewController.h"
 #import "RCWrapSizing.h"
+#import "RCToastPill.h"
 #import "RCNFCTriggerViewController.h"
 #import "RCDevicePickerViewController.h"
 #import "RCFocusPickerViewController.h"
@@ -484,15 +485,9 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
     UITextField *_titleField;
     UITextField *_messageField;
     UITableViewCell *_previewCell;
-    UIView *_previewPill;
-    UIVisualEffectView *_previewBlur;
-    UIImageView *_previewIconView;
-    UILabel *_previewTitleLabel;
-    UILabel *_previewMessageLabel;
+    RCToastPillView *_previewPill;
     NSLayoutConstraint *_previewPillWidth;
     NSLayoutConstraint *_previewPillHeight;
-    NSLayoutConstraint *_previewTitleTop;
-    NSLayoutConstraint *_previewTitleCenterY;
     UITableViewCell *_titleCell;
     UITableViewCell *_messageCell;
     NSString *_selectedIcon;
@@ -593,72 +588,21 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
     _previewCell.contentView.backgroundColor = [UIColor clearColor];
     _previewCell.backgroundView = nil;
 
-    _previewPill = [[UIView alloc] init];
+    // The exact pill the device draws, shared with the tweak. No extra
+    // styling here (no shadow, no own metrics) so the preview cannot drift.
+    _previewPill = [[RCToastPillView alloc] initWithTitle:@"" message:@"" iconName:@""];
+    _previewPill.showsPlaceholderTitle = YES;
     _previewPill.translatesAutoresizingMaskIntoConstraints = NO;
-    _previewPill.backgroundColor = [UIColor clearColor];
-    _previewPill.userInteractionEnabled = NO;
-    _previewPill.layer.shadowColor = [UIColor blackColor].CGColor;
-    _previewPill.layer.shadowOpacity = 0.15;
-    _previewPill.layer.shadowRadius = 8;
-    _previewPill.layer.shadowOffset = CGSizeMake(0, 2);
     [_previewCell.contentView addSubview:_previewPill];
-
-    _previewBlur = [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterialDark]];
-    _previewBlur.translatesAutoresizingMaskIntoConstraints = NO;
-    _previewBlur.layer.masksToBounds = YES;
-    _previewBlur.userInteractionEnabled = NO;
-    [_previewPill addSubview:_previewBlur];
-
-    _previewIconView = [[UIImageView alloc] init];
-    _previewIconView.contentMode = UIViewContentModeScaleAspectFit;
-    _previewIconView.translatesAutoresizingMaskIntoConstraints = NO;
-    _previewIconView.userInteractionEnabled = NO;
-    [_previewPill addSubview:_previewIconView];
-
-    // Same sizes as the on-device toast: 13pt Medium title, 12pt Regular message.
-    _previewTitleLabel = [[UILabel alloc] init];
-    _previewTitleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
-    _previewTitleLabel.textAlignment = NSTextAlignmentCenter;
-    _previewTitleLabel.numberOfLines = 1;
-    _previewTitleLabel.lineBreakMode = NSLineBreakByTruncatingTail;
-    _previewTitleLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    _previewTitleLabel.userInteractionEnabled = NO;
-    [_previewPill addSubview:_previewTitleLabel];
-
-    _previewMessageLabel = [[UILabel alloc] init];
-    _previewMessageLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
-    _previewMessageLabel.textAlignment = NSTextAlignmentCenter;
-    _previewMessageLabel.numberOfLines = 1;
-    _previewMessageLabel.lineBreakMode = NSLineBreakByTruncatingTail;
-    _previewMessageLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    _previewMessageLabel.userInteractionEnabled = NO;
-    [_previewPill addSubview:_previewMessageLabel];
 
     _previewPillWidth = [_previewPill.widthAnchor constraintEqualToConstant:140];
     _previewPillWidth.priority = 999;
     _previewPillHeight = [_previewPill.heightAnchor constraintEqualToConstant:40];
-    _previewTitleTop = [_previewTitleLabel.topAnchor constraintEqualToAnchor:_previewPill.topAnchor constant:8];
-    _previewTitleCenterY = [_previewTitleLabel.centerYAnchor constraintEqualToAnchor:_previewPill.centerYAnchor];
     [NSLayoutConstraint activateConstraints:@[
         [_previewPill.topAnchor constraintEqualToAnchor:_previewCell.contentView.topAnchor constant:12],
         [_previewPill.bottomAnchor constraintEqualToAnchor:_previewCell.contentView.bottomAnchor constant:-12],
         [_previewPill.centerXAnchor constraintEqualToAnchor:_previewCell.contentView.centerXAnchor],
         _previewPillWidth, _previewPillHeight,
-        [_previewBlur.leadingAnchor constraintEqualToAnchor:_previewPill.leadingAnchor],
-        [_previewBlur.trailingAnchor constraintEqualToAnchor:_previewPill.trailingAnchor],
-        [_previewBlur.topAnchor constraintEqualToAnchor:_previewPill.topAnchor],
-        [_previewBlur.bottomAnchor constraintEqualToAnchor:_previewPill.bottomAnchor],
-        [_previewIconView.leadingAnchor constraintEqualToAnchor:_previewPill.leadingAnchor constant:16],
-        [_previewIconView.centerYAnchor constraintEqualToAnchor:_previewPill.centerYAnchor],
-        [_previewIconView.widthAnchor constraintEqualToConstant:20],
-        [_previewIconView.heightAnchor constraintEqualToConstant:20],
-        [_previewTitleLabel.leadingAnchor constraintEqualToAnchor:_previewPill.leadingAnchor],
-        [_previewTitleLabel.trailingAnchor constraintEqualToAnchor:_previewPill.trailingAnchor],
-        [_previewTitleLabel.heightAnchor constraintEqualToConstant:18],
-        [_previewMessageLabel.leadingAnchor constraintEqualToAnchor:_previewPill.leadingAnchor],
-        [_previewMessageLabel.trailingAnchor constraintEqualToAnchor:_previewPill.trailingAnchor],
-        [_previewMessageLabel.topAnchor constraintEqualToAnchor:_previewPill.topAnchor constant:26],
-        [_previewMessageLabel.heightAnchor constraintEqualToConstant:16],
     ]];
     // Keep the pill inside the row when the text is long.
     NSLayoutConstraint *maxW = [_previewPill.widthAnchor constraintLessThanOrEqualToAnchor:_previewCell.contentView.widthAnchor constant:-16];
@@ -671,58 +615,22 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
     NSString *m = _messageField.text ?: @"";
     NSString *symbol = _selectedIcon ?: @"";
 
-    UIFont *titleFont = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
-    UIFont *subFont = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
+    // Same sizing rule as the fired toast; an empty title measures the
+    // "Title" placeholder the pill displays in that state.
+    CGFloat maxW = [RCToastPillView maxPillWidthForScreenWidth:[UIScreen mainScreen].bounds.size.width];
+    CGFloat cellW = _previewCell.contentView.bounds.size.width;
+    if (cellW > 0) maxW = MIN(maxW, cellW - 16);
+    CGSize pillSize = [RCToastPillView sizeForTitle:(t.length > 0 ? t : @"Title")
+                                           message:m
+                                          iconName:symbol
+                                      wrapsMessage:NO
+                                          maxWidth:maxW];
+    _previewPillWidth.constant = pillSize.width;
+    _previewPillHeight.constant = pillSize.height;
 
-    BOOL dark = YES;
-    if (self.traitCollection.userInterfaceStyle == UIUserInterfaceStyleLight) dark = NO;
-    UIColor *titleColor = dark ? [UIColor whiteColor] : [UIColor colorWithWhite:0.0 alpha:0.8];
-    UIColor *subColor = dark ? [UIColor colorWithWhite:1.0 alpha:0.6] : [UIColor colorWithWhite:0.0 alpha:0.48];
-    UIColor *iconColor = dark ? [UIColor whiteColor] : [UIColor colorWithWhite:0.0 alpha:0.7];
-    UIBlurEffectStyle style = dark ? UIBlurEffectStyleSystemMaterialDark : UIBlurEffectStyleSystemMaterialLight;
-    _previewBlur.effect = [UIBlurEffect effectWithStyle:style];
-
-    BOOL hasIcon = NO;
-    UIImage *img = nil;
-    if (symbol.length > 0 && ![symbol isEqualToString:@"none"]) {
-        if ([UIImage systemImageNamed:symbol]) {
-            hasIcon = YES;
-            img = RCToastIconImage(symbol);
-        }
-    }
-
-    BOOL hasSubtitle = (m.length > 0);
-    CGFloat pillHeight = hasSubtitle ? 50.0 : 40.0;
-
-    CGFloat maxTextWidth = 0;
-    NSString *titleForMeasure = t.length > 0 ? t : @"Title";
-    maxTextWidth = [titleForMeasure sizeWithAttributes:@{ NSFontAttributeName: titleFont }].width;
-    if (hasSubtitle) {
-        CGFloat w = [m sizeWithAttributes:@{ NSFontAttributeName: subFont }].width;
-        if (w > maxTextWidth) maxTextWidth = w;
-    }
-    CGFloat leftMargin = 16.0 + (hasIcon ? 20.0 + 10.0 : 0.0);
-    CGFloat pillWidth = maxTextWidth + 2 * leftMargin;
-    CGFloat screenW = [UIScreen mainScreen].bounds.size.width;
-    if (screenW > 0) pillWidth = MAX(140.0, MIN(pillWidth, screenW - 32.0));
-    else pillWidth = MAX(140.0, pillWidth);
-    _previewPillWidth.constant = pillWidth;
-    _previewPillHeight.constant = pillHeight;
-    _previewBlur.layer.cornerRadius = MIN(pillHeight, 50.0) / 2.0;
-
-    _previewTitleLabel.font = titleFont;
-    _previewMessageLabel.font = subFont;
-    _previewTitleLabel.text = titleForMeasure;
-    _previewTitleLabel.textColor = t.length > 0 ? titleColor : [UIColor tertiaryLabelColor];
-    _previewMessageLabel.text = m;
-    _previewMessageLabel.textColor = subColor;
-    _previewMessageLabel.hidden = !hasSubtitle;
-    _previewTitleTop.active = hasSubtitle;
-    _previewTitleCenterY.active = !hasSubtitle;
-
-    _previewIconView.hidden = !hasIcon;
-    _previewIconView.image = img;
-    _previewIconView.tintColor = iconColor;
+    _previewPill.pillTitle = t;
+    _previewPill.pillMessage = m;
+    _previewPill.pillIconName = symbol;
 
     _saveButton.enabled = (t.length > 0);
 }
