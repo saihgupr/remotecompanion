@@ -2,7 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [4.1.0] - 2026-10-31
+
+### Added
+- **Web UI access control**: Settings > General > Access limits where the Web UI can be reached from — Any Network (default, as before), Trusted Networks (only while on listed Wi-Fi networks), or This iPhone Only. The check runs per-connection before any endpoint, so it covers `/api/*` too, and the phone itself can always connect. Also `rc webui access any|networks|local` and `rc webui wifi` (#105).
+- **CarPlay triggers and condition**: new CarPlay Connected / Disconnected triggers plus a CarPlay connection condition; device/media triggers flattened in the New Trigger screen, Home Button section hidden on button-less phones (#67).
+- **On-device test kit**: Settings > Diagnostics > Test Kit self-tests conditions, toggles, gestures, and button presses and produces a shareable report; also fixed a SpringBoard crash when saving config from the Web UI (#68).
+- **Focus modes**: new Set Focus action (on/toggle/off) and Focus If condition on iOS 15+; Do Not Disturb actions/conditions now only affect the Do Not Disturb Focus (#80).
+- **Shortcuts without SpringCuts**: shortcuts run in the background and appear in the picker with no SpringCuts install required; failures and unknown names are logged, and each shortcut action can optionally Run Silently (#94).
+- **Retrigger options and Stop Trigger**: each trigger has a "When Triggered Again" option (Run Alongside / Restart / Ignore) so retriggering a delayed sequence restarts or skips it, plus a new Stop Trigger action to cancel another trigger's running sequence (#95).
+- **Experimental NFC mode**: opt-in mode (iPhone XS+) using iOS's own background tag reader so Apple Pay, Express Transit, and car keys keep working; new NFC Scanner pause/resume/toggle action and dedicated NFC settings section (#98).
+- **Ping iPhone triggers**: Ping iPhone and Ping iPhone (Hold) triggers so tapping or holding Ping on a paired Apple Watch runs custom actions (no Watch app or Wi-Fi needed); with no actions assigned the normal ping sound/flash still plays (#100).
+- **Keep Default Action**: per-trigger option so button actions run alongside stock behavior (Siri, screenshot, Wallet, App Switcher, Accessibility Shortcut). Power Double-Tap with actions now blocks Wallet unless this is on (#101).
+- **Home Button (Hold) and Home + Power triggers** on Home-button iPhones; replace Siri / screenshot-and-sleep by default or run alongside with Keep Default Action (#102).
+- **Button Triggers action**: pause button triggers for 15 min / 1 hour / until resumed (event triggers like NFC and schedules keep working), with a pause banner and Resume button on the Triggers screen; plus an API so other tweaks can hook button events (#103).
+- **Accessibility Shortcut action**: run the Accessibility Shortcut from any trigger; fixed triple-click firing both the shortcut and Power Double-Tap, and a bound Power/Home Triple Click now takes over the shortcut from iOS (#92).
+
+### Fixed
+- **Long commands cut at 1KB**: the tweak read its local socket in one 1KB read, truncating long commands. It now keeps reading while more arrives (up to 256KB); `rc` piped input is also sent in full (#107).
+- **Apple Pay/Wallet with NFC scanning on**: fixed Wallet showing "Updating Cards" for up to a minute by stepping the tag scan aside while Apple Pay or Wallet is on screen (#97).
+
+### Changed
+- **Banners screen groups enabled first**: ticked actions show in an "Enabled" section at the top, moving instantly when toggled (#89).
 
 ### Changed
 - **Toast dialog simplified**: Web UI Toast editor now has labeled Title / Message (optional) / Icon (optional) fields, plain-word icon presets, and a slimmer live preview pill.
