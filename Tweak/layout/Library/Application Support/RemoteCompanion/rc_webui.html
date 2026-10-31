@@ -1350,19 +1350,30 @@
       background: #3a3a3c; transition: background 0.15s, color 0.15s;
     }
     .day-pill input:checked + span { background: #007aff; color: #fff; }
-    /* Toast preset chips & custom dialog toggles */
+    /* Toast icon presets — quiet pill row */
     .toast-preset-chip {
-      background: rgba(255,255,255,0.1);
-      border-radius: 12px;
-      padding: 4px 10px;
+      background: transparent;
+      border: 0.5px solid rgba(255,255,255,0.18);
+      border-radius: 999px;
+      padding: 5px 11px;
       font-size: 12px;
-      color: #fff;
+      font-weight: 500;
+      color: #aeaeb2;
       cursor: pointer;
       user-select: none;
-      transition: background 0.15s ease, transform 0.1s ease;
+      -webkit-user-select: none;
+      transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
     }
-    .toast-preset-chip:hover { background: rgba(255,255,255,0.2); }
-    .toast-preset-chip:active { transform: scale(0.95); }
+    .toast-preset-chip:hover { background: rgba(255,255,255,0.08); color: #fff; border-color: rgba(255,255,255,0.28); }
+    .toast-preset-chip:active { transform: scale(0.95); background: rgba(10,132,255,0.25); color: #fff; border-color: rgba(10,132,255,0.5); }
+    .toast-field-label {
+      font-size: 11px; font-weight: 600;
+      letter-spacing: 0.06em; text-transform: uppercase;
+      color: #8e8e93; margin: 0 2px -6px;
+    }
+    .toast-field-hint {
+      font-size: 11px; color: #636366; font-weight: 400;
+    }
 
     .toggle-switch {
       position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0;
@@ -2239,32 +2250,41 @@
 
 <!-- ══ TOAST ACTION DIALOG ═════════════════════════════════════════════ -->
 <div class="dialog-backdrop" id="toast-dialog-backdrop">
-  <div class="dialog-box" style="max-width: 440px; width: 90%;">
+  <div class="dialog-box" style="max-width: 400px; width: 90%;">
     <div class="dialog-title" id="toast-dialog-title">Toast Notification</div>
-    <div class="dialog-msg" style="padding-bottom: 8px;">Configure HUD toast alert displayed on device:</div>
-    <div style="padding:0 14px 12px; display:flex; flex-direction:column; gap:10px;">
-      <input class="dialog-input" id="toast-title-input" type="text" placeholder="Title (e.g. Silent Vibrate)" autocorrect="off" autocapitalize="words" spellcheck="false" style="margin:0; width:100%" oninput="updateToastPreview()">
-      <input class="dialog-input" id="toast-subtitle-input" type="text" placeholder="Subtitle (optional, e.g. ON)" autocorrect="off" autocapitalize="none" spellcheck="false" style="margin:0; width:100%" oninput="updateToastPreview()">
-      <input class="dialog-input" id="toast-icon-input" type="text" placeholder="SF Symbol Icon (optional, e.g. bell.fill)" autocorrect="off" autocapitalize="none" spellcheck="false" style="margin:0; width:100%" oninput="updateToastPreview()">
-      
-      <!-- Preset Icon Selector Chips -->
-      <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top: 2px;" id="toast-icon-presets">
-        <span class="toast-preset-chip" onclick="setToastIconPreset('bell.fill')">🔔 bell</span>
-        <span class="toast-preset-chip" onclick="setToastIconPreset('bell.slash.fill')">🔕 bell.slash</span>
-        <span class="toast-preset-chip" onclick="setToastIconPreset('checkmark.circle.fill')">✅ checkmark</span>
-        <span class="toast-preset-chip" onclick="setToastIconPreset('xmark.circle.fill')">❌ xmark</span>
-        <span class="toast-preset-chip" onclick="setToastIconPreset('star.fill')">⭐ star</span>
-        <span class="toast-preset-chip" onclick="setToastIconPreset('speaker.wave.3.fill')">🔊 speaker</span>
-        <span class="toast-preset-chip" onclick="setToastIconPreset('camera.fill')">📷 camera</span>
+    <div class="dialog-msg" style="padding-bottom: 12px;">Shows a small alert on the device.</div>
+    <div style="padding:0 16px 16px; display:flex; flex-direction:column; gap:12px;">
+      <div style="display:flex; flex-direction:column; gap:5px;">
+        <div class="toast-field-label">Title</div>
+        <input class="dialog-input" id="toast-title-input" type="text" placeholder="e.g. Silent Vibrate" autocorrect="off" autocapitalize="words" spellcheck="false" style="margin:0; width:100%; text-align:left;" oninput="updateToastPreview()">
+      </div>
+      <div style="display:flex; flex-direction:column; gap:5px;">
+        <div class="toast-field-label">Message <span class="toast-field-hint" style="text-transform:none; letter-spacing:0;">— optional</span></div>
+        <input class="dialog-input" id="toast-subtitle-input" type="text" placeholder="e.g. ON" autocorrect="off" autocapitalize="none" spellcheck="false" style="margin:0; width:100%; text-align:left;" oninput="updateToastPreview()">
+      </div>
+      <div style="display:flex; flex-direction:column; gap:5px;">
+        <div class="toast-field-label">Icon <span class="toast-field-hint" style="text-transform:none; letter-spacing:0;">— optional</span></div>
+        <input class="dialog-input" id="toast-icon-input" type="text" placeholder="e.g. bell.fill" autocorrect="off" autocapitalize="none" spellcheck="false" style="margin:0; width:100%; text-align:left;" oninput="updateToastPreview()">
+        <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top: 3px;" id="toast-icon-presets">
+          <span class="toast-preset-chip" onclick="setToastIconPreset('bell.fill')">Bell</span>
+          <span class="toast-preset-chip" onclick="setToastIconPreset('bell.slash.fill')">Muted</span>
+          <span class="toast-preset-chip" onclick="setToastIconPreset('checkmark.circle.fill')">Check</span>
+          <span class="toast-preset-chip" onclick="setToastIconPreset('xmark.circle.fill')">Dismiss</span>
+          <span class="toast-preset-chip" onclick="setToastIconPreset('star.fill')">Star</span>
+          <span class="toast-preset-chip" onclick="setToastIconPreset('speaker.wave.3.fill')">Volume</span>
+          <span class="toast-preset-chip" onclick="setToastIconPreset('camera.fill')">Camera</span>
+        </div>
       </div>
 
-      <!-- Live Toast Preview Box -->
-      <div style="background: rgba(255,255,255,0.08); border-radius: 12px; padding: 12px; display: flex; align-items: center; justify-content: center; margin-top: 4px;">
-        <div id="toast-live-preview" style="background: #1c1c1e; border: 1px solid rgba(255,255,255,0.15); border-radius: 20px; padding: 8px 16px; display: flex; align-items: center; gap: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); max-width: 100%;">
-          <i class="f7-icons" id="toast-preview-icon" style="font-size: 20px; color: #0a84ff;">text_bubble</i>
-          <div style="display:flex; flex-direction:column; text-align:left;">
-            <span id="toast-preview-title" style="font-size: 14px; font-weight: 600; color: #fff;">Toast Title</span>
-            <span id="toast-preview-subtitle" style="font-size: 12px; color: #8e8e93;">Subtitle</span>
+      <div style="display:flex; flex-direction:column; gap:6px; margin-top:2px;">
+        <div class="toast-field-label" style="text-align:center;">Preview</div>
+        <div style="display:flex; justify-content:center;">
+          <div id="toast-live-preview" style="background:#1c1c1e; border:0.5px solid rgba(255,255,255,0.12); border-radius:18px; padding:8px 14px; display:flex; align-items:center; gap:9px; box-shadow:0 4px 14px rgba(0,0,0,0.35); max-width:100%;">
+            <i class="f7-icons" id="toast-preview-icon" style="font-size:19px; color:#8e8e93;">text_bubble</i>
+            <div style="display:flex; flex-direction:column; text-align:left; line-height:1.25;">
+              <span id="toast-preview-title" style="font-size:13px; font-weight:600; color:#fff;">Toast Title</span>
+              <span id="toast-preview-subtitle" style="font-size:12px; color:#8e8e93;">Subtitle</span>
+            </div>
           </div>
         </div>
       </div>
@@ -5276,9 +5296,7 @@ function selectPickerAction(act) {
       if (val) addActionToCurrent(`delay ${val}`);
     }, true);
   } else if (c === '__TOAST__') {
-    showDialog('Add HUD Toast', 'Message text:', '', 'Add', val => {
-      if (val) addActionToCurrent(`toast ${val}`);
-    });
+    promptToastModal('', null);
   } else if (c === '__CUSTOM__') {
     showDialog('Terminal Command', 'Shell command to execute:', '', 'Add', val => {
       if (val) addActionToCurrent(`exec ${val}`);

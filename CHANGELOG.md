@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- **Toast dialog simplified**: Web UI Toast editor now has labeled Title / Message (optional) / Icon (optional) fields, plain-word icon presets, and a slimmer live preview pill.
+
+### Fixed
+- **Bottom swipe-up left/right zones mirrored in landscape**: `RC_ProgressAlongEdge` returned `y/L` for LandscapeLeft and `1-y/L` for LandscapeRight, which is backwards (west is device-bottom in LandscapeLeft, device-top in LandscapeRight). Swapped so left/center/right triggers fire on the correct side in both landscape orientations; also fixes the mirrored top status-bar hold zones which share the helper.
+- **Toast action editor reuse**: creating a Toast from the Web UI picker now opens the same title/message/icon dialog with live preview as editing (previously a single-field prompt that dropped subtitle/icon), and editing a Toast in the iOS action list now reopens the same 3-field editor used at creation instead of a generic single-field alert.
+
 ### Added
 - **Lock Toggle passcode support**: added optional passcode argument to lock toggle (`lock-toggle <pin>` / `lock toggle <pin>`), enabling automatic passcode unlocking when the device is locked, with dedicated configuration dialogs in the iOS action picker, action editor, and Web UI (#99).
 - **Kill Current App action**: new `kill current` command (aliases `kill front`, `kill foreground`, `kill current app`, `kill front app`) force-closes the currently focused app, available in the iOS action picker, Web UI, and `rc` shell commands (#93).

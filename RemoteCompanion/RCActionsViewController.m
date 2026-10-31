@@ -2383,6 +2383,79 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     } else if ([currentAction isEqualToString:@"lock-toggle"] || [currentAction isEqualToString:@"lock toggle"] || [currentAction hasPrefix:@"lock-toggle "] || [currentAction hasPrefix:@"lock toggle "]) {
         [self promptEditLockToggleActionAtIndex:indexPath.row];
         return;
+    } else if ([currentAction hasPrefix:@"toast "] || [currentAction isEqualToString:@"toast"]) {
+        // Edit Toast - same 3-field editor as creation (__TOAST__)
+        NSString *toastArgsStr = @"";
+        if ([currentAction hasPrefix:@"toast "] && currentAction.length > 6) {
+            toastArgsStr = [[currentAction substringFromIndex:6] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        }
+        NSMutableArray *toastArgs = [NSMutableArray array];
+        NSScanner *toastScanner = [NSScanner scannerWithString:toastArgsStr];
+        [toastScanner setCharactersToBeSkipped:nil];
+        while (![toastScanner isAtEnd]) {
+            [toastScanner scanCharactersFromSet:[NSCharacterSet whitespaceCharacterSet] intoString:NULL];
+            if ([toastScanner isAtEnd]) break;
+            NSString *arg = nil;
+            if ([toastScanner scanString:@"\"" intoString:NULL]) {
+                [toastScanner scanUpToString:@"\"" intoString:&arg];
+                [toastScanner scanString:@"\"" intoString:NULL];
+                if (!arg) arg = @"";
+            } else {
+                [toastScanner scanUpToCharactersFromSet:[NSCharacterSet whitespaceCharacterSet] intoString:&arg];
+            }
+            if (arg) {
+                arg = [arg stringByReplacingOccurrencesOfString:@"\\\"" withString:@"\""];
+                [toastArgs addObject:arg];
+            }
+        }
+        NSString *toastTitle = toastArgs.count > 0 ? toastArgs[0] : @"";
+        NSString *toastSub = toastArgs.count > 1 ? toastArgs[1] : @"";
+        NSString *toastIcon = toastArgs.count > 2 ? toastArgs[2] : @"";
+
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Toast"
+            message:@"Enter toast title, subtitle and SFSymbol name"
+            preferredStyle:UIAlertControllerStyleAlert];
+
+        [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
+            textField.placeholder = @"Title (required)";
+            textField.text = toastTitle;
+        }];
+        [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
+            textField.placeholder = @"Subtitle (optional)";
+            textField.text = toastSub;
+        }];
+        [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
+            textField.placeholder = @"SFSymbol name (optional, e.g. info.circle)";
+            textField.text = toastIcon;
+        }];
+
+        [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+        [alert addAction:[UIAlertAction actionWithTitle:@"Save" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+            NSString *title = alert.textFields[0].text;
+            NSString *subtitle = alert.textFields[1].text;
+            NSString *icon = alert.textFields[2].text;
+
+            if (title.length > 0) {
+                NSString *escTitle = [title stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
+                NSString *escSub = [subtitle stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
+                NSString *escIcon = [icon stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
+
+                NSString *cmd;
+                if (escIcon.length > 0) {
+                    cmd = [NSString stringWithFormat:@"toast \"%@\" \"%@\" \"%@\"", escTitle, escSub ?: @"", escIcon];
+                } else if (escSub.length > 0) {
+                    cmd = [NSString stringWithFormat:@"toast \"%@\" \"%@\"", escTitle, escSub];
+                } else {
+                    cmd = [NSString stringWithFormat:@"toast \"%@\"", escTitle];
+                }
+
+                self.actions[indexPath.row] = cmd;
+                [self saveActions];
+                [self.tableView reloadData];
+            }
+        }]];
+
+        [self presentViewController:alert animated:YES completion:nil];
     } else {
         // Generic edit for other commands - show alert with current command
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Edit Action"

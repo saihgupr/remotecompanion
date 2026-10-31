@@ -14934,8 +14934,8 @@ static inline CGFloat RC_ProgressAlongEdge(CGPoint loc, UIInterfaceOrientation o
     if (orientation == UIInterfaceOrientationPortrait) return (S > 0) ? (loc.x / S) : 0.5;
     if (orientation == UIInterfaceOrientationPortraitUpsideDown) return (S > 0) ? (1.0 - (loc.x / S)) : 0.5;
     if (L <= 0) return 0.5;
-    if (orientation == UIInterfaceOrientationLandscapeLeft) return (loc.y / L); // physical left = device top (y=0)
-    return (1.0 - (loc.y / L)); // LandscapeRight: physical left = device bottom (y=L)
+    if (orientation == UIInterfaceOrientationLandscapeLeft) return (1.0 - (loc.y / L)); // west(device bottom y=L)=0, east(device top y=0)=1
+    return (loc.y / L); // LandscapeRight: west(device top y=0)=0, east(device bottom y=L)=1
 }
 
 static inline NSString *RC_StatusHoldTriggerForProgress(CGFloat progress) {
