@@ -65,8 +65,8 @@ static void rc_parse_km_cmd(NSString *cmd, NSString **outMacro, NSString **outPa
     if (outParam) *outParam = param ?: @"";
 }
 
-// Plain-word icon choices for toasts. Symbols stay internal so the
-// editor never shows raw symbol strings.
+// Favorite icons shown at the top of the picker. Anything else can still
+// be typed by name and is stored verbatim.
 static NSArray<NSDictionary *> *RCToastIconChoices(void) {
     return @[
         @{ @"name": @"Info", @"symbol": @"info.circle" },
@@ -77,6 +77,61 @@ static NSArray<NSDictionary *> *RCToastIconChoices(void) {
         @{ @"name": @"Heart", @"symbol": @"heart.fill" },
         @{ @"name": @"Music", @"symbol": @"music.note" }
     ];
+}
+
+// A browsable list of common icon names. The picker also accepts any typed
+// name verbatim, so this list is for discovery, not a limit.
+static NSArray<NSString *> *RCToastIconCatalog(void) {
+    return @[
+        @"airplane", @"alarm.fill", @"antenna.radiowaves.left.and.right",
+        @"app.fill", @"archivebox.fill", @"arrow.counterclockwise", @"arrow.up.right.circle.fill",
+        @"bag.fill", @"battery.100", @"bell", @"bell.fill", @"bell.slash.fill",
+        @"binoculars.fill", @"bold", @"bolt.fill", @"book.fill", @"bookmark.fill",
+        @"briefcase.fill", @"bubble.left.fill", @"bubble.right.fill", @"building.2.fill",
+        @"calendar", @"calendar.circle.fill", @"camera.fill", @"car.fill",
+        @"cart.fill", @"checkmark", @"checkmark.circle", @"checkmark.circle.fill",
+        @"checkmark.seal.fill", @"clock.fill", @"cloud.fill", @"cloud.rain.fill",
+        @"cloud.sun.fill", @"compass.fill", @"creditcard.fill", @"crop",
+        @"cup.and.saucer.fill", @"desktopcomputer", @"doc.fill", @"doc.on.doc.fill",
+        @"dollarsign.circle.fill", @"drop.fill", @"ear.fill", @"envelope.fill",
+        @"exclamationmark.circle.fill", @"exclamationmark.triangle.fill",
+        @"eye.fill", @"eye.slash.fill", @"face.smiling.fill", @"film.fill",
+        @"flag.fill", @"flashlight.on.fill", @"folder.fill", @"gamecontroller.fill",
+        @"gear", @"gift.fill", @"globe", @"graduationcap.fill",
+        @"guitars.fill", @"hammer.fill", @"hand.thumbsup.fill", @"hare.fill",
+        @"headphones", @"heart", @"heart.fill", @"heart.circle.fill",
+        @"house.fill", @"hourglass", @"info.circle", @"info.circle.fill",
+        @"ipad", @"iphone", @"key.fill", @"keyboard.fill",
+        @"laptopcomputer", @"leaf.fill", @"lightbulb.fill", @"location.fill",
+        @"lock.fill", @"lock.open.fill", @"magnifyingglass", @"map.fill",
+        @"message.fill", @"mic.fill", @"moon.fill", @"music.note",
+        @"music.note.list", @"network", @"newspaper.fill", @"paintbrush.fill",
+        @"paperplane.fill", @"party.popper.fill", @"pawprint.fill", @"pencil",
+        @"person.2.fill", @"person.fill", @"phone.fill", @"photo.fill",
+        @"pin.fill", @"play.fill", @"plus.circle.fill", @"printer.fill",
+        @"puzzlepiece.fill", @"qrcode", @"quote.bubble.fill", @"radio.fill",
+        @"rosette", @"scissors", @"shield.fill", @"shippingbox.fill",
+        @"sparkles", @"speaker.wave.2.fill", @"sportscourt.fill", @"star",
+        @"star.fill", @"star.circle.fill", @"sun.max.fill", @"tag.fill",
+        @"thermometer", @"timer", @"tortoise.fill", @"trash.fill",
+        @"tray.fill", @"tv.fill", @"umbrella.fill", @"video.fill",
+        @"wallet.pass.fill", @"wand.and.stars", @"watch", @"wifi",
+        @"wind", @"wrench.fill", @"xmark.circle.fill", @"zzz"
+    ];
+}
+
+static NSString *RCToastIconNameForString(NSString *symbol) {
+    if (!symbol || symbol.length == 0) return @"None";
+    for (NSDictionary *choice in RCToastIconChoices()) {
+        if ([choice[@"symbol"] isEqualToString:symbol]) return choice[@"name"];
+    }
+    return symbol;
+}
+
+static UIImage *RCToastIconImage(NSString *symbol) {
+    if (!symbol || symbol.length == 0) return nil;
+    UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:16 weight:UIImageSymbolWeightMedium];
+    return [UIImage systemImageNamed:symbol withConfiguration:cfg];
 }
 
 // Splits `toast "title" ["subtitle"] ["icon"]` into its parts.
@@ -192,6 +247,229 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
                          onSave:(void (^)(NSString *cmd))onSave;
 @end
 
+// Searchable icon browser. Favorites on top, then every common icon.
+// Typing any name offers a "Use ..." row that saves it verbatim, with a
+// live preview so a typo simply shows as missing.
+@interface RCToastIconBrowserViewController : UITableViewController <UISearchResultsUpdating>
+- (instancetype)initWithCurrentIcon:(NSString *)icon;
+@property (nonatomic, copy) void (^onPick)(NSString *icon);
+@end
+
+@implementation RCToastIconBrowserViewController {
+    NSString *_currentIcon;
+    NSString *_searchText;
+    NSArray<NSString *> *_filtered;
+    UISearchController *_searchController;
+}
+
+- (instancetype)initWithCurrentIcon:(NSString *)icon {
+    self = [super initWithStyle:UITableViewStyleInsetGrouped];
+    if (self) {
+        _currentIcon = [icon copy] ?: @"";
+        _searchText = @"";
+        _filtered = @[];
+    }
+    return self;
+}
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = @"Choose Icon";
+    _searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
+    _searchController.searchResultsUpdater = self;
+    _searchController.obscuresBackgroundDuringPresentation = NO;
+    _searchController.searchBar.placeholder = @"Search or type icon name";
+    _searchController.searchBar.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    _searchController.searchBar.autocorrectionType = UITextAutocorrectionTypeNo;
+    self.navigationItem.searchController = _searchController;
+    self.navigationItem.hidesSearchBarWhenScrolling = NO;
+    self.definesPresentationContext = YES;
+}
+
+- (BOOL)isSearching {
+    return _searchText.length > 0;
+}
+
+- (BOOL)hasCustomRow {
+    if (_currentIcon.length == 0) return NO;
+    for (NSDictionary *c in RCToastIconChoices()) {
+        if ([c[@"symbol"] isEqualToString:_currentIcon]) return NO;
+    }
+    return ![RCToastIconCatalog() containsObject:_currentIcon];
+}
+
+- (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
+    NSString *t = [[searchController.searchBar.text ?: @"" stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] copy];
+    _searchText = t;
+    if (t.length == 0) {
+        _filtered = @[];
+    } else {
+        NSMutableArray *hits = [NSMutableArray array];
+        NSMutableSet *seen = [NSMutableSet set];
+        for (NSDictionary *c in RCToastIconChoices()) {
+            NSString *sym = c[@"symbol"];
+            NSString *name = c[@"name"];
+            if ([sym localizedCaseInsensitiveContainsString:t] || [name localizedCaseInsensitiveContainsString:t]) {
+                if (![seen containsObject:sym]) { [hits addObject:sym]; [seen addObject:sym]; }
+            }
+        }
+        for (NSString *sym in RCToastIconCatalog()) {
+            if ([sym localizedCaseInsensitiveContainsString:t]) {
+                if (![seen containsObject:sym]) { [hits addObject:sym]; [seen addObject:sym]; }
+            }
+        }
+        [hits sortUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
+        _filtered = hits;
+    }
+    [self.tableView reloadData];
+}
+
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
+    if ([self isSearching]) return 1;
+    return [self hasCustomRow] ? 3 : 2;
+}
+
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    if ([self isSearching]) return 1 + _filtered.count;
+    if ([self hasCustomRow]) {
+        if (section == 0) return 1;
+        if (section == 1) return 1 + RCToastIconChoices().count;
+        return RCToastIconCatalog().count;
+    }
+    if (section == 0) return 1 + RCToastIconChoices().count;
+    return RCToastIconCatalog().count;
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+    if ([self isSearching]) return @"Matches";
+    if ([self hasCustomRow]) {
+        if (section == 0) return @"Current";
+        if (section == 1) return @"Favorites";
+        return @"All Icons";
+    }
+    if (section == 0) return @"Favorites";
+    return @"All Icons";
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+    if ([self isSearching] && section == 0) return @"Type any name to use it, even if there is no preview.";
+    if (![self isSearching]) {
+        NSInteger last = [self numberOfSectionsInTableView:tableView] - 1;
+        if (section == last) return @"Type any name to use it, even if there is no preview.";
+    }
+    return nil;
+}
+
+- (UITableViewCell *)browserCellForTable:(UITableView *)tableView {
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"RCToastBrowserCell"];
+    if (!cell) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"RCToastBrowserCell"];
+    }
+    cell.imageView.tintColor = [UIColor secondaryLabelColor];
+    return cell;
+}
+
+- (void)configureCell:(UITableViewCell *)cell withSymbol:(NSString *)symbol displayName:(NSString *)display detail:(NSString *)detail checked:(BOOL)checked {
+    UIImage *img = RCToastIconImage(symbol);
+    if (symbol.length == 0) {
+        cell.textLabel.text = @"None";
+        cell.detailTextLabel.text = nil;
+        cell.imageView.image = nil;
+    } else if (img) {
+        cell.textLabel.text = display ?: symbol;
+        cell.detailTextLabel.text = detail;
+        cell.imageView.image = img;
+    } else {
+        cell.textLabel.text = display ?: symbol;
+        cell.detailTextLabel.text = @"No preview for this name";
+        cell.imageView.image = [UIImage systemImageNamed:@"questionmark.circle"];
+        cell.imageView.tintColor = [UIColor tertiaryLabelColor];
+    }
+    if (symbol.length > 0 && img) cell.imageView.tintColor = [UIColor secondaryLabelColor];
+    cell.accessoryType = checked ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = [self browserCellForTable:tableView];
+    if ([self isSearching]) {
+        if (indexPath.row == 0) {
+            NSString *typed = _searchText;
+            UIImage *img = RCToastIconImage(typed);
+            cell.textLabel.text = [NSString stringWithFormat:@"Use \"%@\"", typed];
+            if (img) {
+                cell.detailTextLabel.text = typed;
+                cell.imageView.image = img;
+                cell.imageView.tintColor = [UIColor secondaryLabelColor];
+            } else {
+                cell.detailTextLabel.text = @"No preview for this name";
+                cell.imageView.image = [UIImage systemImageNamed:@"questionmark.circle"];
+                cell.imageView.tintColor = [UIColor tertiaryLabelColor];
+            }
+            cell.accessoryType = [_currentIcon isEqualToString:typed] ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+            return cell;
+        }
+        NSString *sym = _filtered[indexPath.row - 1];
+        [self configureCell:cell withSymbol:sym displayName:sym detail:nil checked:[_currentIcon isEqualToString:sym]];
+        return cell;
+    }
+    if ([self hasCustomRow]) {
+        if (indexPath.section == 0) {
+            [self configureCell:cell withSymbol:_currentIcon displayName:_currentIcon detail:nil checked:YES];
+            return cell;
+        }
+        if (indexPath.section == 1) {
+            if (indexPath.row == 0) {
+                [self configureCell:cell withSymbol:@"" displayName:nil detail:nil checked:(_currentIcon.length == 0)];
+                return cell;
+            }
+            NSDictionary *c = RCToastIconChoices()[indexPath.row - 1];
+            [self configureCell:cell withSymbol:c[@"symbol"] displayName:c[@"name"] detail:nil checked:[_currentIcon isEqualToString:c[@"symbol"]]];
+            return cell;
+        }
+        NSString *sym = RCToastIconCatalog()[indexPath.row];
+        [self configureCell:cell withSymbol:sym displayName:sym detail:nil checked:[_currentIcon isEqualToString:sym]];
+        return cell;
+    }
+    if (indexPath.section == 0) {
+        if (indexPath.row == 0) {
+            [self configureCell:cell withSymbol:@"" displayName:nil detail:nil checked:(_currentIcon.length == 0)];
+            return cell;
+        }
+        NSDictionary *c = RCToastIconChoices()[indexPath.row - 1];
+        [self configureCell:cell withSymbol:c[@"symbol"] displayName:c[@"name"] detail:nil checked:[_currentIcon isEqualToString:c[@"symbol"]]];
+        return cell;
+    }
+    NSString *sym = RCToastIconCatalog()[indexPath.row];
+    [self configureCell:cell withSymbol:sym displayName:sym detail:nil checked:[_currentIcon isEqualToString:sym]];
+    return cell;
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    NSString *picked = nil;
+    if ([self isSearching]) {
+        if (indexPath.row == 0) picked = _searchText;
+        else picked = _filtered[indexPath.row - 1];
+    } else if ([self hasCustomRow]) {
+        if (indexPath.section == 0) picked = _currentIcon;
+        else if (indexPath.section == 1) {
+            if (indexPath.row == 0) picked = @"";
+            else picked = RCToastIconChoices()[indexPath.row - 1][@"symbol"];
+        } else picked = RCToastIconCatalog()[indexPath.row];
+    } else {
+        if (indexPath.section == 0) {
+            if (indexPath.row == 0) picked = @"";
+            else picked = RCToastIconChoices()[indexPath.row - 1][@"symbol"];
+        } else picked = RCToastIconCatalog()[indexPath.row];
+    }
+    if (!picked) return;
+    _currentIcon = [picked copy];
+    if (self.onPick) self.onPick(picked);
+    [self.navigationController popViewControllerAnimated:YES];
+}
+
+@end
+
 // The one toast editor: grouped sections, plain words, live preview.
 // New toasts and edits share it, so they never diverge.
 @interface RCToastEditorViewController : UITableViewController <UITextFieldDelegate>
@@ -206,14 +484,18 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
     UITextField *_titleField;
     UITextField *_messageField;
     UITableViewCell *_previewCell;
+    UIView *_previewPill;
+    UIVisualEffectView *_previewBlur;
     UIImageView *_previewIconView;
     UILabel *_previewTitleLabel;
     UILabel *_previewMessageLabel;
+    NSLayoutConstraint *_previewPillWidth;
+    NSLayoutConstraint *_previewPillHeight;
+    NSLayoutConstraint *_previewTitleTop;
+    NSLayoutConstraint *_previewTitleCenterY;
     UITableViewCell *_titleCell;
     UITableViewCell *_messageCell;
     NSString *_selectedIcon;
-    NSString *_customIcon;
-    BOOL _usingCustomIcon;
     UIBarButtonItem *_saveButton;
 }
 
@@ -223,19 +505,7 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
         _isNew = isNew;
         _initialTitle = [title copy] ?: @"";
         _initialMessage = [message copy] ?: @"";
-        NSString *iconStr = [icon copy] ?: @"";
-        BOOL matchesPreset = NO;
-        for (NSDictionary *choice in RCToastIconChoices()) {
-            if ([choice[@"symbol"] isEqualToString:iconStr]) { matchesPreset = YES; break; }
-        }
-        if (iconStr.length > 0 && !matchesPreset) {
-            _customIcon = iconStr;
-            _usingCustomIcon = YES;
-            _selectedIcon = @"";
-        } else {
-            _selectedIcon = iconStr;
-            _usingCustomIcon = NO;
-        }
+        _selectedIcon = [icon copy] ?: @"";
     }
     return self;
 }
@@ -318,47 +588,152 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
 - (void)buildPreviewCell {
     _previewCell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
     _previewCell.selectionStyle = UITableViewCellSelectionStyleNone;
+    _previewCell.userInteractionEnabled = NO;
+    _previewCell.backgroundColor = [UIColor clearColor];
+    _previewCell.contentView.backgroundColor = [UIColor clearColor];
+    _previewCell.backgroundView = nil;
+
+    _previewPill = [[UIView alloc] init];
+    _previewPill.translatesAutoresizingMaskIntoConstraints = NO;
+    _previewPill.backgroundColor = [UIColor clearColor];
+    _previewPill.userInteractionEnabled = NO;
+    _previewPill.layer.shadowColor = [UIColor blackColor].CGColor;
+    _previewPill.layer.shadowOpacity = 0.15;
+    _previewPill.layer.shadowRadius = 8;
+    _previewPill.layer.shadowOffset = CGSizeMake(0, 2);
+    [_previewCell.contentView addSubview:_previewPill];
+
+    _previewBlur = [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterialDark]];
+    _previewBlur.translatesAutoresizingMaskIntoConstraints = NO;
+    _previewBlur.layer.masksToBounds = YES;
+    _previewBlur.userInteractionEnabled = NO;
+    [_previewPill addSubview:_previewBlur];
+
     _previewIconView = [[UIImageView alloc] init];
     _previewIconView.contentMode = UIViewContentModeScaleAspectFit;
     _previewIconView.translatesAutoresizingMaskIntoConstraints = NO;
-    [_previewIconView.widthAnchor constraintEqualToConstant:30].active = YES;
-    [_previewIconView.heightAnchor constraintEqualToConstant:30].active = YES;
+    _previewIconView.userInteractionEnabled = NO;
+    [_previewPill addSubview:_previewIconView];
+
+    // Same sizes as the on-device toast: 13pt Medium title, 12pt Regular message.
     _previewTitleLabel = [[UILabel alloc] init];
-    _previewTitleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
-    _previewTitleLabel.numberOfLines = 0;
+    _previewTitleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+    _previewTitleLabel.textAlignment = NSTextAlignmentCenter;
+    _previewTitleLabel.numberOfLines = 1;
+    _previewTitleLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+    _previewTitleLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    _previewTitleLabel.userInteractionEnabled = NO;
+    [_previewPill addSubview:_previewTitleLabel];
+
     _previewMessageLabel = [[UILabel alloc] init];
-    _previewMessageLabel.font = [UIFont systemFontOfSize:14];
-    _previewMessageLabel.textColor = [UIColor secondaryLabelColor];
-    _previewMessageLabel.numberOfLines = 0;
-    UIStackView *textStack = [[UIStackView alloc] initWithArrangedSubviews:@[_previewTitleLabel, _previewMessageLabel]];
-    textStack.axis = UILayoutConstraintAxisVertical;
-    textStack.spacing = 2;
-    UIStackView *row = [[UIStackView alloc] initWithArrangedSubviews:@[_previewIconView, textStack]];
-    row.axis = UILayoutConstraintAxisHorizontal;
-    row.spacing = 12;
-    row.alignment = UIStackViewAlignmentCenter;
-    row.translatesAutoresizingMaskIntoConstraints = NO;
-    [_previewCell.contentView addSubview:row];
+    _previewMessageLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
+    _previewMessageLabel.textAlignment = NSTextAlignmentCenter;
+    _previewMessageLabel.numberOfLines = 1;
+    _previewMessageLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+    _previewMessageLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    _previewMessageLabel.userInteractionEnabled = NO;
+    [_previewPill addSubview:_previewMessageLabel];
+
+    _previewPillWidth = [_previewPill.widthAnchor constraintEqualToConstant:140];
+    _previewPillWidth.priority = 999;
+    _previewPillHeight = [_previewPill.heightAnchor constraintEqualToConstant:40];
+    _previewTitleTop = [_previewTitleLabel.topAnchor constraintEqualToAnchor:_previewPill.topAnchor constant:8];
+    _previewTitleCenterY = [_previewTitleLabel.centerYAnchor constraintEqualToAnchor:_previewPill.centerYAnchor];
     [NSLayoutConstraint activateConstraints:@[
-        [row.topAnchor constraintEqualToAnchor:_previewCell.contentView.topAnchor constant:12],
-        [row.bottomAnchor constraintEqualToAnchor:_previewCell.contentView.bottomAnchor constant:-12],
-        [row.leadingAnchor constraintEqualToAnchor:_previewCell.contentView.leadingAnchor constant:20],
-        [row.trailingAnchor constraintEqualToAnchor:_previewCell.contentView.trailingAnchor constant:-20],
+        [_previewPill.topAnchor constraintEqualToAnchor:_previewCell.contentView.topAnchor constant:12],
+        [_previewPill.bottomAnchor constraintEqualToAnchor:_previewCell.contentView.bottomAnchor constant:-12],
+        [_previewPill.centerXAnchor constraintEqualToAnchor:_previewCell.contentView.centerXAnchor],
+        _previewPillWidth, _previewPillHeight,
+        [_previewBlur.leadingAnchor constraintEqualToAnchor:_previewPill.leadingAnchor],
+        [_previewBlur.trailingAnchor constraintEqualToAnchor:_previewPill.trailingAnchor],
+        [_previewBlur.topAnchor constraintEqualToAnchor:_previewPill.topAnchor],
+        [_previewBlur.bottomAnchor constraintEqualToAnchor:_previewPill.bottomAnchor],
+        [_previewIconView.leadingAnchor constraintEqualToAnchor:_previewPill.leadingAnchor constant:16],
+        [_previewIconView.centerYAnchor constraintEqualToAnchor:_previewPill.centerYAnchor],
+        [_previewIconView.widthAnchor constraintEqualToConstant:20],
+        [_previewIconView.heightAnchor constraintEqualToConstant:20],
+        [_previewTitleLabel.leadingAnchor constraintEqualToAnchor:_previewPill.leadingAnchor],
+        [_previewTitleLabel.trailingAnchor constraintEqualToAnchor:_previewPill.trailingAnchor],
+        [_previewTitleLabel.heightAnchor constraintEqualToConstant:18],
+        [_previewMessageLabel.leadingAnchor constraintEqualToAnchor:_previewPill.leadingAnchor],
+        [_previewMessageLabel.trailingAnchor constraintEqualToAnchor:_previewPill.trailingAnchor],
+        [_previewMessageLabel.topAnchor constraintEqualToAnchor:_previewPill.topAnchor constant:26],
+        [_previewMessageLabel.heightAnchor constraintEqualToConstant:16],
     ]];
+    // Keep the pill inside the row when the text is long.
+    NSLayoutConstraint *maxW = [_previewPill.widthAnchor constraintLessThanOrEqualToAnchor:_previewCell.contentView.widthAnchor constant:-16];
+    maxW.priority = UILayoutPriorityRequired;
+    maxW.active = YES;
 }
 
 - (void)refreshToastPreview {
     NSString *t = _titleField.text ?: @"";
     NSString *m = _messageField.text ?: @"";
-    _previewTitleLabel.text = t.length > 0 ? t : @"Title";
-    _previewTitleLabel.textColor = t.length > 0 ? [UIColor labelColor] : [UIColor tertiaryLabelColor];
-    _previewMessageLabel.hidden = (m.length == 0);
+    NSString *symbol = _selectedIcon ?: @"";
+
+    UIFont *titleFont = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+    UIFont *subFont = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
+
+    BOOL dark = YES;
+    if (self.traitCollection.userInterfaceStyle == UIUserInterfaceStyleLight) dark = NO;
+    UIColor *titleColor = dark ? [UIColor whiteColor] : [UIColor colorWithWhite:0.0 alpha:0.8];
+    UIColor *subColor = dark ? [UIColor colorWithWhite:1.0 alpha:0.6] : [UIColor colorWithWhite:0.0 alpha:0.48];
+    UIColor *iconColor = dark ? [UIColor whiteColor] : [UIColor colorWithWhite:0.0 alpha:0.7];
+    UIBlurEffectStyle style = dark ? UIBlurEffectStyleSystemMaterialDark : UIBlurEffectStyleSystemMaterialLight;
+    _previewBlur.effect = [UIBlurEffect effectWithStyle:style];
+
+    BOOL hasIcon = NO;
+    UIImage *img = nil;
+    if (symbol.length > 0 && ![symbol isEqualToString:@"none"]) {
+        if ([UIImage systemImageNamed:symbol]) {
+            hasIcon = YES;
+            img = RCToastIconImage(symbol);
+        }
+    }
+
+    BOOL hasSubtitle = (m.length > 0);
+    CGFloat pillHeight = hasSubtitle ? 50.0 : 40.0;
+
+    CGFloat maxTextWidth = 0;
+    NSString *titleForMeasure = t.length > 0 ? t : @"Title";
+    maxTextWidth = [titleForMeasure sizeWithAttributes:@{ NSFontAttributeName: titleFont }].width;
+    if (hasSubtitle) {
+        CGFloat w = [m sizeWithAttributes:@{ NSFontAttributeName: subFont }].width;
+        if (w > maxTextWidth) maxTextWidth = w;
+    }
+    CGFloat leftMargin = 16.0 + (hasIcon ? 20.0 + 10.0 : 0.0);
+    CGFloat pillWidth = maxTextWidth + 2 * leftMargin;
+    CGFloat screenW = [UIScreen mainScreen].bounds.size.width;
+    if (screenW > 0) pillWidth = MAX(140.0, MIN(pillWidth, screenW - 32.0));
+    else pillWidth = MAX(140.0, pillWidth);
+    _previewPillWidth.constant = pillWidth;
+    _previewPillHeight.constant = pillHeight;
+    _previewBlur.layer.cornerRadius = MIN(pillHeight, 50.0) / 2.0;
+
+    _previewTitleLabel.font = titleFont;
+    _previewMessageLabel.font = subFont;
+    _previewTitleLabel.text = titleForMeasure;
+    _previewTitleLabel.textColor = t.length > 0 ? titleColor : [UIColor tertiaryLabelColor];
     _previewMessageLabel.text = m;
-    NSString *symbol = _usingCustomIcon ? _customIcon : _selectedIcon;
-    UIImage *img = symbol.length > 0 ? [UIImage systemImageNamed:symbol] : nil;
-    _previewIconView.hidden = (img == nil);
+    _previewMessageLabel.textColor = subColor;
+    _previewMessageLabel.hidden = !hasSubtitle;
+    _previewTitleTop.active = hasSubtitle;
+    _previewTitleCenterY.active = !hasSubtitle;
+
+    _previewIconView.hidden = !hasIcon;
     _previewIconView.image = img;
+    _previewIconView.tintColor = iconColor;
+
     _saveButton.enabled = (t.length > 0);
+}
+
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+    [super traitCollectionDidChange:previousTraitCollection];
+    if (@available(iOS 13.0, *)) {
+        if ([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection]) {
+            [self refreshToastPreview];
+        }
+    }
 }
 
 - (void)toastFieldChanged:(UITextField *)field {
@@ -382,9 +757,24 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
     NSString *title = _titleField.text ?: @"";
     if (title.length == 0) return;
     NSString *message = _messageField.text ?: @"";
-    NSString *icon = _usingCustomIcon ? _customIcon : _selectedIcon;
+    NSString *icon = _selectedIcon ?: @"";
     if (self.onSave) self.onSave(title, message, icon);
     [self.navigationController popViewControllerAnimated:YES];
+}
+
+- (void)openIconPicker {
+    [_titleField resignFirstResponder];
+    [_messageField resignFirstResponder];
+    RCToastIconBrowserViewController *browser = [[RCToastIconBrowserViewController alloc] initWithCurrentIcon:_selectedIcon];
+    __weak typeof(self) weakSelf = self;
+    browser.onPick = ^(NSString *picked) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        strongSelf->_selectedIcon = picked ?: @"";
+        [strongSelf.tableView reloadRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:0 inSection:2]] withRowAnimation:UITableViewRowAnimationNone];
+        [strongSelf refreshToastPreview];
+    };
+    [self.navigationController pushViewController:browser animated:YES];
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
@@ -394,7 +784,7 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if (section == 0) return 1;
     if (section == 1) return 2;
-    return 1 + RCToastIconChoices().count + (_customIcon ? 1 : 0);
+    return 1;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
@@ -412,52 +802,26 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     if (indexPath.section == 0) return _previewCell;
     if (indexPath.section == 1) return indexPath.row == 0 ? _titleCell : _messageCell;
-    if (indexPath.row == 0) {
-        UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"RCToastIconCell"];
-        if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"RCToastIconCell"];
-        cell.textLabel.text = @"None";
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"RCToastIconPickerCell"];
+    if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"RCToastIconPickerCell"];
+    cell.textLabel.text = @"Icon";
+    cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    if (_selectedIcon.length == 0) {
+        cell.detailTextLabel.text = @"None";
         cell.imageView.image = nil;
-        cell.accessoryType = (!_usingCustomIcon && _selectedIcon.length == 0) ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
-        return cell;
+    } else {
+        cell.detailTextLabel.text = RCToastIconNameForString(_selectedIcon);
+        UIImage *img = RCToastIconImage(_selectedIcon);
+        cell.imageView.image = img ?: [UIImage systemImageNamed:@"questionmark.circle"];
+        cell.imageView.tintColor = img ? [UIColor secondaryLabelColor] : [UIColor tertiaryLabelColor];
     }
-    NSInteger row = indexPath.row;
-    if (_customIcon) {
-        if (row == 1) {
-            UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"RCToastIconCell"];
-            if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"RCToastIconCell"];
-            cell.textLabel.text = @"Current icon";
-            cell.imageView.image = [UIImage systemImageNamed:_customIcon];
-            cell.imageView.tintColor = [UIColor secondaryLabelColor];
-            cell.accessoryType = _usingCustomIcon ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
-            return cell;
-        }
-        row -= 1;
-    }
-    NSDictionary *choice = RCToastIconChoices()[row - 1];
-    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"RCToastIconCell"];
-    if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"RCToastIconCell"];
-    cell.textLabel.text = choice[@"name"];
-    cell.imageView.image = [UIImage systemImageNamed:choice[@"symbol"]];
-    cell.imageView.tintColor = [UIColor secondaryLabelColor];
-    cell.accessoryType = (!_usingCustomIcon && [_selectedIcon isEqualToString:choice[@"symbol"]]) ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
     return cell;
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     if (indexPath.section != 2) return;
-    if (indexPath.row == 0) {
-        _usingCustomIcon = NO;
-        _selectedIcon = @"";
-    } else if (_customIcon && indexPath.row == 1) {
-        _usingCustomIcon = YES;
-    } else {
-        NSInteger row = _customIcon ? indexPath.row - 1 : indexPath.row;
-        _usingCustomIcon = NO;
-        _selectedIcon = RCToastIconChoices()[row - 1][@"symbol"];
-    }
-    [tableView reloadSections:[NSIndexSet indexSetWithIndex:2] withRowAnimation:UITableViewRowAnimationNone];
-    [self refreshToastPreview];
+    [self openIconPicker];
 }
 
 @end
