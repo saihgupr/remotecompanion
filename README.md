@@ -3,12 +3,14 @@
 RemoteCompanion provides fast, scriptable system control for modern rootless jailbreaks. It lets you bind physical gestures and hardware buttons, or send commands remotely from your computer, to trigger system actions, control media playback, and run custom scripts.
 
 > [!IMPORTANT]
-> **What’s New in v4.0**
-> - **Button Timing Engine & Settings**: Fine-grained configuration for Power Clicks, Home Clicks, Volume Sequences, and Holds. Instant native button responsiveness without lag.
-> - **Sound & Haptics Category**: Direct controls for Silent Mode, Ringer Volume (0-100%), Haptics modes (always/silent-only/ring-only/never), unified Noise Control (ANC), and custom relative volume adjustments (`volume up N` / `volume down N`) reporting the updated volume percentage.
-> - **New UI Experience**: Brand new New Trigger screen, collapsible category navigation bars, AirPlay/Bluetooth picker modals, and configurable action banners.
-> - **iOS 17 Compatibility**: Complete support for iOS 17 button hooks, Camera actions, App Switcher, Siri, and Ringer Switch.
-> - **Expanded Automation**: 13 new If Conditions (Auto-Lock, Haptics, vibration modes) and Auto-Lock system controls.
+> **What’s New in v4.1**
+> - **Web UI Access Control**: Settings → General → Access limits where the Web UI can be reached from — Any Network (default), Trusted Networks, or This iPhone Only. Covers `/api/*` too (`rc webui access any|networks|local`, `rc webui wifi`).
+> - **New Triggers**: CarPlay Connected/Disconnected, Ping iPhone (tap/hold from Apple Watch), Home Button (Hold) and Home + Power, plus a per-trigger Keep Default Action option so actions run alongside stock behavior.
+> - **Retrigger Control**: "When Triggered Again" option (Run Alongside / Restart / Ignore) plus a Stop Trigger action to cancel another trigger's running sequence.
+> - **Focus & Button Control**: Set Focus action + Focus condition, Accessibility Shortcut action, and a Button Triggers action to pause hardware buttons (15 min / 1 hour / until resumed).
+> - **NFC Improvements**: Opt-in Experimental NFC mode (Apple Pay keeps working), NFC Scanner action, and Apple Pay/Wallet coexist with tag scanning.
+> - **Shortcuts Without SpringCuts**: Shortcuts run in the background with no extra install required, with an optional Run Silently mode.
+> - **On-Device Test Kit**: Settings → Diagnostics → Test Kit self-tests conditions, toggles, gestures, and buttons with a shareable report.
 
 <p align="center">
   <a href="https://saihgupr.github.io/remotecompanion/">Official Website</a> •
@@ -149,6 +151,12 @@ Access the desktop-class automation hub at `http://[DEVICE_IP]:8080` from any co
 - `rc ldrestart` - Soft-reboot the device.
 - `rc userspace-reboot` - Restart userspace.
 - `rc webui [on|off|status]` - Enable, disable, or check the status of the Web UI server.
+- `rc webui access [any|networks|local]` - Limit where the Web UI can be reached from (default `any`).
+- `rc webui wifi` - Show the current Wi-Fi network name (used for Trusted Networks access).
+- `rc focus [on|toggle] <name>` / `rc focus off` / `rc focus status` - Set or query a Focus mode.
+- `rc stop trigger <key>` - Cancel another trigger's running sequence.
+- `rc button triggers pause [minutes]` / `rc button triggers resume` - Temporarily return buttons and gestures to stock behavior.
+- `rc nfc scanner [pause|resume|toggle]` - Pause or resume NFC tag scanning.
 
 <details>
 <summary><b>Hardware Triggers Reference (Tweak App)</b></summary>
@@ -158,7 +166,9 @@ Configure these in the `RemoteCompanion` app for custom action sequences. Tip: *
 - **Hardware Buttons**:
   - **Power**: Double-tap, Long-press, **Triple/Quadruple click**, or **Power + Volume Up/Down** combos.
   - **Volume**: Long hold Up/Down (0.3s), **Volume Up + Down** combo, or sequential **Volume Up then Down** / **Volume Down then Up** one-handed pocket gestures.
-  - **Home**: Double-tap (Touch ID), Double, Triple, or Quadruple click.
+  - **Home**: Double-tap (Touch ID), Double, Triple, or Quadruple click, **Hold**, or **Home + Power** combo.
+  - **CarPlay**: Connected / Disconnected triggers.
+  - **Apple Watch**: Ping iPhone (tap or hold Ping on a paired Watch).
 - **Touch ID Sensor**: **Single Tap** and **Hold (Rest Finger)** triggers.
 - **NFC Triggers**: Scan physical NFC tags to run actions on screen wake (Optional toggle in Settings).
 - **Ringer Switch**: Mute, Unmute, or Toggle triggers.
