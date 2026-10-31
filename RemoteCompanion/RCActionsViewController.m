@@ -65,6 +65,64 @@ static void rc_parse_km_cmd(NSString *cmd, NSString **outMacro, NSString **outPa
     if (outParam) *outParam = param ?: @"";
 }
 
+// Plain-word icon choices for toasts. Symbols stay internal so the
+// editor never shows raw symbol strings.
+static NSArray<NSDictionary *> *RCToastIconChoices(void) {
+    return @[
+        @{ @"name": @"Info", @"symbol": @"info.circle" },
+        @{ @"name": @"Done", @"symbol": @"checkmark.circle.fill" },
+        @{ @"name": @"Warning", @"symbol": @"exclamationmark.triangle.fill" },
+        @{ @"name": @"Bell", @"symbol": @"bell.fill" },
+        @{ @"name": @"Star", @"symbol": @"star.fill" },
+        @{ @"name": @"Heart", @"symbol": @"heart.fill" },
+        @{ @"name": @"Music", @"symbol": @"music.note" }
+    ];
+}
+
+// Splits `toast "title" ["subtitle"] ["icon"]` into its parts.
+static void rc_parse_toast_cmd(NSString *cmd, NSString **outTitle, NSString **outSubtitle, NSString **outIcon) {
+    NSString *argsStr = @"";
+    if ([cmd hasPrefix:@"toast "] && cmd.length > 6) {
+        argsStr = [[cmd substringFromIndex:6] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    }
+    NSMutableArray *args = [NSMutableArray array];
+    NSScanner *scanner = [NSScanner scannerWithString:argsStr];
+    [scanner setCharactersToBeSkipped:nil];
+    while (![scanner isAtEnd]) {
+        [scanner scanCharactersFromSet:[NSCharacterSet whitespaceCharacterSet] intoString:NULL];
+        if ([scanner isAtEnd]) break;
+        NSString *arg = nil;
+        if ([scanner scanString:@"\"" intoString:NULL]) {
+            [scanner scanUpToString:@"\"" intoString:&arg];
+            [scanner scanString:@"\"" intoString:NULL];
+            if (!arg) arg = @"";
+        } else {
+            [scanner scanUpToCharactersFromSet:[NSCharacterSet whitespaceCharacterSet] intoString:&arg];
+        }
+        if (arg) {
+            arg = [arg stringByReplacingOccurrencesOfString:@"\\\"" withString:@"\""];
+            [args addObject:arg];
+        }
+    }
+    if (outTitle) *outTitle = args.count > 0 ? args[0] : @"";
+    if (outSubtitle) *outSubtitle = args.count > 1 ? args[1] : @"";
+    if (outIcon) *outIcon = args.count > 2 ? args[2] : @"";
+}
+
+// Builds `toast "title" ["subtitle"] ["icon"]` with the same quoting as before.
+static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSString *icon) {
+    NSString *escTitle = [(title ?: @"") stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
+    NSString *escSub = [(subtitle ?: @"") stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
+    NSString *escIcon = [(icon ?: @"") stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
+    if (escIcon.length > 0) {
+        return [NSString stringWithFormat:@"toast \"%@\" \"%@\" \"%@\"", escTitle, escSub ?: @"", escIcon];
+    } else if (escSub.length > 0) {
+        return [NSString stringWithFormat:@"toast \"%@\" \"%@\"", escTitle, escSub];
+    } else {
+        return [NSString stringWithFormat:@"toast \"%@\"", escTitle];
+    }
+}
+
 
 @interface UIImage (Private)
 + (UIImage *)_applicationIconImageForBundleIdentifier:(NSString *)bundleIdentifier format:(int)format scale:(CGFloat)scale;
@@ -125,6 +183,283 @@ static void rc_parse_km_cmd(NSString *cmd, NSString **outMacro, NSString **outPa
 @property (nonatomic, strong) NSString *triggerKey;
 @property (nonatomic, strong) NSMutableArray *actions;
 @property (nonatomic, strong) UIBarButtonItem *moreButton;
+// The one toast editor. New toasts and edits both come through here,
+// so they always look and save the same way.
+- (void)pushToastEditorWithTitle:(NSString *)title
+                        message:(NSString *)message
+                           icon:(NSString *)icon
+                          isNew:(BOOL)isNew
+                         onSave:(void (^)(NSString *cmd))onSave;
+@end
+
+// The one toast editor: grouped sections, plain words, live preview.
+// New toasts and edits share it, so they never diverge.
+@interface RCToastEditorViewController : UITableViewController <UITextFieldDelegate>
+- (instancetype)initWithToastTitle:(NSString *)title message:(NSString *)message icon:(NSString *)icon isNew:(BOOL)isNew;
+@property (nonatomic, copy) void (^onSave)(NSString *title, NSString *message, NSString *icon);
+@end
+
+@implementation RCToastEditorViewController {
+    BOOL _isNew;
+    NSString *_initialTitle;
+    NSString *_initialMessage;
+    UITextField *_titleField;
+    UITextField *_messageField;
+    UITableViewCell *_previewCell;
+    UIImageView *_previewIconView;
+    UILabel *_previewTitleLabel;
+    UILabel *_previewMessageLabel;
+    UITableViewCell *_titleCell;
+    UITableViewCell *_messageCell;
+    NSString *_selectedIcon;
+    NSString *_customIcon;
+    BOOL _usingCustomIcon;
+    UIBarButtonItem *_saveButton;
+}
+
+- (instancetype)initWithToastTitle:(NSString *)title message:(NSString *)message icon:(NSString *)icon isNew:(BOOL)isNew {
+    self = [super initWithStyle:UITableViewStyleInsetGrouped];
+    if (self) {
+        _isNew = isNew;
+        _initialTitle = [title copy] ?: @"";
+        _initialMessage = [message copy] ?: @"";
+        NSString *iconStr = [icon copy] ?: @"";
+        BOOL matchesPreset = NO;
+        for (NSDictionary *choice in RCToastIconChoices()) {
+            if ([choice[@"symbol"] isEqualToString:iconStr]) { matchesPreset = YES; break; }
+        }
+        if (iconStr.length > 0 && !matchesPreset) {
+            _customIcon = iconStr;
+            _usingCustomIcon = YES;
+            _selectedIcon = @"";
+        } else {
+            _selectedIcon = iconStr;
+            _usingCustomIcon = NO;
+        }
+    }
+    return self;
+}
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = _isNew ? @"New Toast" : @"Edit Toast";
+
+    self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc]
+        initWithBarButtonSystemItem:UIBarButtonSystemItemCancel
+        target:self
+        action:@selector(cancelToast)];
+    _saveButton = [[UIBarButtonItem alloc] initWithTitle:(_isNew ? @"Add" : @"Save")
+                                                   style:UIBarButtonItemStyleDone
+                                                  target:self
+                                                  action:@selector(saveToast)];
+    self.navigationItem.rightBarButtonItem = _saveButton;
+
+    self.tableView.rowHeight = UITableViewAutomaticDimension;
+    self.tableView.estimatedRowHeight = 56;
+
+    _titleCell = nil; _messageCell = nil;
+    UITextField *titleField = nil, *messageField = nil;
+    _titleCell = [self toastFieldCellWithLabel:@"Title"
+                                  placeholder:@"Required"
+                                         text:_initialTitle
+                                  returnKey:UIReturnKeyNext
+                                     fieldOut:&titleField];
+    _titleField = titleField;
+    _messageCell = [self toastFieldCellWithLabel:@"Message"
+                                    placeholder:@"Optional"
+                                           text:_initialMessage
+                                    returnKey:UIReturnKeyDone
+                                       fieldOut:&messageField];
+    _messageField = messageField;
+    [self buildPreviewCell];
+    [self refreshToastPreview];
+}
+
+- (void)viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated];
+    if (_isNew) [_titleField becomeFirstResponder];
+}
+
+- (UITableViewCell *)toastFieldCellWithLabel:(NSString *)labelText
+                                 placeholder:(NSString *)placeholder
+                                        text:(NSString *)text
+                                   returnKey:(UIReturnKeyType)ret
+                                    fieldOut:(UITextField **)out {
+    UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
+    cell.selectionStyle = UITableViewCellSelectionStyleNone;
+    UILabel *label = [[UILabel alloc] init];
+    label.text = labelText;
+    label.font = [UIFont systemFontOfSize:17];
+    label.translatesAutoresizingMaskIntoConstraints = NO;
+    [cell.contentView addSubview:label];
+    UITextField *field = [[UITextField alloc] init];
+    field.text = text;
+    field.placeholder = placeholder;
+    field.clearButtonMode = UITextFieldViewModeWhileEditing;
+    field.autocapitalizationType = UITextAutocapitalizationTypeSentences;
+    field.returnKeyType = ret;
+    field.delegate = self;
+    field.translatesAutoresizingMaskIntoConstraints = NO;
+    [field addTarget:self action:@selector(toastFieldChanged:) forControlEvents:UIControlEventEditingChanged];
+    [cell.contentView addSubview:field];
+    [NSLayoutConstraint activateConstraints:@[
+        [label.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:20],
+        [label.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
+        [label.widthAnchor constraintEqualToConstant:78],
+        [field.leadingAnchor constraintEqualToAnchor:label.trailingAnchor constant:8],
+        [field.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-20],
+        [field.topAnchor constraintEqualToAnchor:cell.contentView.topAnchor constant:11],
+        [field.bottomAnchor constraintEqualToAnchor:cell.contentView.bottomAnchor constant:-11],
+    ]];
+    if (out) *out = field;
+    return cell;
+}
+
+- (void)buildPreviewCell {
+    _previewCell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
+    _previewCell.selectionStyle = UITableViewCellSelectionStyleNone;
+    _previewIconView = [[UIImageView alloc] init];
+    _previewIconView.contentMode = UIViewContentModeScaleAspectFit;
+    _previewIconView.translatesAutoresizingMaskIntoConstraints = NO;
+    [_previewIconView.widthAnchor constraintEqualToConstant:30].active = YES;
+    [_previewIconView.heightAnchor constraintEqualToConstant:30].active = YES;
+    _previewTitleLabel = [[UILabel alloc] init];
+    _previewTitleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
+    _previewTitleLabel.numberOfLines = 0;
+    _previewMessageLabel = [[UILabel alloc] init];
+    _previewMessageLabel.font = [UIFont systemFontOfSize:14];
+    _previewMessageLabel.textColor = [UIColor secondaryLabelColor];
+    _previewMessageLabel.numberOfLines = 0;
+    UIStackView *textStack = [[UIStackView alloc] initWithArrangedSubviews:@[_previewTitleLabel, _previewMessageLabel]];
+    textStack.axis = UILayoutConstraintAxisVertical;
+    textStack.spacing = 2;
+    UIStackView *row = [[UIStackView alloc] initWithArrangedSubviews:@[_previewIconView, textStack]];
+    row.axis = UILayoutConstraintAxisHorizontal;
+    row.spacing = 12;
+    row.alignment = UIStackViewAlignmentCenter;
+    row.translatesAutoresizingMaskIntoConstraints = NO;
+    [_previewCell.contentView addSubview:row];
+    [NSLayoutConstraint activateConstraints:@[
+        [row.topAnchor constraintEqualToAnchor:_previewCell.contentView.topAnchor constant:12],
+        [row.bottomAnchor constraintEqualToAnchor:_previewCell.contentView.bottomAnchor constant:-12],
+        [row.leadingAnchor constraintEqualToAnchor:_previewCell.contentView.leadingAnchor constant:20],
+        [row.trailingAnchor constraintEqualToAnchor:_previewCell.contentView.trailingAnchor constant:-20],
+    ]];
+}
+
+- (void)refreshToastPreview {
+    NSString *t = _titleField.text ?: @"";
+    NSString *m = _messageField.text ?: @"";
+    _previewTitleLabel.text = t.length > 0 ? t : @"Title";
+    _previewTitleLabel.textColor = t.length > 0 ? [UIColor labelColor] : [UIColor tertiaryLabelColor];
+    _previewMessageLabel.hidden = (m.length == 0);
+    _previewMessageLabel.text = m;
+    NSString *symbol = _usingCustomIcon ? _customIcon : _selectedIcon;
+    UIImage *img = symbol.length > 0 ? [UIImage systemImageNamed:symbol] : nil;
+    _previewIconView.hidden = (img == nil);
+    _previewIconView.image = img;
+    _saveButton.enabled = (t.length > 0);
+}
+
+- (void)toastFieldChanged:(UITextField *)field {
+    [self refreshToastPreview];
+}
+
+- (BOOL)textFieldShouldReturn:(UITextField *)textField {
+    if (textField == _titleField) {
+        [_messageField becomeFirstResponder];
+    } else {
+        [textField resignFirstResponder];
+    }
+    return YES;
+}
+
+- (void)cancelToast {
+    [self.navigationController popViewControllerAnimated:YES];
+}
+
+- (void)saveToast {
+    NSString *title = _titleField.text ?: @"";
+    if (title.length == 0) return;
+    NSString *message = _messageField.text ?: @"";
+    NSString *icon = _usingCustomIcon ? _customIcon : _selectedIcon;
+    if (self.onSave) self.onSave(title, message, icon);
+    [self.navigationController popViewControllerAnimated:YES];
+}
+
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
+    return 3;
+}
+
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    if (section == 0) return 1;
+    if (section == 1) return 2;
+    return 1 + RCToastIconChoices().count + (_customIcon ? 1 : 0);
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+    if (section == 1) return @"Message";
+    if (section == 2) return @"Icon";
+    return nil;
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+    if (section == 1) return @"Shows as a popup on this device.";
+    if (section == 2) return @"Optional. Adds a small picture to the popup.";
+    return nil;
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (indexPath.section == 0) return _previewCell;
+    if (indexPath.section == 1) return indexPath.row == 0 ? _titleCell : _messageCell;
+    if (indexPath.row == 0) {
+        UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"RCToastIconCell"];
+        if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"RCToastIconCell"];
+        cell.textLabel.text = @"None";
+        cell.imageView.image = nil;
+        cell.accessoryType = (!_usingCustomIcon && _selectedIcon.length == 0) ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+        return cell;
+    }
+    NSInteger row = indexPath.row;
+    if (_customIcon) {
+        if (row == 1) {
+            UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"RCToastIconCell"];
+            if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"RCToastIconCell"];
+            cell.textLabel.text = @"Current icon";
+            cell.imageView.image = [UIImage systemImageNamed:_customIcon];
+            cell.imageView.tintColor = [UIColor secondaryLabelColor];
+            cell.accessoryType = _usingCustomIcon ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+            return cell;
+        }
+        row -= 1;
+    }
+    NSDictionary *choice = RCToastIconChoices()[row - 1];
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"RCToastIconCell"];
+    if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"RCToastIconCell"];
+    cell.textLabel.text = choice[@"name"];
+    cell.imageView.image = [UIImage systemImageNamed:choice[@"symbol"]];
+    cell.imageView.tintColor = [UIColor secondaryLabelColor];
+    cell.accessoryType = (!_usingCustomIcon && [_selectedIcon isEqualToString:choice[@"symbol"]]) ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+    return cell;
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    if (indexPath.section != 2) return;
+    if (indexPath.row == 0) {
+        _usingCustomIcon = NO;
+        _selectedIcon = @"";
+    } else if (_customIcon && indexPath.row == 1) {
+        _usingCustomIcon = YES;
+    } else {
+        NSInteger row = _customIcon ? indexPath.row - 1 : indexPath.row;
+        _usingCustomIcon = NO;
+        _selectedIcon = RCToastIconChoices()[row - 1][@"symbol"];
+    }
+    [tableView reloadSections:[NSIndexSet indexSetWithIndex:2] withRowAnimation:UITableViewRowAnimationNone];
+    [self refreshToastPreview];
+}
+
 @end
 
 @implementation RCActionsViewController
@@ -962,48 +1297,16 @@ static id g_actionClipboard = nil;
                 [self presentViewController:nav animated:YES completion:nil];
             });
         } else if ([action isEqualToString:@"__TOAST__"]) {
-            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Toast" 
-                message:@"Enter toast title, subtitle and SFSymbol name" 
-                preferredStyle:UIAlertControllerStyleAlert];
-                
-            [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-                textField.placeholder = @"Title (required)";
-            }];
-            [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-                textField.placeholder = @"Subtitle (optional)";
-            }];
-            [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-                textField.placeholder = @"SFSymbol name (optional, e.g. info.circle)";
-            }];
-            
-            [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-            [alert addAction:[UIAlertAction actionWithTitle:@"Add" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull alertAction) {
-                NSString *title = alert.textFields[0].text;
-                NSString *subtitle = alert.textFields[1].text;
-                NSString *icon = alert.textFields[2].text;
-                
-                if (title.length > 0) {
-                    NSString *escTitle = [title stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
-                    NSString *escSub = [subtitle stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
-                    NSString *escIcon = [icon stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
-                    
-                    NSString *cmd;
-                    if (escIcon.length > 0) {
-                        cmd = [NSString stringWithFormat:@"toast \"%@\" \"%@\" \"%@\"", escTitle, escSub ?: @"", escIcon];
-                    } else if (escSub.length > 0) {
-                        cmd = [NSString stringWithFormat:@"toast \"%@\" \"%@\"", escTitle, escSub];
-                    } else {
-                        cmd = [NSString stringWithFormat:@"toast \"%@\"", escTitle];
-                    }
-                    
-                    [self.actions addObject:cmd];
-                    [self saveActions];
-                    [self.tableView reloadData];
-                }
-            }]];
-            
+            // New toast: same editor as edits, pushed once the picker is gone
+            __weak typeof(self) weakSelf = self;
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                [self presentViewController:alert animated:YES completion:nil];
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                if (!strongSelf) return;
+                [strongSelf pushToastEditorWithTitle:@"" message:@"" icon:@"" isNew:YES onSave:^(NSString *cmd) {
+                    [strongSelf.actions addObject:cmd];
+                    [strongSelf saveActions];
+                    [strongSelf.tableView reloadData];
+                }];
             });
         } else {
             [self.actions addObject:action];
@@ -2384,78 +2687,17 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         [self promptEditLockToggleActionAtIndex:indexPath.row];
         return;
     } else if ([currentAction hasPrefix:@"toast "] || [currentAction isEqualToString:@"toast"]) {
-        // Edit Toast - same 3-field editor as creation (__TOAST__)
-        NSString *toastArgsStr = @"";
-        if ([currentAction hasPrefix:@"toast "] && currentAction.length > 6) {
-            toastArgsStr = [[currentAction substringFromIndex:6] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        }
-        NSMutableArray *toastArgs = [NSMutableArray array];
-        NSScanner *toastScanner = [NSScanner scannerWithString:toastArgsStr];
-        [toastScanner setCharactersToBeSkipped:nil];
-        while (![toastScanner isAtEnd]) {
-            [toastScanner scanCharactersFromSet:[NSCharacterSet whitespaceCharacterSet] intoString:NULL];
-            if ([toastScanner isAtEnd]) break;
-            NSString *arg = nil;
-            if ([toastScanner scanString:@"\"" intoString:NULL]) {
-                [toastScanner scanUpToString:@"\"" intoString:&arg];
-                [toastScanner scanString:@"\"" intoString:NULL];
-                if (!arg) arg = @"";
-            } else {
-                [toastScanner scanUpToCharactersFromSet:[NSCharacterSet whitespaceCharacterSet] intoString:&arg];
-            }
-            if (arg) {
-                arg = [arg stringByReplacingOccurrencesOfString:@"\\\"" withString:@"\""];
-                [toastArgs addObject:arg];
-            }
-        }
-        NSString *toastTitle = toastArgs.count > 0 ? toastArgs[0] : @"";
-        NSString *toastSub = toastArgs.count > 1 ? toastArgs[1] : @"";
-        NSString *toastIcon = toastArgs.count > 2 ? toastArgs[2] : @"";
-
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Toast"
-            message:@"Enter toast title, subtitle and SFSymbol name"
-            preferredStyle:UIAlertControllerStyleAlert];
-
-        [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-            textField.placeholder = @"Title (required)";
-            textField.text = toastTitle;
+        // Edit Toast: same editor as creation
+        NSString *toastTitle = nil, *toastSub = nil, *toastIcon = nil;
+        rc_parse_toast_cmd(currentAction, &toastTitle, &toastSub, &toastIcon);
+        __weak typeof(self) weakSelf = self;
+        [self pushToastEditorWithTitle:toastTitle message:toastSub icon:toastIcon isNew:NO onSave:^(NSString *cmd) {
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) return;
+            strongSelf.actions[indexPath.row] = cmd;
+            [strongSelf saveActions];
+            [strongSelf.tableView reloadData];
         }];
-        [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-            textField.placeholder = @"Subtitle (optional)";
-            textField.text = toastSub;
-        }];
-        [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-            textField.placeholder = @"SFSymbol name (optional, e.g. info.circle)";
-            textField.text = toastIcon;
-        }];
-
-        [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-        [alert addAction:[UIAlertAction actionWithTitle:@"Save" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
-            NSString *title = alert.textFields[0].text;
-            NSString *subtitle = alert.textFields[1].text;
-            NSString *icon = alert.textFields[2].text;
-
-            if (title.length > 0) {
-                NSString *escTitle = [title stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
-                NSString *escSub = [subtitle stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
-                NSString *escIcon = [icon stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
-
-                NSString *cmd;
-                if (escIcon.length > 0) {
-                    cmd = [NSString stringWithFormat:@"toast \"%@\" \"%@\" \"%@\"", escTitle, escSub ?: @"", escIcon];
-                } else if (escSub.length > 0) {
-                    cmd = [NSString stringWithFormat:@"toast \"%@\" \"%@\"", escTitle, escSub];
-                } else {
-                    cmd = [NSString stringWithFormat:@"toast \"%@\"", escTitle];
-                }
-
-                self.actions[indexPath.row] = cmd;
-                [self saveActions];
-                [self.tableView reloadData];
-            }
-        }]];
-
-        [self presentViewController:alert animated:YES completion:nil];
     } else {
         // Generic edit for other commands - show alert with current command
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Edit Action"
@@ -2480,6 +2722,23 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 
         [self presentViewController:alert animated:YES completion:nil];
     }
+}
+
+// The one toast editor. New toasts and edits both come through here,
+// so they always look and save the same way.
+- (void)pushToastEditorWithTitle:(NSString *)title
+                        message:(NSString *)message
+                           icon:(NSString *)icon
+                          isNew:(BOOL)isNew
+                         onSave:(void (^)(NSString *cmd))onSave {
+    RCToastEditorViewController *editor = [[RCToastEditorViewController alloc] initWithToastTitle:title
+                                                                                         message:message
+                                                                                            icon:icon
+                                                                                           isNew:isNew];
+    editor.onSave = ^(NSString *t, NSString *m, NSString *i) {
+        if (onSave) onSave(rc_build_toast_command(t, m, i));
+    };
+    [self.navigationController pushViewController:editor animated:YES];
 }
 
 - (void)promptEditUnlockActionAtIndex:(NSInteger)index {
