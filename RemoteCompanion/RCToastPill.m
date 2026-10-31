@@ -1,18 +1,30 @@
 #import "RCToastPill.h"
 
-// Shared pill metrics. These are the exact numbers the on-device toast has
-// always used (native iOS 15 ringer HUD look); the editor preview used to
-// keep its own copy, which is why the two could disagree.
+// Shared pill metrics. The two-line stack is defined once, top to bottom:
+// 8pt padding, 18pt title, 16pt message, 8pt padding. The double-line pill
+// height (50pt) and the message label's position both derive from these, so
+// the editor preview and the on-device toast match by construction: there is
+// no separate height number that can disagree with the label frames (a 40pt
+// bounds with fixed 26pt-top frames is what used to crush the message
+// against the pill's bottom edge in the preview while the fired 50pt toast
+// showed the full padding).
 static const CGFloat RCToastPillMinWidth = 140.0;
 static const CGFloat RCToastPillHeightSingle = 40.0;
-static const CGFloat RCToastPillHeightDouble = 50.0;
 static const CGFloat RCToastPillLeftPadding = 16.0;
 static const CGFloat RCToastPillIconSize = 20.0;
 static const CGFloat RCToastPillIconGap = 10.0;
 static const CGFloat RCToastPillTitleTop = 8.0;
 static const CGFloat RCToastPillTitleHeight = 18.0;
-static const CGFloat RCToastPillMessageTop = 26.0;
 static const CGFloat RCToastPillMessageHeight = 16.0;
+// The space below the message. One shared constant: it feeds both the height
+// math and the label layout, and it equals the top padding so the stack is
+// vertically symmetric.
+static const CGFloat RCToastPillBottomPadding = 8.0;
+
+static inline CGFloat RCToastPillDoubleHeight(void) {
+    return RCToastPillTitleTop + RCToastPillTitleHeight
+         + RCToastPillMessageHeight + RCToastPillBottomPadding;
+}
 
 @implementation RCToastPillView {
     UIVisualEffectView *_blurView;
@@ -79,7 +91,7 @@ static const CGFloat RCToastPillMessageHeight = 16.0;
     pillWidth = MAX(RCToastPillMinWidth, MIN(pillWidth, maxWidth));
 
     BOOL hasSubtitle = [self hasMessage:message];
-    CGFloat pillHeight = hasSubtitle ? RCToastPillHeightDouble : RCToastPillHeightSingle;
+    CGFloat pillHeight = hasSubtitle ? RCToastPillDoubleHeight() : RCToastPillHeightSingle;
     if (wrap && hasSubtitle) {
         CGRect needed = [message boundingRectWithSize:CGSizeMake(pillWidth - 2 * leftMargin, CGFLOAT_MAX)
                                               options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading
@@ -218,7 +230,7 @@ static const CGFloat RCToastPillMessageHeight = 16.0;
     if (w <= 0 || h <= 0) return;
 
     _blurView.frame = self.bounds;
-    _blurView.layer.cornerRadius = MIN(h, 50.0) / 2.0;
+    _blurView.layer.cornerRadius = MIN(h, RCToastPillDoubleHeight()) / 2.0;
 
     BOOL hasIcon = [[self class] hasIconForName:_pillIconName];
     if (hasIcon) {
@@ -229,6 +241,9 @@ static const CGFloat RCToastPillMessageHeight = 16.0;
     BOOL hasSubtitle = [[self class] hasMessage:_pillMessage];
     if (hasSubtitle) {
         _titleLabel.frame = CGRectMake(0, RCToastPillTitleTop, w, RCToastPillTitleHeight);
+        // The message is anchored to the pill bottom through the one shared
+        // padding constant, so the space below it is identical wherever the
+        // pill is drawn. At the design height (50pt) this is exactly y=26.
         if (_wrapsMessage) {
             CGFloat leftMargin = [[self class] leftMarginForIconName:_pillIconName];
             UIFont *subFont = [[self class] pillMessageFont];
@@ -237,9 +252,9 @@ static const CGFloat RCToastPillMessageHeight = 16.0;
                                                    attributes:@{ NSFontAttributeName: subFont }
                                                       context:nil];
             CGFloat subtitleHeight = MAX(RCToastPillMessageHeight, ceil(needed.size.height));
-            _subLabel.frame = CGRectMake(leftMargin, RCToastPillMessageTop, w - 2 * leftMargin, subtitleHeight);
+            _subLabel.frame = CGRectMake(leftMargin, h - RCToastPillBottomPadding - subtitleHeight, w - 2 * leftMargin, subtitleHeight);
         } else {
-            _subLabel.frame = CGRectMake(0, RCToastPillMessageTop, w, RCToastPillMessageHeight);
+            _subLabel.frame = CGRectMake(0, h - RCToastPillBottomPadding - RCToastPillMessageHeight, w, RCToastPillMessageHeight);
         }
     } else {
         _titleLabel.frame = CGRectMake(0, 0, w, h);

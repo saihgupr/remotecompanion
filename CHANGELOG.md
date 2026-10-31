@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file.
 - **Toast dialog simplified**: Web UI Toast editor now has labeled Title / Message (optional) / Icon (optional) fields, plain-word icon presets, and a slimmer live preview pill.
 
 ### Fixed
+- **Toast editor preview clipped message**: the live preview pill stayed at the stale single-line row height when a message was typed, squeezing the message's bottom padding unlike the fired toast. The preview row is now re-measured when the pill height changes (40pt / 50pt).
 - **Bottom swipe-up left/right zones mirrored in landscape**: `RC_ProgressAlongEdge` returned `y/L` for LandscapeLeft and `1-y/L` for LandscapeRight, which is backwards (west is device-bottom in LandscapeLeft, device-top in LandscapeRight). Swapped so left/center/right triggers fire on the correct side in both landscape orientations; also fixes the mirrored top status-bar hold zones which share the helper.
 - **Toast action editor reuse**: creating a Toast from the Web UI picker now opens the same title/message/icon dialog with live preview as editing (previously a single-field prompt that dropped subtitle/icon), and editing a Toast in the iOS action list now reopens the same 3-field editor used at creation instead of a generic single-field alert.
 

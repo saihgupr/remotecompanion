@@ -1268,6 +1268,30 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
             result = [NSString stringWithFormat:@"Flashlight %@%%", [cmd substringFromIndex:6]];
         } else if ([cmd hasPrefix:@"shortcut:"]) {
             result = [NSString stringWithFormat:@"Run %@", [RCConfigManager shortcutNameForAction:cmd silent:NULL input:NULL]];
+        } else if ([cmd hasPrefix:@"toast "] || [cmd isEqualToString:@"toast"]) {
+            NSString *argString = originalCmd.length > 5 ? [[originalCmd substringFromIndex:5] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] : @"";
+            NSString *firstArg = nil;
+            if ([argString hasPrefix:@"\""]) {
+                NSRange nextQuote = [argString rangeOfString:@"\"" options:0 range:NSMakeRange(1, argString.length - 1)];
+                if (nextQuote.location != NSNotFound) {
+                    firstArg = [argString substringWithRange:NSMakeRange(1, nextQuote.location - 1)];
+                } else {
+                    firstArg = [argString substringFromIndex:1];
+                }
+            } else {
+                NSRange firstSpace = [argString rangeOfString:@" "];
+                if (firstSpace.location != NSNotFound) {
+                    firstArg = [argString substringToIndex:firstSpace.location];
+                } else {
+                    firstArg = argString;
+                }
+            }
+            firstArg = [firstArg stringByReplacingOccurrencesOfString:@"\\\"" withString:@"\""];
+            if (firstArg.length > 0) {
+                result = [NSString stringWithFormat:@"Toast %@", firstArg];
+            } else {
+                result = @"Toast";
+            }
         } else if ([cmd hasPrefix:@"snapper "] || [cmd isEqualToString:@"snapper"]) {
             NSString *sub = [cmd hasPrefix:@"snapper "] ? [cmd substringFromIndex:8] : @"";
             if ([sub isEqualToString:@"freeze"]) result = @"Snapper: Freeze Screen";

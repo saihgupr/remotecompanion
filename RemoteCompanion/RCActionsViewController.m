@@ -625,12 +625,24 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
                                           iconName:symbol
                                       wrapsMessage:NO
                                           maxWidth:maxW];
+    // The pill's height drives the preview row's height (pill + 12pt top and
+    // bottom padding). The table caches row heights, so when the message
+    // appears or disappears (40pt <-> 50pt) the row must be re-measured or
+    // the pill is squeezed into the stale height and the message's bottom
+    // padding is clipped, unlike the fired toast. Width-only changes need
+    // no table work: the row height is unchanged.
+    BOOL previewHeightChanged = (_previewPillHeight.constant != pillSize.height);
     _previewPillWidth.constant = pillSize.width;
     _previewPillHeight.constant = pillSize.height;
 
     _previewPill.pillTitle = t;
     _previewPill.pillMessage = m;
     _previewPill.pillIconName = symbol;
+
+    if (previewHeightChanged && self.tableView.window) {
+        [self.tableView beginUpdates];
+        [self.tableView endUpdates];
+    }
 
     _saveButton.enabled = (t.length > 0);
 }
