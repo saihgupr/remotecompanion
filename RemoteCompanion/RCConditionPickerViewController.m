@@ -176,6 +176,7 @@ static NSArray<NSString *> *RCDayNames(void) { return @[@"Monday", @"Tuesday", @
         else if ([key isEqualToString:@"front_app"]) prompt = @"Choose App…";
         else if ([condition[@"input"] isEqualToString:@"text"]) prompt = @"Enter Name…";
         else if ([condition[@"input"] isEqualToString:@"threshold"]) prompt = @"Set Level…";
+        else if ([condition[@"input"] isEqualToString:@"variable"]) prompt = @"Compare…";
         [rows addObject:@{ @"kind": @"input", @"title": prompt }];
     }
     return rows;

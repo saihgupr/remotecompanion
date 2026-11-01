@@ -27,6 +27,7 @@ RemoteCompanion_FILES += RCFocusPickerViewController.m
 RemoteCompanion_FILES += RCWebUIAccessViewController.m
 RemoteCompanion_FILES += RCRunningViewController.m
 RemoteCompanion_FILES += RCRunHistoryViewController.m
+RemoteCompanion_FILES += RCVariablesViewController.m
 
 # Reorganized Settings submenus
 RemoteCompanion_FILES += RCAdvancedSettingsViewController.m

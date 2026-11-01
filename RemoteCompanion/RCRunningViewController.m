@@ -185,7 +185,7 @@ static const NSInteger kRCRecentRunsShown = 5;
     if (loop) {
         NSDictionary *repeat = loop[@"repeat"];
         NSInteger round = [loop[@"round"] integerValue];
-        NSInteger count = [repeat isKindOfClass:[NSDictionary class]] ? [repeat[@"count"] integerValue] : 0;
+        NSInteger count = loop[@"count"] ? [loop[@"count"] integerValue] : [repeat isKindOfClass:[NSDictionary class]] ? [repeat[@"count"] integerValue] : 0;
         NSString *roundText = count > 0 ? [NSString stringWithFormat:@"Round %ld of %ld", (long)round, (long)count] : [NSString stringWithFormat:@"Round %ld", (long)round];
         // On the Repeat row itself: its name and round; inside it: the step, then the round
         BOOL onRepeat = [step isKindOfClass:[NSDictionary class]] && [step isEqual:repeat];
