@@ -236,6 +236,10 @@
 
 - (void)layoutSettingChanged:(NSNotification *)note {
     if ([note.object isEqual:RCLayoutTriggers]) [self applyLayout];
+    else if ([note.object isEqual:RCLayoutTriggerColumns]) {
+        [self.grid.collectionView.collectionViewLayout invalidateLayout];
+        [self.grid reload];
+    }
 }
 
 // Shows the table or the grid, with the category bar on it; Edit comes with the grid
@@ -418,7 +422,10 @@
     };
 
     // Get ordered favorites from config
-    NSArray *allFavorites = [config orderedFavorites];
+    // A created trigger that was deleted before deleting took it out of Favorites isn't shown
+    NSArray *allFavorites = [[config orderedFavorites] filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSString *key, NSDictionary *bindings) {
+        return ![RCConfigManager canRenameTrigger:key] || [config triggerDataForKey:key] != nil;
+    }]];
 
     // Add Favorites section at top if there are any
     if (allFavorites.count > 0) {
@@ -438,7 +445,7 @@
     // Standard Sections (Always show headers)
     addSection(@[@"volume_up_hold", @"volume_down_hold", @"volume_both_press", @"volume_up_then_down", @"volume_down_then_up"], @"Volume Buttons", NO);
     addSection(@[@"power_double_tap", @"power_triple_click", @"power_quadruple_click", @"power_volume_up", @"power_volume_down", @"power_long_press"], @"Power Button", NO);
-    addSection(@[@"trigger_statusbar_left_hold", @"trigger_statusbar_center_hold", @"trigger_statusbar_right_hold", @"trigger_statusbar_swipe_left", @"trigger_statusbar_swipe_right", @"trigger_statusbar_double_tap"], @"Screen Gestures", NO);
+    addSection(@[@"trigger_statusbar_left_hold", @"trigger_statusbar_center_hold", @"trigger_statusbar_right_hold", @"trigger_statusbar_swipe_left", @"trigger_statusbar_swipe_right", @"trigger_statusbar_double_tap"], @"Status Bar", NO);
     addSection(@[@"trigger_edge_left_swipe_up", @"trigger_edge_left_swipe_down", @"trigger_edge_right_swipe_up", @"trigger_edge_right_swipe_down"], @"Edge Gestures", NO);
     addSection(@[@"trigger_bottombar_swipe_left", @"trigger_bottombar_swipe_right", @"trigger_bottom_swipe_up_left", @"trigger_bottom_swipe_up_center", @"trigger_bottom_swipe_up_right"], @"Bottom Bar Gestures", NO);
     // Multi-Finger Gestures Section (Only show if configured, hide if empty)
@@ -560,7 +567,9 @@
     for (NSString *title in titles) {
         [chipTitles addObject:[title hasSuffix:@" Triggers"] ? [title substringToIndex:title.length - 9] : title];
     }
-    [self.categoryBar setChipTitles:chipTitles];
+    NSMutableArray *chipIcons = [NSMutableArray array];
+    for (NSString *title in titles) [chipIcons addObject:RCTriggerCategoryIcon(title) ?: [NSNull null]];
+    [self.categoryBar setChipTitles:chipTitles icons:chipIcons];
     NSUInteger selected = self.selectedCategoryTitle ? [titles indexOfObject:self.selectedCategoryTitle] : NSNotFound;
     if (selected == NSNotFound) self.selectedCategoryTitle = nil;
     self.categoryBar.selectedIndex = (selected == NSNotFound) ? -1 : (NSInteger)selected;
@@ -928,6 +937,21 @@
         label.textColor = [UIColor secondaryLabelColor];
     }
 
+    // The section's icon before its title, in the title's colour
+    UIImage *icon = RCTriggerCategoryIcon(title);
+    if (icon) {
+        UIImageView *iconView = [[UIImageView alloc] initWithImage:icon];
+        iconView.preferredSymbolConfiguration = [UIImageSymbolConfiguration configurationWithPointSize:13 weight:UIImageSymbolWeightSemibold];
+        iconView.contentMode = UIViewContentModeScaleAspectFit;
+        iconView.tintColor = label.textColor;
+        iconView.frame = CGRectMake(20, CGRectGetMinY(label.frame) + 1, 18, 18);
+        [headerView addSubview:iconView];
+        CGRect frame = label.frame;
+        frame.origin.x += 24;
+        frame.size.width -= 24;
+        label.frame = frame;
+    }
+
     [headerView addSubview:label];
     return headerView;
 }
@@ -964,7 +988,7 @@
     
     // Add Icon with tint based on section or type?
     // Using dark gray tint for a "premium" but subtle look
-    UIImage *icon = [self appIconForTrigger:triggerKey side:29] ?: RCTriggerIconImage(triggerKey, 22) ?: RCTriggerSymbolImage([RCTriggersViewController iconNameForTrigger:triggerKey], 22);
+    UIImage *icon = [self appIconForTrigger:triggerKey side:29] ?: RCTriggerIconImage(triggerKey, 22) ?: [self symbolIconForTrigger:triggerKey size:22];
     cell.imageView.image = icon;
     cell.imageView.tintColor = [UIColor systemGrayColor];
 
@@ -992,6 +1016,11 @@
         cell.detailTextLabel.font = [UIFont systemFontOfSize:13]; // Regular font for placeholder
     }
     
+    // A name of the user's own: its default name leads the line under it
+    if ([config customNameForTrigger:triggerKey]) {
+        cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · %@", [config defaultNameForTrigger:triggerKey], cell.detailTextLabel.text ?: @""];
+    }
+
     [self applySectionCardStyleToCell:cell atIndexPath:indexPath];
 
     return cell;
@@ -1106,6 +1135,57 @@
     return !(![triggerKey hasPrefix:@"nfc_"] && ![triggerKey hasPrefix:@"wifi_"] && ![triggerKey hasPrefix:@"bt_"] && ![triggerKey hasPrefix:@"app_launch_"] && ![triggerKey hasPrefix:@"app_exit_"] && ![triggerKey hasPrefix:@"output_"] && ![triggerKey hasPrefix:@"notif_"] && ![triggerKey hasPrefix:@"notify_"] && ![triggerKey hasPrefix:@"sched_"] && ![triggerKey hasPrefix:@"mqtt_"] && ![triggerKey hasPrefix:@"mqtt_sub_"] && ![triggerKey hasPrefix:@"trigger_device_"] && ![triggerKey hasPrefix:@"trigger_media_"] && ![triggerKey hasPrefix:@"trigger_power_"] && ![triggerKey hasPrefix:@"trigger_carplay_"] && ![triggerKey hasPrefix:@"trigger_watch_"] && ![triggerKey containsString:@"two_finger"]);
 }
 
+// A created trigger's letter, telling NFC tags, networks and devices of one kind apart: the first
+// of the user's name for it, else of its network, device or topic. None for an unnamed NFC tag or
+// schedule (their default names don't say anything a letter could).
++ (NSString *)letterForTrigger:(NSString *)triggerKey {
+    BOOL created = NO;
+    for (NSString *prefix in @[@"nfc_", @"wifi_", @"bt_", @"output_", @"notif_", @"notify_", @"sched_", @"mqtt_"]) {
+        if ([triggerKey hasPrefix:prefix]) { created = YES; break; }
+    }
+    if (!created) return nil;
+    RCConfigManager *config = [RCConfigManager sharedManager];
+    NSString *source = [config customNameForTrigger:triggerKey];
+    if (!source) {
+        NSString *name = [config defaultNameForTrigger:triggerKey];
+        if ([triggerKey hasPrefix:@"wifi_"] || [triggerKey hasPrefix:@"bt_"] || [triggerKey hasPrefix:@"output_"]) {
+            // "Connected to Home WiFi", "Disconnected from AirPods Pro": what comes after
+            for (NSString *joint in @[@" to ", @" from "]) {
+                NSRange range = [name rangeOfString:joint];
+                if (range.location != NSNotFound) { source = [name substringFromIndex:NSMaxRange(range)]; break; }
+            }
+        } else if ([triggerKey hasPrefix:@"mqtt_"] || [triggerKey hasPrefix:@"notif_"] || [triggerKey hasPrefix:@"notify_"]) {
+            // "MQTT: home/door (OPEN)": the topic; a name given when it was made: that name
+            NSRange colon = [name rangeOfString:@": "];
+            source = colon.location != NSNotFound ? [name substringFromIndex:NSMaxRange(colon)] : name;
+        }
+    }
+    for (NSUInteger i = 0; i < source.length; i++) {
+        unichar c = [source characterAtIndex:i];
+        if ([[NSCharacterSet alphanumericCharacterSet] characterIsMember:c]) return [[source substringWithRange:NSMakeRange(i, 1)] uppercaseString];
+    }
+    return nil;
+}
+
+// A trigger's icon anywhere it's listed (Running, Stop Trigger): an add-on's picture, an app's
+// icon, the phone drawing, or its symbol with a created trigger's letter
++ (UIImage *)iconImageForTrigger:(NSString *)triggerKey size:(CGFloat)size {
+    UIImage *custom = nil;
+    if (custom) return custom;
+    for (NSString *prefix in @[@"app_launch_", @"app_exit_"]) {
+        if ([triggerKey hasPrefix:prefix]) {
+            UIImage *app = RCAppIconImage([triggerKey substringFromIndex:prefix.length], size + 7);
+            if (app) return app;
+        }
+    }
+    return RCTriggerIconImage(triggerKey, size) ?: RCTriggerLetterImage([RCTriggersViewController iconNameForTrigger:triggerKey], [RCTriggersViewController letterForTrigger:triggerKey], size);
+}
+
+// A trigger's plain symbol, with its letter when it's a created one
+- (UIImage *)symbolIconForTrigger:(NSString *)triggerKey size:(CGFloat)size {
+    return RCTriggerLetterImage([RCTriggersViewController iconNameForTrigger:triggerKey], [RCTriggersViewController letterForTrigger:triggerKey], size);
+}
+
 // A trigger's own picture (an add-on's), or nil
 - (UIImage *)customIconForTrigger:(NSString *)triggerKey {
     return nil;
@@ -1142,6 +1222,11 @@
     return [[RCConfigManager sharedManager] displayNameForTrigger:key];
 }
 
+- (NSString *)gridDetailForTrigger:(NSString *)key {
+    RCConfigManager *config = [RCConfigManager sharedManager];
+    return [config customNameForTrigger:key] ? [config defaultNameForTrigger:key] : nil;
+}
+
 - (NSString *)gridIconForTrigger:(NSString *)key {
     return [RCTriggersViewController iconNameForTrigger:key];
 }
@@ -1149,7 +1234,7 @@
 - (UIImage *)gridImageForTrigger:(NSString *)key {
     UIImage *custom = [self customIconForTrigger:key];
     if (custom) return custom;
-    return [self appIconForTrigger:key side:30] ?: RCTriggerIconImage(key, 26) ?: RCTriggerSymbolImage([self gridIconForTrigger:key], 26);
+    return [self appIconForTrigger:key side:30] ?: RCTriggerIconImage(key, 26) ?: [self symbolIconForTrigger:key size:26];
 }
 
 - (NSInteger)gridActionCountForTrigger:(NSString *)key {
@@ -1198,7 +1283,10 @@
 }
 
 - (void)gridMoveFavoriteFrom:(NSInteger)from to:(NSInteger)to {
-    NSMutableArray *favorites = [[RCConfigManager sharedManager] orderedFavorites].mutableCopy;
+    // The favorites as shown (Favorites is the first section when there are any)
+    NSUInteger section = [self.sectionTitles indexOfObject:@"Favorites"];
+    if (section == NSNotFound) return;
+    NSMutableArray *favorites = [self.sections[section] mutableCopy];
     if (from < 0 || from >= (NSInteger)favorites.count || to < 0 || to >= (NSInteger)favorites.count) return;
     NSString *moved = favorites[from];
     [favorites removeObjectAtIndex:from];

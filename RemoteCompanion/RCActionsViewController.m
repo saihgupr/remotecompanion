@@ -896,6 +896,12 @@ static id g_actionClipboard = nil;
     }];
     clearAction.attributes = UIMenuElementAttributesDestructive;
     [menuActions addObject:clearAction];
+    // A name of the user's own, or back to the default (first in the menu)
+    if ([RCConfigManager canRenameTrigger:self.triggerKey]) {
+        [menuActions insertObject:[UIAction actionWithTitle:@"Rename" image:[UIImage systemImageNamed:@"pencil"] identifier:nil handler:^(__kindof UIAction *a) {
+            [weakSelf renameTrigger];
+        }] atIndex:0];
+    }
     return [UIMenu menuWithTitle:@"" children:menuActions];
 }
 
@@ -1258,19 +1264,6 @@ static void RCSetRunWatching(BOOL watching) {
         self.navigationItem.rightBarButtonItems = @[stop];
     }
 
-    // Add tap gesture to title if it's an NFC trigger
-    if ([_triggerKey hasPrefix:@"nfc_"]) {
-        UITapGestureRecognizer *titleTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(renameTrigger)];
-        
-        // Create a custom title view to accept interactions
-        UILabel *titleLabel = [[UILabel alloc] init];
-        titleLabel.text = self.title;
-        titleLabel.font = [UIFont boldSystemFontOfSize:17];
-        titleLabel.userInteractionEnabled = YES;
-        [titleLabel addGestureRecognizer:titleTap];
-        
-        self.navigationItem.titleView = titleLabel;
-    }
 
     
     // Enable Large Titles
@@ -1323,7 +1316,6 @@ static void RCSetRunWatching(BOOL watching) {
 // can't be switched back to a large title in place (it stayed at its small size), so a name that
 // becomes short just shows in the same header at the large-title size.
 - (void)updateWrappedTitle {
-    if ([_triggerKey hasPrefix:@"nfc_"]) return; // has its own tappable title
     NSString *name = self.title ?: @"";
     // Known before the screen is laid out for the first time, so the right title is there from the start
     CGFloat width = self.tableView.bounds.size.width;
@@ -1466,33 +1458,37 @@ static void RCSetRunWatching(BOOL watching) {
     }
 }
 
+// Any trigger can have a name of its own; left empty, it goes back to its default
 - (void)renameTrigger {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Rename Tag" 
-                                                                   message:@"Enter a new name for this NFC tag:" 
+    RCConfigManager *config = [RCConfigManager sharedManager];
+    NSString *defaultName = [config defaultNameForTrigger:self.triggerKey];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Rename Trigger"
+                                                                   message:[NSString stringWithFormat:@"Leave empty for its default name, “%@”.", defaultName]
                                                             preferredStyle:UIAlertControllerStyleAlert];
-    
-    [alert addTextFieldWithConfigurationHandler:^(UITextField * _Nonnull textField) {
-        textField.placeholder = @"My Tag";
-        textField.text = self.title;
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
+        textField.placeholder = defaultName;
+        textField.text = [config customNameForTrigger:self.triggerKey];
         textField.autocapitalizationType = UITextAutocapitalizationTypeWords;
+        textField.clearButtonMode = UITextFieldViewModeWhileEditing;
+        textField.returnKeyType = UIReturnKeyDone;
     }];
-    
     [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    
-    [alert addAction:[UIAlertAction actionWithTitle:@"Save" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
-        NSString *newName = alert.textFields.firstObject.text;
-        if (newName.length > 0) {
-            [[RCConfigManager sharedManager] renameTrigger:self.triggerKey toName:newName];
-            self.title = newName;
-            
-            // Update custom title view text
-            if ([self.navigationItem.titleView isKindOfClass:[UILabel class]]) {
-                ((UILabel *)self.navigationItem.titleView).text = newName;
-                [self.navigationItem.titleView sizeToFit];
-            }
+    __weak typeof(self) weakSelf = self;
+    UIAlertAction *save = [UIAlertAction actionWithTitle:@"Save" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        [config setCustomName:alert.textFields.firstObject.text forTrigger:strongSelf.triggerKey];
+        NSString *name = [config displayNameForTrigger:strongSelf.triggerKey];
+        strongSelf.title = name;
+        // The NFC tag's tappable title, or the wrapped title above the actions
+        if ([strongSelf.navigationItem.titleView isKindOfClass:[UILabel class]]) {
+            ((UILabel *)strongSelf.navigationItem.titleView).text = name;
+            [strongSelf.navigationItem.titleView sizeToFit];
         }
-    }]];
-    
+        [strongSelf updateWrappedTitle];
+    }];
+    [alert addAction:save];
+    alert.preferredAction = save;
     [self presentViewController:alert animated:YES completion:nil];
 }
 

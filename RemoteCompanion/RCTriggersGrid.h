@@ -12,6 +12,7 @@
 - (NSArray<NSString *> *)gridKeysInSection:(NSInteger)section;
 - (BOOL)gridSectionIsFavorites:(NSInteger)section;
 - (NSString *)gridNameForTrigger:(NSString *)key;
+- (NSString *)gridDetailForTrigger:(NSString *)key; // its default name under a name of the user's own, or nil
 - (NSString *)gridIconForTrigger:(NSString *)key;
 - (UIImage *)gridImageForTrigger:(NSString *)key; // an app's icon, or nil
 - (NSInteger)gridActionCountForTrigger:(NSString *)key;

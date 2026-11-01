@@ -27,6 +27,10 @@
 }
 
 - (void)setChipTitles:(NSArray<NSString *> *)chipTitles {
+    [self setChipTitles:chipTitles icons:nil];
+}
+
+- (void)setChipTitles:(NSArray<NSString *> *)chipTitles icons:(NSArray *)icons {
     for (UIButton *chip in self.chips) [chip removeFromSuperview];
     [self.chips removeAllObjects];
 
@@ -38,9 +42,20 @@
         UIButton *chip = [UIButton buttonWithType:UIButtonTypeCustom];
         [chip setTitle:titles[i] forState:UIControlStateNormal];
         chip.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+        // The icon before the name, when there are icons (All: a grid)
+        id icon = nil;
+        if (icons) icon = i == 0 ? [UIImage systemImageNamed:@"square.grid.2x2.fill"] : (i - 1 < icons.count ? icons[i - 1] : nil);
+        BOOL hasIcon = [icon isKindOfClass:[UIImage class]];
+        if (hasIcon) {
+            [chip setImage:icon forState:UIControlStateNormal];
+            [chip setPreferredSymbolConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:13 weight:UIImageSymbolWeightSemibold] forImageInState:UIControlStateNormal];
+            chip.adjustsImageWhenHighlighted = NO;
+        }
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-        chip.contentEdgeInsets = UIEdgeInsetsMake(7, 14, 7, 14); // UIButtonConfiguration is iOS 15+
+        // UIButtonConfiguration is iOS 15+: the gap between icon and name from the insets
+        chip.contentEdgeInsets = UIEdgeInsetsMake(7, hasIcon ? 12 : 14, 7, hasIcon ? 20 : 14);
+        if (hasIcon) chip.titleEdgeInsets = UIEdgeInsetsMake(0, 6, 0, -6);
 #pragma clang diagnostic pop
         [chip sizeToFit];
         chip.frame = CGRectMake(x, (height - chip.bounds.size.height) / 2.0, chip.bounds.size.width, chip.bounds.size.height);
@@ -66,6 +81,7 @@
         BOOL selected = (chip.tag == self.selectedIndex);
         chip.backgroundColor = selected ? [UIColor labelColor] : [UIColor tertiarySystemFillColor];
         [chip setTitleColor:selected ? [UIColor systemBackgroundColor] : [UIColor labelColor] forState:UIControlStateNormal];
+        chip.tintColor = selected ? [UIColor systemBackgroundColor] : [UIColor labelColor];
     }
 }
 
@@ -158,6 +174,16 @@
 }
 
 - (void)chipTapped:(UIButton *)chip {
+    // The chosen category again: back to All
+    if (chip.tag == self.selectedIndex && chip.tag != -1) {
+        UIButton *all = [self viewWithTag:-1];
+        chip = [all isKindOfClass:[UIButton class]] ? all : chip;
+        if (chip.tag != -1) {
+            self.selectedIndex = -1;
+            if (self.onSelect) self.onSelect(-1);
+            return;
+        }
+    }
     self.selectedIndex = chip.tag;
     [self scrollRectToVisible:CGRectInset(chip.frame, -24, 0) animated:YES];
     if (self.onSelect) self.onSelect(chip.tag);

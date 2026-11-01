@@ -138,7 +138,7 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
     } else if (section == RCAdvancedSettingsSectionOptions) {
         return nil;
     } else if (section == RCAdvancedSettingsSectionLayout) {
-        return @"Compact shows a grid of tiles instead of a list.";
+        return @"Compact shows a grid of tiles instead of a list. Triggers per Row applies to Triggers in Compact.";
     } else if (section == RCAdvancedSettingsSectionButtons) {
         return @"How long a press waits for the next one before it counts. A shorter time responds sooner and needs quicker presses.";
     } else if (section == RCAdvancedSettingsSectionSecurity) {

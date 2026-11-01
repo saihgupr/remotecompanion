@@ -26,6 +26,8 @@
 @interface RCActionGridHeader : UICollectionReusableView
 @property (nonatomic, strong, readonly) UILabel *label;
 - (void)setTitle:(NSString *)title;
+// The same, with an icon before the title (nil: none)
+- (void)setTitle:(NSString *)title icon:(UIImage *)icon;
 - (void)setNote:(NSString *)note;
 @end
 
@@ -56,6 +58,10 @@ CGSize RCActionRowSize(CGFloat listWidth, CGFloat height);
 extern NSString *const RCLayoutTriggers;
 extern NSString *const RCLayoutActionPicker;
 extern NSString *const RCLayoutBanners;
+// Triggers in Compact: how many per row, 2, 3 or 4 (its setting row is keyed by this)
+extern NSString *const RCLayoutTriggerColumns;
+NSInteger RCLayoutTriggerColumnCount(void);
+void RCLayoutSetTriggerColumnCount(NSInteger count);
 // Posted when a screen's layout changes (object: the screen's key)
 extern NSString *const RCLayoutChangedNotification;
 
@@ -63,7 +69,7 @@ BOOL RCLayoutIsCompact(NSString *screen);
 void RCLayoutSetCompact(NSString *screen, BOOL compact);
 // The screens, in order: @[title, key]
 NSArray<NSArray<NSString *> *> *RCLayoutScreens(void);
-// A settings row for one screen: its title and a List / Compact control
+// A settings row for one screen: its title and a List / Compact control (2 / 3 / 4 for Triggers per Row)
 UITableViewCell *RCLayoutSettingCell(NSString *title, NSString *screen);
 
 #pragma mark - App icons

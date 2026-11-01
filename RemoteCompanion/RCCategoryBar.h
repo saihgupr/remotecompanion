@@ -13,6 +13,9 @@
 - (instancetype)initWithWidth:(CGFloat)width;
 // Rebuilds the chips; chipTitles are what the chips show (same count as the sections)
 - (void)setChipTitles:(NSArray<NSString *> *)chipTitles;
+// The same, with an icon before each chip's name (icons: UIImage or NSNull, one per title; All
+// gets a grid)
+- (void)setChipTitles:(NSArray<NSString *> *)chipTitles icons:(NSArray *)icons;
 
 // Floats the bar over the top of the table (insetting its content by the bar's height).
 // The screen must forward scrollViewDidScroll: to -scrollViewDidScroll:, and call

@@ -714,6 +714,13 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
     if (triggers[triggerKey]) {
         [triggers removeObjectForKey:triggerKey];
     }
+    // A deleted favorite would stay in Favorites under its raw key
+    NSArray *favorites = _config[@"favoriteTriggers"];
+    if ([favorites containsObject:triggerKey]) {
+        NSMutableArray *left = [favorites mutableCopy];
+        [left removeObject:triggerKey];
+        _config[@"favoriteTriggers"] = left;
+    }
     
     // Also clean up from notificationTriggers metadata if associated entry exists
     NSMutableArray *notifTriggers = [[self notificationTriggers] mutableCopy];
@@ -771,7 +778,40 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
     return [_config[@"triggers"] allKeys];
 }
 
+// A trigger's name: the user's own, else its default
 - (NSString *)displayNameForTrigger:(NSString *)triggerKey {
+    return [self customNameForTrigger:triggerKey] ?: [self defaultNameForTrigger:triggerKey];
+}
+
+// The triggers the user makes (a tag, a network, a device, an app, a notification, a time, a
+// topic) can have a name of their own; the built-in ones (Power Double Click...) keep theirs, so
+// they always say what they are
++ (BOOL)canRenameTrigger:(NSString *)triggerKey {
+    for (NSString *prefix in @[@"nfc_", @"wifi_", @"bt_", @"output_", @"app_launch_", @"app_exit_", @"notif_", @"notify_", @"sched_", @"mqtt_"]) {
+        if ([triggerKey hasPrefix:prefix]) return YES;
+    }
+    return NO;
+}
+
+// A name the user gave a trigger ("Desk", "Car Dock"), or nil. Kept apart from the name a
+// created trigger is given (its network, device or time), which changes when the trigger does.
+- (NSString *)customNameForTrigger:(NSString *)triggerKey {
+    if (![RCConfigManager canRenameTrigger:triggerKey]) return nil;
+    id trigger = _config[@"triggers"][triggerKey];
+    NSString *name = [trigger isKindOfClass:[NSDictionary class]] ? [trigger[@"customName"] description] : nil;
+    return name.length ? name : nil;
+}
+
+- (void)setCustomName:(NSString *)name forTrigger:(NSString *)triggerKey {
+    NSString *trimmed = [name stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    NSMutableDictionary *trigger = [self triggerDict:triggerKey];
+    if (trimmed.length) trigger[@"customName"] = trimmed;
+    else [trigger removeObjectForKey:@"customName"];
+    [self saveConfig];
+}
+
+// The name a trigger has without one of the user's own
+- (NSString *)defaultNameForTrigger:(NSString *)triggerKey {
     NSDictionary *names = @{
         @"shake": @"Shake Device",
         @"trigger_device_lock": @"Device Locked",
@@ -2429,15 +2469,28 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
     for (NSUInteger i = 0; i < bundleIds.count; i++) [shown addObject:(i < names.count && names[i].length) ? names[i] : bundleIds[i]];
     NSString *name = [NSString stringWithFormat:@"%@ %@", verb, [shown componentsJoinedByString:@", "]];
 
+    // Everything else it had (its own name, run mode...) stays with it
     NSDictionary *previous = [self triggerDataForKey:(oldKey ?: newKey)];
-    NSMutableDictionary *data = [NSMutableDictionary dictionary];
+    NSMutableDictionary *data = [previous isKindOfClass:[NSDictionary class]] ? [previous mutableCopy] : [NSMutableDictionary dictionary];
     data[@"name"] = name;
     data[@"enabled"] = previous[@"enabled"] ?: @YES;
     data[@"actions"] = previous[@"actions"] ?: @[];
     if (bundleIds.count > 1) data[@"apps"] = bundleIds;
+    else [data removeObjectForKey:@"apps"];
 
+    BOOL moved = oldKey && ![oldKey isEqualToString:newKey];
+    BOOL favorite = moved && [self isTriggerFavorite:oldKey];
     [self updateTrigger:newKey withData:data];
-    if (oldKey && ![oldKey isEqualToString:newKey]) [self removeTrigger:oldKey];
+    if (moved) {
+        // A favorite stays one, in the same place
+        NSMutableArray *favorites = favorite ? [[self orderedFavorites] mutableCopy] : nil;
+        NSUInteger place = favorite ? [favorites indexOfObject:oldKey] : NSNotFound;
+        [self removeTrigger:oldKey];
+        if (favorite && place != NSNotFound) {
+            [favorites replaceObjectAtIndex:place withObject:newKey];
+            [self setOrderedFavorites:favorites];
+        }
+    }
     return newKey;
 }
 

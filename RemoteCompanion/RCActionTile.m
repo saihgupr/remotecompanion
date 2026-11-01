@@ -251,6 +251,8 @@ static const CGFloat RCTileMinWidth = 80;
 
 @interface RCActionGridHeader ()
 @property (nonatomic, strong, readwrite) UILabel *label;
+@property (nonatomic, strong) UIImageView *iconView;
+@property (nonatomic, strong) NSLayoutConstraint *labelLeading;
 @end
 
 @implementation RCActionGridHeader
@@ -262,8 +264,19 @@ static const CGFloat RCTileMinWidth = 80;
         _label.translatesAutoresizingMaskIntoConstraints = NO;
         _label.textColor = [UIColor secondaryLabelColor];
         [self addSubview:_label];
+        _iconView = [[UIImageView alloc] init];
+        _iconView.contentMode = UIViewContentModeScaleAspectFit;
+        _iconView.preferredSymbolConfiguration = [UIImageSymbolConfiguration configurationWithPointSize:13 weight:UIImageSymbolWeightSemibold];
+        _iconView.translatesAutoresizingMaskIntoConstraints = NO;
+        _iconView.hidden = YES;
+        [self addSubview:_iconView];
+        _labelLeading = [_label.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:RCGridSide + 4];
         [NSLayoutConstraint activateConstraints:@[
-            [_label.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:RCGridSide + 4],
+            _labelLeading,
+            [_iconView.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:RCGridSide + 4],
+            [_iconView.centerYAnchor constraintEqualToAnchor:_label.centerYAnchor],
+            [_iconView.widthAnchor constraintEqualToConstant:18],
+            [_iconView.heightAnchor constraintEqualToConstant:16],
             [_label.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-(RCGridSide + 4)],
             [_label.bottomAnchor constraintEqualToAnchor:self.bottomAnchor constant:-6],
         ]];
@@ -271,8 +284,18 @@ static const CGFloat RCTileMinWidth = 80;
     return self;
 }
 
+- (void)setTitle:(NSString *)title icon:(UIImage *)icon {
+    [self setTitle:title];
+    self.iconView.image = icon;
+    self.iconView.hidden = icon == nil;
+    self.labelLeading.constant = RCGridSide + 4 + (icon ? 24 : 0);
+}
+
 - (void)setTitle:(NSString *)title {
     self.label.textColor = [UIColor secondaryLabelColor]; // a reused title may have been Favorites' yellow
+    self.tintColor = [UIColor secondaryLabelColor];       // the icon's, set like the text's
+    self.iconView.hidden = YES;
+    self.labelLeading.constant = RCGridSide + 4;
     self.label.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
     self.label.numberOfLines = 1;
     self.label.text = title.uppercaseString;
@@ -280,6 +303,8 @@ static const CGFloat RCTileMinWidth = 80;
 }
 
 - (void)setNote:(NSString *)note {
+    self.iconView.hidden = YES;
+    self.labelLeading.constant = RCGridSide + 4;
     self.label.textColor = [UIColor secondaryLabelColor];
     self.label.font = [UIFont systemFontOfSize:13];
     self.label.numberOfLines = 0;
@@ -442,6 +467,7 @@ CGSize RCActionRowSize(CGFloat listWidth, CGFloat height) {
 NSString *const RCLayoutTriggers = @"triggers";
 NSString *const RCLayoutActionPicker = @"actionPicker";
 NSString *const RCLayoutBanners = @"banners";
+NSString *const RCLayoutTriggerColumns = @"triggerColumns";
 NSString *const RCLayoutChangedNotification = @"RCLayoutChangedNotification";
 
 static NSString *RCLayoutDefaultsKey(NSString *screen) {
@@ -457,8 +483,20 @@ void RCLayoutSetCompact(NSString *screen, BOOL compact) {
     [[NSNotificationCenter defaultCenter] postNotificationName:RCLayoutChangedNotification object:screen];
 }
 
+NSInteger RCLayoutTriggerColumnCount(void) {
+    NSInteger count = [[NSUserDefaults standardUserDefaults] integerForKey:@"RCTriggerColumns"];
+    if (count < 2 || count > 4) count = RCLayoutIsCompact(RCLayoutTriggerColumns) ? 3 : 2; // the earlier 2 / 3 switch
+    return count;
+}
+
+void RCLayoutSetTriggerColumnCount(NSInteger count) {
+    [[NSUserDefaults standardUserDefaults] setInteger:MAX(2, MIN(4, count)) forKey:@"RCTriggerColumns"];
+    [[NSNotificationCenter defaultCenter] postNotificationName:RCLayoutChangedNotification object:RCLayoutTriggerColumns];
+}
+
 NSArray<NSArray<NSString *> *> *RCLayoutScreens(void) {
-    return @[@[@"Triggers", RCLayoutTriggers], @[@"Select Action", RCLayoutActionPicker], @[@"Banners", RCLayoutBanners]];
+    return @[@[@"Triggers", RCLayoutTriggers], @[@"Triggers per Row", RCLayoutTriggerColumns],
+             @[@"Select Action", RCLayoutActionPicker], @[@"Banners", RCLayoutBanners]];
 }
 
 // The segmented control's target: it carries its screen's key
@@ -469,7 +507,8 @@ NSArray<NSArray<NSString *> *> *RCLayoutScreens(void) {
 
 @implementation RCLayoutSegmentTarget
 - (void)changed:(UISegmentedControl *)control {
-    RCLayoutSetCompact(self.screen, control.selectedSegmentIndex == 1);
+    if ([self.screen isEqualToString:RCLayoutTriggerColumns]) RCLayoutSetTriggerColumnCount(control.selectedSegmentIndex + 2);
+    else RCLayoutSetCompact(self.screen, control.selectedSegmentIndex == 1);
     [[[UISelectionFeedbackGenerator alloc] init] selectionChanged];
 }
 @end
@@ -481,9 +520,14 @@ UITableViewCell *RCLayoutSettingCell(NSString *title, NSString *screen) {
     cell.selectionStyle = UITableViewCellSelectionStyleNone;
     cell.textLabel.text = title;
     cell.textLabel.textColor = [UIColor labelColor];
-    UISegmentedControl *control = [[UISegmentedControl alloc] initWithItems:@[@"List", @"Compact"]];
-    control.selectedSegmentIndex = RCLayoutIsCompact(screen) ? 1 : 0;
-    control.accessibilityLabel = [title stringByAppendingString:@" Layout"];
+    BOOL columns = [screen isEqualToString:RCLayoutTriggerColumns];
+    UISegmentedControl *control = [[UISegmentedControl alloc] initWithItems:columns ? @[@"2", @"3", @"4"] : @[@"List", @"Compact"]];
+    control.selectedSegmentIndex = columns ? RCLayoutTriggerColumnCount() - 2 : (RCLayoutIsCompact(screen) ? 1 : 0);
+    control.accessibilityLabel = columns ? title : [title stringByAppendingString:@" Layout"];
+    if (columns) {
+        // Short choices: together as wide as List / Compact, so the controls line up
+        for (NSInteger i = 0; i < 3; i++) [control setWidth:48 forSegmentAtIndex:i];
+    }
     RCLayoutSegmentTarget *target = [[RCLayoutSegmentTarget alloc] init];
     target.screen = screen;
     [control addTarget:target action:@selector(changed:) forControlEvents:UIControlEventValueChanged];
