@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+- **Apple Watch triggers hidden until configured**: Ping iPhone / Ping iPhone (Hold) no longer sit empty in the main list. The Apple Watch section only appears once a Watch trigger has actions, and both triggers are now addable from the + menu (Device section) with swipe-to-delete.
+
 ## [4.1.0] - 2026-10-31
 
 ### Added

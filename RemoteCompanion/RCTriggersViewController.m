@@ -343,7 +343,14 @@
         addSection(@[@"trigger_home_double_click", @"trigger_home_triple_click", @"trigger_home_quadruple_click", @"trigger_home_hold", @"trigger_home_power", @"touchid_tap", @"touchid_hold"], @"Home Button", NO);
     }
     addSection(@[@"trigger_ringer_mute", @"trigger_ringer_unmute", @"trigger_ringer_toggle"], @"Ringer Switch", NO);
-    addSection(@[@"trigger_watch_ping", @"trigger_watch_ping_hold"], @"Apple Watch", NO);
+    // Apple Watch Section (Only show if configured, hide if empty)
+    NSMutableArray *watchKeys = [NSMutableArray array];
+    for (NSString *key in @[@"trigger_watch_ping", @"trigger_watch_ping_hold"]) {
+        if ([[RCConfigManager sharedManager] actionsForTrigger:key].count > 0) {
+            [watchKeys addObject:key];
+        }
+    }
+    addSection(watchKeys, @"Apple Watch", YES);
     // Device State Section (Only show if configured, hide if empty)
     NSMutableArray *deviceStateKeys = [NSMutableArray array];
     NSArray *configuredKeys = [[RCConfigManager sharedManager] allConfiguredTriggerKeys];
@@ -482,7 +489,9 @@
                              @[@"trigger_carplay_disconnect", @"CarPlay Disconnected", @"car", @"Device"],
                              @[@"trigger_media_play", @"Media Playing", @"play.fill", @"Media"],
                              @[@"trigger_media_pause", @"Media Paused", @"pause.fill", @"Media"],
-                             @[@"trigger_media_track_change", @"Media Track Changed", @"forward.fill", @"Media"]]) {
+                             @[@"trigger_media_track_change", @"Media Track Changed", @"forward.fill", @"Media"],
+                             @[@"trigger_watch_ping", @"Ping iPhone", @"applewatch.radiowaves.left.and.right", @"Apple Watch"],
+                             @[@"trigger_watch_ping_hold", @"Ping iPhone (Hold)", @"applewatch.radiowaves.left.and.right", @"Apple Watch"]]) {
         NSString *key = event[0], *title = event[1];
         NSMutableDictionary *item = [@{ @"title": title, @"icon": event[2], @"section": event[3], @"handler": ^{
             if (![[[RCConfigManager sharedManager] allConfiguredTriggerKeys] containsObject:key]) {
@@ -893,7 +902,7 @@
     NSString *triggerKey = [self triggerKeyAtIndexPath:indexPath];
 
     // Only allow delete for NFC, WiFi, BT, App, Notif, Sched, MQTT, Device State triggers
-    if (![triggerKey hasPrefix:@"nfc_"] && ![triggerKey hasPrefix:@"wifi_"] && ![triggerKey hasPrefix:@"bt_"] && ![triggerKey hasPrefix:@"app_launch_"] && ![triggerKey hasPrefix:@"app_exit_"] && ![triggerKey hasPrefix:@"output_"] && ![triggerKey hasPrefix:@"notif_"] && ![triggerKey hasPrefix:@"notify_"] && ![triggerKey hasPrefix:@"sched_"] && ![triggerKey hasPrefix:@"mqtt_"] && ![triggerKey hasPrefix:@"mqtt_sub_"] && ![triggerKey hasPrefix:@"trigger_device_"] && ![triggerKey hasPrefix:@"trigger_media_"] && ![triggerKey hasPrefix:@"trigger_power_"] && ![triggerKey hasPrefix:@"trigger_carplay_"]) {
+    if (![triggerKey hasPrefix:@"nfc_"] && ![triggerKey hasPrefix:@"wifi_"] && ![triggerKey hasPrefix:@"bt_"] && ![triggerKey hasPrefix:@"app_launch_"] && ![triggerKey hasPrefix:@"app_exit_"] && ![triggerKey hasPrefix:@"output_"] && ![triggerKey hasPrefix:@"notif_"] && ![triggerKey hasPrefix:@"notify_"] && ![triggerKey hasPrefix:@"sched_"] && ![triggerKey hasPrefix:@"mqtt_"] && ![triggerKey hasPrefix:@"mqtt_sub_"] && ![triggerKey hasPrefix:@"trigger_device_"] && ![triggerKey hasPrefix:@"trigger_media_"] && ![triggerKey hasPrefix:@"trigger_power_"] && ![triggerKey hasPrefix:@"trigger_carplay_"] && ![triggerKey hasPrefix:@"trigger_watch_"]) {
         return [UISwipeActionsConfiguration configurationWithActions:@[]];
     }
 

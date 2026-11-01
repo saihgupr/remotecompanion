@@ -94,7 +94,6 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
                              @"volume_both_press", @"volume_up_then_down", @"volume_down_then_up", @"touchid_tap",
                              @"power_volume_up", @"power_volume_down", @"shake",
                              @"trigger_ringer_mute", @"trigger_ringer_unmute", @"trigger_ringer_toggle",
-                             @"trigger_watch_ping", @"trigger_watch_ping_hold",
                              @"trigger_bottombar_swipe_left", @"trigger_bottombar_swipe_right",
                              @"trigger_bottom_swipe_up_left", @"trigger_bottom_swipe_up_center", @"trigger_bottom_swipe_up_right",
                              @"trigger_device_lock", @"trigger_device_unlock",
@@ -154,8 +153,8 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         if (triggers[@"watch_near"]) { [triggers removeObjectForKey:@"watch_near"]; didChange = YES; }
         if (triggers[@"watch_far"]) { [triggers removeObjectForKey:@"watch_far"]; didChange = YES; }
         
-        // Also cleanup unconfigured device state and media triggers so they don't show up in the main list unless created
-        NSArray *deviceStateKeys = @[@"trigger_device_lock", @"trigger_device_unlock", @"trigger_media_play", @"trigger_media_pause", @"trigger_media_track_change"];
+        // Also cleanup unconfigured device state, media, and watch triggers so they don't show up in the main list unless created
+        NSArray *deviceStateKeys = @[@"trigger_device_lock", @"trigger_device_unlock", @"trigger_media_play", @"trigger_media_pause", @"trigger_media_track_change", @"trigger_watch_ping", @"trigger_watch_ping_hold"];
         for (NSString *key in deviceStateKeys) {
             NSDictionary *trig = triggers[key];
             if (trig && (!trig[@"actions"] || [trig[@"actions"] count] == 0)) {
@@ -210,8 +209,6 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
                 @"trigger_ringer_mute": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
                 @"trigger_ringer_unmute": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
                 @"trigger_ringer_toggle": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"trigger_watch_ping": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"trigger_watch_ping_hold": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
                 @"shake": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
                 @"trigger_bottombar_swipe_left": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
                 @"trigger_bottombar_swipe_right": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
