@@ -197,7 +197,8 @@
             @{ @"name": @"Low Power Mode", @"command": @"low power toggle", @"icon": @"battery.25" },
             @{ @"name": @"Auto-Lock", @"command": @"autolock toggle", @"icon": @"timer" },
             @{ @"name": @"NFC Scanner", @"command": @"nfc scanner toggle", @"icon": @"wave.3.right" },
-            @{ @"name": @"Button Triggers", @"command": @"button triggers pause 15", @"icon": @"pause.circle" }
+            @{ @"name": @"Pause Button Triggers", @"command": @"button triggers pause 15", @"icon": @"pause.circle" },
+            @{ @"name": @"Resume Button Triggers", @"command": @"button triggers resume", @"icon": @"play.circle" }
         ],
         // Connectivity
         @[
@@ -616,16 +617,6 @@
         return;
     }
 
-    if ([command isEqualToString:@"__CAMERA_PICKER__"]) {
-        [self handleCameraPicker:NO];
-        return;
-    }
-
-    if ([command isEqualToString:@"__CAMERA_VIDEO_PICKER__"]) {
-        [self handleCameraPicker:YES];
-        return;
-    }
-
     if (self.onActionSelected) {
         self.onActionSelected(command);
     }
@@ -640,51 +631,6 @@
     } else {
         [self dismissViewControllerAnimated:YES completion:nil];
     }
-}
-
-- (void)handleCameraPicker:(BOOL)isVideo {
-    NSDictionary *toggleInfo = [[RCConfigManager sharedManager] toggleInfoForCommand:isVideo ? @"camera video 2x" : @"camera photo"];
-    if (!toggleInfo) return;
-    
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:toggleInfo[@"name"]
-                                                                   message:@"Select desired mode/lens"
-                                                            preferredStyle:UIAlertControllerStyleActionSheet];
-    
-    NSArray *suffixes = toggleInfo[@"suffixes"];
-    NSArray *displaySuffixes = toggleInfo[@"displaySuffixes"];
-    NSString *canonicalPrefix = toggleInfo[@"prefixes"][0];
-    
-    __weak typeof(self) weakSelf = self;
-    for (NSUInteger idx = 0; idx < suffixes.count; idx++) {
-        NSString *suffix = suffixes[idx];
-        NSString *displaySuffix = displaySuffixes[idx];
-        
-        [sheet addAction:[UIAlertAction actionWithTitle:displaySuffix
-                                                  style:UIAlertActionStyleDefault
-                                                handler:^(__unused UIAlertAction * _Nonnull action) {
-            __strong typeof(weakSelf) strongSelf = weakSelf;
-            if (!strongSelf) return;
-            
-            NSString *chosenCmd = [NSString stringWithFormat:@"%@%@", canonicalPrefix, suffix];
-            if (strongSelf.onActionSelected) {
-                strongSelf.onActionSelected(chosenCmd);
-            }
-            if (strongSelf.searchController.isActive) {
-                [strongSelf.searchController dismissViewControllerAnimated:NO completion:^{
-                    [strongSelf dismissViewControllerAnimated:YES completion:nil];
-                }];
-            } else {
-                [strongSelf dismissViewControllerAnimated:YES completion:nil];
-            }
-        }]];
-    }
-    
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    
-    sheet.popoverPresentationController.sourceView = self.view;
-    sheet.popoverPresentationController.sourceRect = CGRectMake(self.view.bounds.size.width/2, self.view.bounds.size.height/2, 1, 1);
-    
-    [self presentViewController:sheet animated:YES completion:nil];
 }
 
 - (void)handleTouchCoordInputWithTitle:(NSString *)title

@@ -1112,10 +1112,10 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         @"nfc scanner resume": @"NFC Scanner Resume",
         @"nfc scanner pause": @"NFC Scanner Pause",
         @"nfc scanner toggle": @"NFC Scanner Toggle",
-        @"button triggers pause 15": @"Button Triggers Pause 15 Minutes",
-        @"button triggers pause 60": @"Button Triggers Pause 1 Hour",
-        @"button triggers pause": @"Button Triggers Pause Until Resumed",
-        @"button triggers resume": @"Button Triggers Resume",
+        @"button triggers pause 15": @"Pause Button Triggers for 15 Minutes",
+        @"button triggers pause 60": @"Pause Button Triggers for 1 Hour",
+        @"button triggers pause": @"Pause Button Triggers Until Resumed",
+        @"button triggers resume": @"Resume Button Triggers",
         @"location status": @"Location Services Status",
         @"gps on": @"Location Services On",
         @"gps off": @"Location Services Off",
@@ -1266,6 +1266,11 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
     };
     
     NSString *result = names[cmd];
+    if (!result && [cmd hasPrefix:@"button triggers pause "]) {
+        // Paused for a time of the user's own ("30", or a variable)
+        NSString *minutes = [originalCmd substringFromIndex:22];
+        result = [NSString stringWithFormat:@"Pause Button Triggers for %@ Minute%@", minutes, [minutes isEqualToString:@"1"] ? @"" : @"s"];
+    }
     
     if (!result) {
         if ([cmd hasPrefix:@"camera"] || [cmd hasPrefix:@"open camera"]) {
@@ -1586,6 +1591,7 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
 
     NSString *cmd = [[(NSString *)cmdId stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString];
     if ([cmd hasPrefix:@"audiohandoff enabled "] || [cmd hasPrefix:@"audiohandoff auto "]) return @"headphones";
+    if ([cmd hasPrefix:@"button triggers pause "]) return @"pause.circle"; // paused for a time of the user's own
     if ([cmd isEqualToString:@"camera record"]) return @"video.circle.fill";
     if ([cmd isEqualToString:@"camera shutter"]) return @"camera.circle.fill";
     if ([cmd hasPrefix:@"camera"] || [cmd hasPrefix:@"open camera"]) {
@@ -1962,13 +1968,13 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
             @"displaySuffixes": @[@"Resume", @"Pause", @"Toggle"]
         },
         @{
-            // No toggle: while paused, a button can't run the resume
+            // No toggle: while paused, a button can't run the resume. Resume is an action of its own.
             @"key": @"buttontriggers",
-            @"name": @"Button Triggers",
+            @"name": @"Pause Button Triggers",
             @"icon": @"pause.circle",
             @"prefixes": @[@"button triggers "],
-            @"suffixes": @[@"pause 15", @"pause 60", @"pause", @"resume"],
-            @"displaySuffixes": @[@"Pause 15 Minutes", @"Pause 1 Hour", @"Pause Until Resumed", @"Resume"]
+            @"suffixes": @[@"pause 15", @"pause 60", @"pause"],
+            @"displaySuffixes": @[@"For 15 Minutes", @"For 1 Hour", @"Until Resumed"]
         },
         @{
             @"key": @"appearance",

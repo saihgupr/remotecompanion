@@ -6,6 +6,7 @@
 #import "RCConditionPickerViewController.h"
 #import "RCTextInputViewController.h"
 #import "RCTimeRangeViewController.h"
+#import "RCChoiceViewController.h"
 #import "RCSetVariableViewController.h"
 #import "RCVariableConditionViewController.h"
 #import "RCNumberSettingViewController.h"
@@ -1558,6 +1559,7 @@ static void RCSetRunWatching(BOOL watching) {
     __weak typeof(self) weakSelf = self;
     BOOL (^staysOpen)(NSString *) = ^BOOL(NSString *action) {
         // Placeholders this screen answers with a screen of its own (Exit Repeat is added as it is)
+        if ([[RCConfigManager sharedManager] toggleInfoForCommand:action]) return YES; // its choices (On / Off / Toggle...)
         return [action hasPrefix:@"__"] && [action hasSuffix:@"__"] && ![action isEqualToString:@"__EXIT_REPEAT__"];
     };
     picker.staysOpenFor = staysOpen;
@@ -1760,6 +1762,13 @@ static void RCSetRunWatching(BOOL watching) {
             });
         } else if ([self levelPrefixForCommand:action]) {
             [self presentLevelActionForCommand:action index:NSNotFound after:0];
+        } else if ([action isEqualToString:@"__CAMERA_PICKER__"] || [action isEqualToString:@"__CAMERA_VIDEO_PICKER__"]) {
+            // Its modes, inside the picker
+            NSString *sample = [action isEqualToString:@"__CAMERA_PICKER__"] ? @"camera photo" : @"camera video 2x";
+            [self presentChoicesFor:[[RCConfigManager sharedManager] toggleInfoForCommand:sample] current:nil index:NSNotFound];
+        } else if ([[RCConfigManager sharedManager] toggleInfoForCommand:action]) {
+            // Its choices, inside the picker: Back returns to the actions there
+            [self presentChoicesFor:[[RCConfigManager sharedManager] toggleInfoForCommand:action] current:action index:NSNotFound];
         } else {
             [self.actions addObject:action];
             [self saveActions];
@@ -2602,6 +2611,22 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     return depth > 0;
 }
 
+// An action's choices: pushed into the picker while adding (index NSNotFound), or on their own
+// screen when editing the action at index
+- (void)presentChoicesFor:(NSDictionary *)info current:(NSString *)current index:(NSInteger)index {
+    RCChoiceViewController *choices = [[RCChoiceViewController alloc] initWithToggleInfo:info current:current otherActions:self.actions];
+    choices.saveTitle = index == NSNotFound ? @"Add" : @"Save";
+    __weak typeof(self) weakSelf = self;
+    choices.onPick = ^(NSString *command) {
+        [weakSelf storeCommand:command atIndex:index];
+    };
+    if (index == NSNotFound) {
+        [[self flowNavigationController] pushViewController:choices animated:YES];
+        return;
+    }
+    [self presentNumberSetting:(id)choices after:0];
+}
+
 // Puts a command at index (keeping any settings around it), or adds it at the end
 - (void)storeCommand:(NSString *)command atIndex:(NSInteger)index {
     if (index != NSNotFound && index >= 0 && index < (NSInteger)self.actions.count) {
@@ -3078,59 +3103,11 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     }
     
     NSString *currentAction = (NSString *)actionData;
+    // An action with a few settings (Wi-Fi On / Off / Toggle, Auto-Lock times...): its choices
     NSDictionary *toggleInfo = [[RCConfigManager sharedManager] toggleInfoForCommand:currentAction];
-    
+    if (!toggleInfo && [RCChoiceViewController isTimedPauseCommand:currentAction]) toggleInfo = [[RCConfigManager sharedManager] toggleInfoForCommand:@"button triggers pause"];
     if (toggleInfo) {
-        UIAlertController *picker = [UIAlertController alertControllerWithTitle:toggleInfo[@"name"]
-                                                                         message:@"Select desired state"
-                                                                  preferredStyle:UIAlertControllerStyleActionSheet];
-        
-        NSArray *suffixes = toggleInfo[@"suffixes"];
-        NSArray *displaySuffixes = toggleInfo[@"displaySuffixes"];
-        NSString *matchedPrefix = toggleInfo[@"matchedPrefix"];
-        NSArray *prefixes = toggleInfo[@"prefixes"];
-        NSString *canonicalPrefix = (matchedPrefix.length > 0) ? matchedPrefix : (prefixes.firstObject ?: @"");
-        
-        __weak typeof(self) weakSelf = self;
-        for (NSUInteger idx = 0; idx < suffixes.count; idx++) {
-            NSString *suffix = suffixes[idx];
-            NSString *displaySuffix = displaySuffixes[idx];
-            
-            [picker addAction:[UIAlertAction actionWithTitle:displaySuffix
-                                                      style:UIAlertActionStyleDefault
-                                                    handler:^(__unused UIAlertAction * _Nonnull action) {
-                __strong typeof(weakSelf) strongSelf = weakSelf;
-                if (!strongSelf) return;
-                
-                NSString *newCommand = [NSString stringWithFormat:@"%@%@", canonicalPrefix, suffix];
-                if (matchedPrefix.length == 0 && [toggleInfo[@"key"] isEqualToString:@"audiomix"] && [suffix isEqualToString:@"toggle"]) {
-                    newCommand = @"audiomix";
-                }
-                
-                if ([strongSelf.actions[indexPath.row] isKindOfClass:[NSDictionary class]]) {
-                    NSMutableDictionary *d = [strongSelf.actions[indexPath.row] mutableCopy];
-                    d[@"command"] = newCommand;
-                    strongSelf.actions[indexPath.row] = d;
-                } else {
-                    strongSelf.actions[indexPath.row] = newCommand;
-                }
-                [strongSelf saveActions];
-                [strongSelf.tableView reloadData];
-            }]];
-        }
-        
-        [picker addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-        
-        picker.popoverPresentationController.sourceView = self.view;
-        UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
-        if (cell) {
-            picker.popoverPresentationController.sourceRect = cell.bounds;
-            picker.popoverPresentationController.sourceView = cell;
-        } else {
-            picker.popoverPresentationController.sourceRect = CGRectMake(self.view.bounds.size.width/2, self.view.bounds.size.height/2, 1, 1);
-        }
-        
-        [self presentViewController:picker animated:YES completion:nil];
+        [self presentChoicesFor:toggleInfo current:currentAction index:indexPath.row];
         return;
     }
     
