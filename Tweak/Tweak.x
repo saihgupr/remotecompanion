@@ -2291,15 +2291,24 @@ static void rc_watch_ping_received(CFNotificationCenterRef center, void *observe
 NSString *RCNFCScannerCommand(NSString *what);
 
 // Find My Sound trigger: Play Sound from Find My on another device or iCloud.com (see
-// RCFindMyPing.m, loaded into findmydeviced). The sound still plays. The daemon's sandbox keeps it
-// from posting notifications, so it writes a line to a file ("ready <count>", "ping <method>"),
-// and this watches the file: nothing runs until it changes.
-#define kRCFindMySignal "/var/mobile/tmp/rc_findmy_signal"
-static dispatch_source_t g_findMySource = nil;
+// RCFindMyPing.m, loaded into findmydeviced). The daemon's sandbox keeps it from posting
+// notifications, so it writes a line to a file ("ready <count>", "ping <method>"), and this watches
+// the file: nothing runs until it changes. The folder it may write differs (/var/mobile/tmp on
+// iOS 17, /var/tmp on iOS 14), so both are used.
+static NSArray<NSString *> *rc_findmy_folders(void) {
+    return @[@"/var/mobile/tmp", @"/var/tmp"];
+}
 
-static void rc_findmy_signal_changed(void) {
-    NSString *line = [[NSString stringWithContentsOfFile:@kRCFindMySignal encoding:NSUTF8StringEncoding error:nil]
+static void rc_findmy_signal_changed(NSString *path) {
+    NSString *line = [[NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil]
                       stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    // One write can be heard twice (iOS 14): each signal ends with its time, so a line already
+    // acted on is skipped
+    static NSString *lastLine = nil;
+    if (!line.length || [line isEqualToString:lastLine]) return;
+    lastLine = line;
+    NSRange stamp = [line rangeOfString:@" @" options:NSBackwardsSearch];
+    if (stamp.location != NSNotFound) line = [line substringToIndex:stamp.location];
     if ([line hasPrefix:@"ready "]) {
         SRLogMin(@"[FindMy] findmydeviced loaded: watching %@ methods for Play Sound", [line substringFromIndex:6]);
     } else if ([line hasPrefix:@"ping "]) {
@@ -2310,7 +2319,6 @@ static void rc_findmy_signal_changed(void) {
 
 // Tells the daemon whether a Play Sound should be silent: the trigger has actions and its Keep
 // Default Action is switched off (it's on unless set otherwise)
-#define kRCFindMyQuiet "/var/mobile/tmp/rc_findmy_quiet"
 static void RCFindMyConfigChanged(void) {
     BOOL quiet = NO;
     if (RC_MasterEnabled()) {
@@ -2322,26 +2330,37 @@ static void RCFindMyConfigChanged(void) {
             quiet = (keep && ![keep boolValue]) && [actions isKindOfClass:[NSArray class]] && actions.count > 0;
         }
     }
-    int fd = open(kRCFindMyQuiet, O_WRONLY | O_TRUNC | O_CREAT, 0666);
-    if (fd < 0) return;
-    fchmod(fd, 0666);
-    write(fd, quiet ? "1" : "0", 1);
-    close(fd);
+    for (NSString *folder in rc_findmy_folders()) {
+        mkdir(folder.fileSystemRepresentation, 0755); // iOS 14 has no /var/mobile/tmp until something makes it
+        int fd = open([folder stringByAppendingPathComponent:@"rc_findmy_quiet"].fileSystemRepresentation, O_WRONLY | O_TRUNC | O_CREAT, 0666);
+        if (fd < 0) continue;
+        fchmod(fd, 0666);
+        write(fd, quiet ? "1" : "0", 1);
+        close(fd);
+    }
 }
 
+static NSMutableArray *g_findMySources = nil;
+
 static void rc_findmy_start_watching(void) {
-    // The file must already exist to be watched; the daemon only rewrites it
-    int fd = open(kRCFindMySignal, O_RDONLY | O_CREAT, 0666);
-    if (fd < 0) {
-        SRLogMin(@"[FindMy] Can't watch %s - no Find My Sound trigger", kRCFindMySignal);
-        return;
+    g_findMySources = [NSMutableArray array];
+    for (NSString *folder in rc_findmy_folders()) {
+        // The file must already exist to be watched; the daemon only rewrites it
+        mkdir(folder.fileSystemRepresentation, 0755);
+        NSString *path = [folder stringByAppendingPathComponent:@"rc_findmy_signal"];
+        int fd = open(path.fileSystemRepresentation, O_RDONLY | O_CREAT, 0666);
+        if (fd < 0) {
+            SRLogMin(@"[FindMy] Can't watch %@", path);
+            continue;
+        }
+        fchmod(fd, 0666);
+        dispatch_source_t source = dispatch_source_create(DISPATCH_SOURCE_TYPE_VNODE, (uintptr_t)fd,
+                                                          DISPATCH_VNODE_WRITE | DISPATCH_VNODE_EXTEND, dispatch_get_main_queue());
+        dispatch_source_set_event_handler(source, ^{ rc_findmy_signal_changed(path); });
+        dispatch_source_set_cancel_handler(source, ^{ close(fd); });
+        dispatch_resume(source);
+        [g_findMySources addObject:source];
     }
-    fchmod(fd, 0666);
-    g_findMySource = dispatch_source_create(DISPATCH_SOURCE_TYPE_VNODE, (uintptr_t)fd,
-                                            DISPATCH_VNODE_WRITE | DISPATCH_VNODE_EXTEND, dispatch_get_main_queue());
-    dispatch_source_set_event_handler(g_findMySource, ^{ rc_findmy_signal_changed(); });
-    dispatch_source_set_cancel_handler(g_findMySource, ^{ close(fd); });
-    dispatch_resume(g_findMySource);
 }
 
 static void config_changed_callback(CFNotificationCenterRef center, void *observer,
