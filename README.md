@@ -35,7 +35,6 @@ RemoteCompanion provides fast, scriptable system control for modern rootless jai
 - **Universal Search**: Instantly find actions, shortcuts, and devices with integrated search bars in every picker.
 - **Cross-Version Support**: Supports iOS 14 through iOS 17, with partial iOS 26 support, across Rootless, Rootful, and RootHide environments.
 - **Advanced Automation**: Full support for NFC tags, custom Lua scripts (with `objc_call` support), and native Siri integration.
-- **AI-Assisted Scripting**: Use any AI assistant to generate action sequences from plain English — see [SCRIPTING.md](SCRIPTING.md).
 - **iPad Experience**: Native landscape orientation and optimized layouts for iPad power users.
 - **Live Discovery**: Discovery-based live lists for nearby AirPlay and Bluetooth hardware.
 - **Trigger Favorites**: Mark any trigger as a favorite for instant access at the top of the picker.
@@ -447,11 +446,11 @@ end
 </details>
 
 <details>
-<summary><b>AI-Assisted Sequence Builder</b></summary>
+<summary><b>Assistant Sequence Builder</b></summary>
 
-Use any AI assistant (ChatGPT, Claude, Gemini, etc.) to build action sequences from plain English, then paste the result directly into the app using **Import**.
+Build custom action sequences, then paste the result directly into the app using **Import**.
 
-**[→ Full guide + copy-paste AI prompt: SCRIPTING.md](SCRIPTING.md)**
+**[→ Full guide](SCRIPTING.md)**
 
 Example prompt:
 ```
