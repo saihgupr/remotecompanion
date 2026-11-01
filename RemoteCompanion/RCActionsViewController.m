@@ -7,6 +7,7 @@
 #import "RCTextInputViewController.h"
 #import "RCServerClient.h"
 #import "RCRunningViewController.h"
+#import "RCRunHistoryViewController.h"
 #import "RCScheduledTriggerViewController.h"
 #import "RCNotificationTriggerViewController.h"
 #import "RCWiFiTriggerViewController.h"
@@ -943,7 +944,8 @@ static id g_actionClipboard = nil;
     [self setRunMode:@"restart"];
 }
 
-- (UIMenu *)moreMenu {
+// When Triggered Again: in the ••• menu, and on the banner above the sequence
+- (UIMenu *)runModeMenu {
     __weak typeof(self) weakSelf = self;
     NSMutableArray *modes = [NSMutableArray array];
     NSString *current = [self runMode];
@@ -955,9 +957,12 @@ static id g_actionClipboard = nil;
         action.state = [current isEqualToString:choice[0]] ? UIMenuElementStateOn : UIMenuElementStateOff;
         [modes addObject:action];
     }
-    UIMenu *whenFired = [UIMenu menuWithTitle:@"When Triggered Again" image:[UIImage systemImageNamed:@"repeat"] identifier:nil options:0 children:modes];
+    return [UIMenu menuWithTitle:@"When Triggered Again" image:[UIImage systemImageNamed:@"repeat"] identifier:nil options:0 children:modes];
+}
 
-    NSMutableArray *menuActions = [NSMutableArray arrayWithObject:whenFired];
+- (UIMenu *)moreMenu {
+    __weak typeof(self) weakSelf = self;
+    NSMutableArray *menuActions = [NSMutableArray arrayWithObject:[self runModeMenu]];
     // Triggers that take over what iOS normally does can keep it as well: the ping sound, and with a
     // Home button the Accessibility Shortcut, App Switcher, Siri and screenshot, otherwise Siri, the
     // Accessibility Shortcut, a screenshot and Wallet
@@ -972,6 +977,9 @@ static id g_actionClipboard = nil;
         sound.state = keep ? UIMenuElementStateOn : UIMenuElementStateOff;
         [menuActions addObject:sound];
     }
+    [menuActions addObject:[UIAction actionWithTitle:@"Run History" image:[UIImage systemImageNamed:@"clock.arrow.circlepath"] identifier:nil handler:^(__unused UIAction *a) {
+        [weakSelf.navigationController pushViewController:[[RCRunHistoryViewController alloc] initWithTriggerKey:weakSelf.triggerKey] animated:YES];
+    }]];
     [menuActions addObject:[UIAction actionWithTitle:@"Import Actions" image:[UIImage systemImageNamed:@"square.and.arrow.down"] identifier:nil handler:^(__kindof UIAction *a) {
         [weakSelf importActions];
     }]];
@@ -3840,13 +3848,27 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     NSString *mode = [self runMode];
     if ([mode isEqualToString:@"restart"]) return @"If triggered again while running, this sequence will start over.";
     if ([mode isEqualToString:@"single"]) return @"If triggered again while running, the new trigger will be ignored.";
+    // Run Alongside, the default: shown only where a run lasts long enough for it to matter
+    if ([self sequenceTakesTime]) return @"If triggered again while running, another run will start alongside.";
     return nil;
+}
+
+// Whether a run can last a while: a delay, a loop or a Wait Until
+- (BOOL)sequenceTakesTime {
+    for (id item in _actions) {
+        if ([item isKindOfClass:[NSString class]] && [[(NSString *)item lowercaseString] hasPrefix:@"delay "]) return YES;
+        if ([item isKindOfClass:[NSDictionary class]]) {
+            NSString *type = [item[@"type"] isKindOfClass:[NSString class]] ? item[@"type"] : @"";
+            if ([@[@"repeat", @"repeat_while", @"wait_until"] containsObject:type]) return YES;
+        }
+    }
+    return NO;
 }
 
 - (CGFloat)runModeBannerHeightForWidth:(CGFloat)width {
     NSString *text = [self runModeBannerText];
     if (!text) return 0;
-    CGFloat textWidth = width - self.tableView.layoutMargins.left - self.tableView.layoutMargins.right - 56; // margins, icon, padding
+    CGFloat textWidth = width - self.tableView.layoutMargins.left - self.tableView.layoutMargins.right - 78; // margins, icon, chevron, padding
     CGRect bounds = [text boundingRectWithSize:CGSizeMake(textWidth, CGFLOAT_MAX) options:NSStringDrawingUsesLineFragmentOrigin
                                     attributes:@{ NSFontAttributeName: [UIFont systemFontOfSize:13] } context:nil];
     return MAX(40, ceil(bounds.size.height) + 20);
@@ -3866,17 +3888,34 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     if (bannerHeight > 0) {
         // Lined up with the action cards (the table's margins), and kept so as the header is resized
         CGFloat left = tableView.layoutMargins.left, right = tableView.layoutMargins.right;
-        UIView *banner = [[UIView alloc] initWithFrame:CGRectMake(left, 10 + stripHeight, width - left - right, bannerHeight)];
+        // Tapping it changes When Triggered Again, as the ••• menu does
+        UIButton *banner = [UIButton buttonWithType:UIButtonTypeCustom];
+        banner.frame = CGRectMake(left, 10 + stripHeight, width - left - right, bannerHeight);
         banner.autoresizingMask = UIViewAutoresizingFlexibleWidth;
         banner.backgroundColor = [UIColor tertiarySystemFillColor];
         banner.layer.cornerRadius = 10;
-        BOOL restart = [[self runMode] isEqualToString:@"restart"];
-        UIImageView *icon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:restart ? @"arrow.counterclockwise" : @"nosign"]];
+        banner.menu = [self runModeMenu];
+        banner.showsMenuAsPrimaryAction = YES;
+        banner.enabled = ![self runShown]; // the debugger view is read-only
+        banner.accessibilityLabel = [self runModeBannerText];
+        banner.accessibilityHint = @"Changes what happens when triggered again";
+        UIImageView *chevron = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"chevron.up.chevron.down" withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:12 weight:UIImageSymbolWeightSemibold]]];
+        chevron.tintColor = [UIColor tertiaryLabelColor];
+        chevron.contentMode = UIViewContentModeCenter;
+        chevron.frame = CGRectMake(banner.bounds.size.width - 30, 0, 20, bannerHeight);
+        chevron.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
+        chevron.userInteractionEnabled = NO;
+        chevron.hidden = [self runShown];
+        [banner addSubview:chevron];
+        NSString *mode = [self runMode];
+        NSString *iconName = [mode isEqualToString:@"restart"] ? @"arrow.counterclockwise" : [mode isEqualToString:@"single"] ? @"nosign" : @"square.stack";
+        UIImageView *icon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:iconName]];
         icon.tintColor = [UIColor secondaryLabelColor];
         icon.contentMode = UIViewContentModeCenter;
         icon.frame = CGRectMake(12, 0, 22, bannerHeight);
+        icon.userInteractionEnabled = NO;
         [banner addSubview:icon];
-        UILabel *text = [[UILabel alloc] initWithFrame:CGRectMake(44, 0, banner.bounds.size.width - 56, bannerHeight)];
+        UILabel *text = [[UILabel alloc] initWithFrame:CGRectMake(44, 0, banner.bounds.size.width - 78, bannerHeight)];
         text.text = [self runModeBannerText];
         text.font = [UIFont systemFontOfSize:13];
         text.textColor = [UIColor secondaryLabelColor];
@@ -4182,6 +4221,12 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         contextualActionWithStyle:UIContextualActionStyleDestructive
         title:isBlockDelete ? @"Delete Block" : @"Delete"
         handler:^(UIContextualAction * _Nonnull action, __kindof UIView * _Nonnull sourceView, void (^ _Nonnull completionHandler)(BOOL)) {
+            // A block with actions in it: delete them too, or keep them where they are
+            NSInteger inside = isBlockDelete ? [self actionCountInsideBlockRange:rangeToDelete] : 0;
+            if (inside > 0 && NSMaxRange(rangeToDelete) <= self.actions.count) {
+                [self confirmDeleteBlockRange:rangeToDelete actionCount:inside from:sourceView completion:completionHandler];
+                return;
+            }
             if (rangeToDelete.location != NSNotFound && rangeToDelete.length > 0 && NSMaxRange(rangeToDelete) <= self.actions.count) {
                 [self.actions removeObjectsInRange:rangeToDelete];
             } else if (indexPath.row < self.actions.count) {
@@ -4194,6 +4239,62 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 
     deleteAction.image = [UIImage systemImageNamed:@"trash.fill"];
     return [UISwipeActionsConfiguration configurationWithActions:@[deleteAction]];
+}
+
+// The actions inside a block (nested blocks' rows counted as theirs), not its Else and Else If rows
+- (NSInteger)actionCountInsideBlockRange:(NSRange)range {
+    NSInteger count = 0;
+    for (NSUInteger i = range.location + 1; i + 1 < NSMaxRange(range); i++) {
+        id item = self.actions[i];
+        if ([self isElseActionItem:item] || [self isElseIfActionItem:item] || [self isBlockEndItem:item]) continue;
+        count++;
+    }
+    return count;
+}
+
+- (void)confirmDeleteBlockRange:(NSRange)range actionCount:(NSInteger)count from:(UIView *)sourceView completion:(void (^)(BOOL))completion {
+    NSString *message = count == 1 ? @"This block contains 1 action." : [NSString stringWithFormat:@"This block contains %ld actions.", (long)count];
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Delete Block" message:message preferredStyle:UIAlertControllerStyleActionSheet];
+    __weak typeof(self) weakSelf = self;
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Keep Actions" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
+        [weakSelf unwrapBlockRange:range];
+        completion(YES);
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Delete All" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *a) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (strongSelf && NSMaxRange(range) <= strongSelf.actions.count) {
+            [strongSelf.actions removeObjectsInRange:range];
+            [strongSelf saveActions];
+            [strongSelf.tableView reloadData];
+        }
+        completion(YES);
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(__unused UIAlertAction *a) {
+        completion(NO);
+    }]];
+    if (sheet.popoverPresentationController) {
+        sheet.popoverPresentationController.sourceView = sourceView ?: self.view;
+        sheet.popoverPresentationController.sourceRect = sourceView ? sourceView.bounds : CGRectMake(CGRectGetMidX(self.view.bounds), CGRectGetMidY(self.view.bounds), 1, 1);
+    }
+    [self presentViewController:sheet animated:YES completion:nil];
+}
+
+// Keep Actions: the block's own rows go (its start, its end, and its Else and Else If rows), and
+// everything inside stays in order, nested blocks included
+- (void)unwrapBlockRange:(NSRange)range {
+    if (NSMaxRange(range) > self.actions.count || range.length < 2) return;
+    NSMutableIndexSet *remove = [NSMutableIndexSet indexSetWithIndex:range.location];
+    [remove addIndex:NSMaxRange(range) - 1];
+    NSInteger depth = 0;
+    for (NSUInteger i = range.location + 1; i + 1 < NSMaxRange(range); i++) {
+        id item = self.actions[i];
+        if ([self isBlockStartItem:item]) depth++;
+        else if ([self isBlockEndItem:item]) depth--;
+        else if (depth == 0 && ([self isElseActionItem:item] || [self isElseIfActionItem:item])) [remove addIndex:i];
+    }
+    [self.actions removeObjectsAtIndexes:remove];
+    [self saveActions];
+    [self.tableView reloadData];
 }
 
 // Reordering (legacy but kept for logic reference, though drag/drop is primary now)

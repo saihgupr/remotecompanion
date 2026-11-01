@@ -382,6 +382,16 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
     return [_config[@"nfcEnabled"] boolValue];
 }
 
+- (NSInteger)runHistoryCount {
+    id count = _config[@"runHistoryCount"];
+    return count ? [count integerValue] : 10;
+}
+
+- (void)setRunHistoryCount:(NSInteger)count {
+    _config[@"runHistoryCount"] = @(MAX(0, MIN(100, count)));
+    [self saveConfig];
+}
+
 - (BOOL)nfcBackgroundReading {
     return [RCConfigManager nfcBackgroundReadingSupported] && [_config[@"nfcBackgroundReading"] boolValue];
 }

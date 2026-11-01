@@ -283,7 +283,8 @@
         NSArray *runs = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
         BOOL any = [runs isKindOfClass:[NSArray class]] && runs.count > 0;
         dispatch_async(dispatch_get_main_queue(), ^{
-            weakSelf.runningItem.tintColor = any ? [UIColor systemGreenColor] : nil;
+            // Set outright, not left to the bar: nil could leave it a dimmed grey that still opens the page
+            weakSelf.runningItem.tintColor = any ? [UIColor systemGreenColor] : [UIColor labelColor];
         });
     }];
 }

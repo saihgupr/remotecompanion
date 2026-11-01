@@ -1697,6 +1697,9 @@
     </div>
     <div class="rc-navbar-center" id="navbar-small-title">RemoteCompanion</div>
     <div class="rc-navbar-right">
+      <button class="nav-btn" id="nav-running-btn" onclick="openRunning()" title="Running">
+        <i class="f7-icons">list_bullet</i>
+      </button>
       <button class="nav-btn" id="nav-logs-btn" onclick="toggleLogPanel()" title="Live System Logs">
         <i class="f7-icons">list_dash</i>
       </button>
@@ -1791,6 +1794,21 @@
 </div>
 
 <!-- ══ CONDITION PICKER DIALOG ═════════════════════════════════════════════ -->
+<!-- Running: the triggers running now, like a task manager -->
+<div class="dialog-backdrop" id="running-dialog-backdrop" onclick="if (event.target === this) closeRunning()">
+  <div class="dialog-box app-launch-dialog" style="max-width: 480px; width: 90%;">
+    <div class="dialog-title">Running</div>
+    <div class="dialog-msg" style="text-align:center;padding:0 16px 6px">Stop ends that run, even during a wait or a loop.</div>
+    <div style="padding:0 14px 10px; display:flex; flex-direction:column; flex:1; min-height:0;">
+      <div class="app-picker-list" id="running-content" style="max-height: 52vh; max-height: 52dvh; overflow-y: auto;"></div>
+    </div>
+    <div class="dialog-btns">
+      <button onclick="stopAllRuns()" id="running-stop-all" style="color:#ff453a">Stop All</button>
+      <button onclick="closeRunning()">Done</button>
+    </div>
+  </div>
+</div>
+
 <div class="dialog-backdrop" id="cond-picker-dialog-backdrop" onclick="_condPickerBackdropClick(event)">
   <div class="dialog-box app-launch-dialog" style="max-width: 480px; width: 90%;">
     <div class="dialog-title">Select Condition</div>
@@ -2952,6 +2970,180 @@ function iconForKey(key) {
   if (key.startsWith('mqtt_sub_') || key.startsWith('mqtt_')) return { icon:'antenna_radiowaves_left_right', cls:'icon-blue' };
   return { icon:'hand_tap', cls:'icon-gray' };
 }
+
+// ── Running ───────────────────────────────────────────────────────────────
+// The runs going: the navbar button turns green while there are any (checked every few seconds
+// while this page is visible); the Running sheet lists them with the step each is on, refreshed
+// every second while it's open.
+let runningRuns = [];
+let runningTimer = null;
+
+async function fetchRunning() {
+  try {
+    const res = await fetch('/api/running', { cache: 'no-store' });
+    if (!res.ok) return null;
+    const runs = await res.json();
+    return Array.isArray(runs) ? runs : [];
+  } catch (e) { return null; }
+}
+
+function runElapsedText(seconds) {
+  const s = Math.floor(seconds || 0);
+  if (s < 60) return `${s} s`;
+  if (s < 3600) return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  return `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+}
+
+function runStepText(run) {
+  let text = run.step ? nameForCmd(run.step) : 'Starting';
+  const loop = run.loop;
+  if (loop && loop.repeat) {
+    const count = parseInt(loop.repeat.count, 10) || 0;
+    const round = count > 0 ? `Round ${loop.round} of ${count}` : `Round ${loop.round}`;
+    const onRepeat = typeof run.step === 'object' && JSON.stringify(run.step) === JSON.stringify(loop.repeat);
+    text = onRepeat ? `${nameForCmd(loop.repeat)} · ${round}` : `${text} · ${round}`;
+  }
+  return text;
+}
+
+function updateRunningButton(runs) {
+  const btn = document.getElementById('nav-running-btn');
+  if (btn) btn.style.color = (runs && runs.length) ? '#30d158' : '';
+}
+
+// The last runs that ended, from Run History: fetched on opening and when a run starts or ends
+let recentRuns = [];
+let recentRunCount = -1;
+
+async function refreshRecent() {
+  try {
+    const res = await fetch('/api/history', { cache: 'no-store' });
+    if (!res.ok) return;
+    const runs = await res.json();
+    recentRuns = Array.isArray(runs) ? runs : [];
+  } catch (e) {}
+  renderRunning();
+}
+
+function runWhenText(started) {
+  const d = new Date((started || 0) * 1000);
+  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+  const today = new Date();
+  if (d.toDateString() === today.toDateString()) return `Today ${time}`;
+  const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return `Yesterday ${time}`;
+  return d.toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
+}
+
+function runDurationText(seconds) {
+  const s = seconds || 0;
+  return s < 10 ? `${s.toFixed(1)} s` : runElapsedText(Math.round(s));
+}
+
+function renderRecent(box) {
+  if (!recentRuns.length) return;
+  const head = document.createElement('div');
+  head.style.cssText = 'padding:14px 4px 6px;font-size:13px;font-weight:600;color:#8e8e93;text-transform:uppercase';
+  head.textContent = 'Recent';
+  box.appendChild(head);
+  recentRuns.forEach(run => {
+    const stopped = run.outcome === 'stopped';
+    const row = document.createElement('div');
+    row.className = 'app-picker-row';
+    row.style.cursor = 'default';
+    row.innerHTML = `
+      <div class="app-picker-row-inner" style="display:flex; align-items:center; gap:10px;">
+        <i class="f7-icons" style="font-size:22px;flex-shrink:0;color:${stopped ? '#ff9f0a' : '#30d158'}">${stopped ? 'stop_circle' : 'checkmark_circle'}</i>
+        <div style="min-width:0; flex:1;">
+          <div class="app-picker-name">${escHtml(nameForKey(run.key || ''))}</div>
+          <div class="app-picker-bid">${escHtml(runWhenText(run.started))} · ${runDurationText(run.seconds)} · ${run.test ? 'Test · ' : ''}${stopped ? 'Stopped' : 'Finished'}</div>
+        </div>
+      </div>
+    `;
+    box.appendChild(row);
+  });
+}
+
+function renderRunning() {
+  const box = document.getElementById('running-content');
+  if (!box) return;
+  document.getElementById('running-stop-all').disabled = !runningRuns.length;
+  if (!runningRuns.length) {
+    box.innerHTML = '<div style="padding:22px 16px;color:#8e8e93;text-align:center">No triggers are running</div>';
+    renderRecent(box);
+    return;
+  }
+  box.innerHTML = '';
+  runningRuns.forEach(run => {
+    const row = document.createElement('div');
+    row.className = 'app-picker-row';
+    row.style.cursor = 'default';
+    const { icon, cls } = iconForKey(run.key);
+    row.innerHTML = `
+      <div class="app-picker-row-inner" style="display:flex; align-items:center; gap:10px;">
+        <div class="row-icon ${cls}" style="flex-shrink:0"><i class="f7-icons">${icon}</i></div>
+        <div style="min-width:0; flex:1;">
+          <div class="app-picker-name">${escHtml(nameForKey(run.key))}</div>
+          <div class="app-picker-bid">${run.test ? 'Test · ' : ''}${runElapsedText(run.seconds)} · ${escHtml(runStepText(run))}</div>
+        </div>
+      </div>
+      <button class="nav-btn" title="Stop" style="color:#ff453a;flex-shrink:0"><i class="f7-icons" style="font-size:22px">stop_circle_fill</i></button>
+    `;
+    row.querySelector('button').onclick = () => stopRun(run.id);
+    box.appendChild(row);
+  });
+  renderRecent(box);
+}
+
+async function refreshRunning() {
+  const runs = await fetchRunning();
+  if (runs === null) return;
+  runningRuns = runs;
+  updateRunningButton(runs);
+  renderRunning();
+  // A run started or ended: Recent may have a new one
+  if (runs.length !== recentRunCount) {
+    recentRunCount = runs.length;
+    refreshRecent();
+  }
+}
+
+function openRunning() {
+  runningRuns = [];
+  recentRunCount = -1;
+  renderRunning();
+  document.getElementById('running-dialog-backdrop').classList.add('visible');
+  refreshRunning();
+  clearInterval(runningTimer);
+  runningTimer = setInterval(refreshRunning, 1000);
+}
+
+function closeRunning() {
+  clearInterval(runningTimer);
+  runningTimer = null;
+  document.getElementById('running-dialog-backdrop').classList.remove('visible');
+}
+
+async function stopRun(id) {
+  if (!id) return;
+  try { await fetch(`/api/command?cmd=${encodeURIComponent('stop run ' + id)}`, { method: 'POST' }); } catch (e) {}
+  refreshRunning();
+}
+
+async function stopAllRuns() {
+  const keys = [...new Set(runningRuns.map(r => r.key))];
+  for (const key of keys) {
+    try { await fetch(`/api/command?cmd=${encodeURIComponent('stop trigger ' + key)}`, { method: 'POST' }); } catch (e) {}
+  }
+  refreshRunning();
+}
+
+// The navbar button's colour, every 3 s while the page is visible and the sheet is closed
+setInterval(async () => {
+  if (document.hidden || runningTimer) return;
+  const runs = await fetchRunning();
+  if (runs !== null) updateRunningButton(runs);
+}, 3000);
 
 function nameForKey(key) {
   if (TRIGGER_NAMES[key]) return TRIGGER_NAMES[key];
