@@ -19,6 +19,8 @@
 // -layoutInScrollView: from viewDidLayoutSubviews (the table's size and insets aren't
 // known yet when the bar is attached, and change with rotation / the large title).
 - (void)attachToTableView:(UITableView *)tableView;
+// The same for any scroll view, such as a collection view
+- (void)attachToScrollView:(UIScrollView *)scrollView;
 - (void)scrollViewDidScroll:(UIScrollView *)scrollView;
 - (void)layoutInScrollView:(UIScrollView *)scrollView;
 

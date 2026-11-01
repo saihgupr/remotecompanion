@@ -72,9 +72,13 @@
 #pragma mark - Floating
 
 - (void)attachToTableView:(UITableView *)tableView {
-    CGFloat height = [RCCategoryBar barHeight];
     // Keeps the first section header's own spacing (no default table header gap)
     tableView.tableHeaderView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 0, CGFLOAT_MIN)];
+    [self attachToScrollView:tableView];
+}
+
+- (void)attachToScrollView:(UIScrollView *)tableView {
+    CGFloat height = [RCCategoryBar barHeight];
     BOOL atTop = (tableView.contentOffset.y + tableView.adjustedContentInset.top) <= 0.5;
     UIEdgeInsets inset = tableView.contentInset;
     inset.top += height;

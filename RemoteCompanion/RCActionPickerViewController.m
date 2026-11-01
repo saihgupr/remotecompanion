@@ -7,8 +7,9 @@
 #import "RCKMMacroPickerViewController.h"
 #import "RCCategoryBar.h"
 #import "RCSSHActionEditorViewController.h"
+#import "RCActionTile.h"
 
-@interface RCActionPickerViewController () <UISearchResultsUpdating>
+@interface RCActionPickerViewController () <UISearchResultsUpdating, UICollectionViewDelegateFlowLayout>
 @property (nonatomic, strong) NSArray<NSString *> *sectionTitles;
 @property (nonatomic, strong) NSArray<NSArray<NSDictionary *> *> *sections;
 @property (nonatomic, strong) NSArray<NSDictionary *> *filteredActions;
@@ -39,7 +40,7 @@
 }
 
 - (instancetype)init {
-    self = [super initWithStyle:UITableViewStyleInsetGrouped];
+    self = [super initWithCollectionViewLayout:RCActionGridLayout()];
     if (self) _selectedCategory = -1;
     return self;
 }
@@ -68,12 +69,9 @@
     // Category bar floating below the search bar
     [self rebuildSections];
     self.categoryBar = [self makeCategoryBar];
-    [self.categoryBar attachToTableView:self.tableView];
-    if (@available(iOS 15.0, *)) {
-        // Spacing above headers is built into the header views instead (see
-        // heightForHeaderInSection:), so the first one can sit close to the category bar
-        self.tableView.sectionHeaderTopPadding = 0;
-    }
+    self.collectionView.alwaysBounceVertical = YES;
+    self.collectionView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
+    [self.categoryBar attachToScrollView:self.collectionView];
     
     // Use proper Cancel button style
     self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc]
@@ -92,8 +90,8 @@
     
     [self rebuildSections];
     
-    [self.tableView registerClass:[UITableViewCell class] forCellReuseIdentifier:@"ActionCell"];
-    self.tableView.rowHeight = 60; // Increased touch target
+    [self.collectionView registerClass:[RCActionTileCell class] forCellWithReuseIdentifier:@"ActionTile"];
+    [self.collectionView registerClass:[RCActionGridHeader class] forSupplementaryViewOfKind:UICollectionElementKindSectionHeader withReuseIdentifier:@"Header"];
     
     [self applyTweaks];
 }
@@ -101,7 +99,7 @@
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     [self rebuildSections];
-    [self.tableView reloadData];
+    [self.collectionView reloadData];
 }
 
 - (void)rebuildSections {
@@ -377,10 +375,9 @@
     CGFloat mainBG = [cm tweakValueForKey:@"mainBackground" defaultVal:0.09];
     UIColor *pickerBG = [cm tweakColorForKey:@"actionPickerBackground" defaultVal:mainBG];
     self.view.backgroundColor = pickerBG;
-    self.tableView.backgroundColor = pickerBG;
+    self.collectionView.backgroundColor = pickerBG;
     self.navigationController.navigationBar.backgroundColor = [cm tweakColorForKey:@"navBar" defaultVal:0.09];
-    self.tableView.separatorColor = [cm tweakColorForKey:@"separators" defaultVal:0.30];
-    [self.tableView reloadData];
+    [self.collectionView reloadData];
 }
 
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
@@ -414,7 +411,18 @@
 
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
-    [self.categoryBar layoutInScrollView:self.tableView];
+    [self.categoryBar layoutInScrollView:self.collectionView];
+}
+
+// More or fewer columns after a rotation
+- (void)viewWillTransitionToSize:(CGSize)size withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator {
+    [super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
+    [self.collectionView.collectionViewLayout invalidateLayout];
+}
+
+// A tile isn't left looking picked after its popup is cancelled
+- (void)deselectTiles {
+    for (NSIndexPath *path in self.collectionView.indexPathsForSelectedItems) [self.collectionView deselectItemAtIndexPath:path animated:YES];
 }
 
 #pragma mark - Display model
@@ -444,107 +452,65 @@
     return [self displaySections][indexPath.section][indexPath.row];
 }
 
-#pragma mark - Table View Data Source
+#pragma mark - Grid
 
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
+// Actions that open another screen or ask for more: their tiles get a chevron
+static BOOL RCPickerActionOpensMore(NSString *command) {
+    static NSSet *more;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        more = [NSSet setWithArray:@[@"__SET_VOLUME__", @"__SET_RINGER_VOLUME__", @"__SET_BRIGHTNESS__", @"__SET_FLASHLIGHT__",
+                                     @"__BT_CONNECT__", @"__BT_DISCONNECT__", @"__AIRPLAY_CONNECT__", @"__FOCUS__",
+                                     @"__SHORTCUT_PICKER__", @"__OPEN_APP__", @"__KILL_APP__", @"__LUA_SCRIPT__", @"__TOAST__",
+                                     @"__IF_CONDITION__", @"__REPEAT__", @"__REPEAT_WHILE__", @"__WAIT_UNTIL__", @"__DELAY__",
+                                     @"__STOP_TRIGGER__", @"__CUSTOM__", @"__HA_PICKER__", @"__KM_TRIGGER__", @"__MQTT_PUBLISH__",
+                                     @"__CAMERA_PICKER__", @"__CAMERA_VIDEO_PICKER__", @"__TAP__", @"__HOLD__", @"__SWIPE__",
+                                     @"__UNLOCK_DEVICE__", @"__LOCK_TOGGLE__"]];
+    });
+    if (![command isKindOfClass:[NSString class]]) return NO;
+    // Any other placeholder opens something too; a plain command is added as it is
+    return [more containsObject:command] || ([command hasPrefix:@"__"] && [command hasSuffix:@"__"]);
+}
+
+- (NSInteger)numberOfSectionsInCollectionView:(UICollectionView *)collectionView {
     return [self displaySections].count;
 }
 
-- (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
-    NSString *title = [self displayTitleForSection:section];
-    CGFloat height = [self tableView:tableView heightForHeaderInSection:section];
-    
-    UIView *headerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, tableView.bounds.size.width, height)];
-    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(20, height - 25, tableView.bounds.size.width - 40, 20)];
-    label.text = [title uppercaseString];
-    label.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
-    label.textColor = [UIColor secondaryLabelColor];
-    [headerView addSubview:label];
-    return headerView;
-}
-
-- (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section {
-    // The first section sits just below the category bar. The others keep their old
-    // spacing, including the 15pt sectionHeaderTopPadding they had on iOS 15+.
-    if (section == 0) return 29.0f;
-    CGFloat topPadding = 0;
-    if (@available(iOS 15.0, *)) topPadding = 15;
-    return 40.0f + topPadding;
-}
-
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+- (NSInteger)collectionView:(UICollectionView *)collectionView numberOfItemsInSection:(NSInteger)section {
     return [self displaySections][section].count;
 }
 
-- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"ActionCell" forIndexPath:indexPath];
-    RCConfigManager *cm = [RCConfigManager sharedManager];
-    
+- (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView cellForItemAtIndexPath:(NSIndexPath *)indexPath {
+    RCActionTileCell *cell = [collectionView dequeueReusableCellWithReuseIdentifier:@"ActionTile" forIndexPath:indexPath];
     NSDictionary *action = [self actionAtIndexPath:indexPath];
-    cell.textLabel.text = action[@"name"];
-    cell.textLabel.font = [UIFont systemFontOfSize:17];
-    
-    cell.backgroundColor = [cm tweakColorForKey:@"blockBackground" defaultVal:0.12];
-    UIView *selBg = [[UIView alloc] init];
-    selBg.backgroundColor = [cm tweakColorForKey:@"selectionHighlight" defaultVal:0.15];
-    cell.selectedBackgroundView = selBg;
-    cell.layer.borderColor = [cm tweakColorForKey:@"borders" defaultVal:0.14].CGColor;
-    cell.layer.borderWidth = 1.0;
-    cell.contentView.backgroundColor = [UIColor clearColor];
-    cell.layer.masksToBounds = YES; // Ensure content doesn't overflow rounded corners if any
-    
-    cell.textLabel.textColor = [UIColor labelColor];
-    
-    if (action[@"icon"]) {
-        NSString *iconName = action[@"icon"];
-        if (@available(iOS 15.0, *)) {
-            // Use modern icon
-        } else {
-            if ([iconName isEqualToString:@"ear.badge.checkmark"]) {
-                iconName = @"ear";
-            }
-        }
-        cell.imageView.image = [UIImage systemImageNamed:iconName];
-        cell.imageView.tintColor = [UIColor secondaryLabelColor];
-    }
-    
-    cell.accessoryType = UITableViewCellAccessoryNone;
-    
-    // Add disclosure for items requiring input
-    NSString *cmd = action[@"command"];
-    if ([cmd isEqualToString:@"__SET_VOLUME__"] || 
-        [cmd isEqualToString:@"__SET_RINGER_VOLUME__"] || 
-        [cmd isEqualToString:@"__SET_BRIGHTNESS__"] || 
-        [cmd isEqualToString:@"__BT_CONNECT__"] || 
-        [cmd isEqualToString:@"__BT_DISCONNECT__"] || 
-        [cmd isEqualToString:@"__AIRPLAY_CONNECT__"] || 
-        [cmd isEqualToString:@"__FOCUS__"] || 
-        [cmd isEqualToString:@"__SHORTCUT_PICKER__"] || 
-        [cmd isEqualToString:@"__OPEN_APP__"] || 
-        [cmd isEqualToString:@"__KILL_APP__"] || 
-        [cmd isEqualToString:@"__LUA_SCRIPT__"] || 
-        [cmd isEqualToString:@"__TOAST__"] || 
-        [cmd isEqualToString:@"__IF_CONDITION__"] ||
-        [cmd isEqualToString:@"__DELAY__"] ||
-        [cmd isEqualToString:@"__STOP_TRIGGER__"] ||
-        [cmd isEqualToString:@"__CUSTOM__"] ||
-        [cmd isEqualToString:@"__SSH_COMMAND__"] ||
-        [cmd isEqualToString:@"__HA_PICKER__"] ||
-        [cmd isEqualToString:@"__KM_TRIGGER__"] ||
-        [cmd isEqualToString:@"__TAP__"] ||
-        [cmd isEqualToString:@"__HOLD__"] ||
-        [cmd isEqualToString:@"__SWIPE__"] ||
-        [cmd isEqualToString:@"__UNLOCK_DEVICE__"] ||
-        [cmd isEqualToString:@"__LOCK_TOGGLE__"]) {
-        
-        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-    }
-    
+    NSString *icon = action[@"icon"];
+    if (@available(iOS 15.0, *)) {} else if ([icon isEqualToString:@"ear.badge.checkmark"]) icon = @"ear";
+    [cell setName:action[@"name"] icon:icon];
+    cell.opensMore = RCPickerActionOpensMore(action[@"command"]);
     return cell;
 }
 
-- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
-    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+- (UICollectionReusableView *)collectionView:(UICollectionView *)collectionView viewForSupplementaryElementOfKind:(NSString *)kind atIndexPath:(NSIndexPath *)indexPath {
+    RCActionGridHeader *header = [collectionView dequeueReusableSupplementaryViewOfKind:kind withReuseIdentifier:@"Header" forIndexPath:indexPath];
+    [header setTitle:[self displayTitleForSection:indexPath.section]];
+    return header;
+}
+
+- (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout sizeForItemAtIndexPath:(NSIndexPath *)indexPath {
+    return RCActionTileSize(collectionView.bounds.size.width);
+}
+
+- (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout referenceSizeForHeaderInSection:(NSInteger)section {
+    // The first title sits just below the category bar
+    return CGSizeMake(collectionView.bounds.size.width, section == 0 ? 30 : 38);
+}
+
+- (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)indexPath {
+    [self selectActionAtIndexPath:indexPath];
+}
+
+- (void)selectActionAtIndexPath:(NSIndexPath *)indexPath {
+    [self.collectionView deselectItemAtIndexPath:indexPath animated:YES];
     
     NSDictionary *action = [self actionAtIndexPath:indexPath];
     NSString *command = action[@"command"];
@@ -728,7 +694,7 @@
     UIAlertAction *cancel = [UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(UIAlertAction *a) {
         self.activeAlert = nil;
         self.isWaitingForTapRecord = NO;
-        [self.tableView deselectRowAtIndexPath:[self.tableView indexPathForSelectedRow] animated:YES];
+        [self deselectTiles];
     }];
     
     UIAlertAction *record = [UIAlertAction actionWithTitle:@"Record Tap" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
@@ -835,7 +801,7 @@
     }];
     
     UIAlertAction *cancelAction = [UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(UIAlertAction * _Nonnull action) {
-        [self.tableView deselectRowAtIndexPath:[self.tableView indexPathForSelectedRow] animated:YES];
+        [self deselectTiles];
     }];
     
     [alert addAction:cancelAction];
@@ -887,7 +853,7 @@
     }];
     
     UIAlertAction *cancel = [UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(UIAlertAction * _Nonnull action) {
-        [self.tableView deselectRowAtIndexPath:[self.tableView indexPathForSelectedRow] animated:YES];
+        [self deselectTiles];
     }];
     
     [alert addAction:wakeOnly];
@@ -941,7 +907,7 @@
     }];
     
     UIAlertAction *cancel = [UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(UIAlertAction * _Nonnull action) {
-        [self.tableView deselectRowAtIndexPath:[self.tableView indexPathForSelectedRow] animated:YES];
+        [self deselectTiles];
     }];
     
     [alert addAction:noPasscode];
@@ -1026,7 +992,7 @@
         NSPredicate *pred = [NSPredicate predicateWithFormat:@"name CONTAINS[cd] %@ OR command CONTAINS[cd] %@ OR (keywords != nil AND keywords CONTAINS[cd] %@)", text, text, text];
         self.filteredActions = [allActions filteredArrayUsingPredicate:pred];
     }
-    [self.tableView reloadData];
+    [self.collectionView reloadData];
 }
 
 - (void)handleHAPicker {

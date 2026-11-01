@@ -1,6 +1,6 @@
 #import <UIKit/UIKit.h>
 
-@interface RCActionPickerViewController : UITableViewController
+@interface RCActionPickerViewController : UICollectionViewController
 
 @property (nonatomic, copy) void (^onActionSelected)(NSString *action);
 // Actions that lead to another screen: the picker stays open under it (Cancel there comes back

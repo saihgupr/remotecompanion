@@ -1,6 +1,7 @@
 #import "RCBannersViewController.h"
 #import "RCActionPickerViewController.h"
 #import "RCConfigManager.h"
+#import "RCActionTile.h"
 
 // Lists the action picker's catalog; tapping an action adds/removes it from the
 // config's "bannerActions". Each entry tells the tweak how to recognise the action:
@@ -15,7 +16,7 @@
 // Actions that show a banner of their own (Camera, Home Assistant, ...) are listed too,
 // ticked unless switched off: their banners stay their own, and switching one off adds
 // it to the config's "bannerOptOut", which the tweak checks before showing it.
-@interface RCBannersViewController ()
+@interface RCBannersViewController () <UICollectionViewDelegateFlowLayout>
 @property (nonatomic, strong) NSArray<NSString *> *sectionTitles;
 @property (nonatomic, strong) NSArray<NSArray<NSDictionary *> *> *sections;      // the catalog, by category
 // What the table shows: the checked actions first ("Enabled"), then the rest by category. Ticking
@@ -64,7 +65,7 @@ static NSArray<NSArray<NSDictionary *> *> *RCBannerCatalog(NSArray<NSString *> *
 @implementation RCBannersViewController
 
 - (instancetype)init {
-    return [super initWithStyle:UITableViewStyleInsetGrouped];
+    return [super initWithCollectionViewLayout:RCActionGridLayout()];
 }
 
 - (void)viewDidLoad {
@@ -75,8 +76,11 @@ static NSArray<NSArray<NSDictionary *> *> *RCBannerCatalog(NSArray<NSString *> *
     RCConfigManager *cm = [RCConfigManager sharedManager];
     UIColor *bg = [cm tweakColorForKey:@"settingsBackground" defaultVal:[cm tweakValueForKey:@"mainBackground" defaultVal:0.09]];
     self.view.backgroundColor = bg;
-    self.tableView.backgroundColor = bg;
-    self.tableView.separatorColor = [cm tweakColorForKey:@"separators" defaultVal:0.30];
+    self.collectionView.backgroundColor = bg;
+    self.collectionView.alwaysBounceVertical = YES;
+    [self.collectionView registerClass:[RCActionTileCell class] forCellWithReuseIdentifier:@"Tile"];
+    [self.collectionView registerClass:[RCActionGridHeader class] forSupplementaryViewOfKind:UICollectionElementKindSectionHeader withReuseIdentifier:@"Header"];
+    [self.collectionView registerClass:[RCActionGridHeader class] forSupplementaryViewOfKind:UICollectionElementKindSectionFooter withReuseIdentifier:@"Footer"];
 
     NSArray *titles = nil;
     self.sections = RCBannerCatalog(&titles);
@@ -227,52 +231,75 @@ static BOOL RCBannerIsPrefixPattern(NSString *p) {
     [RCConfigManager sharedManager].bannerOptOut = self.optedOutIds.allObjects;
 }
 
-#pragma mark - Table view
+#pragma mark - Grid
 
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
+static NSString *const RCBannersNote = @"Checked actions show a banner whenever a trigger runs them. Toggles show their new state; other actions show their name.";
+
+- (NSInteger)numberOfSectionsInCollectionView:(UICollectionView *)collectionView {
     return self.displaySections.count;
 }
 
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+- (NSInteger)collectionView:(UICollectionView *)collectionView numberOfItemsInSection:(NSInteger)section {
     return self.displaySections[section].count;
 }
 
-- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    return self.displayTitles[section];
-}
-
-- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    if (section != 0) return nil;
-    return @"Checked actions show a banner whenever a trigger runs them. Toggles show their new state; other actions show their name.";
-}
-
-- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    RCConfigManager *cm = [RCConfigManager sharedManager];
-    NSDictionary *item = self.displaySections[indexPath.section][indexPath.row];
-    UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
-    cell.backgroundColor = [cm tweakColorForKey:@"blockBackground" defaultVal:0.12];
-    cell.textLabel.text = item[@"name"];
-    cell.textLabel.textColor = [UIColor labelColor];
-    cell.imageView.image = [UIImage systemImageNamed:item[@"icon"]];
-    cell.imageView.tintColor = [UIColor systemGrayColor];
-    cell.accessoryType = [self isChecked:item[@"command"]] ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+- (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView cellForItemAtIndexPath:(NSIndexPath *)indexPath {
+    RCActionTileCell *cell = [collectionView dequeueReusableCellWithReuseIdentifier:@"Tile" forIndexPath:indexPath];
+    NSDictionary *item = self.displaySections[indexPath.section][indexPath.item];
+    [cell setName:item[@"name"] icon:item[@"icon"]];
+    cell.checked = [self isChecked:item[@"command"]];
     return cell;
 }
 
-- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
-    [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    NSString *command = self.displaySections[indexPath.section][indexPath.row][@"command"];
+// A title over each section; the explanation under the first
+- (UICollectionReusableView *)collectionView:(UICollectionView *)collectionView viewForSupplementaryElementOfKind:(NSString *)kind atIndexPath:(NSIndexPath *)indexPath {
+    BOOL footer = [kind isEqualToString:UICollectionElementKindSectionFooter];
+    RCActionGridHeader *view = [collectionView dequeueReusableSupplementaryViewOfKind:kind withReuseIdentifier:footer ? @"Footer" : @"Header" forIndexPath:indexPath];
+    if (footer) [view setNote:indexPath.section == 0 ? RCBannersNote : nil];
+    else [view setTitle:self.displayTitles[indexPath.section]];
+    return view;
+}
+
+- (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout sizeForItemAtIndexPath:(NSIndexPath *)indexPath {
+    return RCActionTileSize(collectionView.bounds.size.width);
+}
+
+- (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout referenceSizeForHeaderInSection:(NSInteger)section {
+    return CGSizeMake(collectionView.bounds.size.width, section == 0 ? 34 : 38);
+}
+
+- (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout referenceSizeForFooterInSection:(NSInteger)section {
+    CGFloat width = collectionView.bounds.size.width;
+    return CGSizeMake(width, section == 0 ? RCActionGridNoteHeight(RCBannersNote, width) : 0);
+}
+
+- (UIEdgeInsets)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewFlowLayout *)layout insetForSectionAtIndex:(NSInteger)section {
+    UIEdgeInsets inset = layout.sectionInset;
+    if (section == 0) inset.bottom = 4; // the note follows closely
+    return inset;
+}
+
+// More or fewer columns after a rotation
+- (void)viewWillTransitionToSize:(CGSize)size withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator {
+    [super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
+    [self.collectionView.collectionViewLayout invalidateLayout];
+}
+
+- (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)indexPath {
+    [collectionView deselectItemAtIndexPath:indexPath animated:NO];
+    NSString *command = self.displaySections[indexPath.section][indexPath.item][@"command"];
     NSMutableSet *set = [RCOwnBannerIds() containsObject:command] ? self.optedOutIds : self.selectedIds;
     NSArray *oldTitles = self.displayTitles;
     NSArray *oldSections = self.displaySections;
     if ([set containsObject:command]) [set removeObject:command];
     else [set addObject:command];
+    [[[UISelectionFeedbackGenerator alloc] init] selectionChanged];
     [self saveSelection];
     [self buildDisplaySections];
     [self animateFromTitles:oldTitles sections:oldSections];
 }
 
-// Moves the table from the sections it shows to the current ones: the action that was ticked or
+// Moves the grid from the sections it shows to the current ones: the action that was ticked or
 // unticked leaves one section and arrives in the other, and a section that has become empty (or
 // has just got its first action, like "Enabled") goes or comes with it
 - (void)animateFromTitles:(NSArray<NSString *> *)oldTitles sections:(NSArray<NSArray<NSDictionary *> *> *)oldSections {
@@ -286,7 +313,7 @@ static BOOL RCBannerIsPrefixPattern(NSString *p) {
         if (inNew == NSNotFound) { [deleteSections addIndex:i]; continue; }
         NSSet *kept = [NSSet setWithArray:[newSections[inNew] valueForKey:@"command"]];
         for (NSUInteger row = 0; row < oldSections[i].count; row++) {
-            if (![kept containsObject:oldSections[i][row][@"command"]]) [deleteRows addObject:[NSIndexPath indexPathForRow:(NSInteger)row inSection:(NSInteger)i]];
+            if (![kept containsObject:oldSections[i][row][@"command"]]) [deleteRows addObject:[NSIndexPath indexPathForItem:(NSInteger)row inSection:(NSInteger)i]];
         }
     }
     for (NSUInteger i = 0; i < newTitles.count; i++) {
@@ -294,17 +321,17 @@ static BOOL RCBannerIsPrefixPattern(NSString *p) {
         if (inOld == NSNotFound) { [insertSections addIndex:i]; continue; }
         NSSet *had = [NSSet setWithArray:[oldSections[inOld] valueForKey:@"command"]];
         for (NSUInteger row = 0; row < newSections[i].count; row++) {
-            if (![had containsObject:newSections[i][row][@"command"]]) [insertRows addObject:[NSIndexPath indexPathForRow:(NSInteger)row inSection:(NSInteger)i]];
+            if (![had containsObject:newSections[i][row][@"command"]]) [insertRows addObject:[NSIndexPath indexPathForItem:(NSInteger)row inSection:(NSInteger)i]];
         }
     }
-    [self.tableView performBatchUpdates:^{
-        [self.tableView deleteSections:deleteSections withRowAnimation:UITableViewRowAnimationFade];
-        [self.tableView insertSections:insertSections withRowAnimation:UITableViewRowAnimationFade];
-        [self.tableView deleteRowsAtIndexPaths:deleteRows withRowAnimation:UITableViewRowAnimationFade];
-        [self.tableView insertRowsAtIndexPaths:insertRows withRowAnimation:UITableViewRowAnimationFade];
+    [self.collectionView performBatchUpdates:^{
+        [self.collectionView deleteSections:deleteSections];
+        [self.collectionView insertSections:insertSections];
+        [self.collectionView deleteItemsAtIndexPaths:deleteRows];
+        [self.collectionView insertItemsAtIndexPaths:insertRows];
     } completion:^(BOOL finished) {
         // The first section carries the explanation, so its footer changes when the sections do
-        [self.tableView reloadData];
+        [self.collectionView reloadData];
     }];
 }
 
