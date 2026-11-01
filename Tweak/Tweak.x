@@ -9480,6 +9480,28 @@ static NSString *handle_command(NSString *cmd) {
         }
         
         return rc_open_camera_unified(mode, device, zoom, hasFlash ? 1 : 0, autoShutter);
+    } else if ([cleanCmd isEqualToString:@"nav"] || [cleanCmd hasPrefix:@"nav "] || [cleanCmd hasPrefix:@"app nav "]) {
+        NSString *dest = @"";
+        if ([cleanCmd hasPrefix:@"nav "]) dest = [cleanCmd substringFromIndex:4];
+        else if ([cleanCmd hasPrefix:@"app nav "]) dest = [cleanCmd substringFromIndex:8];
+        dest = [dest stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (dest.length == 0) dest = @"home";
+
+        // Unlock device first if locked
+        Class SBLockScreenManagerClass = objc_getClass("SBLockScreenManager");
+        SBLockScreenManager *manager = (SBLockScreenManagerClass) ? [SBLockScreenManagerClass sharedInstance] : nil;
+        if (manager && [manager respondsToSelector:@selector(isUILocked)] && [manager isUILocked]) {
+            handle_command(@"unlock");
+        }
+
+        NSString *urlString = [dest containsString:@"://"] ? dest : [NSString stringWithFormat:@"remotecompanion://%@", dest];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NSURL *url = [NSURL URLWithString:urlString];
+            if (url) {
+                [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
+            }
+        });
+        return [NSString stringWithFormat:@"Navigating to %@\n", dest];
     } else if ([cleanCmd hasPrefix:@"uiopen "]) {
         NSString *bundleId = [[cleanCmd substringFromIndex:7] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         NSLog(@"[RemoteCommand] UIOPEN Bundle ID: %@", bundleId);
@@ -9489,11 +9511,11 @@ static NSString *handle_command(NSString *cmd) {
         });
         return [NSString stringWithFormat:@"Opened %@", bundleId];
     } else if ([cleanCmd hasPrefix:@"open "]) {
-        // Open app by name or Bundle ID
+        // Open app by name, Bundle ID, or URL scheme
         NSString *appName = [[cleanCmd substringFromIndex:5] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         
         // If it looks like a Bundle ID (contains dot), use FBSOpenApplicationService (faster)
-        if ([appName containsString:@"."]) {
+        if ([appName containsString:@"."] && ![appName containsString:@"://"]) {
              NSLog(@"[RemoteCommand] Opening Bundle ID via FBS: %@", appName);
              dispatch_async(dispatch_get_main_queue(), ^{
                  FBSOpenApplicationService *service = [FBSOpenApplicationService serviceWithDefaultShellEndpoint];
@@ -9505,8 +9527,9 @@ static NSString *handle_command(NSString *cmd) {
         NSString *lowerName = [appName lowercaseString];
         NSString *urlString = nil;
         
-        // Common app URL schemes
-        if ([lowerName isEqualToString:@"spotify"]) urlString = @"spotify://";
+        if ([appName containsString:@"://"]) {
+            urlString = appName;
+        } else if ([lowerName isEqualToString:@"spotify"]) urlString = @"spotify://";
         else if ([lowerName isEqualToString:@"music"]) urlString = @"music://";
         else if ([lowerName isEqualToString:@"youtube"]) urlString = @"youtube://";
         else if ([lowerName isEqualToString:@"safari"]) urlString = @"x-web-search://";
@@ -9532,6 +9555,7 @@ static NSString *handle_command(NSString *cmd) {
                 [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
             }
         });
+        return [NSString stringWithFormat:@"Opened %@\n", appName];
     } else if ([cleanCmd isEqualToString:@"bluetooth-on"] || [cleanCmd isEqualToString:@"bt-on"] || [cleanCmd isEqualToString:@"bluetooth on"] || [cleanCmd isEqualToString:@"bt on"]) {
         void *btHandle = dlopen("/System/Library/PrivateFrameworks/BluetoothManager.framework/BluetoothManager", RTLD_NOW);
         if (btHandle) {
@@ -11532,6 +11556,7 @@ static void start_web_server() {
                                     @{@"command": @"app switcher", @"desc": @"System: Open App Switcher"},
                                     @{@"command": @"accessibility shortcut", @"desc": @"System: Run the Accessibility Shortcut"},
                                     @{@"command": @"open <bundleId>", @"desc": @"System: Launch an application by bundle identifier"},
+                                    @{@"command": @"nav <panel>", @"desc": @"Companion: Open app panel (triggers, settings, ha, km, mqtt, add)"},
                                     @{@"command": @"kill <bundleId>", @"desc": @"System: Force-close an application"},
                                     @{@"command": @"kill current", @"desc": @"System: Force-close the currently focused app"},
                                     @{@"command": @"respring", @"desc": @"System: Restart SpringBoard"},

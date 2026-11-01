@@ -24,10 +24,10 @@ RemoteCompanion provides fast, scriptable system control for modern rootless jai
 </p>
 
 <p align="center">
-  <img src="images/4.0.0/IMG_2285.PNG" width="200" alt="Main Interface" />
-  <img src="images/4.0.0/IMG_2284.PNG" width="200" alt="Action Picker" />
-  <img src="images/4.0.0/IMG_2283.PNG" width="200" alt="If Conditions" />
-  <img src="images/4.0.0/IMG_2286.PNG" width="200" alt="Settings & Backup" />
+  <img src="images/4.1.0/01_dashboard.png" width="200" alt="Main Dashboard" />
+  <img src="images/4.1.0/02_add_trigger.png" width="200" alt="Add Trigger" />
+  <img src="images/4.1.0/03_action_conditions.png" width="200" alt="Conditional Logic" />
+  <img src="images/4.1.0/04_settings.png" width="200" alt="Settings & Web UI" />
 </p>
 
 ## Features
@@ -105,6 +105,7 @@ Access the desktop-class automation hub at `http://[DEVICE_IP]:8080` from any co
 - `rc vibration [silent-toggle|ring-toggle]` - System "Vibrate on Silent/Ring" settings.
 
 ### Apps, URLs & Shortcuts
+- `rc nav <triggers|settings|ha|km|mqtt|add|advanced|testkit>` - Navigate directly to any RemoteCompanion panel or trigger editor (supports `remotecompanion://` deep linking URL scheme).
 - `rc open <alias|bundleID>` (e.g., `youtube`, `spotify`, `settings`, `messages`, `home`, `photos`, `camera`, `clock`, `maps`, `calendar`, `weather`, `notes`, `reminders`, `appstore`, `mail`, `music`, `phone`, `stocks`, `calculator`, `tv`, `wallet`, `facetime`, `files`).
 - `rc kill <alias|bundleID>` - Force close an app.
 - `rc kill current` - Force close the currently focused app.
@@ -248,6 +249,10 @@ Enable two-way automation between your iOS device and Home Assistant:
 3. Enter your **Server URL** (e.g., `http://192.168.1.100:8123`) and a **Long-Lived Access Token** (generated under your Home Assistant Profile &rarr; Long-Lived Access Tokens).
 4. Click **Test Connection** to verify setup.
 
+<p align="center">
+  <img src="images/4.1.0/05_home_assistant.png" width="220" alt="Home Assistant Setup" />
+</p>
+
 Once configured:
 - Use **Control Home Assistant Entity…** in any trigger sequence to search and select entities (lights, switches, scenes, scripts, automations, locks) with live state badges and quick action options (Toggle, Turn On, Turn Off), or enter custom commands manually.
 - Execute HA commands directly via CLI: `rc ha toggle light.bedroom_lights`, `rc ha call light.turn_on light.bedroom_lights`, or `rc ha raw light.turn_on '{"entity_id":"light.bedroom","brightness":200}'`.
@@ -286,6 +291,10 @@ Trigger macros on your Mac directly from iPhone hardware gestures, buttons, NFC 
 4. Toggle on **Enable Keyboard Maestro**.
 5. Enter your **Web Server URL** (e.g., `http://192.168.1.50:4490`) and optional **Username** and **Password** (supports HTTP Basic Authentication).
 6. Click **Test Connection** to verify connectivity.
+
+<p align="center">
+  <img src="images/4.1.0/06_keyboard_maestro.png" width="220" alt="Keyboard Maestro Setup" />
+</p>
 
 Once configured:
 - **Visual Macro Picker**: Open **Keyboard Maestro: Trigger Macro…** in the action picker to browse and search all macros categorized by group, with instant live filtering and parameter selection.
@@ -539,6 +548,8 @@ RemoteCompanion ships as fat universal binaries containing both `arm64` and `arm
 
 ## Support & Feedback
 
-If you encounter any issues or have feature requests, please [open an issue](https://github.com/saihgupr/remotecompanion/issues) on GitHub.
+If you encounter any issues, bugs, or have feature requests, please [open an issue on GitHub](https://github.com/saihgupr/remotecompanion/issues).
 
-RemoteCompanion is open-source and free. If you find it useful, consider giving it a star on GitHub or making a small [donation](https://ko-fi.com/saihgupr) to support development.
+RemoteCompanion is open-source and free. If you find it useful, consider giving it a star on GitHub or making a donation to support development!
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/saihgupr)

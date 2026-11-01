@@ -4,8 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-### Changed
-- **Apple Watch triggers hidden until configured**: Ping iPhone / Ping iPhone (Hold) no longer sit empty in the main list. The Apple Watch section only appears once a Watch trigger has actions, and both triggers are now addable from the + menu (Device section) with swipe-to-delete.
+### Added
+- **Deep Linking URL Scheme & CLI Navigation**: added `remotecompanion://` URL scheme support and `rc nav <panel>` CLI command to jump directly into Settings, Integrations (Home Assistant, Keyboard Maestro, MQTT), New Trigger picker, or Triggers list from Siri Shortcuts, automation scripts, or terminal.
 
 ## [4.1.0] - 2026-10-31
 
@@ -24,13 +24,13 @@ All notable changes to this project will be documented in this file.
 - **Accessibility Shortcut action**: run the Accessibility Shortcut from any trigger; fixed triple-click firing both the shortcut and Power Double-Tap, and a bound Power/Home Triple Click now takes over the shortcut from iOS (#92).
 
 ### Fixed
+- **Power Long Press put device to sleep on release**: releasing the side button after a Power Long Press trigger fired iOS's native single-press handler and slept the phone on non-Face ID devices (iPhone 8 / iOS 14). Suppressed the native sleep action when Power Long Press has executed (#109).
 - **Long commands cut at 1KB**: the tweak read its local socket in one 1KB read, truncating long commands. It now keeps reading while more arrives (up to 256KB); `rc` piped input is also sent in full (#107).
 - **Apple Pay/Wallet with NFC scanning on**: fixed Wallet showing "Updating Cards" for up to a minute by stepping the tag scan aside while Apple Pay or Wallet is on screen (#97).
 
 ### Changed
+- **Apple Watch triggers hidden until configured**: Ping iPhone / Ping iPhone (Hold) no longer sit empty in the main list. The Apple Watch section only appears once a Watch trigger has actions, and both triggers are now addable from the + menu (Device section) with swipe-to-delete.
 - **Banners screen groups enabled first**: ticked actions show in an "Enabled" section at the top, moving instantly when toggled (#89).
-
-### Changed
 - **Toast dialog simplified**: Web UI Toast editor now has labeled Title / Message (optional) / Icon (optional) fields, plain-word icon presets, and a slimmer live preview pill.
 
 ### Fixed

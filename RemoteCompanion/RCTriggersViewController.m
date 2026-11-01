@@ -472,6 +472,12 @@
     [self presentViewController:nav animated:YES completion:nil];
 }
 
+- (void)openTriggerWithKey:(NSString *)triggerKey {
+    if (!triggerKey.length) return;
+    RCActionsViewController *actionsVC = [[RCActionsViewController alloc] initWithTriggerKey:triggerKey];
+    [self.navigationController pushViewController:actionsVC animated:YES];
+}
+
 - (void)addNewItem {
     __weak typeof(self) weakSelf = self;
     void (^push)(UIViewController *) = ^(UIViewController *vc) {

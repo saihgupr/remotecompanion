@@ -66,6 +66,7 @@ if [ -z "$1" ]; then
     echo "  km <trigger|url>  - Trigger Keyboard Maestro Macro or URL"
     echo "  mqtt <pub|publish> <topic> [payload] - Publish MQTT topic"
     echo "  blacklist <list|add|remove|reset> - Manage app exclusion"
+    echo "  nav <panel>       - Navigate companion app (triggers, settings, ha, km, mqtt, add)"
     echo "  log               - Stream device logs"
     echo ""
     exit 1
