@@ -9,6 +9,8 @@
 #import "RCSetVariableViewController.h"
 #import "RCVariableConditionViewController.h"
 #import "RCNumberSettingViewController.h"
+#import "RCVariableEditorParts.h"
+#import "RCSymbolPickerViewController.h"
 #import "RCServerClient.h"
 #import "RCRunningViewController.h"
 #import "RCRunHistoryViewController.h"
@@ -72,8 +74,8 @@ static void rc_parse_km_cmd(NSString *cmd, NSString **outMacro, NSString **outPa
     if (outParam) *outParam = param ?: @"";
 }
 
-// Favorite icons shown at the top of the picker. Anything else can still
-// be typed by name and is stored verbatim.
+// Favorite icons, shown first in the icon picker. Any other icon can be
+// picked from its categories or typed by name, and is stored verbatim.
 static NSArray<NSDictionary *> *RCToastIconChoices(void) {
     return @[
         @{ @"name": @"Info", @"symbol": @"info.circle" },
@@ -83,47 +85,6 @@ static NSArray<NSDictionary *> *RCToastIconChoices(void) {
         @{ @"name": @"Star", @"symbol": @"star.fill" },
         @{ @"name": @"Heart", @"symbol": @"heart.fill" },
         @{ @"name": @"Music", @"symbol": @"music.note" }
-    ];
-}
-
-// A browsable list of common icon names. The picker also accepts any typed
-// name verbatim, so this list is for discovery, not a limit.
-static NSArray<NSString *> *RCToastIconCatalog(void) {
-    return @[
-        @"airplane", @"alarm.fill", @"antenna.radiowaves.left.and.right",
-        @"app.fill", @"archivebox.fill", @"arrow.counterclockwise", @"arrow.up.right.circle.fill",
-        @"bag.fill", @"battery.100", @"bell", @"bell.fill", @"bell.slash.fill",
-        @"binoculars.fill", @"bold", @"bolt.fill", @"book.fill", @"bookmark.fill",
-        @"briefcase.fill", @"bubble.left.fill", @"bubble.right.fill", @"building.2.fill",
-        @"calendar", @"calendar.circle.fill", @"camera.fill", @"car.fill",
-        @"cart.fill", @"checkmark", @"checkmark.circle", @"checkmark.circle.fill",
-        @"checkmark.seal.fill", @"clock.fill", @"cloud.fill", @"cloud.rain.fill",
-        @"cloud.sun.fill", @"compass.fill", @"creditcard.fill", @"crop",
-        @"cup.and.saucer.fill", @"desktopcomputer", @"doc.fill", @"doc.on.doc.fill",
-        @"dollarsign.circle.fill", @"drop.fill", @"ear.fill", @"envelope.fill",
-        @"exclamationmark.circle.fill", @"exclamationmark.triangle.fill",
-        @"eye.fill", @"eye.slash.fill", @"face.smiling.fill", @"film.fill",
-        @"flag.fill", @"flashlight.on.fill", @"folder.fill", @"gamecontroller.fill",
-        @"gear", @"gift.fill", @"globe", @"graduationcap.fill",
-        @"guitars.fill", @"hammer.fill", @"hand.thumbsup.fill", @"hare.fill",
-        @"headphones", @"heart", @"heart.fill", @"heart.circle.fill",
-        @"house.fill", @"hourglass", @"info.circle", @"info.circle.fill",
-        @"ipad", @"iphone", @"key.fill", @"keyboard.fill",
-        @"laptopcomputer", @"leaf.fill", @"lightbulb.fill", @"location.fill",
-        @"lock.fill", @"lock.open.fill", @"magnifyingglass", @"map.fill",
-        @"message.fill", @"mic.fill", @"moon.fill", @"music.note",
-        @"music.note.list", @"network", @"newspaper.fill", @"paintbrush.fill",
-        @"paperplane.fill", @"party.popper.fill", @"pawprint.fill", @"pencil",
-        @"person.2.fill", @"person.fill", @"phone.fill", @"photo.fill",
-        @"pin.fill", @"play.fill", @"plus.circle.fill", @"printer.fill",
-        @"puzzlepiece.fill", @"qrcode", @"quote.bubble.fill", @"radio.fill",
-        @"rosette", @"scissors", @"shield.fill", @"shippingbox.fill",
-        @"sparkles", @"speaker.wave.2.fill", @"sportscourt.fill", @"star",
-        @"star.fill", @"star.circle.fill", @"sun.max.fill", @"tag.fill",
-        @"thermometer", @"timer", @"tortoise.fill", @"trash.fill",
-        @"tray.fill", @"tv.fill", @"umbrella.fill", @"video.fill",
-        @"wallet.pass.fill", @"wand.and.stars", @"watch", @"wifi",
-        @"wind", @"wrench.fill", @"xmark.circle.fill", @"zzz"
     ];
 }
 
@@ -281,237 +242,17 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
                          onSave:(void (^)(NSString *cmd))onSave;
 @end
 
-// Searchable icon browser. Favorites on top, then every common icon.
-// Typing any name offers a "Use ..." row that saves it verbatim, with a
-// live preview so a typo simply shows as missing.
-@interface RCToastIconBrowserViewController : UITableViewController <UISearchResultsUpdating>
-- (instancetype)initWithCurrentIcon:(NSString *)icon;
-@property (nonatomic, copy) void (^onPick)(NSString *icon);
-@end
-
-@implementation RCToastIconBrowserViewController {
-    NSString *_currentIcon;
-    NSString *_searchText;
-    NSArray<NSString *> *_filtered;
-    UISearchController *_searchController;
-}
-
-- (instancetype)initWithCurrentIcon:(NSString *)icon {
-    self = [super initWithStyle:UITableViewStyleInsetGrouped];
-    if (self) {
-        _currentIcon = [icon copy] ?: @"";
-        _searchText = @"";
-        _filtered = @[];
-    }
-    return self;
-}
-
-- (void)viewDidLoad {
-    [super viewDidLoad];
-    self.title = @"Choose Icon";
-    _searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
-    _searchController.searchResultsUpdater = self;
-    _searchController.obscuresBackgroundDuringPresentation = NO;
-    _searchController.searchBar.placeholder = @"Search or type icon name";
-    _searchController.searchBar.autocapitalizationType = UITextAutocapitalizationTypeNone;
-    _searchController.searchBar.autocorrectionType = UITextAutocorrectionTypeNo;
-    self.navigationItem.searchController = _searchController;
-    self.navigationItem.hidesSearchBarWhenScrolling = NO;
-    self.definesPresentationContext = YES;
-}
-
-- (BOOL)isSearching {
-    return _searchText.length > 0;
-}
-
-- (BOOL)hasCustomRow {
-    if (_currentIcon.length == 0) return NO;
-    for (NSDictionary *c in RCToastIconChoices()) {
-        if ([c[@"symbol"] isEqualToString:_currentIcon]) return NO;
-    }
-    return ![RCToastIconCatalog() containsObject:_currentIcon];
-}
-
-- (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
-    NSString *t = [[searchController.searchBar.text ?: @"" stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] copy];
-    _searchText = t;
-    if (t.length == 0) {
-        _filtered = @[];
-    } else {
-        NSMutableArray *hits = [NSMutableArray array];
-        NSMutableSet *seen = [NSMutableSet set];
-        for (NSDictionary *c in RCToastIconChoices()) {
-            NSString *sym = c[@"symbol"];
-            NSString *name = c[@"name"];
-            if ([sym localizedCaseInsensitiveContainsString:t] || [name localizedCaseInsensitiveContainsString:t]) {
-                if (![seen containsObject:sym]) { [hits addObject:sym]; [seen addObject:sym]; }
-            }
-        }
-        for (NSString *sym in RCToastIconCatalog()) {
-            if ([sym localizedCaseInsensitiveContainsString:t]) {
-                if (![seen containsObject:sym]) { [hits addObject:sym]; [seen addObject:sym]; }
-            }
-        }
-        [hits sortUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
-        _filtered = hits;
-    }
-    [self.tableView reloadData];
-}
-
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    if ([self isSearching]) return 1;
-    return [self hasCustomRow] ? 3 : 2;
-}
-
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    if ([self isSearching]) return 1 + _filtered.count;
-    if ([self hasCustomRow]) {
-        if (section == 0) return 1;
-        if (section == 1) return 1 + RCToastIconChoices().count;
-        return RCToastIconCatalog().count;
-    }
-    if (section == 0) return 1 + RCToastIconChoices().count;
-    return RCToastIconCatalog().count;
-}
-
-- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    if ([self isSearching]) return @"Matches";
-    if ([self hasCustomRow]) {
-        if (section == 0) return @"Current";
-        if (section == 1) return @"Favorites";
-        return @"All Icons";
-    }
-    if (section == 0) return @"Favorites";
-    return @"All Icons";
-}
-
-- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    if ([self isSearching] && section == 0) return @"Type any name to use it, even if there is no preview.";
-    if (![self isSearching]) {
-        NSInteger last = [self numberOfSectionsInTableView:tableView] - 1;
-        if (section == last) return @"Type any name to use it, even if there is no preview.";
-    }
-    return nil;
-}
-
-- (UITableViewCell *)browserCellForTable:(UITableView *)tableView {
-    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"RCToastBrowserCell"];
-    if (!cell) {
-        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"RCToastBrowserCell"];
-    }
-    cell.imageView.tintColor = [UIColor secondaryLabelColor];
-    return cell;
-}
-
-- (void)configureCell:(UITableViewCell *)cell withSymbol:(NSString *)symbol displayName:(NSString *)display detail:(NSString *)detail checked:(BOOL)checked {
-    UIImage *img = RCToastIconImage(symbol);
-    if (symbol.length == 0) {
-        cell.textLabel.text = @"None";
-        cell.detailTextLabel.text = nil;
-        cell.imageView.image = nil;
-    } else if (img) {
-        cell.textLabel.text = display ?: symbol;
-        cell.detailTextLabel.text = detail;
-        cell.imageView.image = img;
-    } else {
-        cell.textLabel.text = display ?: symbol;
-        cell.detailTextLabel.text = @"No preview for this name";
-        cell.imageView.image = [UIImage systemImageNamed:@"questionmark.circle"];
-        cell.imageView.tintColor = [UIColor tertiaryLabelColor];
-    }
-    if (symbol.length > 0 && img) cell.imageView.tintColor = [UIColor secondaryLabelColor];
-    cell.accessoryType = checked ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
-}
-
-- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    UITableViewCell *cell = [self browserCellForTable:tableView];
-    if ([self isSearching]) {
-        if (indexPath.row == 0) {
-            NSString *typed = _searchText;
-            UIImage *img = RCToastIconImage(typed);
-            cell.textLabel.text = [NSString stringWithFormat:@"Use \"%@\"", typed];
-            if (img) {
-                cell.detailTextLabel.text = typed;
-                cell.imageView.image = img;
-                cell.imageView.tintColor = [UIColor secondaryLabelColor];
-            } else {
-                cell.detailTextLabel.text = @"No preview for this name";
-                cell.imageView.image = [UIImage systemImageNamed:@"questionmark.circle"];
-                cell.imageView.tintColor = [UIColor tertiaryLabelColor];
-            }
-            cell.accessoryType = [_currentIcon isEqualToString:typed] ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
-            return cell;
-        }
-        NSString *sym = _filtered[indexPath.row - 1];
-        [self configureCell:cell withSymbol:sym displayName:sym detail:nil checked:[_currentIcon isEqualToString:sym]];
-        return cell;
-    }
-    if ([self hasCustomRow]) {
-        if (indexPath.section == 0) {
-            [self configureCell:cell withSymbol:_currentIcon displayName:_currentIcon detail:nil checked:YES];
-            return cell;
-        }
-        if (indexPath.section == 1) {
-            if (indexPath.row == 0) {
-                [self configureCell:cell withSymbol:@"" displayName:nil detail:nil checked:(_currentIcon.length == 0)];
-                return cell;
-            }
-            NSDictionary *c = RCToastIconChoices()[indexPath.row - 1];
-            [self configureCell:cell withSymbol:c[@"symbol"] displayName:c[@"name"] detail:nil checked:[_currentIcon isEqualToString:c[@"symbol"]]];
-            return cell;
-        }
-        NSString *sym = RCToastIconCatalog()[indexPath.row];
-        [self configureCell:cell withSymbol:sym displayName:sym detail:nil checked:[_currentIcon isEqualToString:sym]];
-        return cell;
-    }
-    if (indexPath.section == 0) {
-        if (indexPath.row == 0) {
-            [self configureCell:cell withSymbol:@"" displayName:nil detail:nil checked:(_currentIcon.length == 0)];
-            return cell;
-        }
-        NSDictionary *c = RCToastIconChoices()[indexPath.row - 1];
-        [self configureCell:cell withSymbol:c[@"symbol"] displayName:c[@"name"] detail:nil checked:[_currentIcon isEqualToString:c[@"symbol"]]];
-        return cell;
-    }
-    NSString *sym = RCToastIconCatalog()[indexPath.row];
-    [self configureCell:cell withSymbol:sym displayName:sym detail:nil checked:[_currentIcon isEqualToString:sym]];
-    return cell;
-}
-
-- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
-    [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    NSString *picked = nil;
-    if ([self isSearching]) {
-        if (indexPath.row == 0) picked = _searchText;
-        else picked = _filtered[indexPath.row - 1];
-    } else if ([self hasCustomRow]) {
-        if (indexPath.section == 0) picked = _currentIcon;
-        else if (indexPath.section == 1) {
-            if (indexPath.row == 0) picked = @"";
-            else picked = RCToastIconChoices()[indexPath.row - 1][@"symbol"];
-        } else picked = RCToastIconCatalog()[indexPath.row];
-    } else {
-        if (indexPath.section == 0) {
-            if (indexPath.row == 0) picked = @"";
-            else picked = RCToastIconChoices()[indexPath.row - 1][@"symbol"];
-        } else picked = RCToastIconCatalog()[indexPath.row];
-    }
-    if (!picked) return;
-    _currentIcon = [picked copy];
-    if (self.onPick) self.onPick(picked);
-    [self.navigationController popViewControllerAnimated:YES];
-}
-
-@end
-
-// The one toast editor: grouped sections, plain words, live preview.
-// New toasts and edits share it, so they never diverge.
 @interface RCToastEditorViewController : UITableViewController <UITextFieldDelegate>
 - (instancetype)initWithToastTitle:(NSString *)title message:(NSString *)message icon:(NSString *)icon isNew:(BOOL)isNew;
 @property (nonatomic, copy) void (^onSave)(NSString *title, NSString *message, NSString *icon);
+// The trigger's actions: their Set Variable names go in the + menus on Title and Message
+@property (nonatomic, copy) NSArray *variableActions;
 @end
 
 @implementation RCToastEditorViewController {
+    NSArray<NSString *> *_runNames;          // This Run Only variables set by the trigger
+    NSArray<NSString *> *_triggerSavedNames; // saved variables set by the trigger
+    NSArray<NSString *> *_savedNames;        // those and the ones saved on the phone
     BOOL _isNew;
     NSString *_initialTitle;
     NSString *_initialMessage;
@@ -571,6 +312,65 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
     _messageField = messageField;
     [self buildPreviewCell];
     [self refreshToastPreview];
+    [self collectVariableNames];
+    [self rebuildVariableMenus];
+    [self loadSavedVariableNames];
+}
+
+#pragma mark Variables
+
+// The variables the trigger's Set Variable actions name, This Run Only apart from saved ones
+- (void)collectVariableNames {
+    NSMutableOrderedSet *run = [NSMutableOrderedSet orderedSet], *saved = [NSMutableOrderedSet orderedSet];
+    for (id item in self.variableActions ?: @[]) {
+        if (![item isKindOfClass:[NSDictionary class]] || ![[item[@"type"] description] isEqualToString:@"set_variable"]) continue;
+        NSString *name = [item[@"name"] description];
+        if (!RCSetVariableNameValid(name)) continue;
+        if ([[item[@"scope"] description] isEqualToString:@"run"]) [run addObject:name];
+        else [saved addObject:name];
+    }
+    _runNames = [run.array sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
+    _triggerSavedNames = saved.array;
+    _savedNames = [self mergedSavedNames:@[]];
+}
+
+- (NSArray<NSString *> *)mergedSavedNames:(NSArray<NSString *> *)phoneNames {
+    NSMutableOrderedSet *all = [NSMutableOrderedSet orderedSetWithArray:phoneNames];
+    [all addObjectsFromArray:_triggerSavedNames ?: @[]];
+    [all minusSet:[NSSet setWithArray:_runNames ?: @[]]];
+    return [all.array sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
+}
+
+// The ones saved on the phone, from other triggers too
+- (void)loadSavedVariableNames {
+    __weak typeof(self) weakSelf = self;
+    [[RCServerClient sharedClient] executeCommand:@"var list" completion:^(NSString *output, NSError *error) {
+        NSData *data = [output dataUsingEncoding:NSUTF8StringEncoding];
+        id parsed = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+        if (![parsed isKindOfClass:[NSDictionary class]] || ![parsed count]) return;
+        NSArray *phoneNames = [parsed allKeys];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf || !strongSelf.isViewLoaded) return;
+            strongSelf->_savedNames = [strongSelf mergedSavedNames:phoneNames];
+            [strongSelf rebuildVariableMenus];
+        });
+    }];
+}
+
+- (void)rebuildVariableMenus {
+    for (UITextField *field in @[_titleField ?: [UITextField new], _messageField ?: [UITextField new]]) {
+        if (![field.rightView isKindOfClass:[UIButton class]]) continue;
+        __weak UITextField *weakField = field;
+        __weak typeof(self) weakSelf = self;
+        ((UIButton *)field.rightView).menu = RCVariableInsertMenu(_runNames, _savedNames, ^(NSString *name) {
+            UITextField *f = weakField;
+            if (!f) return;
+            UITextRange *range = f.selectedTextRange ?: [f textRangeFromPosition:f.endOfDocument toPosition:f.endOfDocument];
+            [f replaceRange:range withText:[NSString stringWithFormat:@"{%@}", name]];
+            [weakSelf toastFieldChanged:f];
+        });
+    }
 }
 
 - (void)viewDidAppear:(BOOL)animated {
@@ -599,6 +399,14 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
     field.delegate = self;
     field.translatesAutoresizingMaskIntoConstraints = NO;
     [field addTarget:self action:@selector(toastFieldChanged:) forControlEvents:UIControlEventEditingChanged];
+    // + inserts a variable's {name} at the cursor (its menu is set in rebuildVariableMenus)
+    UIButton *insert = [UIButton buttonWithType:UIButtonTypeSystem];
+    [insert setImage:[UIImage systemImageNamed:@"plus.circle"] forState:UIControlStateNormal];
+    insert.frame = CGRectMake(0, 0, 32, 32);
+    insert.showsMenuAsPrimaryAction = YES;
+    insert.accessibilityLabel = @"Insert Variable";
+    field.rightView = insert;
+    field.rightViewMode = UITextFieldViewModeAlways;
     [cell.contentView addSubview:field];
     [NSLayoutConstraint activateConstraints:@[
         [label.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:20],
@@ -718,16 +526,19 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
 - (void)openIconPicker {
     [_titleField resignFirstResponder];
     [_messageField resignFirstResponder];
-    RCToastIconBrowserViewController *browser = [[RCToastIconBrowserViewController alloc] initWithCurrentIcon:_selectedIcon];
+    RCSymbolPickerViewController *picker = [[RCSymbolPickerViewController alloc] initWithSelectedSymbol:_selectedIcon allowsNone:YES];
+    NSMutableArray *favorites = [NSMutableArray array];
+    for (NSDictionary *choice in RCToastIconChoices()) [favorites addObject:choice[@"symbol"]];
+    picker.favoriteSymbols = favorites;
     __weak typeof(self) weakSelf = self;
-    browser.onPick = ^(NSString *picked) {
+    picker.onPick = ^(NSString *picked) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf) return;
         strongSelf->_selectedIcon = picked ?: @"";
         [strongSelf.tableView reloadRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:0 inSection:2]] withRowAnimation:UITableViewRowAnimationNone];
         [strongSelf refreshToastPreview];
     };
-    [self.navigationController pushViewController:browser animated:YES];
+    [self.navigationController pushViewController:picker animated:YES];
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
@@ -1925,9 +1736,7 @@ static void RCSetRunWatching(BOOL watching) {
                 __strong typeof(weakSelf) strongSelf = weakSelf;
                 if (!strongSelf) return;
                 [strongSelf pushToastEditorWithTitle:@"" message:@"" icon:@"" isNew:YES onSave:^(NSString *cmd) {
-                    [strongSelf.actions addObject:cmd];
-                    [strongSelf saveActions];
-                    [strongSelf.tableView reloadData];
+                    [weakSelf storeCommand:cmd atIndex:NSNotFound];
                 }];
             });
         } else if ([self levelPrefixForCommand:action]) {
@@ -3456,12 +3265,9 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         NSString *toastTitle = nil, *toastSub = nil, *toastIcon = nil;
         rc_parse_toast_cmd(currentAction, &toastTitle, &toastSub, &toastIcon);
         __weak typeof(self) weakSelf = self;
+        NSInteger index = indexPath.row;
         [self pushToastEditorWithTitle:toastTitle message:toastSub icon:toastIcon isNew:NO onSave:^(NSString *cmd) {
-            __strong typeof(weakSelf) strongSelf = weakSelf;
-            if (!strongSelf) return;
-            strongSelf.actions[indexPath.row] = cmd;
-            [strongSelf saveActions];
-            [strongSelf.tableView reloadData];
+            [weakSelf storeCommand:cmd atIndex:index]; // keeps any settings around the command
         }];
     } else {
         // Any other command: the command editor, with the variable menu
@@ -3488,6 +3294,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
                                                                                          message:message
                                                                                             icon:icon
                                                                                            isNew:isNew];
+    editor.variableActions = self.actions;
     editor.onSave = ^(NSString *t, NSString *m, NSString *i) {
         if (onSave) onSave(rc_build_toast_command(t, m, i));
     };

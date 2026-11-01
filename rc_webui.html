@@ -1544,6 +1544,8 @@
     .terminal-var-insert { position: absolute; right: 4px; top: 4px; margin: 0; }
     .terminal-var-insert i.f7-icons { font-size: 20px; }
     #symbol-picker-backdrop { z-index: 960; }
+    /* Toast rows: + inserts a variable, the grid button opens the icon picker */
+    .toast-row .toast-row-insert { margin: 0 -6px 0 2px; flex-shrink: 0; }
     .sym-box { width: 92%; max-width: 480px; display: flex; flex-direction: column; max-height: 86vh; max-height: 86dvh; }
     .sym-top { padding: 0 14px; }
     .sym-search { margin: 0 0 10px; width: 100%; text-align: left; padding: 8px 12px; font-size: 15px; }
@@ -2419,6 +2421,19 @@
   </div>
 </div>
 
+<!-- ══ ICON PICKER (Toast) ═════════════════════════════════════════════ -->
+<div class="dialog-backdrop" id="symbol-picker-backdrop" onclick="if (event.target === this) closeSymbolPicker()">
+  <div class="dialog-box sym-box">
+    <div class="dialog-title">Icon</div>
+    <div class="sym-top">
+      <input class="dialog-input sym-search" id="symbol-picker-search" type="text" placeholder="Search Icons" autocorrect="off" autocapitalize="none" spellcheck="false" oninput="renderSymbolPicker()">
+      <div class="sym-cats" id="symbol-picker-cats"></div>
+    </div>
+    <div class="sym-grid" id="symbol-picker-grid"></div>
+    <div class="dialog-btns"><button onclick="closeSymbolPicker()">Cancel</button></div>
+  </div>
+</div>
+
 <!-- ══ COMMAND LIST (Set Variable's RC Command) ═══════════════════════ -->
 <div class="dialog-backdrop" id="cmd-picker-backdrop" onclick="if (event.target === this) closeCommandPicker()">
   <div class="dialog-box sym-box">
@@ -2513,18 +2528,21 @@
           <span class="dialog-row-icon" aria-hidden="true"><i class="f7-icons">textformat</i></span>
           <span class="toast-row-label">Title</span>
           <input class="toast-row-input" id="toast-title-input" type="text" placeholder="Silent Vibrate" autocorrect="off" autocapitalize="words" spellcheck="false" oninput="updateToastPreview()">
+          <button type="button" class="var-ed-insert toast-row-insert" title="Insert Variable" aria-label="Insert Variable" onclick="toastInsertVariable(event, 'toast-title-input')"><i class="f7-icons">plus_circle</i></button>
         </label>
         <label class="toast-row">
           <span class="dialog-row-icon" aria-hidden="true"><i class="f7-icons">text_bubble</i></span>
           <span class="toast-row-label">Message</span>
           <span class="toast-row-hint" aria-hidden="true">Optional</span>
           <input class="toast-row-input" id="toast-subtitle-input" type="text" placeholder="ON" autocorrect="off" autocapitalize="none" spellcheck="false" oninput="updateToastPreview()">
+          <button type="button" class="var-ed-insert toast-row-insert" title="Insert Variable" aria-label="Insert Variable" onclick="toastInsertVariable(event, 'toast-subtitle-input')"><i class="f7-icons">plus_circle</i></button>
         </label>
         <label class="toast-row">
           <span class="dialog-row-icon" aria-hidden="true"><i class="f7-icons">square_grid_2x2</i></span>
           <span class="toast-row-label">Icon</span>
           <span class="toast-row-hint" aria-hidden="true">Optional</span>
           <input class="toast-row-input" id="toast-icon-input" type="text" placeholder="bell.fill" autocorrect="off" autocapitalize="none" spellcheck="false" oninput="updateToastPreview()">
+          <button type="button" class="var-ed-insert toast-row-insert" title="Choose Icon" aria-label="Choose Icon" onclick="event.preventDefault(); openSymbolPicker()"><i class="f7-icons">square_grid_2x2</i></button>
         </label>
       </div>
 
@@ -5023,6 +5041,7 @@ function promptLevelAction(prefix, idx) {
 // ── Toast Action Modal ──
 function promptToastModal(initialCmd = '', editIdx = null) {
   g_editingToastIdx = editIdx;
+  varEdStart({ mode: 'toast', typed: {}, nameText: '', picked: null, typingNew: false }, null); // names for the + menus
   const title = (editIdx !== null) ? 'Edit Toast Notification' : 'Toast Notification';
   document.getElementById('toast-dialog-title').textContent = title;
   
@@ -5032,7 +5051,7 @@ function promptToastModal(initialCmd = '', editIdx = null) {
   
   if (initialCmd && initialCmd.toLowerCase().startsWith('toast ')) {
     const argStr = initialCmd.slice(6).trim();
-    const match = argStr.match(/^"([^"]+)"(?:\s+"([^"]+)")?(?:\s+"([^"]+)")?/);
+    const match = argStr.match(/^"([^"]*)"(?:\s+"([^"]*)")?(?:\s+"([^"]*)")?/);
     if (match) {
       tTitle = match[1] || '';
       tSub = match[2] || '';
@@ -5070,11 +5089,106 @@ function updateToastPreview() {
     subEl.style.display = 'none';
   }
   
-  let f7Icon = tIcon.replaceAll('.', '_');
-  document.getElementById('toast-preview-icon').textContent = f7Icon || 'text_bubble';
+  document.getElementById('toast-preview-icon').textContent = symbolGlyph(tIcon) || 'text_bubble';
+}
+// The + on a Toast field: the variable goes in at the cursor
+function toastInsertVariable(e, id) {
+  e.stopPropagation();
+  const input = document.getElementById(id);
+  varEdOpenMenu(e.currentTarget, name => {
+    const token = `{${name}}`;
+    const s = input.selectionStart ?? input.value.length, en = input.selectionEnd ?? input.value.length;
+    input.value = input.value.slice(0, s) + token + input.value.slice(en);
+    input.focus();
+    input.setSelectionRange(s + token.length, s + token.length);
+    updateToastPreview();
+  });
+}
+
+// ── Icon picker for the Toast: SF Symbol names the web icon font also has, by category ──
+// The Suggestions strip's icons, first in the picker as Favorites: SF name and its web glyph
+const TOAST_FAVORITES = [...document.querySelectorAll('#toast-icon-presets .toast-icon-tile')].map(t => {
+  const m = (t.getAttribute('onclick') || '').match(/'([^']+)'/);
+  return m ? [m[1], t.querySelector('i').textContent.trim()] : null;
+}).filter(Boolean);
+const SYMBOL_GLYPHS = Object.fromEntries(TOAST_FAVORITES);
+// The web icon font's name for an SF Symbol name
+function symbolGlyph(name) { return SYMBOL_GLYPHS[name] || (name || '').replaceAll('.', '_'); }
+const SYMBOL_CATEGORIES = [
+  ['Favorites', TOAST_FAVORITES.map(f => f[0]).join(' ')],
+  ['Common', 'bell.fill bell.slash.fill checkmark.circle.fill xmark.circle.fill exclamationmark.triangle.fill exclamationmark.circle.fill info.circle.fill star.fill heart.fill flag.fill bolt.fill sparkles hand.thumbsup.fill hand.thumbsdown.fill hand.raised.fill lightbulb.fill flame.fill gift.fill tag.fill bookmark.fill pin.fill eye.fill eye.slash.fill lock.fill lock.open.fill shield.fill person.fill person.2.fill house.fill trash.fill pencil paperplane.fill envelope.fill text.bubble.fill phone.fill link doc.fill folder.fill'],
+  ['Media', 'play.fill pause.fill stop.fill playpause.fill forward.fill backward.fill forward.end.fill backward.end.fill shuffle repeat repeat.1 music.note music.note.list music.mic headphones speaker.fill speaker.slash.fill mic.fill mic.slash.fill camera.fill photo.fill film.fill tv.fill hifispeaker.fill waveform'],
+  ['Devices', 'desktopcomputer keyboard printer.fill gamecontroller.fill battery.100 battery.25 battery.0 bolt.circle.fill lock.rotation rotate.right.fill car.fill'],
+  ['Connectivity', 'wifi wifi.slash wifi.exclamationmark airplane personalhotspot globe location.fill location.slash.fill cloud.fill arrow.down.circle.fill arrow.up.circle.fill'],
+  ['Home', 'house.fill lightbulb.fill lightbulb.slash.fill thermometer bed.double.fill lock.shield.fill'],
+  ['Weather & Time', 'sun.max.fill moon.fill moon.stars.fill cloud.sun.fill cloud.rain.fill cloud.bolt.fill cloud.snow.fill wind tornado umbrella.fill sunrise.fill sunset.fill moon.zzz.fill zzz alarm.fill clock.fill timer hourglass stopwatch.fill calendar'],
+  ['Life', 'waveform.path.ecg drop.fill bandage.fill cart.fill bag.fill creditcard.fill briefcase.fill book.fill gamecontroller.fill'],
+  ['Symbols', 'plus.circle.fill minus.circle.fill multiply.circle.fill number textformat checkmark xmark exclamationmark arrow.right arrow.left arrow.up arrow.down arrow.clockwise arrow.counterclockwise chevron.right circle.fill square.fill triangle.fill hexagon.fill power slider.horizontal.3'],
+].map(([title, names]) => [title, names.split(' ')]);
+let symbolPickerCategory = -1;
+
+function openSymbolPicker() {
+  symbolPickerCategory = -1;
+  document.getElementById('symbol-picker-search').value = '';
+  const cats = document.getElementById('symbol-picker-cats');
+  cats.innerHTML = '';
+  [['All'], ...SYMBOL_CATEGORIES].forEach(([title], i) => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'sym-cat' + (i === 0 ? ' active' : '');
+    chip.textContent = title;
+    chip.onclick = () => {
+      symbolPickerCategory = i - 1;
+      cats.querySelectorAll('.sym-cat').forEach((c, j) => c.classList.toggle('active', j === i));
+      renderSymbolPicker();
+      document.getElementById('symbol-picker-grid').scrollTop = 0;
+    };
+    cats.appendChild(chip);
+  });
+  renderSymbolPicker();
+  document.getElementById('symbol-picker-backdrop').classList.add('visible');
+  const sel = document.querySelector('#symbol-picker-grid .sym-tile.selected');
+  if (sel) setTimeout(() => sel.scrollIntoView({ block: 'center' }), 50);
+}
+
+function closeSymbolPicker() {
+  document.getElementById('symbol-picker-backdrop').classList.remove('visible');
+}
+
+function renderSymbolPicker() {
+  const q = document.getElementById('symbol-picker-search').value.trim().toLowerCase();
+  const current = document.getElementById('toast-icon-input').value.trim();
+  const terms = q.split(/[ .]+/).filter(Boolean);
+  const names = [];
+  SYMBOL_CATEGORIES.forEach(([, list], i) => {
+    if (symbolPickerCategory >= 0 && i !== symbolPickerCategory) return;
+    list.forEach(n => {
+      if (names.includes(n)) return;
+      if (!terms.length || terms.some(t => n.replaceAll('.', ' ').includes(t))) names.push(n);
+    });
+  });
+  const shown = (!q && symbolPickerCategory < 0) ? ['', ...names] : names;
+  const grid = document.getElementById('symbol-picker-grid');
+  grid.innerHTML = '';
+  shown.forEach(n => {
+    const tile = document.createElement('button');
+    tile.type = 'button';
+    tile.className = 'sym-tile' + (n === current ? ' selected' : '');
+    tile.title = n || 'None';
+    tile.innerHTML = `<i class="f7-icons">${n ? symbolGlyph(n) : 'nosign'}</i><span>${escHtml(n || 'None')}</span>`;
+    tile.onclick = () => {
+      document.getElementById('toast-icon-input').value = n;
+      updateToastPreview();
+      closeSymbolPicker();
+    };
+    grid.appendChild(tile);
+  });
+  if (!shown.length) grid.innerHTML = '<div class="sym-empty">No matching icons. Type any SF Symbol name in the Icon field.</div>';
 }
 
 function closeToastDialog() {
+  varEdCloseMenu();
+  if (varEd && varEd.mode === 'toast') varEd = null;
   document.getElementById('toast-dialog-backdrop').classList.remove('visible');
   g_editingToastIdx = null;
 }
@@ -5085,19 +5199,20 @@ function toastDialogOk() {
     closeToastDialog();
     return;
   }
-  const tSub = document.getElementById('toast-subtitle-input').value.trim();
-  const tIcon = document.getElementById('toast-icon-input').value.trim();
+  // A " would end the quoted part early: values (a variable's too) use ' instead
+  const tSub = document.getElementById('toast-subtitle-input').value.trim().replaceAll('"', "'");
+  const tIcon = document.getElementById('toast-icon-input').value.trim().replaceAll('"', "'");
   
   let formattedCmd = '';
   if (tSub || tIcon) {
-    formattedCmd = `toast "${tTitle}" "${tSub}" "${tIcon}"`;
+    formattedCmd = `toast "${tTitle.replaceAll('"', "'")}" "${tSub}" "${tIcon}"`;
   } else {
     formattedCmd = `toast ${tTitle}`;
   }
   
   const actions = triggerData(currentKey).actions || [];
   if (g_editingToastIdx !== null && g_editingToastIdx < actions.length) {
-    actions[g_editingToastIdx] = formattedCmd;
+    storeCommandAt(actions, g_editingToastIdx, formattedCmd); // keeps any settings around it
   } else {
     addActionToCurrent(formattedCmd);
   }
