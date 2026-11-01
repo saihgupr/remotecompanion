@@ -235,7 +235,7 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
 @property (nonatomic, strong) UISelectionFeedbackGenerator *reorderTick;
 // The one toast editor. New toasts and edits both come through here,
 // so they always look and save the same way.
-- (void)pushToastEditorWithTitle:(NSString *)title
+- (void)showToastEditorWithTitle:(NSString *)title
                         message:(NSString *)message
                            icon:(NSString *)icon
                           isNew:(BOOL)isNew
@@ -510,8 +510,17 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
     return YES;
 }
 
+// Opened as a card (its own navigation controller): it closes; pushed: it goes back
+- (void)closeEditor {
+    if (self.navigationController.viewControllers.firstObject == self && self.navigationController.presentingViewController) {
+        [self.navigationController dismissViewControllerAnimated:YES completion:nil];
+    } else {
+        [self.navigationController popViewControllerAnimated:YES];
+    }
+}
+
 - (void)cancelToast {
-    [self.navigationController popViewControllerAnimated:YES];
+    [self closeEditor];
 }
 
 - (void)saveToast {
@@ -520,7 +529,7 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
     NSString *message = _messageField.text ?: @"";
     NSString *icon = _selectedIcon ?: @"";
     if (self.onSave) self.onSave(title, message, icon);
-    [self.navigationController popViewControllerAnimated:YES];
+    [self closeEditor];
 }
 
 - (void)openIconPicker {
@@ -1730,12 +1739,12 @@ static void RCSetRunWatching(BOOL watching) {
                 [self presentViewController:nav animated:YES completion:nil];
             });
         } else if ([action isEqualToString:@"__TOAST__"]) {
-            // New toast: same editor as edits, pushed once the picker is gone
+            // New toast: same editor as edits, opened once the picker is gone
             __weak typeof(self) weakSelf = self;
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                 __strong typeof(weakSelf) strongSelf = weakSelf;
                 if (!strongSelf) return;
-                [strongSelf pushToastEditorWithTitle:@"" message:@"" icon:@"" isNew:YES onSave:^(NSString *cmd) {
+                [strongSelf showToastEditorWithTitle:@"" message:@"" icon:@"" isNew:YES onSave:^(NSString *cmd) {
                     [weakSelf storeCommand:cmd atIndex:NSNotFound];
                 }];
             });
@@ -3266,7 +3275,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         rc_parse_toast_cmd(currentAction, &toastTitle, &toastSub, &toastIcon);
         __weak typeof(self) weakSelf = self;
         NSInteger index = indexPath.row;
-        [self pushToastEditorWithTitle:toastTitle message:toastSub icon:toastIcon isNew:NO onSave:^(NSString *cmd) {
+        [self showToastEditorWithTitle:toastTitle message:toastSub icon:toastIcon isNew:NO onSave:^(NSString *cmd) {
             [weakSelf storeCommand:cmd atIndex:index]; // keeps any settings around the command
         }];
     } else {
@@ -3285,7 +3294,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 
 // The one toast editor. New toasts and edits both come through here,
 // so they always look and save the same way.
-- (void)pushToastEditorWithTitle:(NSString *)title
+- (void)showToastEditorWithTitle:(NSString *)title
                         message:(NSString *)message
                            icon:(NSString *)icon
                           isNew:(BOOL)isNew
@@ -3298,7 +3307,9 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     editor.onSave = ^(NSString *t, NSString *m, NSString *i) {
         if (onSave) onSave(rc_build_toast_command(t, m, i));
     };
-    [self.navigationController pushViewController:editor animated:YES];
+    // A card like the other editors: swiping it down cancels
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:editor];
+    [self presentViewController:nav animated:YES completion:nil];
 }
 
 - (void)promptEditUnlockActionAtIndex:(NSInteger)index {
