@@ -11929,6 +11929,10 @@ static NSTimeInterval g_lastPowerVolComboFireTime = 0;
 // performDoublePressActions hooks use it to recognize that press's native
 // callbacks, which arrive after it was already handled.
 static BOOL g_powerPressIsCombo = NO;
+// Power Long Press fired for the current press. iOS can still take a hold this short for a
+// single press and fire singlePress: after the release, which slept the phone (iPhone 8,
+// iOS 14). Reset by each real power press-down.
+static BOOL g_powerPressWasLongPress = NO;
 // How many times iOS's own sleep gesture (-[SBLockHardwareButton singlePress:]) fired
 // during the current deferred click sequence. iOS doesn't fire it for a press that was
 // part of one of its chords or gestures - and those differ by device: without a Home
@@ -14043,6 +14047,7 @@ static void setup_background_hid_listener() {
     if (g_powerDownsAwaitingUp < 1) g_powerDownsAwaitingUp = 1; // the HID listener normally armed it already
     g_replaySinglePressesAllowed = 0; // a new real press; any unclaimed replay slot is stale
     g_powerPressIsCombo = NO;
+    g_powerPressWasLongPress = NO;
     g_powerReleasedWithVolumeHeld = NO;
     if (g_powerClickCount == 0) { // a new click sequence
         g_nativeSinglePressCount = 0;
@@ -14104,6 +14109,7 @@ static void setup_background_hid_listener() {
                     return;
                 }
                 g_lockButtonTriggered = YES;
+                g_powerPressWasLongPress = YES;
                 trigger_haptic();
                 RCExecuteTrigger(@"power_long_press");
                 SRLog(@"Power Long Press Fired (Stage 1)!");
@@ -14353,6 +14359,7 @@ static void setup_background_hid_listener() {
                 g_lockButtonTimer = nil;
             }
             g_lockButtonTriggered = YES;
+            g_powerPressWasLongPress = YES;
             trigger_haptic();
             RCExecuteTrigger(@"power_long_press");
             SRLog(@"Power Long Press Fired (via performLongPressActions)!");
@@ -14534,6 +14541,12 @@ static BOOL RC_HomeSinglePressIsPartOfHeldClicks(void) {
     if (g_powerPressIsCombo && !RC_IsForegroundAppExcluded()) {
         SRLog(@"Suppressing native singlePress: - a Power + Volume combo consumed this press");
         RCTKEvent(@"ios.singlePress", @{ @"press": @"combo" });
+        return;
+    }
+    // Power Long Press consumed this press, so its release doesn't sleep the phone
+    if (g_powerPressWasLongPress && !RC_IsForegroundAppExcluded()) {
+        SRLog(@"Suppressing native singlePress: - Power Long Press consumed this press");
+        RCTKEvent(@"ios.singlePress", @{ @"press": @"longPress" });
         return;
     }
     // A Volume button still held when this press was released: it never sleeps the phone (see
