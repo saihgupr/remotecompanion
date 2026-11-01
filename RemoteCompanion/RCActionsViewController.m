@@ -6,6 +6,7 @@
 #import "RCConditionPickerViewController.h"
 #import "RCTextInputViewController.h"
 #import "RCServerClient.h"
+#import "RCRunningViewController.h"
 #import "RCScheduledTriggerViewController.h"
 #import "RCNotificationTriggerViewController.h"
 #import "RCWiFiTriggerViewController.h"
@@ -239,6 +240,21 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
 @property (nonatomic, strong) NSString *triggerKey;
 @property (nonatomic, strong) NSMutableArray *actions;
 @property (nonatomic, strong) UIBarButtonItem *moreButton;
+// While this trigger runs: the row of the action it's on (highlighted, like a debugger's current
+// line), or NSNotFound
+@property (nonatomic, assign) NSInteger runningIndex; // the longest run's (scrolled to)
+@property (nonatomic, strong) NSIndexSet *runningIndexes; // every run's (all highlighted)
+@property (nonatomic, copy) NSString *runningRunID; // with one run, Stop ends it
+@property (nonatomic, strong) NSTimer *runTimer;
+@property (nonatomic, assign) int runsToken;
+@property (nonatomic, assign) int stepToken;
+@property (nonatomic, assign) BOOL pollInFlight, pollAgain;
+// The debugger view: follows this one run (highlight, time, Stop), read-only. Without it the page is
+// the trigger's ordinary editor, with a strip at the top while the trigger runs.
+@property (nonatomic, copy) NSString *debugRunID;
+@property (nonatomic, assign) BOOL debugRunSeen; // the followed run has shown up (it ending closes the view)
+@property (nonatomic, copy) NSArray<NSDictionary *> *stripRuns; // this trigger's runs, for the strip
+@property (nonatomic, weak) UILabel *stripLabel;
 // The one toast editor. New toasts and edits both come through here,
 // so they always look and save the same way.
 - (void)pushToastEditorWithTitle:(NSString *)title
@@ -920,6 +936,13 @@ static id g_actionClipboard = nil;
     self.moreButton.menu = [self moreMenu];
 }
 
+// A trigger with a loop restarts when it fires again (instead of running a second copy alongside),
+// unless When Triggered Again was already chosen
+- (void)defaultToRestartForLoop {
+    if ([[RCConfigManager sharedManager] triggerDataForKey:_triggerKey][@"mode"]) return;
+    [self setRunMode:@"restart"];
+}
+
 - (UIMenu *)moreMenu {
     __weak typeof(self) weakSelf = self;
     NSMutableArray *modes = [NSMutableArray array];
@@ -980,16 +1003,279 @@ static id g_actionClipboard = nil;
     [self presentViewController:sheet animated:YES completion:nil];
 }
 
+- (instancetype)initWithTriggerKey:(NSString *)triggerKey followingRun:(NSString *)runID {
+    self = [self initWithTriggerKey:triggerKey];
+    if (self) _debugRunID = [runID copy];
+    return self;
+}
+
 - (instancetype)initWithTriggerKey:(NSString *)triggerKey {
     self = [super initWithStyle:UITableViewStyleInsetGrouped];
     if (self) {
         _triggerKey = triggerKey;
+        _runningIndex = NSNotFound;
     }
     return self;
 }
 
+// Editors on screen following runs; the tweak sends step signals only while there's one
+static NSInteger g_runWatchers = 0;
+
+static void RCSetRunWatching(BOOL watching) {
+    g_runWatchers = MAX(0, g_runWatchers + (watching ? 1 : -1));
+    static int token = NOTIFY_TOKEN_INVALID;
+    if (token == NOTIFY_TOKEN_INVALID) notify_register_check("com.pizzaman.rc.run_watch", &token);
+    if (token != NOTIFY_TOKEN_INVALID) notify_set_state(token, g_runWatchers > 0 ? 1 : 0);
+}
+
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    [self startRunWatch];
+}
+
+- (void)viewWillDisappear:(BOOL)animated {
+    [super viewWillDisappear:animated];
+    [self stopRunWatch];
+}
+
+// In the background nothing is shown, so nothing is followed
+- (void)appDidEnterBackground {
+    [self stopRunWatch];
+}
+
+- (void)appWillEnterForeground {
+    if (self.view.window) [self startRunWatch];
+}
+
+// Follow a run of this trigger: one when it starts or ends (runs_changed), each step (run_step),
+// and once a second for the time
+- (void)startRunWatch {
+    if (self.runsToken) return;
+    RCSetRunWatching(YES);
+    __weak typeof(self) weakSelf = self;
+    int token;
+    if (notify_register_dispatch("com.pizzaman.rc.runs_changed", &token, dispatch_get_main_queue(), ^(int t) { [weakSelf pollRun]; }) == NOTIFY_STATUS_OK) {
+        self.runsToken = token;
+    }
+    if (notify_register_dispatch("com.pizzaman.rc.run_step", &token, dispatch_get_main_queue(), ^(int t) { [weakSelf pollRun]; }) == NOTIFY_STATUS_OK) {
+        self.stepToken = token;
+    }
+    [self pollRun];
+}
+
+- (void)stopRunWatch {
+    if (!self.runsToken && !self.stepToken) return;
+    RCSetRunWatching(NO);
+    if (self.runsToken) notify_cancel(self.runsToken);
+    if (self.stepToken) notify_cancel(self.stepToken);
+    self.runsToken = 0;
+    self.stepToken = 0;
+    [self.runTimer invalidate];
+    self.runTimer = nil;
+}
+
+// One request at a time: steps that come while one is out are covered by one more after it
+- (void)pollRun {
+    if (self.pollInFlight) { self.pollAgain = YES; return; }
+    self.pollInFlight = YES;
+    __weak typeof(self) weakSelf = self;
+    [[RCServerClient sharedClient] executeCommand:@"running" completion:^(NSString *output, NSError *error) {
+        NSData *data = [output dataUsingEncoding:NSUTF8StringEncoding];
+        NSArray *runs = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) return;
+            if (!strongSelf.isViewLoaded) { strongSelf.pollInFlight = NO; return; }
+            NSMutableArray *mine = [NSMutableArray array]; // this trigger's runs, longest first
+            if ([runs isKindOfClass:[NSArray class]]) {
+                for (NSDictionary *run in runs) {
+                    if ([run isKindOfClass:[NSDictionary class]] && [run[@"key"] isEqual:strongSelf.triggerKey]) [mine addObject:run];
+                }
+            }
+            [strongSelf showRuns:mine];
+            strongSelf.pollInFlight = NO;
+            if (strongSelf.pollAgain) {
+                strongSelf.pollAgain = NO;
+                [strongSelf pollRun];
+            }
+        });
+    }];
+}
+
+- (void)showRuns:(NSArray<NSDictionary *> *)runs {
+    if (self.debugRunID) {
+        NSDictionary *run = nil;
+        for (NSDictionary *each in runs) if ([each[@"id"] isEqual:self.debugRunID]) run = each;
+        [self showDebugRun:run];
+    } else {
+        [self showStripForRuns:runs];
+    }
+}
+
+// The ordinary editor: a strip at the top of the list while the trigger runs
+- (void)showStripForRuns:(NSArray<NSDictionary *> *)runs {
+    BOOL had = self.stripRuns.count > 0;
+    self.stripRuns = runs;
+    if (had != (runs.count > 0)) {
+        [self.tableView reloadData]; // the strip comes or goes (the header's height changes)
+    } else if (self.stripLabel) {
+        self.stripLabel.text = [self stripText];
+    }
+    if (runs.count && !self.runTimer && self.runsToken) {
+        __weak typeof(self) weakSelf = self;
+        self.runTimer = [NSTimer scheduledTimerWithTimeInterval:1.0 repeats:YES block:^(NSTimer *timer) { [weakSelf pollRun]; }];
+    } else if (!runs.count) {
+        [self.runTimer invalidate];
+        self.runTimer = nil;
+    }
+}
+
+- (NSString *)stripText {
+    NSDictionary *run = self.stripRuns.firstObject;
+    if (!run) return @"";
+    NSInteger seconds = [run[@"seconds"] integerValue];
+    NSString *time = seconds < 60 ? [NSString stringWithFormat:@"%ld s", (long)seconds] : [NSString stringWithFormat:@"%ld:%02ld", (long)(seconds / 60), (long)(seconds % 60)];
+    if (self.stripRuns.count > 1) return [NSString stringWithFormat:@"%lu running · longest %@", (unsigned long)self.stripRuns.count, time];
+    NSString *step = run[@"step"] ? [[RCConfigManager sharedManager] nameForCommand:run[@"step"] truncate:YES] : @"Starting";
+    return [NSString stringWithFormat:@"%@ · %@ · %@", [run[@"test"] boolValue] ? @"Testing" : @"Running", time, step];
+}
+
+// The strip: green, with the runs' state; tap for this trigger's Running list, Stop ends them all
+- (UIView *)runStripWithWidth:(CGFloat)width left:(CGFloat)left right:(CGFloat)right {
+    UIView *strip = [[UIView alloc] initWithFrame:CGRectMake(left, 10, width - left - right, 40)];
+    strip.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    strip.backgroundColor = [[UIColor systemGreenColor] colorWithAlphaComponent:0.18];
+    strip.layer.cornerRadius = 10;
+    UIImageView *icon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"play.circle.fill"]];
+    icon.tintColor = [UIColor systemGreenColor];
+    icon.contentMode = UIViewContentModeCenter;
+    icon.frame = CGRectMake(10, 0, 24, 40);
+    [strip addSubview:icon];
+    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(42, 0, strip.bounds.size.width - 42 - 44, 40)];
+    label.font = [UIFont monospacedDigitSystemFontOfSize:13 weight:UIFontWeightMedium];
+    label.textColor = [UIColor labelColor];
+    label.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    label.text = [self stripText];
+    [strip addSubview:label];
+    self.stripLabel = label;
+    UIButton *stop = [UIButton buttonWithType:UIButtonTypeSystem];
+    [stop setImage:[UIImage systemImageNamed:@"stop.circle.fill" withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:20]] forState:UIControlStateNormal];
+    stop.tintColor = [UIColor systemRedColor];
+    stop.frame = CGRectMake(strip.bounds.size.width - 44, 0, 44, 40);
+    stop.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
+    stop.accessibilityLabel = @"Stop";
+    [stop addTarget:self action:@selector(stopAllRuns) forControlEvents:UIControlEventTouchUpInside];
+    [strip addSubview:stop];
+    [strip addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(openRuns)]];
+    return strip;
+}
+
+- (void)stopAllRuns {
+    __weak typeof(self) weakSelf = self;
+    [[RCServerClient sharedClient] executeCommand:[@"stop trigger " stringByAppendingString:self.triggerKey] completion:^(NSString *output, NSError *error) {
+        dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf pollRun]; });
+    }];
+}
+
+// The debugger view: the followed run's step highlighted, its time and loop round above the title,
+// and Stop. When the run ends, the view closes.
+- (void)showDebugRun:(NSDictionary *)run {
+    if (!run) {
+        [self.runTimer invalidate];
+        self.runTimer = nil;
+        self.navigationItem.prompt = self.debugRunSeen ? @"Finished" : @"Not running";
+        if (self.runningIndexes.count) {
+            NSIndexSet *old = self.runningIndexes;
+            self.runningIndexes = [NSIndexSet indexSet];
+            [old enumerateIndexesUsingBlock:^(NSUInteger i, BOOL *stop) { [self repaintRunRow:i]; }];
+        }
+        self.navigationItem.rightBarButtonItems = @[];
+        if (self.debugRunSeen && self.navigationController.topViewController == self) {
+            __weak typeof(self) weakSelf = self;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                if (weakSelf.navigationController.topViewController == weakSelf) [weakSelf.navigationController popViewControllerAnimated:YES];
+            });
+        }
+        return;
+    }
+    self.debugRunSeen = YES;
+    NSInteger index = run[@"index"] ? [run[@"index"] integerValue] : NSNotFound;
+    if (index != NSNotFound && (index < 0 || index >= (NSInteger)self.actions.count)) index = NSNotFound;
+    NSIndexSet *indexes = index != NSNotFound ? [NSIndexSet indexSetWithIndex:index] : [NSIndexSet indexSet];
+    if (![indexes isEqualToIndexSet:self.runningIndexes ?: [NSIndexSet indexSet]]) {
+        NSMutableIndexSet *changed = [indexes mutableCopy];
+        [changed addIndexes:self.runningIndexes ?: [NSIndexSet indexSet]];
+        self.runningIndexes = indexes;
+        // Repainted in place: reloading the rows cross-fades the old and new cells, and quick steps
+        // stacked those fades into a darker green
+        NSInteger rowCount = [self.tableView numberOfRowsInSection:0];
+        [changed enumerateIndexesUsingBlock:^(NSUInteger i, BOOL *stop) {
+            if ((NSInteger)i < rowCount) [self repaintRunRow:i];
+        }];
+    }
+    if (index != self.runningIndex) {
+        self.runningIndex = index;
+        if (index != NSNotFound) [self.tableView scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:index inSection:0] atScrollPosition:UITableViewScrollPositionNone animated:YES];
+    }
+    NSInteger seconds = [run[@"seconds"] integerValue];
+    NSString *prompt = [NSString stringWithFormat:@"%@ for %ld s", [run[@"test"] boolValue] ? @"Testing" : @"Running", (long)seconds];
+    NSDictionary *loop = [run[@"loop"] isKindOfClass:[NSDictionary class]] ? run[@"loop"] : nil;
+    if (loop) {
+        NSInteger count = [loop[@"repeat"] isKindOfClass:[NSDictionary class]] ? [loop[@"repeat"][@"count"] integerValue] : 0;
+        prompt = count > 0 ? [prompt stringByAppendingFormat:@" · Round %ld of %ld", (long)[loop[@"round"] integerValue], (long)count]
+                           : [prompt stringByAppendingFormat:@" · Round %ld", (long)[loop[@"round"] integerValue]];
+    }
+    self.navigationItem.prompt = prompt;
+    if (!self.runTimer && self.runsToken) {
+        __weak typeof(self) weakSelf = self;
+        self.runTimer = [NSTimer scheduledTimerWithTimeInterval:1.0 repeats:YES block:^(NSTimer *timer) { [weakSelf pollRun]; }];
+    }
+}
+
+// The followed run: Stop ends it
+- (void)stopRun {
+    if (!self.debugRunID.length) return;
+    __weak typeof(self) weakSelf = self;
+    [[RCServerClient sharedClient] executeCommand:[@"stop run " stringByAppendingString:self.debugRunID] completion:^(NSString *output, NSError *error) {
+        dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf pollRun]; });
+    }];
+}
+
+// This trigger's Running list (from the strip): each run with Stop, and its debugger view
+- (void)openRuns {
+    [self.navigationController pushViewController:[[RCRunningViewController alloc] initWithTriggerKey:self.triggerKey] animated:YES];
+}
+
+// Shows or clears the run highlight on a visible row (rows scrolled in later get it from
+// willDisplayCell)
+- (void)repaintRunRow:(NSInteger)row {
+    NSIndexPath *indexPath = [NSIndexPath indexPathForRow:row inSection:0];
+    UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
+    if (!cell) return;
+    if (![self.runningIndexes containsIndex:row]) {
+        // The icon's own tint, as cellForRow sets it
+        id item = row < (NSInteger)self.actions.count ? self.actions[row] : nil;
+        BOOL isStep = [item isKindOfClass:[NSDictionary class]] && !((NSDictionary *)item)[@"command"];
+        if (isStep) {
+            cell.imageView.tintColor = ([self isBlockEndItem:item] || [self isElseActionItem:item]) ? [UIColor tertiaryLabelColor] : [UIColor systemGrayColor];
+        } else {
+            NSString *action = [item isKindOfClass:[NSDictionary class]] ? ((NSDictionary *)item)[@"command"] : item;
+            cell.imageView.tintColor = [[self iconForCommand:action] hasPrefix:@"USER_APP:"] ? nil : [UIColor systemGrayColor];
+        }
+    }
+    [self applySectionCardStyleToCell:cell atIndexPath:indexPath];
+}
+
+// The debugger view is read-only (no adding, moving, editing or deleting)
+- (BOOL)runShown {
+    return self.debugRunID != nil;
+}
+
 - (void)viewDidLoad {
     [super viewDidLoad];
+    if (self.debugRunID) self.tableView.dragInteractionEnabled = NO;
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(appDidEnterBackground) name:UIApplicationDidEnterBackgroundNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(appWillEnterForeground) name:UIApplicationWillEnterForegroundNotification object:nil];
     
     // Elegant grey tint
     self.navigationController.navigationBar.tintColor = [UIColor labelColor];
@@ -1035,6 +1321,13 @@ static id g_actionClipboard = nil;
     [rightItems addObject:playButton];
     
     self.navigationItem.rightBarButtonItems = rightItems;
+    if (self.debugRunID) {
+        // The debugger view: just Stop for the run it follows
+        UIBarButtonItem *stop = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"stop.circle.fill"] style:UIBarButtonItemStylePlain target:self action:@selector(stopRun)];
+        stop.tintColor = [UIColor systemRedColor];
+        stop.accessibilityLabel = @"Stop";
+        self.navigationItem.rightBarButtonItems = @[stop];
+    }
 
     // Add tap gesture to title if it's an NFC trigger
     if ([_triggerKey hasPrefix:@"nfc_"]) {
@@ -2132,6 +2425,8 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         }
     }
     [self saveActions];
+    BOOL newLoop = [self isRepeatActionItem:ifAction] && !(existingIndex != NSNotFound && existingIndex >= 0 && existingIndex < (NSInteger)self.actions.count);
+    if (newLoop) [self defaultToRestartForLoop];
     [self.tableView reloadData];
 }
 
@@ -2365,6 +2660,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             [strongSelf.actions addObject:@{ @"type": @"end_repeat" }];
         }
         [strongSelf saveActions];
+        if (!editing) [strongSelf defaultToRestartForLoop];
         [strongSelf.tableView reloadData];
     }]];
     [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
@@ -2474,6 +2770,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 
 - (void)handleLongPress:(UILongPressGestureRecognizer *)gesture {
     if (gesture.state != UIGestureRecognizerStateBegan) return;
+    if ([self runShown]) return; // read-only while it runs
     
     UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
     [haptic prepare];
@@ -2711,6 +3008,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    if ([self runShown]) return;
     id actionData = self.actions[indexPath.row];
     
     if ([actionData isKindOfClass:[NSDictionary class]]) {
@@ -3351,6 +3649,12 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     UIColor *fillColor = [config tweakColorForKey:@"blockBackground" defaultVal:0.12];
     UIColor *selectedFillColor = [config tweakColorForKey:@"selectionHighlight" defaultVal:0.15];
     UIColor *borderColor = [config tweakColorForKey:@"borders" defaultVal:0.14];
+    // The action a run of this trigger is on: green, like a debugger's current line
+    if ([self.runningIndexes containsIndex:indexPath.row]) {
+        fillColor = [[UIColor systemGreenColor] colorWithAlphaComponent:0.22];
+        borderColor = [UIColor systemGreenColor];
+        cell.imageView.tintColor = [UIColor systemGreenColor];
+    }
     
     NSInteger rowCount = [self.tableView numberOfRowsInSection:indexPath.section];
     if (rowCount < 1) {
@@ -3482,12 +3786,16 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     
     CGFloat width = tableView.bounds.size.width;
     CGFloat bannerHeight = [self runModeBannerHeightForWidth:width];
-    CGFloat top = bannerHeight > 0 ? bannerHeight + 12 : 0;
+    CGFloat stripHeight = [self showsRunStrip] ? 52 : 0;
+    CGFloat top = (bannerHeight > 0 ? bannerHeight + 12 : 0) + stripHeight;
     UIView *headerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, 40 + top)];
+    if (stripHeight > 0) {
+        [headerView addSubview:[self runStripWithWidth:width left:tableView.layoutMargins.left right:tableView.layoutMargins.right]];
+    }
     if (bannerHeight > 0) {
         // Lined up with the action cards (the table's margins), and kept so as the header is resized
         CGFloat left = tableView.layoutMargins.left, right = tableView.layoutMargins.right;
-        UIView *banner = [[UIView alloc] initWithFrame:CGRectMake(left, 10, width - left - right, bannerHeight)];
+        UIView *banner = [[UIView alloc] initWithFrame:CGRectMake(left, 10 + stripHeight, width - left - right, bannerHeight)];
         banner.autoresizingMask = UIViewAutoresizingFlexibleWidth;
         banner.backgroundColor = [UIColor tertiarySystemFillColor];
         banner.layer.cornerRadius = 10;
@@ -3517,7 +3825,12 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 - (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section {
     if (_actions.count == 0) return 0;
     CGFloat bannerHeight = [self runModeBannerHeightForWidth:tableView.bounds.size.width];
-    return 40.0f + (bannerHeight > 0 ? bannerHeight + 12 : 0);
+    return 40.0f + (bannerHeight > 0 ? bannerHeight + 12 : 0) + ([self showsRunStrip] ? 52 : 0);
+}
+
+// The ordinary editor while its trigger runs (the debugger view has the run above its title instead)
+- (BOOL)showsRunStrip {
+    return !self.debugRunID && self.stripRuns.count > 0;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
@@ -3739,6 +4052,8 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 
 - (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath {
     [self applySectionCardStyleToCell:cell atIndexPath:indexPath];
+    if ([self runShown]) cell.accessoryView.hidden = YES; // no drag handles while it runs
+    else cell.accessoryView.hidden = NO;
     NSInteger level = [self indentationLevelForRow:indexPath.row];
     [self applyIndentGuidesToCell:cell level:level];
 }
@@ -3746,6 +4061,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 #pragma mark - UITableViewDragDelegate
 
 - (NSArray<UIDragItem *> *)tableView:(UITableView *)tableView itemsForBeginningDragSession:(id<UIDragSession>)session atIndexPath:(NSIndexPath *)indexPath {
+    if ([self runShown]) return @[];
     id action = self.actions[indexPath.row];
     NSItemProvider *itemProvider = [[NSItemProvider alloc] initWithObject:@"rc-action"];
     UIDragItem *dragItem = [[UIDragItem alloc] initWithItemProvider:itemProvider];
@@ -3787,6 +4103,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 
 // Swipe Actions
 - (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
+    if ([self runShown]) return [UISwipeActionsConfiguration configurationWithActions:@[]];
     NSRange rangeToDelete = [self ifBlockRangeForIndex:indexPath.row];
     BOOL isBlockDelete = rangeToDelete.length > 1;
     
