@@ -312,6 +312,14 @@ static const NSInteger kRCRecentRunsShown = 5;
         if (!recent[@"key"] && self.filterKey) recent[@"key"] = self.filterKey;
         __weak typeof(self) weakSelf = self;
         UIContextualAction *delete = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleDestructive title:@"Delete" handler:^(UIContextualAction *action, UIView *view, void (^done)(BOOL)) {
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            // Off the list at once; the history catches up
+            if (strongSelf && indexPath.row < (NSInteger)strongSelf.recentRuns.count) {
+                NSMutableArray *recentRuns = [strongSelf.recentRuns mutableCopy];
+                [recentRuns removeObjectAtIndex:indexPath.row];
+                strongSelf.recentRuns = recentRuns;
+                [tableView deleteRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationAutomatic];
+            }
             done(YES);
             [RCRunHistoryViewController deleteRun:recent completion:^{ [weakSelf refreshRecent]; }];
         }];

@@ -21,6 +21,19 @@
 
 @implementation RCActionPickerViewController
 
+// One pick per opening: a second tap while the list is closing (easy on a slower iPhone) would
+// otherwise add the action twice, or ask for its details twice
+- (void)setOnActionSelected:(void (^)(NSString *))onActionSelected {
+    if (!onActionSelected) { _onActionSelected = nil; return; }
+    __block BOOL picked = NO;
+    void (^once)(NSString *) = ^(NSString *action) {
+        if (picked) return;
+        picked = YES;
+        onActionSelected(action);
+    };
+    _onActionSelected = [once copy];
+}
+
 - (instancetype)init {
     self = [super initWithStyle:UITableViewStyleInsetGrouped];
     if (self) _selectedCategory = -1;
@@ -528,6 +541,7 @@
     
     NSDictionary *action = [self actionAtIndexPath:indexPath];
     NSString *command = action[@"command"];
+    if (self.isBeingDismissed || self.navigationController.isBeingDismissed) return; // already picked, closing
     
 
     if ([command isEqualToString:@"__UNLOCK_DEVICE__"]) {

@@ -5311,7 +5311,7 @@ function editAction(idx) {
       }, true);
     }
     else if (type === 'repeat') {
-      showDialog('Repeat', 'Runs the actions inside this many times (up to 1,000):', String(act.count||1), 'Save', val => {
+      showDialog('Repeat', 'Runs the actions inside this many times (up to 1,000). In their text, {round} becomes the round number:', String(act.count||1), 'Save', val => {
         if (!val) return;
         act.count = Math.max(1, Math.min(1000, parseInt(val, 10) || 1));
         saveConfig(); renderActionList();
@@ -5678,8 +5678,8 @@ function selectPickerAction(act) {
     condPickerNewType = 'wait_until';
     openCondPicker(null);
   } else if (c === '__REPEAT__') {
-    showDialog('Repeat', 'Runs the actions inside this many times (up to 1,000):', '3', 'Add', val => {
-      if (!val) return;
+    showDialog('Repeat', 'Runs the actions inside this many times (up to 1,000). In their text, {round} becomes the round number:', '', 'Add', val => {
+      if (!val || !(parseInt(val, 10) > 0)) return;
       const actions = triggerData(currentKey).actions || [];
       actions.push({ type: 'repeat', count: Math.max(1, Math.min(1000, parseInt(val, 10) || 1)) });
       actions.push({ type: 'end_repeat' });

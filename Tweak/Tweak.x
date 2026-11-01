@@ -3298,6 +3298,15 @@ static BOOL rc_run_wait(double seconds) {
 
 static BOOL rc_evaluate_if_condition(NSDictionary *ifAction);
 
+// {round} in an action inside a Repeat: the round the innermost loop is on (1, 2, 3...), so an
+// action can count ("Reminder {round}") or step a value ("brightness {round}0"). Outside a loop
+// the text is left as it is.
+static NSString *rc_fill_round(NSString *action, NSArray<NSDictionary *> *loops) {
+    if (!loops.count || [action rangeOfString:@"{round}"].location == NSNotFound) return action;
+    NSString *round = [NSString stringWithFormat:@"%ld", (long)[loops.lastObject[@"rounds"] integerValue]];
+    return [action stringByReplacingOccurrencesOfString:@"{round}" withString:round];
+}
+
 static void rc_execute_action_sequence(NSArray *actions, NSString *triggerKey, BOOL simulationMode) {
     if (![actions isKindOfClass:[NSArray class]] || actions.count == 0) return;
     // Repeat blocks running, innermost last: @{ start, rounds, roundStart }
@@ -3321,7 +3330,7 @@ static void rc_execute_action_sequence(NSArray *actions, NSString *triggerKey, B
         }
         
         if ([actionItem isKindOfClass:[NSString class]]) {
-            NSString *action = (NSString *)actionItem;
+            NSString *action = rc_fill_round((NSString *)actionItem, loops);
             SRLogMin(@"[%@] -> %@", triggerKey, action);
             RCTKEvent(@"action", @{ @"trigger": triggerKey ?: @"", @"command": action });
             handle_command(action);
