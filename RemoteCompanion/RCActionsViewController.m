@@ -206,6 +206,9 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
 @property (nonatomic, strong) NSString *triggerKey;
 @property (nonatomic, strong) NSMutableArray *actions;
 @property (nonatomic, strong) UIBarButtonItem *moreButton;
+// The action picker while it's open for an action that leads to another screen; closed once
+// that action is added
+@property (nonatomic, weak) UINavigationController *addingNav;
 // While this trigger runs: the row of the action it's on (highlighted, like a debugger's current
 // line), or NSNotFound
 @property (nonatomic, assign) NSInteger runningIndex; // the longest run's (scrolled to)
@@ -1552,7 +1555,14 @@ static void RCSetRunWatching(BOOL watching) {
 - (void)addAction {
 
     RCActionPickerViewController *picker = [[RCActionPickerViewController alloc] init];
+    __weak typeof(self) weakSelf = self;
+    BOOL (^staysOpen)(NSString *) = ^BOOL(NSString *action) {
+        // Placeholders this screen answers with a screen of its own (Exit Repeat is added as it is)
+        return [action hasPrefix:@"__"] && [action hasSuffix:@"__"] && ![action isEqualToString:@"__EXIT_REPEAT__"];
+    };
+    picker.staysOpenFor = staysOpen;
     picker.onActionSelected = ^(NSString *action) {
+        if (!staysOpen(action)) weakSelf.addingNav = nil; // the picker closes itself
         if ([action isEqualToString:@"__SHORTCUT_PICKER__"]) {
             // Present Shortcut Picker
             RCShortcutPickerViewController *vc = [[RCShortcutPickerViewController alloc] init];
@@ -1567,7 +1577,7 @@ static void RCSetRunWatching(BOOL watching) {
             };
             UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
             
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            dispatch_async(dispatch_get_main_queue(), ^{
                 [self presentViewController:nav animated:YES completion:nil];
             });
             
@@ -1592,7 +1602,7 @@ static void RCSetRunWatching(BOOL watching) {
             
             UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:inputVC];
             
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            dispatch_async(dispatch_get_main_queue(), ^{
                 [self presentViewController:nav animated:YES completion:nil];
             });
 
@@ -1618,7 +1628,7 @@ static void RCSetRunWatching(BOOL watching) {
                 }
             }]];
             
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            dispatch_async(dispatch_get_main_queue(), ^{
                 [self presentViewController:alert animated:YES completion:nil];
             });
 
@@ -1656,7 +1666,7 @@ static void RCSetRunWatching(BOOL watching) {
                 }
             }]];
             
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            dispatch_async(dispatch_get_main_queue(), ^{
                 [self presentViewController:alert animated:YES completion:nil];
             });
 
@@ -1669,7 +1679,7 @@ static void RCSetRunWatching(BOOL watching) {
                 }];
             });
         } else if ([action isEqualToString:@"__DELAY__"]) {
-            [self presentDelayForIndex:NSNotFound current:nil after:0.5];
+            [self presentDelayForIndex:NSNotFound current:nil after:0];
         } else if ([action isEqualToString:@"__OPEN_APP__"]) {
             RCAppPickerViewController *appPicker = [[RCAppPickerViewController alloc] init];
             appPicker.onAppSelected = ^(NSString *name, NSString *bundleId) {
@@ -1680,7 +1690,7 @@ static void RCSetRunWatching(BOOL watching) {
             };
             
             UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:appPicker];
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            dispatch_async(dispatch_get_main_queue(), ^{
                 [self presentViewController:nav animated:YES completion:nil];
             });
         } else if ([action isEqualToString:@"__KILL_APP__"]) {
@@ -1693,15 +1703,15 @@ static void RCSetRunWatching(BOOL watching) {
             };
             
             UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:appPicker];
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            dispatch_async(dispatch_get_main_queue(), ^{
                 [self presentViewController:nav animated:YES completion:nil];
             });
         } else if ([action isEqualToString:@"__IF_CONDITION__"]) {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            dispatch_async(dispatch_get_main_queue(), ^{
                 [self presentIfConditionPickerForIndex:NSNotFound];
             });
         } else if ([action isEqualToString:@"__REPEAT__"]) {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            dispatch_async(dispatch_get_main_queue(), ^{
                 [self presentRepeatCountForIndex:NSNotFound];
             });
         } else if ([action isEqualToString:@"__EXIT_REPEAT__"]) {
@@ -1709,15 +1719,15 @@ static void RCSetRunWatching(BOOL watching) {
             [self saveActions];
             [self.tableView reloadData];
         } else if ([action isEqualToString:@"__WAIT_UNTIL__"]) {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            dispatch_async(dispatch_get_main_queue(), ^{
                 [self presentIfConditionPickerForIndex:NSNotFound insertIndex:NSNotFound type:@"wait_until"];
             });
         } else if ([action isEqualToString:@"__SET_VARIABLE__"]) {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            dispatch_async(dispatch_get_main_queue(), ^{
                 [self presentSetVariable:nil existingIndex:NSNotFound];
             });
         } else if ([action isEqualToString:@"__REPEAT_WHILE__"]) {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            dispatch_async(dispatch_get_main_queue(), ^{
                 [self presentIfConditionPickerForIndex:NSNotFound insertIndex:NSNotFound type:@"repeat_while"];
             });
         } else if ([action isEqualToString:@"__LUA_SCRIPT__"]) {
@@ -1735,13 +1745,13 @@ static void RCSetRunWatching(BOOL watching) {
             
             UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:inputVC];
             
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            dispatch_async(dispatch_get_main_queue(), ^{
                 [self presentViewController:nav animated:YES completion:nil];
             });
         } else if ([action isEqualToString:@"__TOAST__"]) {
-            // New toast: same editor as edits, opened once the picker is gone
+            // New toast: same editor as edits, opened on the action picker (which stays open)
             __weak typeof(self) weakSelf = self;
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            dispatch_async(dispatch_get_main_queue(), ^{
                 __strong typeof(weakSelf) strongSelf = weakSelf;
                 if (!strongSelf) return;
                 [strongSelf showToastEditorWithTitle:@"" message:@"" icon:@"" isNew:YES onSave:^(NSString *cmd) {
@@ -1749,7 +1759,7 @@ static void RCSetRunWatching(BOOL watching) {
                 }];
             });
         } else if ([self levelPrefixForCommand:action]) {
-            [self presentLevelActionForCommand:action index:NSNotFound after:0.5];
+            [self presentLevelActionForCommand:action index:NSNotFound after:0];
         } else {
             [self.actions addObject:action];
             [self saveActions];
@@ -1758,10 +1768,54 @@ static void RCSetRunWatching(BOOL watching) {
     };
     
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:picker];
+    self.addingNav = nav;
     [self presentViewController:nav animated:YES completion:nil];
 }
 
+// A screen opened while another is up (the action picker, during an add) opens on top of it,
+// so closing it goes back there
+- (void)presentViewController:(UIViewController *)controller animated:(BOOL)animated completion:(void (^)(void))completion {
+    UIViewController *top = self.presentedViewController;
+    if (!top || top.isBeingDismissed) {
+        [super presentViewController:controller animated:animated completion:completion];
+        return;
+    }
+    while (top.presentedViewController && !top.presentedViewController.isBeingDismissed) top = top.presentedViewController;
+    [top presentViewController:controller animated:animated completion:completion];
+}
+
+// Where a screen is pushed: inside the action picker during an add, otherwise here
+- (UINavigationController *)flowNavigationController {
+    UINavigationController *adding = self.addingNav;
+    return adding && adding.presentingViewController && !adding.isBeingDismissed ? adding : self.navigationController;
+}
+
+// The action is added: the picker (and anything still on it) closes
+- (void)finishAdding {
+    UINavigationController *nav = self.addingNav;
+    if (!nav) return;
+    self.addingNav = nil;
+    // After the screen that saved has started closing itself
+    dispatch_async(dispatch_get_main_queue(), ^{ [self closeAddingNav:nav]; });
+}
+
+- (void)closeAddingNav:(UINavigationController *)nav {
+    if (self.presentedViewController != nav || nav.isBeingDismissed) return;
+    UIViewController *top = nav;
+    while (top.presentedViewController) top = top.presentedViewController;
+    id<UIViewControllerTransitionCoordinator> coordinator = top.transitionCoordinator ?: nav.transitionCoordinator;
+    if (coordinator) {
+        // Something on it is still moving: close once that's done
+        [coordinator animateAlongsideTransition:nil completion:^(__unused id<UIViewControllerTransitionCoordinatorContext> context) {
+            [self closeAddingNav:nav];
+        }];
+        return;
+    }
+    [self dismissViewControllerAnimated:YES completion:nil];
+}
+
 - (void)saveActions {
+    [self finishAdding]; // closes the picker once this save is done
     [[RCConfigManager sharedManager] setActions:_actions forTrigger:_triggerKey];
 }
 
@@ -2433,7 +2487,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             [strongSelf.navigationController popToViewController:strongSelf animated:YES];
         };
         appPicker.suppressAutoPop = YES; // back to this editor, past the condition picker
-        [self.navigationController pushViewController:appPicker animated:YES];
+        [[self flowNavigationController] pushViewController:appPicker animated:YES];
         return;
     }
 
@@ -2489,7 +2543,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     picker.onInputRequested = ^(NSDictionary *condition) {
         [weakSelf presentIfValuePickerForCondition:condition existingIndex:existingIndex insertIndex:insertIndex type:type];
     };
-    [self.navigationController pushViewController:picker animated:YES];
+    [[self flowNavigationController] pushViewController:picker animated:YES];
 }
 
 // Wait Until's time limit, in seconds: for a new Wait Until (then added) or the one at existingIndex
@@ -3307,7 +3361,8 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     editor.onSave = ^(NSString *t, NSString *m, NSString *i) {
         if (onSave) onSave(rc_build_toast_command(t, m, i));
     };
-    // A card like the other editors: swiping it down cancels
+    // A card like the other editors: swiping it down cancels. During an add it opens over the
+    // action picker, and saving closes both.
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:editor];
     [self presentViewController:nav animated:YES completion:nil];
 }

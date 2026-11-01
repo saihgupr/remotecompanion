@@ -22,13 +22,16 @@
 @implementation RCActionPickerViewController
 
 // One pick per opening: a second tap while the list is closing (easy on a slower iPhone) would
-// otherwise add the action twice, or ask for its details twice
+// otherwise add the action twice, or ask for its details twice. A pick that keeps the list open
+// (its screen opens on top, and Cancel there comes back here) doesn't use it up.
 - (void)setOnActionSelected:(void (^)(NSString *))onActionSelected {
     if (!onActionSelected) { _onActionSelected = nil; return; }
     __block BOOL picked = NO;
+    __weak typeof(self) weakSelf = self;
     void (^once)(NSString *) = ^(NSString *action) {
         if (picked) return;
-        picked = YES;
+        BOOL (^staysOpen)(NSString *) = weakSelf.staysOpenFor;
+        if (!staysOpen || !staysOpen(action)) picked = YES;
         onActionSelected(action);
     };
     _onActionSelected = [once copy];
@@ -626,6 +629,7 @@
     if (self.onActionSelected) {
         self.onActionSelected(command);
     }
+    if (self.staysOpenFor && self.staysOpenFor(command)) return; // its screen opens on top of this one
     
     if (self.searchController.isActive) {
         // Dismiss search first, then self (or just self which now dismisses search? No, we need self gone.)
