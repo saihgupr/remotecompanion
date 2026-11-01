@@ -1535,6 +1535,56 @@
       padding: 5px 11px; font-size: 13px; font-family: inherit; cursor: pointer;
     }
     .var-ed-chip:active { background: rgba(10,132,255,0.32); }
+    .var-ed-seg { display: flex; background: rgba(118,118,128,0.24); border-radius: 9px; padding: 2px; margin-top: 6px; }
+    .var-ed-seg button {
+      flex: 1; background: none; border: none; color: #fff; font-family: inherit; font-size: 14px; font-weight: 500;
+      padding: 7px 0; border-radius: 7px; cursor: pointer; transition: background 0.15s;
+    }
+    .var-ed-seg button.selected { background: #636366; box-shadow: 0 2px 6px rgba(0,0,0,0.25); }
+    .terminal-var-insert { position: absolute; right: 4px; top: 4px; margin: 0; }
+    .terminal-var-insert i.f7-icons { font-size: 20px; }
+    #symbol-picker-backdrop { z-index: 960; }
+    .sym-box { width: 92%; max-width: 480px; display: flex; flex-direction: column; max-height: 86vh; max-height: 86dvh; }
+    .sym-top { padding: 0 14px; }
+    .sym-search { margin: 0 0 10px; width: 100%; text-align: left; padding: 8px 12px; font-size: 15px; }
+    .sym-cats { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 10px; scrollbar-width: none; }
+    .sym-cats::-webkit-scrollbar { display: none; }
+    .sym-cat {
+      flex-shrink: 0; border: none; border-radius: 15px; padding: 6px 12px; font-size: 13px; font-weight: 600; font-family: inherit;
+      background: rgba(255,255,255,0.12); color: #fff; cursor: pointer;
+    }
+    .sym-cat.active { background: #fff; color: #000; }
+    .sym-grid {
+      overflow-y: auto; padding: 4px 14px 14px; display: grid; gap: 8px;
+      grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); -webkit-overflow-scrolling: touch;
+    }
+    .sym-tile {
+      aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+      background: rgba(255,255,255,0.07); border: 1.5px solid transparent; border-radius: 12px; color: #fff; cursor: pointer;
+      font-family: inherit; padding: 4px; min-width: 0; transition: transform 0.1s, background 0.12s;
+    }
+    .sym-tile i.f7-icons { font-size: 24px; }
+    .sym-tile span { font-size: 9.5px; color: #8e8e93; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sym-tile:hover { background: rgba(255,255,255,0.12); }
+    .sym-tile:active { transform: scale(0.94); }
+    .sym-tile.selected { background: rgba(10,132,255,0.22); border-color: #0a84ff; }
+    .sym-tile.selected i.f7-icons { color: #0a84ff; }
+    .sym-empty { grid-column: 1 / -1; text-align: center; color: #8e8e93; font-size: 13px; padding: 24px 0; }
+    #cmd-picker-backdrop { z-index: 960; }
+    .cmd-list { display: block; padding-top: 0; }
+    .cmd-head { font-size: 13px; font-weight: 500; letter-spacing: 0.05em; color: #8e8e93; text-transform: uppercase; margin: 12px 4px 6px; }
+    .cmd-card { background: rgba(255,255,255,0.07); border-radius: 12px; overflow: hidden; }
+    .cmd-row { display: flex; align-items: center; gap: 12px; padding: 9px 12px; cursor: pointer; position: relative; }
+    .cmd-row + .cmd-row::before { content: ''; position: absolute; top: 0; left: 46px; right: 0; height: 0.5px; background: rgba(255,255,255,0.12); }
+    .cmd-row:hover { background: rgba(255,255,255,0.05); }
+    .cmd-row > i.f7-icons { font-size: 20px; color: #0a84ff; width: 22px; text-align: center; }
+    .cmd-text { flex: 1; min-width: 0; text-align: left; }
+    .cmd-title { font-size: 15px; color: #fff; }
+    .cmd-sub { font-size: 12px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .cmd-sub code { font-family: ui-monospace, Menlo, monospace; color: #8e8e93; }
+    .cmd-sub span { color: #0a84ff; font-weight: 500; margin-left: 8px; }
+    .cmd-check { color: #0a84ff; font-size: 17px; }
+    .cmd-note { font-size: 12px; color: #8e8e93; margin: 6px 4px 0; line-height: 1.35; }
     #var-editor-save:disabled { color: rgba(235,235,245,0.3); cursor: default; }
     .var-ed-menu {
       position: fixed; z-index: 3000; min-width: 220px; max-width: 300px; max-height: 60vh; overflow-y: auto;
@@ -2369,6 +2419,15 @@
   </div>
 </div>
 
+<!-- ══ COMMAND LIST (Set Variable's RC Command) ═══════════════════════ -->
+<div class="dialog-backdrop" id="cmd-picker-backdrop" onclick="if (event.target === this) closeCommandPicker()">
+  <div class="dialog-box sym-box">
+    <div class="dialog-title">Command</div>
+    <div class="sym-grid cmd-list" id="cmd-picker-list"></div>
+    <div class="dialog-btns"><button onclick="closeCommandPicker()">Cancel</button></div>
+  </div>
+</div>
+
 <!-- ══ HOME ASSISTANT ACTION DIALOG ═════════════════════════════════════ -->
 <div class="dialog-backdrop" id="ha-dialog-backdrop">
   <div class="dialog-box app-launch-dialog" style="max-width: 560px; width: 90%;">
@@ -2419,11 +2478,12 @@
 <div class="dialog-backdrop" id="terminal-dialog-backdrop">
   <div class="dialog-box" style="max-width: 480px; width: 90%;">
     <div class="dialog-title" id="terminal-dialog-title">Terminal Action</div>
-    <div class="dialog-msg" style="padding-bottom: 8px;">Enter shell command to execute on device:</div>
+    <div class="dialog-msg" id="terminal-dialog-msg" style="padding-bottom: 8px;">Enter shell command to execute on device:</div>
     <div style="position: relative; margin: 0 16px 12px; width: calc(100% - 32px); box-sizing: border-box;">
-      <textarea class="dialog-input" id="terminal-dialog-textarea" rows="4" placeholder="killall SpringBoard" style="height:100px; text-align:left; resize:vertical; font-family:monospace; font-size:13px; margin:0; width:100%; box-sizing:border-box; padding: 10px;"></textarea>
+      <textarea class="dialog-input" id="terminal-dialog-textarea" rows="4" placeholder="killall SpringBoard" style="height:100px; text-align:left; resize:vertical; font-family:monospace; font-size:13px; margin:0; width:100%; box-sizing:border-box; padding: 10px 40px 10px 10px;"></textarea>
+      <button type="button" class="var-ed-insert terminal-var-insert" title="Insert Variable" onclick="terminalInsertVariable(event)"><i class="f7-icons">plus_circle</i></button>
     </div>
-    <div style="margin: 0 16px 16px; display: flex; align-items: center; justify-content: space-between; background: rgba(255,255,255,0.06); padding: 10px 14px; border-radius: 10px;">
+    <div id="terminal-dialog-root-row" style="margin: 0 16px 16px; display: flex; align-items: center; justify-content: space-between; background: rgba(255,255,255,0.06); padding: 10px 14px; border-radius: 10px;">
       <div style="display:flex; flex-direction:column; text-align:left;">
         <span style="font-size:14px; font-weight:600; color:#fff;">Root Privileges</span>
         <span style="font-size:12px; color:#8e8e93;">Run command as root user (`root`)</span>
@@ -3360,16 +3420,6 @@ function setVariableText(cmd) {
     case 'command_number': return `Set ${name} to Number from ${v}`;
     default: return `Set ${name} to ${v ? v : 'nothing'}`;
   }
-}
-
-// A number typed for a setting (lo..hi), or one variable in braces ("{times}"): what to store, or null
-function numberOrVariable(text, lo, hi) {
-  text = String(text || '').trim();
-  const m = text.match(/^\{([A-Za-z_][A-Za-z0-9_]*)\}$/);
-  if (m) return variableNameValid(m[1]) ? text : null;
-  const n = parseInt(text, 10);
-  if (isNaN(n) || n < lo) return null;
-  return Math.min(hi, n);
 }
 
 // Variable names: letters, digits and _, not starting with a digit; "round" is taken
@@ -4864,10 +4914,22 @@ function pasteAction(insertIdx) {
 }
 
 // ── Terminal Action Modal ──
-function promptTerminalModal(initialCmd = '', editIdx = null) {
+// plain: any other command, as it is stored (no root switch)
+let g_terminalPlain = false;
+function promptTerminalModal(initialCmd = '', editIdx = null, plain = false) {
   g_editingTerminalIdx = editIdx;
-  const title = (editIdx !== null) ? 'Edit Terminal Command' : 'Terminal Action';
+  g_terminalPlain = plain;
+  varEdStart({ mode: 'toast', typed: {}, nameText: '', picked: null, typingNew: false }, null); // names for the + menu
+  const title = plain ? 'Edit Action' : (editIdx !== null) ? 'Edit Terminal Command' : 'Terminal Action';
   document.getElementById('terminal-dialog-title').textContent = title;
+  document.getElementById('terminal-dialog-msg').textContent = plain ? 'The command to run. Use + to insert a variable.' : 'Shell command to run on the phone. Use + to insert a variable.';
+  document.getElementById('terminal-dialog-root-row').style.display = plain ? 'none' : 'flex';
+  if (plain) {
+    document.getElementById('terminal-dialog-textarea').value = initialCmd || '';
+    document.getElementById('terminal-dialog-backdrop').classList.add('visible');
+    setTimeout(() => document.getElementById('terminal-dialog-textarea').focus(), 100);
+    return;
+  }
   
   let rawCmd = initialCmd || '';
   let isRoot = false;
@@ -4899,11 +4961,11 @@ function terminalDialogOk() {
     return;
   }
   const isRoot = document.getElementById('terminal-dialog-root-toggle').checked;
-  const formattedCmd = `${isRoot ? 'root' : 'exec'} ${cmdText}`;
+  const formattedCmd = g_terminalPlain ? cmdText : `${isRoot ? 'root' : 'exec'} ${cmdText}`;
   
   const actions = triggerData(currentKey).actions || [];
   if (g_editingTerminalIdx !== null && g_editingTerminalIdx < actions.length) {
-    actions[g_editingTerminalIdx] = formattedCmd;
+    storeCommandAt(actions, g_editingTerminalIdx, formattedCmd);
   } else {
     addActionToCurrent(formattedCmd);
   }
@@ -4911,6 +4973,51 @@ function terminalDialogOk() {
   closeTerminalDialog();
   saveConfig();
   renderActionList();
+}
+
+// The + on the command: the variable goes in at the cursor
+function terminalInsertVariable(e) {
+  e.stopPropagation();
+  const input = document.getElementById('terminal-dialog-textarea');
+  varEdOpenMenu(e.currentTarget, name => {
+    const token = `{${name}}`;
+    const s = input.selectionStart ?? input.value.length, en = input.selectionEnd ?? input.value.length;
+    input.value = input.value.slice(0, s) + token + input.value.slice(en);
+    input.focus();
+    input.setSelectionRange(s + token.length, s + token.length);
+  });
+}
+
+// Puts a command at idx, keeping any settings around it
+function storeCommandAt(actions, idx, command) {
+  if (actions[idx] && typeof actions[idx] === 'object' && typeof actions[idx].command === 'string') actions[idx].command = command;
+  else actions[idx] = command;
+}
+
+// ── Volume, Ringer Volume, Brightness, Flashlight: a level on the number panel ──
+const LEVEL_ACTIONS = {
+  'set-vol ': ['Volume', 'The media volume to set, from 0 to 100.', 0],
+  'ringer volume ': ['Ringer Volume', 'The ringer and alerts volume to set, from 0 to 100.', 0],
+  'brightness ': ['Brightness', 'The screen brightness to set, from 0 to 100.', 0],
+  'flashlight ': ['Flashlight Intensity', 'The flashlight brightness to set, from 1 to 100.', 1],
+};
+// A level command: the prefix, then a number or a variable
+function isLevelCommand(low, prefix) {
+  return low.startsWith(prefix) && /^(\d+(\.\d+)?|\{[a-z_][a-z0-9_]*\})$/i.test(low.slice(prefix.length).trim());
+}
+// Adds the level action (idx null) or edits the one at idx
+function promptLevelAction(prefix, idx) {
+  const [title, note, min] = LEVEL_ACTIONS[prefix];
+  const actions = triggerData(currentKey).actions || [];
+  const act = idx === null ? '' : actions[idx];
+  const cmd = act && typeof act === 'object' ? String(act.command || '') : String(act || '');
+  const current = cmd.toLowerCase().startsWith(prefix) ? cmd.slice(prefix.length).trim() : '';
+  promptNumberSetting({ title, label: 'Percent', value: current, placeholder: prefix === 'flashlight ' ? '100' : '50', min, max: 100, note,
+    saveLabel: idx === null ? 'Add' : 'Save', allowsRound: roundAvailableAt(idx) }, n => {
+    if (idx === null) { addActionToCurrent(`${prefix}${n}`); return; }
+    storeCommandAt(actions, idx, `${prefix}${n}`);
+    saveConfig(); renderActionList();
+  });
 }
 
 // ── Toast Action Modal ──
@@ -5439,31 +5546,27 @@ function editAction(idx) {
       openCondPicker(idx);
     }
     else if (type === 'wait_until') {
-      showDialog('Time Limit', 'Seconds to wait at most before the actions go on anyway (up to a day), or a variable like {limit}:', String(act.timeout||60), 'Save', val => {
-        if (!val) return;
-        act.timeout = numberOrVariable(val, 1, 86400) ?? 60;
+      promptTimeLimit(String(act.timeout || 60), 'Save', n => {
+        act.timeout = n;
         saveConfig(); renderActionList();
-      });
+      }, idx);
     }
     else if (type === 'set_variable') {
       promptSetVariable(idx);
     }
     else if (type === 'repeat') {
-      showDialog('Repeat', 'Runs the actions inside this many times (up to 1,000), or as many as a variable says, like {times}. In their text, {round} becomes the round number:', String(act.count||1), 'Save', val => {
-        const n = numberOrVariable(val, 1, 1000);
-        if (n === null) return;
+      promptRepeatCount(String(act.count || 1), 'Save', n => {
         act.count = n;
         saveConfig(); renderActionList();
-      });
+      }, idx);
     }
   } else if (typeof act === 'string') {
     const low = act.toLowerCase();
     if (low.startsWith('delay ')) {
-      showDialog('Edit Delay', 'Seconds, or a variable like {wait}:', act.slice(6), 'Save', val => {
-        if (!val) return;
-        actions[idx] = `delay ${val}`;
+      promptDelay(act.slice(6).trim(), 'Save', n => {
+        actions[idx] = `delay ${n}`;
         saveConfig(); renderActionList();
-      });
+      }, idx);
     } else if (low.startsWith('toast ')) {
       promptToastModal(act, idx);
     } else if (low.startsWith('exec ') || low.startsWith('root ')) {
@@ -5490,30 +5593,14 @@ function editAction(idx) {
         actions[idx] = `kill ${val}`;
         saveConfig(); renderActionList();
       });
-    } else if (low.startsWith('flashlight ')) {
-      showDialog('Edit Flashlight Level', 'Intensity % (1-100):', act.slice(11), 'Save', val => {
-        if (!val) return;
-        actions[idx] = `flashlight ${val}`;
-        saveConfig(); renderActionList();
-      }, true);
-    } else if (low.startsWith('set-vol ')) {
-      showDialog('Edit Volume Level', 'Volume % (0-100):', act.slice(8), 'Save', val => {
-        if (!val) return;
-        actions[idx] = `set-vol ${val}`;
-        saveConfig(); renderActionList();
-      }, true);
-    } else if (low.startsWith('ringer volume ')) {
-      showDialog('Edit Ringer Volume', 'Ringer volume % (0-100):', act.slice(14), 'Save', val => {
-        if (!val) return;
-        actions[idx] = `ringer volume ${val}`;
-        saveConfig(); renderActionList();
-      }, true);
-    } else if (low.startsWith('brightness ')) {
-      showDialog('Edit Brightness Level', 'Brightness % (0-100):', act.slice(11), 'Save', val => {
-        if (!val) return;
-        actions[idx] = `brightness ${val}`;
-        saveConfig(); renderActionList();
-      }, true);
+    } else if (isLevelCommand(low, 'flashlight ')) {
+      promptLevelAction('flashlight ', idx);
+    } else if (isLevelCommand(low, 'set-vol ')) {
+      promptLevelAction('set-vol ', idx);
+    } else if (isLevelCommand(low, 'ringer volume ')) {
+      promptLevelAction('ringer volume ', idx);
+    } else if (isLevelCommand(low, 'brightness ')) {
+      promptLevelAction('brightness ', idx);
     } else if (low === 'unlock' || low.startsWith('unlock ')) {
       const currentPin = low.startsWith('unlock ') ? act.slice(7).trim() : '';
       promptUnlockDialog(currentPin, val => {
@@ -5530,6 +5617,8 @@ function editAction(idx) {
       });
     } else if (low.startsWith('km ') || low === 'km') {
       editKMAction(idx);
+    } else {
+      promptTerminalModal(act, idx, true); // any other command, as text with the + menu
     }
   }
 }
@@ -5754,15 +5843,11 @@ function selectPickerAction(act) {
   closePickerPanel();
   const c = act.cmd;
   if (c === '__DELAY__') {
-    showDialog('Add Delay', 'Delay duration in seconds, or a variable like {wait}:', '1', 'Add', val => {
-      if (val) addActionToCurrent(`delay ${val}`);
-    });
+    promptDelay('', 'Add', n => addActionToCurrent(`delay ${n}`));
   } else if (c === '__TOAST__') {
     promptToastModal('', null);
   } else if (c === '__CUSTOM__') {
-    showDialog('Terminal Command', 'Shell command to execute:', '', 'Add', val => {
-      if (val) addActionToCurrent(`exec ${val}`);
-    });
+    promptTerminalModal('', null);
   } else if (c === '__LUA_SCRIPT__') {
     showDialog('Lua Script', 'Lua expression or script:', '', 'Add', val => {
       if (val) addActionToCurrent(`lua:${val}`);
@@ -5819,9 +5904,7 @@ function selectPickerAction(act) {
   } else if (c === '__SET_VARIABLE__') {
     promptSetVariable(null);
   } else if (c === '__REPEAT__') {
-    showDialog('Repeat', 'Runs the actions inside this many times (up to 1,000), or as many as a variable says, like {times}. In their text, {round} becomes the round number:', '', 'Add', val => {
-      const n = numberOrVariable(val, 1, 1000);
-      if (n === null) return;
+    promptRepeatCount('', 'Add', n => {
       const actions = triggerData(currentKey).actions || [];
       actions.push({ type: 'repeat', count: n });
       actions.push({ type: 'end_repeat' });
@@ -5830,21 +5913,13 @@ function selectPickerAction(act) {
       renderActionList();
     });
   } else if (c === '__SET_FLASHLIGHT__') {
-    showDialog('Flashlight Intensity', 'Brightness percentage (1-100):', '100', 'Add', val => {
-      if (val) addActionToCurrent(`flashlight ${val}`);
-    }, true);
+    promptLevelAction('flashlight ', null);
   } else if (c === '__SET_VOLUME__') {
-    showDialog('Set Volume', 'Volume percentage (0-100):', '50', 'Add', val => {
-      if (val) addActionToCurrent(`set-vol ${val}`);
-    }, true);
+    promptLevelAction('set-vol ', null);
   } else if (c === '__SET_RINGER_VOLUME__') {
-    showDialog('Set Ringer Volume', 'Ringer volume percentage (0-100):', '50', 'Add', val => {
-      if (val) addActionToCurrent(`ringer volume ${val}`);
-    }, true);
+    promptLevelAction('ringer volume ', null);
   } else if (c === '__SET_BRIGHTNESS__') {
-    showDialog('Set Brightness', 'Brightness percentage (0-100):', '50', 'Add', val => {
-      if (val) addActionToCurrent(`brightness ${val}`);
-    }, true);
+    promptLevelAction('brightness ', null);
   } else if (c === '__HA_PICKER__') {
     promptHAActionPicker();
   } else if (c === '__HA_TOGGLE__') {
@@ -5923,11 +5998,15 @@ function updateTimeCondPreview() {
   } else {
     hintEl.textContent = `Actions will only run between ${s12} and ${e12}.`;
   }
+  // Variables ("{wake} - 09:00") can't show in the time fields: Save replaces them
+  if (timeCondVariableRange) hintEl.textContent = `Now “${timeCondVariableRange}”, which uses variables. Save replaces it with these times; Cancel keeps it.`;
 }
 
+let timeCondVariableRange = null;
 function showTimeConditionDialog(def, editIdx = null) {
   timeCondDef = def;
   timeCondEditIdx = editIdx;
+  timeCondVariableRange = null;
   
   let startVal = '09:00';
   let endVal = '17:00';
@@ -5937,6 +6016,7 @@ function showTimeConditionDialog(def, editIdx = null) {
     const act = actions[editIdx];
     if (act) {
       const raw = act.expectedValue || act.expected || act.expectedLabel || '';
+      if (String(raw).includes('{')) timeCondVariableRange = String(raw);
       const parts = raw.split(/[-–—]| to | and /i);
       if (parts.length >= 2) {
         const p0 = parts[0].trim();
@@ -6021,7 +6101,7 @@ function condDaysValue() {
 function openCondPicker(editIdx = null) {
   condPickerEditIdx = editIdx;
   const exKey = condPickerExistingKey();
-  condPickerExpandedKey = (exKey && exKey !== 'variable' && CONDITION_DEFS.some(d => d.key === exKey)) ? exKey : null;
+  condPickerExpandedKey = (exKey && CONDITION_DEFS.some(d => d.key === exKey && d.key !== 'variable' && !d.threshold)) ? exKey : null;
   condPickerTicked = [];
   if (condPickerExpandedKey === 'day_of_week') {
     const ex = condPickerExisting();
@@ -6059,10 +6139,11 @@ function loadCondBtDevices() {
 }
 
 function selectCond(key) {
-  if (key === 'variable') { // its own panel
+  const def = CONDITION_DEFS.find(d => d.key === key);
+  if (key === 'variable' || (def && def.threshold)) { // their own panels
     const editIdx = condPickerEditIdx;
     closeCondPicker();
-    setTimeout(() => promptVariableCondition(editIdx), 200);
+    setTimeout(() => key === 'variable' ? promptVariableCondition(editIdx) : promptThresholdSetting(def, editIdx), 200);
     return;
   }
   if (condPickerExpandedKey === key) {
@@ -6097,25 +6178,6 @@ function finishCondValue(def, value, title) {
   const editIdx = condPickerEditIdx;
   closeCondPicker();
   finishIfCondition(def, value, title, editIdx);
-}
-
-function promptCondThreshold(def, direction) {
-  const ex = condPickerExisting();
-  let current = '50';
-  if (ex && (ex.conditionKey || ex.conditionName) === def.key) {
-    const raw = String(ex.expectedValue || ex.expected || '');
-    if (raw.toUpperCase().startsWith(direction.toUpperCase())) {
-      const n = raw.slice(direction.length).trim();
-      if (n) current = n;
-    }
-  }
-  const editIdx = condPickerEditIdx;
-  closeCondPicker();
-  showDialog(`${def.title} ${direction.toLowerCase()}`, 'Percentage (0-100), or a variable like {limit}:', current, 'Save', val => {
-    const n = numberOrVariable(val, 0, 100);
-    if (n === null) return;
-    finishIfCondition(def, `${direction.toUpperCase()} ${n}`, `${direction.toLowerCase()} ${n}%`, editIdx);
-  });
 }
 
 // ── Variable editors: Set Variable and the Variable condition on one panel each, like the app's ──
@@ -6221,6 +6283,7 @@ function varEdName() {
 }
 
 function varEdFields() {
+  if (varEd.mode === 'number') return [[varEd.opts.label, 'value', varEd.opts.placeholder || '', true]];
   if (varEd.mode === 'cond') {
     const k = varEdKind();
     return k.value ? [['Value', 'value', k.number ? VAR_NUMBER_HINT : 'Text, number or {variable}', !!k.number]] : [];
@@ -6291,6 +6354,7 @@ function promptVariableCondition(editIdx) {
 function varEdRenderAll() {
   const body = document.getElementById('var-editor-body');
   body.innerHTML = '';
+  if (varEd.mode === 'number') { numSettingRender(body); numSettingUpdate(); return; }
   if (varEd.mode === 'set') {
     body.appendChild(varEdSection('Set Value', varEdGrid(SET_VARIABLE_KINDS.filter(k => !k.change), 3, false)));
     body.appendChild(varEdSection('Change Value', varEdGrid(SET_VARIABLE_KINDS.filter(k => k.change), 5, true)));
@@ -6467,9 +6531,9 @@ function varEdRenderFields() {
       <button type="button" class="var-ed-insert" title="Insert Variable"><i class="f7-icons">plus_circle</i></button>`;
     const input = row.querySelector('input');
     input.placeholder = placeholder;
-    input.value = varEd.mode === 'cond' ? varEd.value : varEdTyped(key);
+    input.value = varEd.mode !== 'set' ? varEd.value : varEdTyped(key);
     const store = () => {
-      if (varEd.mode === 'cond') varEd.value = input.value;
+      if (varEd.mode !== 'set') varEd.value = input.value;
       else (varEd.typed[varEd.op] = varEd.typed[varEd.op] || {})[key] = input.value;
       varEdUpdate();
     };
@@ -6478,8 +6542,19 @@ function varEdRenderFields() {
       if (e.key !== 'Enter') return;
       e.preventDefault();
       const inputs = [...card.querySelectorAll('input.var-ed-input')];
-      if (inputs[i + 1]) inputs[i + 1].focus(); else input.blur();
+      if (inputs[i + 1]) inputs[i + 1].focus();
+      else if (varEd.mode === 'number') { if (!document.getElementById('var-editor-save').disabled) varEditorSave(); }
+      else input.blur();
     };
+    if (varEd.mode === 'set' && varEd.op === 'command' && i === 0) {
+      const list = document.createElement('button');
+      list.type = 'button';
+      list.className = 'var-ed-insert';
+      list.title = 'Choose Command';
+      list.innerHTML = '<i class="f7-icons">list_bullet</i>';
+      list.onclick = e => { e.stopPropagation(); openCommandPicker(input.value.trim()); };
+      row.insertBefore(list, row.querySelector('.var-ed-insert'));
+    }
     row.querySelector('.var-ed-insert').onclick = e => {
       e.stopPropagation();
       varEdOpenMenu(e.currentTarget, name => {
@@ -6531,6 +6606,7 @@ function varEdTileTapped(op) {
 // Notes, which rows show, and whether Save is on
 function varEdUpdate() {
   if (!varEd) return;
+  if (varEd.mode === 'number') { numSettingUpdate(); return; }
   const kind = varEdKind();
   const typed = varEd.nameText.trim();
   let note = '', bad = false;
@@ -6567,6 +6643,7 @@ function varEdUpdate() {
 
 function varEditorSave() {
   if (!varEd) return;
+  if (varEd.mode === 'number') { numSettingSave(); return; }
   const name = varEdName();
   if (!name) return;
   const st = varEd;
@@ -6599,6 +6676,189 @@ function varEditorSave() {
   renderActionList();
 }
 
+// ── Number settings (Delay, Repeat, Time Limit, a percentage): one small panel ──
+// opts: title, label, value, placeholder, note, min, max, decimals, choices, choice, saveLabel.
+// onSave(value, choiceIndex): a number in range, or "{name}".
+function promptNumberSetting(opts, onSave) {
+  varEdStart({ mode: 'number', idx: null, opts, onSave, choice: opts.choice || 0,
+    value: opts.value === undefined || opts.value === null ? '' : String(opts.value),
+    typed: {}, nameText: '', picked: null, typingNew: false }, null);
+  openVarEditor(opts.title, opts.saveLabel || 'Save');
+  if (!varEd.value) setTimeout(() => { const f = document.querySelector('#var-ed-fields input'); if (f) f.focus(); }, 150);
+}
+
+function numFormat(n) {
+  return Number(n).toLocaleString(undefined, { maximumFractionDigits: 3 });
+}
+
+// The number panel's value: a number in range, "{name}", or null with why
+function numSettingValue() {
+  const o = varEd.opts, text = varEd.value.trim();
+  if (!text) return { value: null };
+  const m = text.match(/^\{([A-Za-z_][A-Za-z0-9_]*)\}$/);
+  if (m && m[1] === 'round') return o.allowsRound === false ? { value: null, problem: 'Repeat Round only has a value inside a Repeat.' } : { value: text };
+  if (m) return variableNameValid(m[1]) ? { value: text } : { value: null, problem: 'Variable names use letters, digits and _ only.' };
+  const n = Number(text.replace(',', '.'));
+  const min = o.min ?? 0, max = o.max ?? 1000000;
+  if (!/^-?\d*[.,]?\d+$/.test(text) || isNaN(n) || (!o.decimals && !Number.isInteger(n)) || n < min || n > max) {
+    return { value: null, problem: `Enter a ${o.decimals ? 'number' : 'whole number'} from ${numFormat(min)} to ${numFormat(max)}, or choose a variable with +.` };
+  }
+  return { value: n };
+}
+
+function numSettingRender(body) {
+  const o = varEd.opts;
+  if (o.choices && o.choices.length) {
+    const seg = document.createElement('div');
+    seg.className = 'var-ed-seg';
+    o.choices.forEach((c, i) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = c;
+      b.className = i === varEd.choice ? 'selected' : '';
+      b.onclick = () => {
+        varEd.choice = i;
+        seg.querySelectorAll('button').forEach((x, j) => x.classList.toggle('selected', j === i));
+      };
+      seg.appendChild(b);
+    });
+    const sec = document.createElement('div');
+    sec.className = 'var-ed-section';
+    sec.appendChild(seg);
+    body.appendChild(sec);
+  }
+  const fields = varEdSection(null, document.createElement('div'), 'var-ed-fields-note');
+  fields.id = 'var-ed-fields';
+  body.appendChild(fields);
+  varEdRenderFields();
+  const input = fields.querySelector('input');
+  if (input) input.setAttribute('inputmode', o.decimals ? 'decimal' : 'numeric');
+}
+
+function numSettingUpdate() {
+  const r = numSettingValue();
+  const note = document.getElementById('var-ed-fields-note');
+  note.textContent = r.problem || varEd.opts.note || '';
+  note.classList.toggle('bad', !!r.problem);
+  document.getElementById('var-editor-save').disabled = r.value === null;
+}
+
+function numSettingSave() {
+  const r = numSettingValue();
+  if (r.value === null) return;
+  const st = varEd;
+  closeVarEditor();
+  st.onSave(r.value, st.choice);
+}
+
+// Battery, Volume...: above or below a percentage, on the number panel
+function promptThresholdSetting(def, editIdx) {
+  const actions = triggerData(currentKey).actions || [];
+  const ex = editIdx !== null ? actions[editIdx] : null;
+  let value = '', choice = 0;
+  if (ex && typeof ex === 'object' && (ex.conditionKey || ex.conditionName) === def.key) {
+    const raw = String(ex.expectedValue || ex.expected || '');
+    if (/^\s*below/i.test(raw)) choice = 1;
+    value = raw.replace(/^\s*(above|below)\s*/i, '');
+  }
+  promptNumberSetting({ title: def.title, label: 'Percent', value, placeholder: '50', min: 0, max: 100,
+    choices: ['Above', 'Below'], choice, note: 'True when the level is above or below this percentage.',
+    saveLabel: editIdx === null ? 'Add' : 'Save', allowsRound: roundAvailableAt(editIdx) }, (n, c) => {
+    const word = c === 1 ? 'Below' : 'Above';
+    finishIfCondition(def, `${word.toUpperCase()} ${n}`, `${word.toLowerCase()} ${n}%`, editIdx);
+  });
+}
+
+// Whether an action at idx (null: the end) sits inside a Repeat or Repeat While, where {round} has a value
+function roundAvailableAt(idx) {
+  const actions = triggerData(currentKey).actions || [];
+  const end = idx === null || idx === undefined ? actions.length : Math.max(0, Math.min(idx, actions.length));
+  let depth = 0;
+  for (let i = 0; i < end; i++) {
+    const t = actions[i] && typeof actions[i] === 'object' ? String(actions[i].type || '').toLowerCase() : '';
+    if (t === 'repeat' || t === 'repeat_while') depth++;
+    else if (t === 'end_repeat') depth = Math.max(0, depth - 1);
+  }
+  return depth > 0;
+}
+
+// Wait Until's time limit; Repeat's count; Delay's seconds. idx: the action's place (null: the end)
+function promptTimeLimit(current, saveLabel, onSave, idx = null) {
+  promptNumberSetting({ title: 'Time Limit', label: 'Seconds', value: current, placeholder: '60', min: 1, max: 86400,
+    note: 'The longest to wait, up to a day. Then the actions go on anyway.', saveLabel, allowsRound: roundAvailableAt(idx) }, n => onSave(n));
+}
+
+function promptRepeatCount(current, saveLabel, onSave, idx = null) {
+  promptNumberSetting({ title: 'Repeat', label: 'Times', value: current, placeholder: '3', min: 1, max: 1000,
+    note: 'Runs the actions inside this many times, up to 1,000. In their text, {round} becomes the current round.', saveLabel, allowsRound: roundAvailableAt(idx) }, n => onSave(n));
+}
+
+function promptDelay(current, saveLabel, onSave, idx = null) {
+  promptNumberSetting({ title: 'Delay', label: 'Seconds', value: current, placeholder: '1', min: 0, max: 86400, decimals: true,
+    note: 'How long to wait before the next action, up to a day.', saveLabel, allowsRound: roundAvailableAt(idx) }, n => onSave(n));
+}
+
+// ── Set Variable's RC Command: commands that answer with a value, with their answer now ──
+const VALUE_COMMANDS = [
+  ['Levels', [['Battery Level', 'battery', 'battery_100', true], ['Volume', 'volume', 'speaker_2_fill', true]]],
+  ['Connectivity', [['Wi-Fi', 'wifi status', 'wifi'], ['Bluetooth', 'bt status', 'antenna_radiowaves_left_right'],
+    ['Cellular Data', 'cell status', 'antenna_radiowaves_left_right'], ['Airplane Mode', 'airplane status', 'airplane'],
+    ['Location Services', 'location status', 'location_fill'], ['CarPlay', 'carplay status', 'car_fill']]],
+  ['Sound', [['Ringer', 'ringer status', 'bell_fill'], ['Silent Vibrate', 'vibration silent-status', 'iphone'],
+    ['Haptics', 'haptics status', 'hand_draw'], ['Media Playing', 'is-playing', 'play_fill']]],
+  ['Device', [['Lock State', 'lock status', 'lock_fill'], ['Low Power Mode', 'low power status', 'battery_25'],
+    ['Flashlight', 'flashlight status', 'lightbulb_fill'], ['Do Not Disturb', 'dnd status', 'moon_fill'],
+    ['Focus', 'focus status', 'moon_circle_fill'], ['Screen Recording', 'screenrecord status', 'record_circle_fill'],
+    ['Proximity', 'proximity status', 'hand_raised_fill']]],
+  ['Display', [['Orientation', 'orientation status', 'rotate_right_fill'], ['Appearance', 'appearance status', 'circle_lefthalf_fill'],
+    ['Auto-Lock', 'autolock status', 'timer']]],
+];
+let commandPickerAnswers = {};
+
+function openCommandPicker(current) {
+  renderCommandPicker(current);
+  document.getElementById('cmd-picker-backdrop').classList.add('visible');
+  fetch('/api/answers', { cache: 'no-store' }).then(r => r.ok ? r.json() : {}).then(a => {
+    commandPickerAnswers = a || {};
+    if (document.getElementById('cmd-picker-backdrop').classList.contains('visible')) renderCommandPicker(current);
+  }).catch(() => {});
+}
+
+function closeCommandPicker() {
+  document.getElementById('cmd-picker-backdrop').classList.remove('visible');
+}
+
+function renderCommandPicker(current) {
+  const list = document.getElementById('cmd-picker-list');
+  list.innerHTML = '';
+  VALUE_COMMANDS.forEach(([title, rows], si) => {
+    list.insertAdjacentHTML('beforeend', `<div class="cmd-head">${title}</div>`);
+    const card = document.createElement('div');
+    card.className = 'cmd-card';
+    rows.forEach(([name, cmd, icon, number]) => {
+      const row = document.createElement('div');
+      row.className = 'cmd-row';
+      const answer = commandPickerAnswers[cmd];
+      row.innerHTML = `<i class="f7-icons">${icon}</i>
+        <div class="cmd-text"><div class="cmd-title">${escHtml(name)}</div>
+        <div class="cmd-sub"><code>${escHtml(cmd)}</code><span>${answer === undefined ? '…' : escHtml(answer || '—')}</span></div></div>
+        ${cmd === (current || '').toLowerCase() ? '<i class="f7-icons cmd-check">checkmark_alt</i>' : ''}`;
+      row.onclick = () => {
+        closeCommandPicker();
+        if (!varEd || varEd.op !== 'command') return;
+        (varEd.typed.command = varEd.typed.command || {}).value = cmd;
+        varEd.numberOnly = !!number;
+        varEdRenderFields();
+        varEdUpdate();
+      };
+      card.appendChild(row);
+    });
+    list.appendChild(card);
+    if (si === 0) list.insertAdjacentHTML('beforeend', '<div class="cmd-note">Levels are stored as a number, such as 85.</div>');
+  });
+  list.insertAdjacentHTML('beforeend', '<div class="cmd-note">Each row shows the answer this phone gives now; the variable stores the answer at run time.</div>');
+}
+
 // ── The + menu: This Run and saved variables, then the Repeat round ──
 
 function varEdOpenMenu(anchor, onPick) {
@@ -6619,12 +6879,16 @@ function varEdOpenMenu(anchor, onPick) {
   };
   section('This Run', varEd.runNames);
   section('Saved', varEd.savedNames);
-  if (menu.childElementCount) menu.insertAdjacentHTML('beforeend', '<div class="var-ed-menu-gap"></div>');
-  const round = document.createElement('div');
-  round.className = 'var-ed-menu-item';
-  round.innerHTML = '<div><span>Repeat Round</span><div class="var-ed-menu-sub">The current pass of a Repeat: 1, 2, 3…</div></div><i class="f7-icons">repeat</i>';
-  round.onclick = () => { varEdCloseMenu(); onPick('round'); };
-  menu.appendChild(round);
+  const withRound = !(varEd.mode === 'number' && varEd.opts.allowsRound === false); // {round} has a value only inside a Repeat
+  if (withRound) {
+    if (menu.childElementCount) menu.insertAdjacentHTML('beforeend', '<div class="var-ed-menu-gap"></div>');
+    const round = document.createElement('div');
+    round.className = 'var-ed-menu-item';
+    round.innerHTML = '<div><span>Repeat Round</span><div class="var-ed-menu-sub">The current pass of a Repeat: 1, 2, 3…</div></div><i class="f7-icons">repeat</i>';
+    round.onclick = () => { varEdCloseMenu(); onPick('round'); };
+    menu.appendChild(round);
+  }
+  if (!menu.childElementCount) menu.insertAdjacentHTML('beforeend', '<div class="var-ed-menu-header">No Variables Yet</div>');
   document.body.appendChild(menu);
   const r = anchor.getBoundingClientRect();
   const w = menu.offsetWidth, h = menu.offsetHeight;
@@ -6690,14 +6954,6 @@ function condOptionsFor(d, exKey, exValue, exTitle) {
     } else {
       rows.push(condOptionRow('Tick at least one day', 'dim', '', null));
     }
-    return rows;
-  }
-  if (d.threshold) {
-    ['Above', 'Below'].forEach(dir => {
-      let label = `${dir}…`;
-      if (exKey === d.key && String(exValue).toUpperCase().startsWith(dir.toUpperCase())) label += ` (now: ${exTitle})`;
-      rows.push(condOptionRow(label, 'blue', '', () => promptCondThreshold(d, dir)));
-    });
     return rows;
   }
   if (d.key === 'bt_device') {
@@ -6816,6 +7072,7 @@ function finishIfCondition(def, value, valueTitle, editIdx, extra) {
     expectedTitle: valueTitle
   };
   if (extra) Object.assign(item, extra);
+  if (editIdx !== null && actions[editIdx] && actions[editIdx].disabled) item.disabled = actions[editIdx].disabled; // stays disabled
 
   if (existingType === 'wait_until') {
     // Wait Until: one row, no End; a new one asks for its time limit, an edited one keeps it
@@ -6828,8 +7085,8 @@ function finishIfCondition(def, value, valueTitle, editIdx, extra) {
       renderActionList();
       return;
     }
-    setTimeout(() => showDialog('Time Limit', 'Seconds to wait at most before the actions go on anyway (up to a day), or a variable like {limit}:', '60', 'Add', val => {
-      item.timeout = numberOrVariable(val, 1, 86400) ?? 60;
+    setTimeout(() => promptTimeLimit('60', 'Add', n => {
+      item.timeout = n;
       actions.push(item);
       triggerData(currentKey).actions = actions;
       saveConfig();

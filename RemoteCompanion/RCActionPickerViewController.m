@@ -555,11 +555,6 @@
         return;
     }
 
-    if ([command isEqualToString:@"__SET_VOLUME__"] || [command isEqualToString:@"__SET_RINGER_VOLUME__"] || [command isEqualToString:@"__SET_BRIGHTNESS__"] || [command isEqualToString:@"__SET_FLASHLIGHT__"]) {
-        [self handleValueInputForCommand:command];
-        return;
-    }
-    
     // Touch gesture handlers
     if ([command isEqualToString:@"__TAP__"]) {
         [self handleTouchCoordInputWithTitle:@"Tap" placeholder:@"x y  (e.g. 195 422)" build:^NSString *(NSString *v) {

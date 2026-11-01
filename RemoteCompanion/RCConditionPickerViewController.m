@@ -142,9 +142,6 @@ static NSArray<NSString *> *RCDayNames(void) { return @[@"Monday", @"Tuesday", @
             [rows addObject:@{ @"kind": @"day", @"code": RCDayCodes()[i], @"title": RCDayNames()[i] }];
         }
         [rows addObject:@{ @"kind": @"done", @"title": @"Done" }];
-    } else if ([condition[@"input"] isEqualToString:@"threshold"]) {
-        [rows addObject:@{ @"kind": @"threshold", @"direction": @"Above", @"title": @"Above…" }];
-        [rows addObject:@{ @"kind": @"threshold", @"direction": @"Below", @"title": @"Below…" }];
     } else if ([key isEqualToString:@"bt_device"]) {
         // The paired devices (from the tweak), then a row to type any other name
         if (!self.bluetoothDevices) {
@@ -279,12 +276,6 @@ static NSArray<NSString *> *RCDayNames(void) { return @[@"Monday", @"Tuesday", @
         cell.textLabel.text = enabled ? [NSString stringWithFormat:@"Done — %@", [self daysValue][@"title"]] : @"Tick at least one day";
         cell.textLabel.textColor = enabled ? [UIColor systemBlueColor] : [UIColor tertiaryLabelColor];
         cell.selectionStyle = enabled ? UITableViewCellSelectionStyleDefault : UITableViewCellSelectionStyleNone;
-    } else if ([kind isEqualToString:@"threshold"]) {
-        cell.textLabel.text = row[@"title"];
-        cell.textLabel.textColor = [UIColor systemBlueColor];
-        if (isExistingCondition && [self.existingValue hasPrefix:[row[@"direction"] uppercaseString]]) {
-            cell.textLabel.text = [NSString stringWithFormat:@"%@ (now: %@)", row[@"title"], self.existingTitle];
-        }
     } else if ([kind isEqualToString:@"loading"]) {
         cell.textLabel.text = row[@"title"];
         cell.textLabel.textColor = [UIColor tertiaryLabelColor];
@@ -335,8 +326,6 @@ static NSArray<NSString *> *RCDayNames(void) { return @[@"Monday", @"Tuesday", @
     } else if ([kind isEqualToString:@"done"]) {
         if (self.tickedDays.count == 0) return;
         [self finishWithValue:[self daysValue] condition:condition];
-    } else if ([kind isEqualToString:@"threshold"]) {
-        [self promptThresholdForCondition:condition direction:row[@"direction"]];
     } else if ([kind isEqualToString:@"input"]) {
         void (^onInput)(NSDictionary *) = self.onInputRequested;
         if ([condition[@"key"] isEqualToString:@"front_app"]) {
@@ -429,31 +418,6 @@ static NSArray<NSString *> *RCDayNames(void) { return @[@"Monday", @"Tuesday", @
             if ([self.expandedKey isEqualToString:@"focus"]) [self.tableView reloadData];
         });
     }];
-}
-
-// Battery / Volume Level: just the number, for the direction picked in the list
-- (void)promptThresholdForCondition:(NSDictionary *)condition direction:(NSString *)direction {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"%@ %@", condition[@"title"], direction.lowercaseString]
-                                                                   message:@"Percentage (0-100)"
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    NSString *current = nil;
-    if ([condition[@"key"] isEqualToString:self.existingKey] && [self.existingValue hasPrefix:direction.uppercaseString]) {
-        current = [[self.existingValue substringFromIndex:direction.length] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-    }
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-        textField.placeholder = @"50";
-        textField.keyboardType = UIKeyboardTypeNumberPad;
-        textField.text = current;
-    }];
-    __weak typeof(self) weakSelf = self;
-    [alert addAction:[UIAlertAction actionWithTitle:@"Save" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-        NSInteger value = MAX(0, MIN(100, [alert.textFields[0].text integerValue]));
-        [weakSelf finishWithValue:@{ @"value": [NSString stringWithFormat:@"%@ %ld", direction.uppercaseString, (long)value],
-                                     @"title": [NSString stringWithFormat:@"%@ %ld%%", direction.lowercaseString, (long)value] }
-                        condition:condition];
-    }]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [self presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)finishWithValue:(NSDictionary *)value condition:(NSDictionary *)condition {

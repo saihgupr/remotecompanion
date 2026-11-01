@@ -8,6 +8,9 @@ BOOL RCSetVariableNameValid(NSString *name);
 // The insert menu for a value field: known variables by kind, then {round}
 UIMenu *RCVariableInsertMenu(NSArray<NSString *> *runNames, NSArray<NSString *> *savedNames, void (^insert)(NSString *name));
 
+// The same, with Repeat Round left out when includesRound is NO (outside a Repeat it has no value)
+UIMenu *RCVariableInsertMenuWithRound(NSArray<NSString *> *runNames, NSArray<NSString *> *savedNames, BOOL includesRound, void (^insert)(NSString *name));
+
 // A footer whose text can change while a field in its section is being typed in
 @interface RCSetVariableFooter : UITableViewHeaderFooterView
 @property (nonatomic, strong) UILabel *label;

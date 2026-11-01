@@ -2727,9 +2727,40 @@ static BOOL rc_variable_delete(NSString *name) {
     return found;
 }
 
+// How a value goes into text: as it is, single-quoted for a shell, or only {round} filled
+typedef NS_ENUM(NSInteger, RCFillMode) { RCFillPlain, RCFillShell, RCFillRoundOnly, RCFillQuoted };
+
+// One shell word whatever the value holds: 'it'\''s' for it's
+static NSString *rc_shell_quoted(NSString *value) {
+    return [NSString stringWithFormat:@"'%@'", [value stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"]];
+}
+
+static NSString *rc_fill_placeholders_mode(NSString *text, RCFillMode mode);
+
 // {round} (the innermost loop's round) and {name} (a variable) in text. Braces that aren't one of
 // these, like a JSON body in a curl command or a variable that isn't set, are left as they are.
 static NSString *rc_fill_placeholders(NSString *text) {
+    return rc_fill_placeholders_mode(text, RCFillPlain);
+}
+
+// An action's command with its placeholders filled. In a Terminal command (exec, root, sudo) each
+// value is single-quoted, so text in it can't run as a command of its own. In Lua, whose tables
+// use braces too, only {round} is filled, as before variables.
+static NSString *rc_fill_action(NSString *text) {
+    if (![text isKindOfClass:[NSString class]]) return text;
+    NSString *lower = [[text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString];
+    for (NSString *prefix in @[@"lua ", @"lua_eval ", @"lua:"]) {
+        if ([lower hasPrefix:prefix]) return rc_fill_placeholders_mode(text, RCFillRoundOnly);
+    }
+    for (NSString *prefix in @[@"exec ", @"root ", @"sudo "]) {
+        if ([lower hasPrefix:prefix]) return rc_fill_placeholders_mode(text, RCFillShell);
+    }
+    // A Toast's parts are in double quotes: a " in a value would end one early
+    if ([lower hasPrefix:@"toast "]) return rc_fill_placeholders_mode(text, RCFillQuoted);
+    return rc_fill_placeholders_mode(text, RCFillPlain);
+}
+
+static NSString *rc_fill_placeholders_mode(NSString *text, RCFillMode mode) {
     if (![text isKindOfClass:[NSString class]] || [text rangeOfString:@"{"].location == NSNotFound) return text;
     static NSRegularExpression *pattern;
     static dispatch_once_t once;
@@ -2744,10 +2775,12 @@ static NSString *rc_fill_placeholders(NSString *text) {
         NSString *value = nil;
         if ([name isEqualToString:@"round"]) {
             if (loops.count) value = [NSString stringWithFormat:@"%ld", (long)[loops.lastObject[@"rounds"] integerValue]];
-        } else {
+        } else if (mode != RCFillRoundOnly) {
             value = rc_variable_get(name);
         }
         if (!value) return;
+        if (mode == RCFillShell) value = rc_shell_quoted(value);
+        else if (mode == RCFillQuoted) value = [value stringByReplacingOccurrencesOfString:@"\"" withString:@"'"];
         [filled appendString:[text substringWithRange:NSMakeRange(last, match.range.location - last)]];
         [filled appendString:value];
         last = NSMaxRange(match.range);
@@ -3582,7 +3615,7 @@ static void rc_execute_action_sequence_body(NSArray *actions, NSString *triggerK
         }
         
         if ([actionItem isKindOfClass:[NSString class]]) {
-            NSString *action = rc_fill_placeholders((NSString *)actionItem);
+            NSString *action = rc_fill_action((NSString *)actionItem);
             SRLogMin(@"[%@] -> %@", triggerKey, action);
             RCTKEvent(@"action", @{ @"trigger": triggerKey ?: @"", @"command": action });
             handle_command(action);
@@ -3734,17 +3767,30 @@ static void rc_execute_action_sequence_body(NSArray *actions, NSString *triggerK
                 SRLog(@"[%@] Set Variable with an unusable name '%@' - skipped", triggerKey, name);
                 continue;
             }
-            NSString *value = rc_fill_placeholders([dictAction[@"value"] description] ?: @"");
             BOOL runOnly = [[dictAction[@"scope"] description] isEqualToString:@"run"];
             NSString *op = [[dictAction[@"op"] description] lowercaseString] ?: @"set";
+            // An RC command is filled the way an action is (quoted in a Terminal command)
+            BOOL runsCommand = [op isEqualToString:@"command"] || [op isEqualToString:@"command_number"];
+            NSString *raw = [dictAction[@"value"] description] ?: @"";
+            NSString *value = runsCommand ? rc_fill_action(raw) : rc_fill_placeholders(raw);
             NSString *problem = nil;
-            value = rc_variable_operation(op, name, value, dictAction, &problem);
+            // Math on a saved variable reads and writes it in one step, so two runs changing it at
+            // once (Add 1 each) don't lose a change. The lock is reentrant; commands run outside it.
+            BOOL readsValue = !runsCommand && ![op isEqualToString:@"set"] && op.length && ![op isEqualToString:@"random"];
+            if (readsValue && !runOnly) {
+                @synchronized (rc_variables_lock()) {
+                    value = rc_variable_operation(op, name, value, dictAction, &problem);
+                    if (value) rc_variable_set(name, value, runOnly);
+                }
+            } else {
+                value = rc_variable_operation(op, name, value, dictAction, &problem);
+                if (value) rc_variable_set(name, value, runOnly);
+            }
             if (!value) {
                 SRLogMin(@"[%@] Set Variable %@ (%@): %@ - unchanged", triggerKey, name, op, problem);
                 rc_run_trace(idx, @"problem", problem);
                 continue;
             }
-            rc_variable_set(name, value, runOnly);
             rc_run_trace(idx, @"sets", nil);
             rc_run_trace(idx, @"value", value.length > 200 ? [[value substringToIndex:200] stringByAppendingString:@"…"] : value);
             SRLogMin(@"[%@] Set %@%@ = %@", triggerKey, name, runOnly ? @" (this run)" : @"", value);
@@ -10562,6 +10608,15 @@ static NSString *handle_command(NSString *cmd) {
         });
         NSLog(@"[RemoteCommand] Haptic triggered");
         return @"Haptic triggered\n";
+    } else if ([cleanCmd isEqualToString:@"battery"] || [cleanCmd isEqualToString:@"battery status"]) {
+        // "Battery: 85% (Charging)": the level, and whether it's charging
+        UIDevice *device = [UIDevice currentDevice];
+        device.batteryMonitoringEnabled = YES;
+        float level = device.batteryLevel;
+        if (level < 0) return @"Battery: unknown\n";
+        UIDeviceBatteryState state = device.batteryState;
+        NSString *charge = state == UIDeviceBatteryStateFull ? @" (Full)" : state == UIDeviceBatteryStateCharging ? @" (Charging)" : @"";
+        return [NSString stringWithFormat:@"Battery: %.0f%%%@\n", level * 100.0f, charge];
     } else if ([cleanCmd isEqualToString:@"ping"]) {
         AudioServicesPlaySystemSound(1005);
         NSLog(@"[RemoteCommand] Ping (Alert Sound) played");
@@ -10770,16 +10825,25 @@ static NSString *handle_command(NSString *cmd) {
             return value ? [value stringByAppendingString:@"\n"] : @"";
         } else if ([verb isEqualToString:@"set"]) {
             if (!rc_variable_name_valid(name)) return @"Usage: var set <name> <text> (name: letters, digits and _)\n";
+            // The value as sent, spaces at either end kept (cleanCmd is trimmed); only a line end is dropped
             NSString *value = argSpace.location == NSNotFound ? @"" : [args substringFromIndex:argSpace.location + 1];
+            static NSRegularExpression *rawSet;
+            static dispatch_once_t rawOnce;
+            dispatch_once(&rawOnce, ^{ rawSet = [NSRegularExpression regularExpressionWithPattern:@"^\\s*var\\s+set\\s+\\S+ (.*?)[\\r\\n]*$" options:NSRegularExpressionDotMatchesLineSeparators error:nil]; });
+            NSTextCheckingResult *raw = [rawSet firstMatchInString:cmd options:0 range:NSMakeRange(0, cmd.length)];
+            if (raw) value = [cmd substringWithRange:[raw rangeAtIndex:1]];
             rc_variable_set(name, value, NO);
             return [NSString stringWithFormat:@"%@ = %@\n", name, value];
         } else if ([verb isEqualToString:@"add"]) {
             // "var add count 1" (or -1): a number added to the variable's (0 when not set)
             if (!rc_variable_name_valid(name)) return @"Usage: var add <name> <number>\n";
             NSString *problem = nil;
-            NSString *value = rc_variable_operation(@"add", name, argSpace.location == NSNotFound ? @"" : [args substringFromIndex:argSpace.location + 1], nil, &problem);
+            NSString *value;
+            @synchronized (rc_variables_lock()) { // read and write in one step
+                value = rc_variable_operation(@"add", name, argSpace.location == NSNotFound ? @"" : [args substringFromIndex:argSpace.location + 1], nil, &problem);
+                if (value) rc_variable_set(name, value, NO);
+            }
             if (!value) return [NSString stringWithFormat:@"Not changed: %@\n", problem];
-            rc_variable_set(name, value, NO);
             return [NSString stringWithFormat:@"%@ = %@\n", name, value];
         } else if ([verb isEqualToString:@"delete"]) {
             return rc_variable_delete(name) ? @"Variable deleted\n" : @"No such variable\n";
@@ -11696,6 +11760,22 @@ static void start_web_server() {
                                     write(new_socket, [assetData bytes], [assetData length]);
                                     responseString = nil; // Skip default write
                                 }
+                            } else if ([path isEqualToString:@"/api/answers"] && [method isEqualToString:@"GET"]) {
+                                // The answers of the status commands Set Variable's command list offers, for
+                                // the Web UI to show next to them. Only these: they report, they change nothing.
+                                NSArray *commands = @[@"battery", @"volume", @"wifi status", @"bt status", @"cell status", @"airplane status",
+                                                      @"location status", @"carplay status", @"ringer status", @"vibration silent-status",
+                                                      @"haptics status", @"is-playing", @"lock status", @"low power status", @"flashlight status",
+                                                      @"dnd status", @"focus status", @"screenrecord status", @"proximity status",
+                                                      @"orientation status", @"appearance status", @"autolock status"];
+                                NSMutableDictionary *answers = [NSMutableDictionary dictionary];
+                                for (NSString *command in commands) {
+                                    NSString *output = [handle_command(command) stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+                                    answers[command] = [output componentsSeparatedByString:@"\n"].firstObject ?: @"";
+                                }
+                                NSData *jsonData = [NSJSONSerialization dataWithJSONObject:answers options:0 error:nil];
+                                NSString *jsonString = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+                                responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)jsonData.length, jsonString];
                             } else if ([path isEqualToString:@"/api/variables"] && [method isEqualToString:@"GET"]) {
                                 // The saved variables, for the editors' variable menus
                                 NSDictionary *all;
