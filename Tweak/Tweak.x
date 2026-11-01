@@ -11696,6 +11696,13 @@ static void start_web_server() {
                                     write(new_socket, [assetData bytes], [assetData length]);
                                     responseString = nil; // Skip default write
                                 }
+                            } else if ([path isEqualToString:@"/api/variables"] && [method isEqualToString:@"GET"]) {
+                                // The saved variables, for the editors' variable menus
+                                NSDictionary *all;
+                                @synchronized (rc_variables_lock()) { all = [rc_variables_locked() copy]; }
+                                NSData *jsonData = [NSJSONSerialization dataWithJSONObject:all ?: @{} options:NSJSONWritingSortedKeys error:nil];
+                                NSString *jsonString = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+                                responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)jsonData.length, jsonString];
                             } else if ([path isEqualToString:@"/api/config"]) {
                                 load_trigger_config();
                                 // Allow GET/POST for config regardless of webUIEnabled to prevent lockout

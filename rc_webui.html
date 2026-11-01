@@ -1487,6 +1487,72 @@
     .toggle-switch input:checked + .toggle-slider { background-color: #34c759; }
     .toggle-switch input:checked + .toggle-slider:before { transform: translateX(20px); }
 
+    /* ── Variable editors ── */
+    .var-editor-box { width: 92%; max-width: 460px; display: flex; flex-direction: column; max-height: 88vh; max-height: 88dvh; }
+    .var-editor-body { overflow-y: auto; padding: 4px 14px 6px; text-align: left; -webkit-overflow-scrolling: touch; }
+    .var-ed-section { margin-bottom: 10px; }
+    .var-ed-header { font-size: 13px; font-weight: 500; letter-spacing: 0.05em; color: #8e8e93; text-transform: uppercase; margin: 10px 4px 6px; }
+    .var-ed-note { font-size: 12px; color: #8e8e93; line-height: 1.35; margin: 6px 4px 0; }
+    .var-ed-note:empty { display: none; }
+    .var-ed-note.bad { color: #ff453a; }
+    .var-ed-grid { display: grid; gap: 8px; }
+    .var-ed-tile {
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
+      min-height: 64px; padding: 8px 4px; border-radius: 12px; cursor: pointer;
+      background: rgba(255,255,255,0.07); border: 1.5px solid transparent; color: #fff;
+      font-family: inherit; font-size: 12px; font-weight: 500; line-height: 1.15; text-align: center;
+      transition: background 0.12s, border-color 0.12s, transform 0.1s;
+    }
+    .var-ed-tile i.f7-icons { font-size: 22px; color: #0a84ff; }
+    .var-ed-grid.compact .var-ed-tile { min-height: 54px; font-size: 11px; }
+    .var-ed-grid.compact .var-ed-tile i.f7-icons { font-size: 19px; }
+    .var-ed-tile:active { transform: scale(0.96); }
+    .var-ed-tile.selected { background: rgba(10,132,255,0.22); border-color: #0a84ff; }
+    .var-ed-card { background: rgba(255,255,255,0.07); border-radius: 12px; overflow: hidden; }
+    .var-ed-row { display: flex; align-items: center; gap: 12px; min-height: 46px; padding: 0 12px 0 14px; position: relative; }
+    .var-ed-card > .var-ed-row + .var-ed-row::before, .var-ed-card > .var-ed-row + .var-ed-chips::before {
+      content: ''; position: absolute; top: 0; left: 14px; right: 0; height: 0.5px; background: rgba(255,255,255,0.12);
+    }
+    label.var-ed-row { cursor: pointer; justify-content: space-between; }
+    .var-ed-label { font-size: 15px; color: #fff; min-width: 84px; flex-shrink: 0; }
+    .var-ed-input {
+      flex: 1; min-width: 0; background: transparent; border: none; outline: none; color: #fff;
+      font-size: 15px; font-family: inherit; padding: 12px 0; caret-color: #0a84ff;
+    }
+    .var-ed-input::placeholder { color: rgba(235,235,245,0.3); }
+    .var-ed-insert { background: none; border: none; padding: 6px; margin-right: -4px; color: #0a84ff; cursor: pointer; display: flex; }
+    .var-ed-insert i.f7-icons { font-size: 22px; }
+    .var-ed-select-wrap { flex: 1; min-width: 0; position: relative; display: flex; align-items: center; }
+    .var-ed-select {
+      flex: 1; min-width: 0; -webkit-appearance: none; appearance: none; background: transparent; border: none; outline: none;
+      color: #0a84ff; font-size: 15px; font-family: inherit; padding: 12px 34px 12px 0; text-align: left; cursor: pointer;
+    }
+    .var-ed-select option, .var-ed-select optgroup { color: #000; }
+    .var-ed-select-icon { position: absolute; right: 6px; font-size: 15px; color: #0a84ff; pointer-events: none; }
+    .var-ed-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 12px 12px 14px; position: relative; }
+    .var-ed-chip {
+      background: rgba(10,132,255,0.18); color: #0a84ff; border: none; border-radius: 14px;
+      padding: 5px 11px; font-size: 13px; font-family: inherit; cursor: pointer;
+    }
+    .var-ed-chip:active { background: rgba(10,132,255,0.32); }
+    #var-editor-save:disabled { color: rgba(235,235,245,0.3); cursor: default; }
+    .var-ed-menu {
+      position: fixed; z-index: 3000; min-width: 220px; max-width: 300px; max-height: 60vh; overflow-y: auto;
+      background: rgba(44,44,46,0.96); backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px);
+      border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.5); padding: 6px 5px 8px;
+      opacity: 0; transform: scale(0.96); transition: opacity 0.12s, transform 0.12s; transform-origin: top right;
+    }
+    .var-ed-menu.show { opacity: 1; transform: scale(1); }
+    .var-ed-menu-header { font-size: 12px; color: #8e8e93; padding: 8px 12px 4px; }
+    .var-ed-menu-gap { height: 6px; margin: 4px 8px 4px; border-bottom: 0.5px solid rgba(255,255,255,0.12); }
+    .var-ed-menu-item {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 10px 12px; border-radius: 8px; font-size: 15px; color: #fff; cursor: pointer;
+    }
+    .var-ed-menu-item:active, .var-ed-menu-item:hover { background: rgba(255,255,255,0.1); }
+    .var-ed-menu-item i.f7-icons { font-size: 17px; opacity: 0.9; }
+    .var-ed-menu-sub { font-size: 12px; color: #8e8e93; margin-top: 2px; }
+
     /* Live Log Viewer Styling - iOS Native Design Language */
     #logs-panel {
       background: #121214 !important;
@@ -2287,6 +2353,18 @@
     <div class="dialog-btns">
       <button onclick="closeTimeCondDialog()" style="color:#ff3b30;">Cancel</button>
       <button onclick="saveTimeCondDialog()" style="font-weight:600;">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ VARIABLE EDITOR (Set Variable, Variable condition) ══════════════ -->
+<div class="dialog-backdrop" id="var-editor-backdrop" onclick="_varEditorBackdropClick(event)">
+  <div class="dialog-box var-editor-box">
+    <div class="dialog-title" id="var-editor-title">Set Variable</div>
+    <div class="var-editor-body" id="var-editor-body"></div>
+    <div class="dialog-btns">
+      <button onclick="closeVarEditor()">Cancel</button>
+      <button id="var-editor-save" onclick="varEditorSave()">Save</button>
     </div>
   </div>
 </div>
@@ -3267,19 +3345,6 @@ function variableConditionText(cmd) {
   const needsValue = c[0] !== 'empty' && c[0] !== 'not_empty';
   return `${cmd.variable || 'Variable'} ${c[2]}${needsValue ? ' ' + (cmd.expectedValue || '') : ''}`;
 }
-
-// Set Variable's kinds: op, menu title, the fields after the name ([prompt, key]), a note
-const SET_VARIABLE_KINDS = [
-  { op: 'set', title: 'Text or Number', fields: [['Value (can include other variables and {round}):', 'value']] },
-  { op: 'add', title: 'Add', fields: [['Number or {variable} to add (0 when the variable isn\'t set):', 'value']] },
-  { op: 'subtract', title: 'Subtract', fields: [['Number or {variable} to subtract (0 when the variable isn\'t set):', 'value']] },
-  { op: 'multiply', title: 'Multiply', fields: [['Multiply by (number or {variable}):', 'value']] },
-  { op: 'divide', title: 'Divide', fields: [['Divide by (number or {variable}; 0 leaves it as it is):', 'value']] },
-  { op: 'round', title: 'Round', fields: [['Decimals (0 if empty):', 'value']] },
-  { op: 'random', title: 'Random Number', fields: [['A whole number from (number or {variable}):', 'min'], ['To (included):', 'max']] },
-  { op: 'command', title: 'RC Command Output', fields: [['RC command (e.g. "wifi status" gives "WiFi ON"):', 'value']] },
-  { op: 'command_number', title: 'Number from RC Command', fields: [['RC command (keeps the first number, e.g. "volume" gives 100):', 'value']] },
-];
 
 // A Set Variable action in words: "Set x to 5", "Add 1 to x", "Set x to Random 1–6"...
 function setVariableText(cmd) {
@@ -5956,7 +6021,7 @@ function condDaysValue() {
 function openCondPicker(editIdx = null) {
   condPickerEditIdx = editIdx;
   const exKey = condPickerExistingKey();
-  condPickerExpandedKey = (exKey && CONDITION_DEFS.some(d => d.key === exKey)) ? exKey : null;
+  condPickerExpandedKey = (exKey && exKey !== 'variable' && CONDITION_DEFS.some(d => d.key === exKey)) ? exKey : null;
   condPickerTicked = [];
   if (condPickerExpandedKey === 'day_of_week') {
     const ex = condPickerExisting();
@@ -5994,6 +6059,12 @@ function loadCondBtDevices() {
 }
 
 function selectCond(key) {
+  if (key === 'variable') { // its own panel
+    const editIdx = condPickerEditIdx;
+    closeCondPicker();
+    setTimeout(() => promptVariableCondition(editIdx), 200);
+    return;
+  }
   if (condPickerExpandedKey === key) {
     condPickerExpandedKey = null; // collapse it
   } else {
@@ -6047,72 +6118,534 @@ function promptCondThreshold(def, direction) {
   });
 }
 
-// The Variable condition: the name, then (unless it's Has Any / No Value) the value to compare with
-function promptVariableCondition(code, title) {
-  const ex = condPickerExisting();
-  const same = ex && ex.conditionKey === 'variable';
-  const editIdx = condPickerEditIdx;
-  const def = CONDITION_DEFS.find(d => d.key === 'variable');
-  const needsValue = code !== 'empty' && code !== 'not_empty';
-  closeCondPicker();
-  showDialog(`Variable ${title}`, 'Variable name:', same ? String(ex.variable || '') : '', needsValue ? 'Next' : 'Save', name => {
-    name = (name || '').trim();
-    if (!variableNameValid(name)) { if (name) showToast('Names use letters, digits and _'); return; }
-    const finish = value => finishIfCondition(def, value, needsValue ? `${title.toLowerCase()} ${value}` : title.toLowerCase(), editIdx,
-      { conditionTitle: name, variable: name, comparison: code });
-    if (!needsValue) { finish(''); return; }
-    showDialog(`Variable ${title}`, 'Value (can include other variables, like {limit}). Text compares without regard to case; Is Above and Is Below compare numbers:',
-      same ? String(ex.expectedValue || '') : '', 'Save', value => finish((value || '').trim()));
-  });
+// ── Variable editors: Set Variable and the Variable condition on one panel each, like the app's ──
+const VAR_NUMBER_HINT = 'Number or {variable}';
+
+// Set Variable's kinds: op, tile title, icon, whether it changes an existing number, the note under
+// the fields, and the fields ([label, key, placeholder, number]). "command" saves as command_number with Number Only.
+const SET_VARIABLE_KINDS = [
+  { op: 'set', title: 'Text or Number', icon: 'textformat',
+    message: 'Stores this text or number, replacing the current value. {name} inserts another variable\'s value; {round} inserts the repeat round.',
+    fields: [['Value', 'value', 'Text, number or {variable}', false]] },
+  { op: 'random', title: 'Random Number', icon: 'shuffle',
+    message: 'Stores a random whole number from From to To, both included. Each can be a number or a {variable}.',
+    fields: [['From', 'min', VAR_NUMBER_HINT, true], ['To', 'max', VAR_NUMBER_HINT, true]] },
+  { op: 'command', title: 'RC Command', icon: 'chevron_left_slash_chevron_right',
+    message: 'Runs an RC command and stores its answer. For example, wifi status stores "WiFi ON".',
+    numberMessage: 'Runs an RC command and stores the first number in its answer. For example, volume answers "Volume: 100%" and stores 100.',
+    fields: [['Command', 'value', 'volume', false]] },
+  { op: 'add', title: 'Add', icon: 'plus', change: true,
+    message: 'Adds the amount to the variable. A variable without a value starts at 0, so Add 1 works as a counter.',
+    fields: [['Amount', 'value', VAR_NUMBER_HINT, true]] },
+  { op: 'subtract', title: 'Subtract', icon: 'minus', change: true,
+    message: 'Subtracts the amount from the variable. A variable without a value starts at 0.',
+    fields: [['Amount', 'value', VAR_NUMBER_HINT, true]] },
+  { op: 'multiply', title: 'Multiply', icon: 'multiply', change: true,
+    message: 'Multiplies the variable by this number.',
+    fields: [['By', 'value', VAR_NUMBER_HINT, true]] },
+  { op: 'divide', title: 'Divide', icon: 'divide', change: true,
+    message: 'Divides the variable by this number. Dividing by 0 leaves it unchanged.',
+    fields: [['By', 'value', VAR_NUMBER_HINT, true]] },
+  { op: 'round', title: 'Round', icon: 'number', change: true,
+    message: 'Rounds the variable to this many decimal places; empty rounds to a whole number. For example, 2 turns 3.14159 into 3.14.',
+    fields: [['Decimals', 'value', '0', true]] },
+];
+
+// The Variable condition's comparisons as tiles: op, tile title, icon, needs a value, compares numbers, note
+const VARIABLE_COMPARE_KINDS = [
+  { op: 'is', title: 'Is', icon: 'equal', value: true, message: 'True when the variable equals this text or number. Letter case doesn\'t matter.' },
+  { op: 'is_not', title: 'Is Not', icon: 'xmark', value: true, message: 'True when the variable doesn\'t equal this text or number. Letter case doesn\'t matter.' },
+  { op: 'contains', title: 'Contains', icon: 'search', value: true, message: 'True when this text appears anywhere in the variable. Letter case doesn\'t matter.' },
+  { op: 'above', title: 'Above', icon: 'greaterthan', value: true, number: true, message: 'True when the variable is a number greater than this one.' },
+  { op: 'below', title: 'Below', icon: 'lessthan', value: true, number: true, message: 'True when the variable is a number less than this one.' },
+  { op: 'not_empty', title: 'Has Value', icon: 'checkmark_circle', message: 'True when the variable has any value.' },
+  { op: 'empty', title: 'No Value', icon: 'circle', message: 'True when the variable has no value or was never set.' },
+];
+
+let varEd = null; // the open editor's state
+
+function varEdSort(list) {
+  return [...list].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
 }
 
-// Set Variable: its kind, the name, the kind's fields, then saved (all triggers) or this run only.
-// Edits the one at idx, or adds one.
+// The trigger's This Run and saved names (without the action at skipIdx), and the saved ones on the phone
+function varEdStart(state, skipIdx) {
+  const actions = triggerData(currentKey).actions || [];
+  const run = new Set(), saved = new Set();
+  actions.forEach((a, i) => {
+    if (i === skipIdx || !a || typeof a !== 'object' || a.type !== 'set_variable' || !variableNameValid(a.name)) return;
+    (a.scope === 'run' ? run : saved).add(a.name);
+  });
+  state.runNames = varEdSort(run);
+  state.triggerSaved = [...saved];
+  state.phoneNames = [];
+  varEd = state;
+  varEdMergeSaved();
+  fetch('/api/variables', { cache: 'no-store' }).then(r => r.ok ? r.json() : {}).then(all => {
+    if (varEd !== state || !all || typeof all !== 'object') return;
+    state.phoneNames = Object.keys(all).filter(variableNameValid);
+    varEdMergeSaved();
+    varEdRenderVariable();
+    varEdUpdate();
+  }).catch(() => {});
+}
+
+function varEdMergeSaved() {
+  const all = new Set([...varEd.phoneNames, ...varEd.triggerSaved]);
+  varEd.runNames.forEach(n => all.delete(n));
+  varEd.savedNames = varEdSort(all);
+}
+
+function varEdKind() {
+  return varEd.mode === 'set' ? SET_VARIABLE_KINDS.find(k => k.op === varEd.op) : VARIABLE_COMPARE_KINDS.find(k => k.op === varEd.op);
+}
+
+// Set Variable: a kind that changes an existing variable's number
+function varEdIsChange() {
+  return varEd.mode === 'set' && !!varEdKind().change;
+}
+
+// Whether the Variable row is a menu (true) or a typed name
+function varEdUsesMenu() {
+  return varEd.mode === 'cond' || varEdIsChange();
+}
+
+function varEdShowsName() {
+  return !varEdUsesMenu() || varEd.typingNew;
+}
+
+function varEdName() {
+  if (varEdUsesMenu() && !varEd.typingNew) return varEd.picked ? varEd.picked.name : null;
+  const typed = varEd.nameText.trim();
+  return variableNameValid(typed) ? typed : null;
+}
+
+function varEdFields() {
+  if (varEd.mode === 'cond') {
+    const k = varEdKind();
+    return k.value ? [['Value', 'value', k.number ? VAR_NUMBER_HINT : 'Text, number or {variable}', !!k.number]] : [];
+  }
+  return varEdKind().fields;
+}
+
+function varEdTyped(key) {
+  const own = varEd.typed[varEd.op] || {};
+  return own[key] ?? '';
+}
+
+function openVarEditor(title, saveLabel) {
+  document.getElementById('var-editor-title').textContent = title;
+  document.getElementById('var-editor-save').textContent = saveLabel || 'Save';
+  varEdRenderAll();
+  document.getElementById('var-editor-backdrop').classList.add('visible');
+  const body = document.getElementById('var-editor-body');
+  body.scrollTop = 0;
+}
+
+function closeVarEditor() {
+  varEdCloseMenu();
+  document.getElementById('var-editor-backdrop').classList.remove('visible');
+  varEd = null;
+}
+
+function _varEditorBackdropClick(e) {
+  if (e.target === document.getElementById('var-editor-backdrop')) closeVarEditor();
+}
+
+// Set Variable: edits the action at idx, or adds one
 function promptSetVariable(idx) {
   const actions = triggerData(currentKey).actions || [];
   const ex = (idx !== null && actions[idx] && typeof actions[idx] === 'object') ? actions[idx] : null;
-  const exOp = ex ? (ex.op || 'set') : null;
-  showSheet('Set Variable', SET_VARIABLE_KINDS.map(kind => ({
-    label: kind.title + (kind.op === exOp ? ' ✓' : ''),
-    action() { setTimeout(() => promptSetVariableFields(idx, ex, kind), 250); }
-  })));
+  let op = ex ? (ex.op || 'set') : 'set';
+  let numberOnly = false;
+  if (op === 'command_number') { op = 'command'; numberOnly = true; }
+  if (!SET_VARIABLE_KINDS.some(k => k.op === op)) op = 'set';
+  const mine = {};
+  ['value', 'min', 'max'].forEach(k => { if (ex && ex[k] !== undefined && ex[k] !== null) mine[k] = String(ex[k]); });
+  varEdStart({ mode: 'set', idx, ex, op, typed: { [op]: mine }, numberOnly,
+    nameText: ex ? String(ex.name || '') : '', runOnly: !!(ex && ex.scope === 'run'), picked: null, typingNew: false }, idx);
+  if (varEdIsChange() && ex && ex.name) varEd.picked = { name: String(ex.name), run: ex.scope === 'run' };
+  openVarEditor('Set Variable', ex ? 'Save' : 'Add');
 }
 
-function promptSetVariableFields(idx, ex, kind) {
-  const same = ex && (ex.op || 'set') === kind.op;
-  showDialog(`Set Variable: ${kind.title}`, 'Name (letters, digits and _). In an action\'s text, {name} becomes the value:', ex ? String(ex.name || '') : '', 'Next', name => {
-    name = (name || '').trim();
-    if (!name) return;
-    if (!variableNameValid(name)) { showToast('Names use letters, digits and _, not starting with a digit'); return; }
-    const item = { type: 'set_variable', name, value: '' };
-    if (kind.op !== 'set') item.op = kind.op;
-    const ask = i => {
-      if (i >= kind.fields.length) {
-        const optional = kind.op === 'set' || kind.op === 'round';
-        if (!optional && kind.fields.some(([, key]) => !String(item[key] || '').length)) { showToast('Enter every field'); return; }
-        const save = runOnly => {
-          const actions = triggerData(currentKey).actions || [];
-          if (runOnly) item.scope = 'run';
-          if (ex && ex.disabled) item.disabled = ex.disabled;
-          if (ex) actions[idx] = item; else actions.push(item);
-          triggerData(currentKey).actions = actions;
-          saveConfig();
-          renderActionList();
-        };
-        showSheet(`Keep ${name}`, [
-          { label: 'Saved (All Triggers)', action() { save(false); } },
-          { label: 'This Run Only', action() { save(true); } },
-        ]);
-        return;
+// The Variable condition for an If, Else If, Repeat While or Wait Until
+function promptVariableCondition(editIdx) {
+  const actions = triggerData(currentKey).actions || [];
+  const act = editIdx !== null ? actions[editIdx] : null;
+  const ex = (act && typeof act === 'object' && act.conditionKey === 'variable') ? act : null;
+  const op = ex && VARIABLE_COMPARE_KINDS.some(k => k.op === ex.comparison) ? ex.comparison : 'is';
+  varEdStart({ mode: 'cond', idx: editIdx, ex, op, typed: {}, numberOnly: false, nameText: '', runOnly: false,
+    picked: null, typingNew: false, value: ex ? String(ex.expectedValue || '') : '' }, null);
+  if (ex && variableNameValid(ex.variable)) {
+    const name = String(ex.variable);
+    if (varEd.runNames.includes(name) || varEd.savedNames.includes(name)) varEd.picked = { name, run: varEd.runNames.includes(name) };
+    else { varEd.typingNew = true; varEd.nameText = name; }
+  } else if (!varEd.runNames.length && !varEd.savedNames.length) {
+    varEd.typingNew = true; // nothing to choose yet
+  }
+  openVarEditor('Variable', editIdx === null ? 'Add' : 'Save');
+}
+
+// ── Building the panel ──
+
+function varEdRenderAll() {
+  const body = document.getElementById('var-editor-body');
+  body.innerHTML = '';
+  if (varEd.mode === 'set') {
+    body.appendChild(varEdSection('Set Value', varEdGrid(SET_VARIABLE_KINDS.filter(k => !k.change), 3, false)));
+    body.appendChild(varEdSection('Change Value', varEdGrid(SET_VARIABLE_KINDS.filter(k => k.change), 5, true)));
+  } else {
+    body.appendChild(varEdSection('Compare', varEdGrid(VARIABLE_COMPARE_KINDS, 4, true), 'var-ed-compare-note'));
+  }
+  const variable = varEdSection(null, document.createElement('div'), 'var-ed-variable-note');
+  variable.id = 'var-ed-variable';
+  body.appendChild(variable);
+  const fields = varEdSection(null, document.createElement('div'), 'var-ed-fields-note');
+  fields.id = 'var-ed-fields';
+  body.appendChild(fields);
+  if (varEd.mode === 'set') {
+    const scope = varEdSection(null, varEdSwitchRow('This Run Only', varEd.runOnly, on => { varEd.runOnly = on; }),
+      null, 'Off: the value is saved for every trigger. On: it is forgotten when this run ends.');
+    scope.id = 'var-ed-scope';
+    body.appendChild(scope);
+  }
+  varEdRenderVariable();
+  varEdRenderFields();
+  varEdUpdate();
+}
+
+// A titled group: header, a card, then a note
+function varEdSection(title, content, noteId, noteText) {
+  const sec = document.createElement('div');
+  sec.className = 'var-ed-section';
+  if (title) {
+    const h = document.createElement('div');
+    h.className = 'var-ed-header';
+    h.textContent = title;
+    sec.appendChild(h);
+  }
+  if (!content.classList.contains('var-ed-grid')) content.classList.add('var-ed-card');
+  sec.appendChild(content);
+  const note = document.createElement('div');
+  note.className = 'var-ed-note';
+  if (noteId) note.id = noteId;
+  if (noteText) note.textContent = noteText;
+  sec.appendChild(note);
+  return sec;
+}
+
+function varEdGrid(kinds, perRow, compact) {
+  const grid = document.createElement('div');
+  grid.className = 'var-ed-grid' + (compact ? ' compact' : '');
+  grid.style.gridTemplateColumns = `repeat(${perRow}, minmax(0, 1fr))`;
+  kinds.forEach(k => {
+    const tile = document.createElement('button');
+    tile.type = 'button';
+    tile.className = 'var-ed-tile' + (k.op === varEd.op ? ' selected' : '');
+    tile.dataset.op = k.op;
+    tile.innerHTML = `<i class="f7-icons">${k.icon}</i><span>${escHtml(k.title)}</span>`;
+    tile.onclick = () => varEdTileTapped(k.op);
+    grid.appendChild(tile);
+  });
+  return grid;
+}
+
+function varEdSwitchRow(label, on, onChange) {
+  const row = document.createElement('label');
+  row.className = 'var-ed-row';
+  row.innerHTML = `<span class="var-ed-label">${escHtml(label)}</span>
+    <span class="toggle-switch"><input type="checkbox"${on ? ' checked' : ''}><span class="toggle-slider"></span></span>`;
+  row.querySelector('input').onchange = e => { onChange(e.target.checked); varEdUpdate(); };
+  return row;
+}
+
+// The Variable row: a menu of known variables (plus a typed name), or a name with chips of known ones
+function varEdRenderVariable() {
+  if (!varEd) return;
+  const sec = document.getElementById('var-ed-variable');
+  if (!sec) return;
+  const card = sec.querySelector('.var-ed-card');
+  const focused = document.activeElement && card.contains(document.activeElement) && document.activeElement.tagName === 'INPUT';
+  if (focused && !varEdUsesMenu()) { varEdRenderChips(card); return; } // keep the caret where it is
+  card.innerHTML = '';
+  if (varEdUsesMenu()) {
+    const row = document.createElement('div');
+    row.className = 'var-ed-row';
+    row.innerHTML = '<span class="var-ed-label">Variable</span>';
+    const wrap = document.createElement('div');
+    wrap.className = 'var-ed-select-wrap';
+    const sel = document.createElement('select');
+    sel.className = 'var-ed-select';
+    const newLabel = varEd.mode === 'cond' ? 'Other Name' : 'New Name';
+    const run = [...varEd.runNames], saved = [...varEd.savedNames];
+    if (varEd.picked && !run.includes(varEd.picked.name) && !saved.includes(varEd.picked.name)) (varEd.picked.run ? run : saved).push(varEd.picked.name);
+    let html = '';
+    if (!varEd.picked && !varEd.typingNew) html += '<option value="" selected disabled>Choose</option>';
+    const group = (title, names, isRun) => {
+      if (!names.length) return;
+      html += `<optgroup label="${title}">` + names.map(n => {
+        const on = varEd.picked && !varEd.typingNew && varEd.picked.name === n && varEd.picked.run === isRun;
+        return `<option value="${isRun ? 'r' : 's'}:${escHtml(n)}"${on ? ' selected' : ''}>${escHtml(n)}</option>`;
+      }).join('') + '</optgroup>';
+    };
+    group('This Run', run, true);
+    group('Saved', saved, false);
+    html += `<option value="new"${varEd.typingNew ? ' selected' : ''}>${newLabel}</option>`;
+    sel.innerHTML = html;
+    sel.onchange = () => {
+      const v = sel.value;
+      if (v === 'new') {
+        varEd.typingNew = true;
+      } else {
+        varEd.typingNew = false;
+        varEd.picked = { name: v.slice(2), run: v.startsWith('r:') };
       }
-      const [prompt, key] = kind.fields[i];
-      showDialog(`Set ${name}`, prompt, same ? String(ex[key] ?? '') : '', 'Next', val => {
-        item[key] = val || '';
-        ask(i + 1);
+      varEdRenderVariable();
+      varEdUpdate();
+      if (varEd.typingNew) { const f = document.getElementById('var-ed-name'); if (f) f.focus(); }
+    };
+    wrap.appendChild(sel);
+    wrap.insertAdjacentHTML('beforeend', '<i class="f7-icons var-ed-select-icon">chevron_up_chevron_down</i>');
+    row.appendChild(wrap);
+    card.appendChild(row);
+  }
+  if (varEdShowsName()) {
+    const row = document.createElement('div');
+    row.className = 'var-ed-row';
+    row.innerHTML = `<span class="var-ed-label">Name</span>
+      <input id="var-ed-name" class="var-ed-input" type="text" placeholder="count" autocorrect="off" autocapitalize="none" spellcheck="false">`;
+    const input = row.querySelector('input');
+    input.value = varEd.nameText;
+    input.oninput = () => { varEd.nameText = input.value; varEdUpdate(); };
+    input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); const next = document.querySelector('#var-ed-fields input'); if (next) next.focus(); } };
+    card.appendChild(row);
+  }
+  if (!varEdUsesMenu()) varEdRenderChips(card);
+}
+
+// Set Value kinds: the known names as chips under the name
+function varEdRenderChips(card) {
+  const old = card.querySelector('.var-ed-chips');
+  if (old) old.remove();
+  const names = [...new Set([...varEd.runNames, ...varEd.savedNames])];
+  if (!names.length) return;
+  const chips = document.createElement('div');
+  chips.className = 'var-ed-chips';
+  names.forEach(n => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'var-ed-chip';
+    chip.textContent = n;
+    chip.onclick = () => {
+      varEd.nameText = n;
+      const f = document.getElementById('var-ed-name');
+      if (f) f.value = n;
+      // A This Run variable's name keeps it This Run Only
+      if (varEd.runNames.includes(n)) varEd.runOnly = true;
+      else if (varEd.savedNames.includes(n)) varEd.runOnly = false;
+      const sw = document.querySelector('#var-ed-scope input');
+      if (sw) sw.checked = varEd.runOnly;
+      varEdUpdate();
+    };
+    chips.appendChild(chip);
+  });
+  card.appendChild(chips);
+}
+
+// The kind's fields, each with a + menu that inserts a variable
+function varEdRenderFields() {
+  const sec = document.getElementById('var-ed-fields');
+  const card = sec.querySelector('.var-ed-card');
+  card.innerHTML = '';
+  const fields = varEdFields();
+  sec.style.display = fields.length ? '' : 'none';
+  fields.forEach(([label, key, placeholder, numeric], i) => {
+    const row = document.createElement('div');
+    row.className = 'var-ed-row';
+    row.innerHTML = `<span class="var-ed-label">${escHtml(label)}</span>
+      <input class="var-ed-input" type="text" autocorrect="off" autocapitalize="none" spellcheck="false">
+      <button type="button" class="var-ed-insert" title="Insert Variable"><i class="f7-icons">plus_circle</i></button>`;
+    const input = row.querySelector('input');
+    input.placeholder = placeholder;
+    input.value = varEd.mode === 'cond' ? varEd.value : varEdTyped(key);
+    const store = () => {
+      if (varEd.mode === 'cond') varEd.value = input.value;
+      else (varEd.typed[varEd.op] = varEd.typed[varEd.op] || {})[key] = input.value;
+      varEdUpdate();
+    };
+    input.oninput = store;
+    input.onkeydown = e => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      const inputs = [...card.querySelectorAll('input.var-ed-input')];
+      if (inputs[i + 1]) inputs[i + 1].focus(); else input.blur();
+    };
+    row.querySelector('.var-ed-insert').onclick = e => {
+      e.stopPropagation();
+      varEdOpenMenu(e.currentTarget, name => {
+        const token = `{${name}}`;
+        if (numeric) {
+          input.value = token; // a number field takes one number or one variable
+        } else {
+          const s = input.selectionStart ?? input.value.length, en = input.selectionEnd ?? input.value.length;
+          input.value = input.value.slice(0, s) + token + input.value.slice(en);
+          input.setSelectionRange(s + token.length, s + token.length);
+        }
+        input.focus();
+        store();
       });
     };
-    ask(0);
+    card.appendChild(row);
   });
+  if (varEd.mode === 'set' && varEd.op === 'command') {
+    card.appendChild(varEdSwitchRow('Number Only', varEd.numberOnly, on => { varEd.numberOnly = on; }));
+  }
+}
+
+function varEdTileTapped(op) {
+  if (op === varEd.op) return;
+  const wasChange = varEdIsChange();
+  varEd.op = op;
+  document.querySelectorAll('#var-editor-body .var-ed-tile').forEach(t => t.classList.toggle('selected', t.dataset.op === op));
+  if (varEd.mode === 'set' && wasChange !== varEdIsChange()) {
+    const typed = varEd.nameText.trim();
+    if (varEdIsChange()) {
+      // A typed name carries over: picked when it's a known variable (or the one picked before),
+      // otherwise kept as a new name
+      if (varEd.runNames.includes(typed)) { varEd.picked = { name: typed, run: true }; varEd.typingNew = false; }
+      else if (varEd.savedNames.includes(typed)) { varEd.picked = { name: typed, run: false }; varEd.typingNew = false; }
+      else if (varEd.picked && typed === varEd.picked.name) { varEd.picked.run = varEd.runOnly; varEd.typingNew = false; }
+      else varEd.typingNew = typed.length > 0;
+    } else {
+      if (!varEd.typingNew && varEd.picked) { varEd.nameText = varEd.picked.name; varEd.runOnly = varEd.picked.run; }
+      varEd.typingNew = false;
+      const sw = document.querySelector('#var-ed-scope input');
+      if (sw) sw.checked = varEd.runOnly;
+    }
+    varEdRenderVariable();
+  }
+  varEdRenderFields();
+  varEdUpdate();
+}
+
+// Notes, which rows show, and whether Save is on
+function varEdUpdate() {
+  if (!varEd) return;
+  const kind = varEdKind();
+  const typed = varEd.nameText.trim();
+  let note = '', bad = false;
+  if (varEdShowsName() && typed && !variableNameValid(typed)) {
+    note = typed === 'round' ? '"round" is reserved.' : 'Letters, digits and _ only, not starting with a digit.';
+    bad = true;
+  } else if (varEd.mode === 'cond') {
+    note = varEd.typingNew ? 'A variable this trigger doesn\'t set, such as one another trigger saves.' : 'The variable to check.';
+  } else if (varEdIsChange() && !varEd.typingNew) {
+    note = !varEd.picked ? 'Choose the variable to change. Its value must be a number; otherwise it stays unchanged and Run History shows why.'
+      : (varEd.picked.run ? 'Changes the value this run set. It is forgotten when the run ends.' : 'Changes the saved value, which every trigger can use.');
+  } else if (varEdIsChange()) {
+    note = 'A new variable starts at 0.';
+  } else {
+    note = 'Letters, digits and _. Write {name} in any action\'s text to insert the value.';
+  }
+  const vNote = document.getElementById('var-ed-variable-note');
+  vNote.textContent = note;
+  vNote.classList.toggle('bad', bad);
+
+  let ok = !!varEdName();
+  if (varEd.mode === 'set') {
+    document.getElementById('var-ed-fields-note').textContent = (kind.op === 'command' && varEd.numberOnly) ? kind.numberMessage : kind.message;
+    document.getElementById('var-ed-scope').style.display = varEdShowsName() ? '' : 'none';
+    if (kind.op !== 'set' && kind.op !== 'round') {
+      kind.fields.forEach(([, key]) => { if (!String(varEdTyped(key)).trim()) ok = false; });
+    }
+  } else {
+    document.getElementById('var-ed-compare-note').textContent = kind.message;
+    if (kind.value && !varEd.value.trim()) ok = false;
+  }
+  document.getElementById('var-editor-save').disabled = !ok;
+}
+
+function varEditorSave() {
+  if (!varEd) return;
+  const name = varEdName();
+  if (!name) return;
+  const st = varEd;
+  if (st.mode === 'cond') {
+    const kind = varEdKind();
+    const phrase = (VARIABLE_COMPARISONS.find(c => c[0] === kind.op) || VARIABLE_COMPARISONS[0])[1];
+    const value = kind.value ? st.value.trim() : '';
+    const def = CONDITION_DEFS.find(d => d.key === 'variable');
+    closeVarEditor();
+    finishIfCondition(def, value, kind.value ? `${phrase.toLowerCase()} ${value}` : phrase.toLowerCase(), st.idx,
+      { conditionTitle: name, variable: name, comparison: kind.op });
+    return;
+  }
+  const item = { type: 'set_variable', name, value: '' };
+  let op = st.op;
+  if (op === 'command' && st.numberOnly) op = 'command_number';
+  if (op !== 'set') item.op = op;
+  varEdKind().fields.forEach(([, key]) => {
+    const text = String(varEdTyped(key));
+    item[key] = st.op === 'set' ? text : text.trim(); // a Set value is kept as typed; spaces may matter
+  });
+  const runOnly = (varEdIsChange() && !st.typingNew) ? st.picked.run : st.runOnly;
+  if (runOnly) item.scope = 'run';
+  if (st.ex && st.ex.disabled) item.disabled = st.ex.disabled;
+  closeVarEditor();
+  const actions = triggerData(currentKey).actions || [];
+  if (st.ex) actions[st.idx] = item; else actions.push(item);
+  triggerData(currentKey).actions = actions;
+  saveConfig();
+  renderActionList();
+}
+
+// ── The + menu: This Run and saved variables, then the Repeat round ──
+
+function varEdOpenMenu(anchor, onPick) {
+  varEdCloseMenu();
+  const menu = document.createElement('div');
+  menu.id = 'var-ed-menu';
+  menu.className = 'var-ed-menu';
+  const section = (title, names) => {
+    if (!names.length) return;
+    menu.insertAdjacentHTML('beforeend', `<div class="var-ed-menu-header">${title}</div>`);
+    names.forEach(n => {
+      const item = document.createElement('div');
+      item.className = 'var-ed-menu-item';
+      item.innerHTML = `<span>${escHtml(n)}</span>`;
+      item.onclick = () => { varEdCloseMenu(); onPick(n); };
+      menu.appendChild(item);
+    });
+  };
+  section('This Run', varEd.runNames);
+  section('Saved', varEd.savedNames);
+  if (menu.childElementCount) menu.insertAdjacentHTML('beforeend', '<div class="var-ed-menu-gap"></div>');
+  const round = document.createElement('div');
+  round.className = 'var-ed-menu-item';
+  round.innerHTML = '<div><span>Repeat Round</span><div class="var-ed-menu-sub">The current pass of a Repeat: 1, 2, 3…</div></div><i class="f7-icons">repeat</i>';
+  round.onclick = () => { varEdCloseMenu(); onPick('round'); };
+  menu.appendChild(round);
+  document.body.appendChild(menu);
+  const r = anchor.getBoundingClientRect();
+  const w = menu.offsetWidth, h = menu.offsetHeight;
+  const left = Math.max(8, Math.min(window.innerWidth - w - 8, r.right - w));
+  let top = r.bottom + 6;
+  if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 6);
+  menu.style.left = left + 'px';
+  menu.style.top = top + 'px';
+  requestAnimationFrame(() => menu.classList.add('show'));
+  setTimeout(() => document.addEventListener('pointerdown', varEdMenuOutside, true), 0);
+}
+
+function varEdMenuOutside(e) {
+  const menu = document.getElementById('var-ed-menu');
+  if (menu && !menu.contains(e.target)) varEdCloseMenu();
+}
+
+function varEdCloseMenu() {
+  document.removeEventListener('pointerdown', varEdMenuOutside, true);
+  const menu = document.getElementById('var-ed-menu');
+  if (menu) menu.remove();
 }
 
 function promptCondText(def) {
@@ -6183,14 +6716,6 @@ function condOptionsFor(d, exKey, exValue, exTitle) {
     rows.push(condValueRow(d, { value: 'OFF', title: 'Off' }, exKey, exValue));
     rows.push(condValueRow(d, { value: 'ON', title: 'Any Focus' }, exKey, exValue));
     rows.push(condOptionRow('Other Name…', 'blue', '', () => promptCondText({ key: d.key, title: d.title, hint: 'Focus name, Off, or On for any Focus:' })));
-    return rows;
-  }
-  if (d.key === 'variable') {
-    VARIABLE_COMPARISONS.forEach(([code, title]) => {
-      const ex = condPickerExisting();
-      const now = (exKey === 'variable' && ex && (ex.comparison || 'is') === code) ? ` (now: ${variableConditionText(ex)})` : '';
-      rows.push(condOptionRow(`${title}…${now}`, 'blue', '', () => promptVariableCondition(code, title)));
-    });
     return rows;
   }
   if (d.key === 'time_between') {
