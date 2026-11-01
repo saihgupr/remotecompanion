@@ -1859,6 +1859,14 @@ static void RCSetRunWatching(BOOL watching) {
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                 [self presentRepeatCountForIndex:NSNotFound];
             });
+        } else if ([action isEqualToString:@"__EXIT_REPEAT__"]) {
+            [self.actions addObject:@{ @"type": @"exit_repeat" }];
+            [self saveActions];
+            [self.tableView reloadData];
+        } else if ([action isEqualToString:@"__WAIT_UNTIL__"]) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                [self presentIfConditionPickerForIndex:NSNotFound insertIndex:NSNotFound type:@"wait_until"];
+            });
         } else if ([action isEqualToString:@"__REPEAT_WHILE__"]) {
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                 [self presentIfConditionPickerForIndex:NSNotFound insertIndex:NSNotFound type:@"repeat_while"];
@@ -2408,6 +2416,21 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 // at insertIndex or the end. Only a new top-level If owns an End If marker; an
 // Else If belongs to the existing block and must not create another terminator.
 - (void)applyIfAction:(NSDictionary *)ifAction existingIndex:(NSInteger)existingIndex insertIndex:(NSInteger)insertIndex {
+    // Wait Until: one row, no End; a new one asks for its time limit, an edited one keeps it
+    if ([[ifAction[@"type"] description].lowercaseString isEqualToString:@"wait_until"]) {
+        BOOL editing = existingIndex != NSNotFound && existingIndex >= 0 && existingIndex < (NSInteger)self.actions.count;
+        if (editing) {
+            NSMutableDictionary *item = [ifAction mutableCopy];
+            id old = self.actions[existingIndex];
+            item[@"timeout"] = ([old isKindOfClass:[NSDictionary class]] && old[@"timeout"]) ? old[@"timeout"] : @60;
+            self.actions[existingIndex] = item;
+            [self saveActions];
+            [self.tableView reloadData];
+        } else {
+            [self presentWaitLimitForAction:ifAction existingIndex:NSNotFound insertIndex:insertIndex];
+        }
+        return;
+    }
     BOOL isElseIf = [[ifAction[@"type"] description].lowercaseString isEqualToString:@"else_if"];
     // A Repeat While block ends with End Repeat (same condition fields as If)
     NSDictionary *endMarker = [self isRepeatActionItem:ifAction] ? @{ @"type": @"end_repeat" } : @{ @"type": @"end_if" };
@@ -2611,7 +2634,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 }
 
 - (void)presentIfConditionPickerForIndex:(NSInteger)existingIndex insertIndex:(NSInteger)insertIndex type:(NSString *)type {
-    NSString *title = [type isEqualToString:@"else_if"] ? @"Else If Condition" : [type isEqualToString:@"repeat_while"] ? @"Repeat While" : @"If Condition";
+    NSString *title = [type isEqualToString:@"else_if"] ? @"Else If Condition" : [type isEqualToString:@"repeat_while"] ? @"Repeat While" : [type isEqualToString:@"wait_until"] ? @"Wait Until" : @"If Condition";
     NSDictionary *existing = nil;
     if (existingIndex != NSNotFound && existingIndex >= 0 && existingIndex < (NSInteger)self.actions.count && [self.actions[existingIndex] isKindOfClass:[NSDictionary class]]) {
         existing = self.actions[existingIndex];
@@ -2633,6 +2656,42 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         [weakSelf presentIfValuePickerForCondition:condition existingIndex:existingIndex insertIndex:insertIndex type:type];
     };
     [self.navigationController pushViewController:picker animated:YES];
+}
+
+// Wait Until's time limit, in seconds: for a new Wait Until (then added) or the one at existingIndex
+- (void)presentWaitLimitForAction:(NSDictionary *)waitAction existingIndex:(NSInteger)existingIndex insertIndex:(NSInteger)insertIndex {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Time Limit"
+                                                                   message:@"Seconds to wait at most before the actions go on anyway (up to a day)."
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    NSString *current = [waitAction[@"timeout"] description] ?: @"60";
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
+        textField.placeholder = @"60";
+        textField.text = current;
+        textField.keyboardType = UIKeyboardTypeNumberPad;
+    }];
+    __weak typeof(self) weakSelf = self;
+    [alert addAction:[UIAlertAction actionWithTitle:@"Save" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        NSInteger seconds = MAX(1, MIN(86400, [alert.textFields[0].text integerValue] ?: 60));
+        NSMutableDictionary *item = [waitAction mutableCopy];
+        item[@"timeout"] = @(seconds);
+        if (existingIndex != NSNotFound && existingIndex >= 0 && existingIndex < (NSInteger)strongSelf.actions.count) {
+            strongSelf.actions[existingIndex] = item;
+        } else if (insertIndex != NSNotFound && insertIndex >= 0 && insertIndex <= (NSInteger)strongSelf.actions.count) {
+            [strongSelf.actions insertObject:item atIndex:insertIndex];
+        } else {
+            [strongSelf.actions addObject:item];
+        }
+        [strongSelf saveActions];
+        [strongSelf.tableView reloadData];
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [self configurePopoverSourceForAlert:alert];
+    // After the condition picker has closed (it may still be going back)
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [weakSelf presentViewController:alert animated:YES completion:nil];
+    });
 }
 
 // Repeat: how many times. Edits the Repeat at existingIndex, or adds a Repeat block at the end.
@@ -2676,6 +2735,8 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             type = @"else_if";
         } else if ([self isRepeatWhileActionItem:actionItem]) {
             type = @"repeat_while";
+        } else if ([[self actionTypeForItem:actionItem] isEqualToString:@"wait_until"]) {
+            type = @"wait_until";
         }
     }
     [self presentIfConditionPickerForIndex:index insertIndex:NSNotFound type:type];
@@ -2925,6 +2986,16 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             }
         }
         
+        // Wait Until: its condition and time limit
+        if ([[self actionTypeForItem:item] isEqualToString:@"wait_until"]) {
+            [alert addAction:[UIAlertAction actionWithTitle:@"Edit Condition" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+                [self presentIfConditionPickerForIndex:indexPath.row];
+            }]];
+            [alert addAction:[UIAlertAction actionWithTitle:@"Edit Time Limit" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+                [self presentWaitLimitForAction:self.actions[indexPath.row] existingIndex:indexPath.row insertIndex:NSNotFound];
+            }]];
+        }
+
         // Repeat blocks: change the count or condition, and add an If inside
         if ([self isRepeatActionItem:item] || [self isEndRepeatActionItem:item]) {
             if ([self isRepeatActionItem:item]) {
@@ -3016,7 +3087,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         if (dict[@"command"] && [dict[@"command"] isKindOfClass:[NSString class]]) {
             actionData = dict[@"command"];
         } else {
-            if ([self isIfActionItem:actionData] || [self isElseIfActionItem:actionData] || [self isRepeatWhileActionItem:actionData]) {
+            if ([self isIfActionItem:actionData] || [self isElseIfActionItem:actionData] || [self isRepeatWhileActionItem:actionData] || [[self actionTypeForItem:actionData] isEqualToString:@"wait_until"]) {
                 [self presentIfConditionPickerForIndex:indexPath.row];
             } else if ([self isRepeatActionItem:actionData]) {
                 [self presentRepeatCountForIndex:indexPath.row];

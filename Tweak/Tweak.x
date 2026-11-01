@@ -3277,6 +3277,34 @@ static void rc_execute_action_sequence(NSArray *actions, NSString *triggerKey, B
             }
             [loops addObject:[@{ @"start": @(idx), @"rounds": @1, @"roundStart": @(CFAbsoluteTimeGetCurrent()) } mutableCopy]];
             rc_run_note_step(dictAction, idx, @{ @"repeat": dictAction, @"round": @1 });
+        } else if ([type isEqualToString:@"exit_repeat"]) {
+            // Exit Repeat: leave the innermost loop now, after its End Repeat
+            NSMutableDictionary *loop = loops.lastObject;
+            if (!loop) {
+                SRLog(@"[%@] Exit Repeat outside a Repeat - ignored", triggerKey);
+                continue;
+            }
+            NSInteger start = [loop[@"start"] integerValue];
+            NSInteger end = rc_matching_end_repeat(actions, start);
+            SRLogMin(@"[%@] Exit Repeat in round %ld", triggerKey, (long)[loop[@"rounds"] integerValue]);
+            [loops removeLastObject];
+            if (end == NSNotFound) break;
+            idx = end;
+        } else if ([type isEqualToString:@"wait_until"]) {
+            // Wait Until: until the condition (as for If) is true, checked twice a second, for at most
+            // its time limit; then the actions go on either way
+            double limit = [dictAction[@"timeout"] doubleValue];
+            if (limit <= 0) limit = 60;
+            limit = MIN(limit, 24 * 3600);
+            CFAbsoluteTime started = CFAbsoluteTimeGetCurrent();
+            BOOL met = rc_evaluate_if_condition(dictAction);
+            while (!met && CFAbsoluteTimeGetCurrent() - started < limit) {
+                if (!rc_run_wait(0.5)) break; // stopped
+                met = rc_evaluate_if_condition(dictAction);
+            }
+            if (rc_run_stopped()) continue; // the top of the loop ends the run
+            SRLogMin(@"[%@] Wait Until %@ == %@ -> %@ after %.1f s", triggerKey, dictAction[@"conditionKey"], dictAction[@"expectedValue"],
+                     met ? @"TRUE" : @"time limit", CFAbsoluteTimeGetCurrent() - started);
         } else if ([type isEqualToString:@"end_repeat"]) {
             NSMutableDictionary *loop = loops.lastObject;
             if (!loop) continue; // an End Repeat without its Repeat

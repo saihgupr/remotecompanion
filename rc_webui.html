@@ -3077,6 +3077,12 @@ function nameForCmd(cmd) {
     if (t === 'repeat') { const n = parseInt(cmd.count, 10) || 0; return n === 1 ? 'Repeat 1 Time' : `Repeat ${n} Times`; }
     if (t === 'repeat_while') return (cmd.conditionKey === 'time_between') ? `Repeat While Time is Between ${cmd.expectedTitle||cmd.expectedValue||''}` : `Repeat While ${cmd.conditionTitle||'Condition'} is ${cmd.expectedTitle||'Value'}`;
     if (t === 'end_repeat') return 'End Repeat';
+    if (t === 'exit_repeat') return 'Exit Repeat';
+    if (t === 'wait_until') {
+      const lim = parseInt(cmd.timeout, 10) > 0 ? parseInt(cmd.timeout, 10) : 60;
+      const limText = (lim >= 60 && lim % 60 === 0) ? `${lim / 60} min` : `${lim} s`;
+      return (cmd.conditionKey === 'time_between') ? `Wait Until Time is Between ${cmd.expectedTitle||cmd.expectedValue||''} (up to ${limText})` : `Wait Until ${cmd.conditionTitle||'Condition'} is ${cmd.expectedTitle||'Value'} (up to ${limText})`;
+    }
     return 'Block';
   }
   const toggleInfo = parseToggleCmd(cmd);
@@ -3254,6 +3260,8 @@ function iconForCmd(cmd) {
     if (t === 'if' || t === 'else_if' || t === 'else') return { icon:'arrow_triangle_branch', cls:'icon-purple' };
     if (t === 'end_if' || t === 'end') return { icon:'arrow_turn_up_left', cls:'icon-purple' };
     if (t === 'end_repeat') return { icon:'arrow_turn_up_left', cls:'icon-green' };
+    if (t === 'exit_repeat') return { icon:'arrow_right_to_line', cls:'icon-green' };
+    if (t === 'wait_until') return { icon:'hourglass', cls:'icon-orange' };
     return { icon:'repeat', cls:'icon-green' };
   }
   const map = {
@@ -3421,6 +3429,8 @@ const ACTION_SECTIONS = [
     { name:'If Condition…',     cmd:'__IF_CONDITION__',icon:'arrow_triangle_branch', needs_input:true },
     { name:'Repeat…',           cmd:'__REPEAT__',      icon:'repeat', needs_input:true },
     { name:'Repeat While…',     cmd:'__REPEAT_WHILE__',icon:'repeat', needs_input:true },
+    { name:'Exit Repeat',       cmd:'__EXIT_REPEAT__', icon:'arrow_right_to_line', needs_input:true },
+    { name:'Wait Until…',       cmd:'__WAIT_UNTIL__',  icon:'hourglass', needs_input:true },
     { name:'Delay…',            cmd:'__DELAY__',     icon:'hourglass', needs_input:true },
     { name:'Terminal Command…', cmd:'__CUSTOM__',    icon:'chevron_right_square_fill', needs_input:true },
     { name:'Lua Script…',       cmd:'__LUA_SCRIPT__',icon:'doc_text_fill', needs_input:true },
@@ -5101,6 +5111,13 @@ function editAction(idx) {
     if (type === 'if' || type === 'else_if' || type === 'repeat_while') {
       openCondPicker(idx);
     }
+    else if (type === 'wait_until') {
+      showDialog('Time Limit', 'Seconds to wait at most before the actions go on anyway (up to a day):', String(act.timeout||60), 'Save', val => {
+        if (!val) return;
+        act.timeout = Math.max(1, Math.min(86400, parseInt(val, 10) || 60));
+        saveConfig(); renderActionList();
+      }, true);
+    }
     else if (type === 'repeat') {
       showDialog('Repeat', 'Runs the actions inside this many times (up to 1,000):', String(act.count||1), 'Save', val => {
         if (!val) return;
@@ -5458,6 +5475,15 @@ function selectPickerAction(act) {
     openCondPicker(null);
   } else if (c === '__REPEAT_WHILE__') {
     condPickerNewType = 'repeat_while';
+    openCondPicker(null);
+  } else if (c === '__EXIT_REPEAT__') {
+    const actions = triggerData(currentKey).actions || [];
+    actions.push({ type: 'exit_repeat' });
+    triggerData(currentKey).actions = actions;
+    saveConfig();
+    renderActionList();
+  } else if (c === '__WAIT_UNTIL__') {
+    condPickerNewType = 'wait_until';
     openCondPicker(null);
   } else if (c === '__REPEAT__') {
     showDialog('Repeat', 'Runs the actions inside this many times (up to 1,000):', '3', 'Add', val => {
@@ -5919,6 +5945,26 @@ function finishIfCondition(def, value, valueTitle, editIdx) {
     expectedTitle: valueTitle
   };
 
+  if (existingType === 'wait_until') {
+    // Wait Until: one row, no End; a new one asks for its time limit, an edited one keeps it
+    condPickerNewType = 'if';
+    if (editIdx !== null) {
+      item.timeout = actions[editIdx].timeout || 60;
+      actions[editIdx] = item;
+      triggerData(currentKey).actions = actions;
+      saveConfig();
+      renderActionList();
+      return;
+    }
+    setTimeout(() => showDialog('Time Limit', 'Seconds to wait at most before the actions go on anyway (up to a day):', '60', 'Add', val => {
+      item.timeout = Math.max(1, Math.min(86400, parseInt(val, 10) || 60));
+      actions.push(item);
+      triggerData(currentKey).actions = actions;
+      saveConfig();
+      renderActionList();
+    }, true), 300);
+    return;
+  }
   if (editIdx !== null) {
     actions[editIdx] = item;
   } else {
@@ -6919,7 +6965,7 @@ function promptManualHAEntity() {
 // toggle, match, exclude }. "match"/"exclude" patterns ending in " ", ":" or "-"
 // are prefixes; anything else must equal the (lowercased) command.
 // Not offered: entries that don't run an action of their own, and Set Flashlight (covered by Flashlight)
-const BANNER_SKIP = new Set(['__IF_CONDITION__', '__REPEAT__', '__REPEAT_WHILE__', '__DELAY__', '__TOAST__', '__SET_FLASHLIGHT__']);
+const BANNER_SKIP = new Set(['__IF_CONDITION__', '__REPEAT__', '__REPEAT_WHILE__', '__EXIT_REPEAT__', '__WAIT_UNTIL__', '__DELAY__', '__TOAST__', '__SET_FLASHLIGHT__']);
 // The app's names for the same actions, so both UIs share one setting
 const BANNER_ID_ALIASES = { '__SHORTCUT__': '__SHORTCUT_PICKER__', 'queuealbum': 'queue album', 'queueartist': 'queue artist',
   'shuffleall': 'shuffle all songs', 'deletesong': 'delete current song' };

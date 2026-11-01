@@ -1021,6 +1021,15 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
             return [NSString stringWithFormat:@"Repeat While %@ is %@", conditionTitle, expectedTitle];
         } else if ([type isEqualToString:@"end_repeat"]) {
             return @"End Repeat";
+        } else if ([type isEqualToString:@"exit_repeat"]) {
+            return @"Exit Repeat";
+        } else if ([type isEqualToString:@"wait_until"]) {
+            NSString *conditionTitle = dict[@"conditionTitle"] ?: @"Condition";
+            NSString *expectedTitle = dict[@"expectedTitle"] ?: dict[@"expectedValue"] ?: @"";
+            NSInteger limit = [dict[@"timeout"] integerValue] > 0 ? [dict[@"timeout"] integerValue] : 60;
+            NSString *limitText = limit % 60 == 0 && limit >= 60 ? [NSString stringWithFormat:@"%ld min", (long)(limit / 60)] : [NSString stringWithFormat:@"%ld s", (long)limit];
+            if ([dict[@"conditionKey"] isEqualToString:@"time_between"]) return [NSString stringWithFormat:@"Wait Until Time is Between %@ (up to %@)", expectedTitle, limitText];
+            return [NSString stringWithFormat:@"Wait Until %@ is %@ (up to %@)", conditionTitle, expectedTitle, limitText];
         } else if ([type isEqualToString:@"end"] || [type isEqualToString:@"end_if"]) {
             return @"End If";
         }
@@ -1532,6 +1541,10 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
             return @"repeat";
         } else if ([type isEqualToString:@"end"] || [type isEqualToString:@"end_if"] || [type isEqualToString:@"end_repeat"]) {
             return @"arrow.turn.up.left";
+        } else if ([type isEqualToString:@"exit_repeat"]) {
+            return @"arrow.right.to.line";
+        } else if ([type isEqualToString:@"wait_until"]) {
+            return @"hourglass";
         }
         return @"square.grid.2x2";
     }
