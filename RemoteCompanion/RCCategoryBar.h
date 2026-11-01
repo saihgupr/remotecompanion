@@ -8,6 +8,10 @@
 // -1 = All, otherwise an index into titles
 @property (nonatomic, assign) NSInteger selectedIndex;
 @property (nonatomic, copy) void (^onSelect)(NSInteger index);
+// 1, 2 or 3 lines of chips (Layout > Category Bar Lines sets it; it follows changes while shown)
+@property (nonatomic, assign) NSInteger rows;
+// The bar's height for its number of lines
+- (CGFloat)height;
 
 + (CGFloat)barHeight;
 - (instancetype)initWithWidth:(CGFloat)width;

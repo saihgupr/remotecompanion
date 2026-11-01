@@ -282,7 +282,7 @@ static NSString *const RCBannersNote = @"Checked actions show a banner whenever 
 }
 
 - (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout sizeForItemAtIndexPath:(NSIndexPath *)indexPath {
-    return [self compact] ? RCActionTileSize(collectionView.bounds.size.width) : RCActionRowSize(collectionView.bounds.size.width, 48);
+    return [self compact] ? RCActionTileSize(RCGridWidth(collectionView)) : RCActionRowSize(RCGridWidth(collectionView), 48);
 }
 
 - (CGFloat)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout minimumLineSpacingForSectionAtIndex:(NSInteger)section {

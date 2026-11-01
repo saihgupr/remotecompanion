@@ -66,6 +66,12 @@
     
     self.title = @"Select Action";
     
+    // The cells and titles first: attaching the category bar lays the grid out, and on iOS 14 that
+    // asks for cells straight away
+    [self.collectionView registerClass:[RCActionTileCell class] forCellWithReuseIdentifier:@"ActionTile"];
+    [self.collectionView registerClass:[RCActionRowCell class] forCellWithReuseIdentifier:@"ActionRow"];
+    [self.collectionView registerClass:[RCActionGridHeader class] forSupplementaryViewOfKind:UICollectionElementKindSectionHeader withReuseIdentifier:@"Header"];
+
     // Category bar floating below the search bar
     [self rebuildSections];
     self.categoryBar = [self makeCategoryBar];
@@ -90,11 +96,8 @@
     
     [self rebuildSections];
     
-    [self.collectionView registerClass:[RCActionTileCell class] forCellWithReuseIdentifier:@"ActionTile"];
-    [self.collectionView registerClass:[RCActionRowCell class] forCellWithReuseIdentifier:@"ActionRow"];
     // List or Compact (Settings), followed while open
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(layoutChanged:) name:RCLayoutChangedNotification object:nil];
-    [self.collectionView registerClass:[RCActionGridHeader class] forSupplementaryViewOfKind:UICollectionElementKindSectionHeader withReuseIdentifier:@"Header"];
     
     [self applyTweaks];
 }
@@ -522,7 +525,7 @@ static BOOL RCPickerActionOpensMore(NSString *command) {
 }
 
 - (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout sizeForItemAtIndexPath:(NSIndexPath *)indexPath {
-    return [self compact] ? RCActionTileSize(collectionView.bounds.size.width) : RCActionRowSize(collectionView.bounds.size.width, 56);
+    return [self compact] ? RCActionTileSize(RCGridWidth(collectionView)) : RCActionRowSize(RCGridWidth(collectionView), 56);
 }
 
 - (CGFloat)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout minimumLineSpacingForSectionAtIndex:(NSInteger)section {

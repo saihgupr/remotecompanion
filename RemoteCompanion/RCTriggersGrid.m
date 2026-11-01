@@ -89,10 +89,10 @@
         // at the top right
         _stackedConstraints = @[
             [_iconView.leadingAnchor constraintEqualToAnchor:content.leadingAnchor constant:10],
-            [_iconView.topAnchor constraintEqualToAnchor:content.topAnchor constant:10],
+            [_iconView.topAnchor constraintEqualToAnchor:content.topAnchor constant:8],
             [_textStack.leadingAnchor constraintEqualToAnchor:content.leadingAnchor constant:10],
             [_textStack.trailingAnchor constraintEqualToAnchor:content.trailingAnchor constant:-8],
-            [_textStack.topAnchor constraintEqualToAnchor:_iconView.bottomAnchor constant:6],
+            [_textStack.topAnchor constraintEqualToAnchor:_iconView.bottomAnchor constant:4],
             [_textStack.bottomAnchor constraintLessThanOrEqualToAnchor:content.bottomAnchor constant:-6],
             [_editButtons.trailingAnchor constraintEqualToAnchor:content.trailingAnchor constant:-2],
             [_editButtons.topAnchor constraintEqualToAnchor:content.topAnchor constant:0],
@@ -101,10 +101,10 @@
         // top corners
         _miniConstraints = @[
             [_iconView.centerXAnchor constraintEqualToAnchor:content.centerXAnchor],
-            [_iconView.topAnchor constraintEqualToAnchor:content.topAnchor constant:10],
+            [_iconView.topAnchor constraintEqualToAnchor:content.topAnchor constant:8],
             [_textStack.leadingAnchor constraintEqualToAnchor:content.leadingAnchor constant:4],
             [_textStack.trailingAnchor constraintEqualToAnchor:content.trailingAnchor constant:-4],
-            [_textStack.topAnchor constraintEqualToAnchor:_iconView.bottomAnchor constant:5],
+            [_textStack.topAnchor constraintEqualToAnchor:_iconView.bottomAnchor constant:4],
             [_textStack.bottomAnchor constraintLessThanOrEqualToAnchor:content.bottomAnchor constant:-5],
             [_editButtons.leadingAnchor constraintEqualToAnchor:content.leadingAnchor],
             [_editButtons.trailingAnchor constraintEqualToAnchor:content.trailingAnchor],
@@ -147,8 +147,9 @@
     // The star and minus: side by side, or one in each top corner, smaller there (with the icon)
     // so they clear the icon between them
     self.editButtons.distribution = mini ? UIStackViewDistributionEqualSpacing : UIStackViewDistributionFill;
-    self.iconWidth.constant = mini ? 28 : 34;
-    self.iconHeight.constant = mini ? 26 : 30;
+    // Beside: the full icon; stacked and mini tiles are shorter, so a smaller one
+    self.iconWidth.constant = perRow == 2 ? 34 : perRow == 3 ? 30 : 28;
+    self.iconHeight.constant = perRow == 2 ? 30 : 26;
     UIImageSymbolConfiguration *buttonSize = [UIImageSymbolConfiguration configurationWithPointSize:mini ? 17 : 20 weight:UIImageSymbolWeightRegular];
     [self.favoriteButton setPreferredSymbolConfiguration:buttonSize forImageInState:UIControlStateNormal];
     [self.deleteButton setPreferredSymbolConfiguration:buttonSize forImageInState:UIControlStateNormal];
@@ -359,15 +360,16 @@
 
 // Wide cards (2 per row on a phone), tiles (3) or small tiles (4); more on a wider screen
 - (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout sizeForItemAtIndexPath:(NSIndexPath *)indexPath {
-    CGFloat usable = MAX(0, collectionView.bounds.size.width - 32);
+    CGFloat usable = MAX(0, RCGridWidth(collectionView) - 32);
     NSInteger perRow = RCLayoutTriggerColumnCount();
     CGFloat minimum = perRow == 2 ? 170 : perRow == 3 ? 104 : 76;
-    CGFloat height = perRow == 2 ? 64 : perRow == 3 ? 104 : 96;
+    CGFloat height = perRow == 2 ? 64 : perRow == 3 ? 92 : 84;
     NSInteger columns = MAX(perRow, (NSInteger)floor((usable + 8) / (minimum + 8)));
     return CGSizeMake(floor((usable - 8 * (columns - 1)) / columns), height);
 }
 
 - (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout referenceSizeForHeaderInSection:(NSInteger)section {
+    if (![self.source gridTitleForSection:section].length) return CGSizeMake(collectionView.bounds.size.width, 8); // one grid, no titles
     // The first title sits just below the category bar
     return CGSizeMake(collectionView.bounds.size.width, section == 0 ? 30 : 38);
 }

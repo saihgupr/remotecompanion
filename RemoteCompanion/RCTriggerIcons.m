@@ -121,18 +121,18 @@ static UIImage *RCDrawPhoneIcon(NSDictionary *spec, CGFloat side) {
             return;
         }
 
-        // Shake: a narrower phone with motion lines on both sides
+        // Shake: the phone (as big as the others), with motion lines just outside it
         if ([spec[@"shake"] boolValue]) {
-            UIBezierPath *phone = [UIBezierPath bezierPathWithRoundedRect:R(12.5, 4, 15, 32) cornerRadius:4 * k];
+            UIBezierPath *phone = [UIBezierPath bezierPathWithRoundedRect:R(9, 1, 22, 38) cornerRadius:5 * k];
             phone.lineWidth = 2.4 * k;
             [phone stroke];
             for (NSNumber *side in @[@-1, @1]) {
                 for (NSNumber *step in @[@0, @1]) {
-                    CGFloat x = 20 + side.doubleValue * (12 + step.doubleValue * 5);
+                    CGFloat x = 20 + side.doubleValue * (14.5 + step.doubleValue * 4);
                     UIBezierPath *line = [UIBezierPath bezierPath];
-                    line.lineWidth = 2.2 * k;
+                    line.lineWidth = 2 * k;
                     line.lineCapStyle = kCGLineCapRound;
-                    CGFloat half = 6 - step.doubleValue * 1.5;
+                    CGFloat half = 5 - step.doubleValue * 1.2;
                     // A slight curve, bowing away from the phone
                     [line moveToPoint:CGPointMake((x - side.doubleValue * 1.2) * k, (20 - half) * k)];
                     [line addQuadCurveToPoint:CGPointMake((x - side.doubleValue * 1.2) * k, (20 + half) * k)

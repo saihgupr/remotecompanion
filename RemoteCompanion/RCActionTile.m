@@ -270,14 +270,14 @@ static const CGFloat RCTileMinWidth = 80;
         _iconView.translatesAutoresizingMaskIntoConstraints = NO;
         _iconView.hidden = YES;
         [self addSubview:_iconView];
-        _labelLeading = [_label.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:RCGridSide + 4];
+        _labelLeading = [_label.leadingAnchor constraintEqualToAnchor:self.safeAreaLayoutGuide.leadingAnchor constant:RCGridSide + 4];
         [NSLayoutConstraint activateConstraints:@[
             _labelLeading,
-            [_iconView.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:RCGridSide + 4],
+            [_iconView.leadingAnchor constraintEqualToAnchor:self.safeAreaLayoutGuide.leadingAnchor constant:RCGridSide + 4],
             [_iconView.centerYAnchor constraintEqualToAnchor:_label.centerYAnchor],
             [_iconView.widthAnchor constraintEqualToConstant:18],
             [_iconView.heightAnchor constraintEqualToConstant:16],
-            [_label.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-(RCGridSide + 4)],
+            [_label.trailingAnchor constraintEqualToAnchor:self.safeAreaLayoutGuide.trailingAnchor constant:-(RCGridSide + 4)],
             [_label.bottomAnchor constraintEqualToAnchor:self.bottomAnchor constant:-6],
         ]];
     }
@@ -319,6 +319,7 @@ UICollectionViewFlowLayout *RCActionGridLayout(void) {
     layout.minimumInteritemSpacing = RCGridSpacing;
     layout.minimumLineSpacing = RCGridSpacing;
     layout.sectionInset = UIEdgeInsetsMake(0, RCGridSide, 18, RCGridSide);
+    layout.sectionInsetReference = UICollectionViewFlowLayoutSectionInsetFromSafeArea; // clear of the Dynamic Island in landscape
     return layout;
 }
 
@@ -458,6 +459,10 @@ CGFloat RCActionGridNoteHeight(NSString *note, CGFloat gridWidth) {
 
 @end
 
+CGFloat RCGridWidth(UIScrollView *view) {
+    return MAX(0, view.bounds.size.width - view.safeAreaInsets.left - view.safeAreaInsets.right);
+}
+
 CGSize RCActionRowSize(CGFloat listWidth, CGFloat height) {
     return CGSizeMake(MAX(0, listWidth - 2 * RCGridSide), height);
 }
@@ -468,6 +473,8 @@ NSString *const RCLayoutTriggers = @"triggers";
 NSString *const RCLayoutActionPicker = @"actionPicker";
 NSString *const RCLayoutBanners = @"banners";
 NSString *const RCLayoutTriggerColumns = @"triggerColumns";
+NSString *const RCLayoutTriggerSections = @"triggerSectionsHidden";
+NSString *const RCLayoutCategoryBarLines = @"categoryBarTwoLines";
 NSString *const RCLayoutChangedNotification = @"RCLayoutChangedNotification";
 
 static NSString *RCLayoutDefaultsKey(NSString *screen) {
@@ -489,13 +496,24 @@ NSInteger RCLayoutTriggerColumnCount(void) {
     return count;
 }
 
+NSInteger RCLayoutCategoryBarLineCount(void) {
+    NSInteger count = [[NSUserDefaults standardUserDefaults] integerForKey:@"RCCategoryBarLines"];
+    if (count < 1 || count > 3) count = RCLayoutIsCompact(RCLayoutCategoryBarLines) ? 2 : 1; // the earlier 1 / 2 switch
+    return count;
+}
+
+void RCLayoutSetCategoryBarLineCount(NSInteger count) {
+    [[NSUserDefaults standardUserDefaults] setInteger:MAX(1, MIN(3, count)) forKey:@"RCCategoryBarLines"];
+    [[NSNotificationCenter defaultCenter] postNotificationName:RCLayoutChangedNotification object:RCLayoutCategoryBarLines];
+}
+
 void RCLayoutSetTriggerColumnCount(NSInteger count) {
     [[NSUserDefaults standardUserDefaults] setInteger:MAX(2, MIN(4, count)) forKey:@"RCTriggerColumns"];
     [[NSNotificationCenter defaultCenter] postNotificationName:RCLayoutChangedNotification object:RCLayoutTriggerColumns];
 }
 
 NSArray<NSArray<NSString *> *> *RCLayoutScreens(void) {
-    return @[@[@"Triggers", RCLayoutTriggers], @[@"Triggers per Row", RCLayoutTriggerColumns],
+    return @[@[@"Triggers", RCLayoutTriggers], @[@"Triggers per Row", RCLayoutTriggerColumns], @[@"Compact Sections", RCLayoutTriggerSections], @[@"Category Bar Lines", RCLayoutCategoryBarLines],
              @[@"Select Action", RCLayoutActionPicker], @[@"Banners", RCLayoutBanners]];
 }
 
@@ -508,6 +526,7 @@ NSArray<NSArray<NSString *> *> *RCLayoutScreens(void) {
 @implementation RCLayoutSegmentTarget
 - (void)changed:(UISegmentedControl *)control {
     if ([self.screen isEqualToString:RCLayoutTriggerColumns]) RCLayoutSetTriggerColumnCount(control.selectedSegmentIndex + 2);
+    else if ([self.screen isEqualToString:RCLayoutCategoryBarLines]) RCLayoutSetCategoryBarLineCount(control.selectedSegmentIndex + 1);
     else RCLayoutSetCompact(self.screen, control.selectedSegmentIndex == 1);
     [[[UISelectionFeedbackGenerator alloc] init] selectionChanged];
 }
@@ -521,10 +540,12 @@ UITableViewCell *RCLayoutSettingCell(NSString *title, NSString *screen) {
     cell.textLabel.text = title;
     cell.textLabel.textColor = [UIColor labelColor];
     BOOL columns = [screen isEqualToString:RCLayoutTriggerColumns];
-    UISegmentedControl *control = [[UISegmentedControl alloc] initWithItems:columns ? @[@"2", @"3", @"4"] : @[@"List", @"Compact"]];
-    control.selectedSegmentIndex = columns ? RCLayoutTriggerColumnCount() - 2 : (RCLayoutIsCompact(screen) ? 1 : 0);
-    control.accessibilityLabel = columns ? title : [title stringByAppendingString:@" Layout"];
-    if (columns) {
+    BOOL sections = [screen isEqualToString:RCLayoutTriggerSections];
+    BOOL lines = [screen isEqualToString:RCLayoutCategoryBarLines];
+    UISegmentedControl *control = [[UISegmentedControl alloc] initWithItems:columns ? @[@"2", @"3", @"4"] : sections ? @[@"Show", @"Hide"] : lines ? @[@"1", @"2", @"3"] : @[@"List", @"Compact"]];
+    control.selectedSegmentIndex = columns ? RCLayoutTriggerColumnCount() - 2 : lines ? RCLayoutCategoryBarLineCount() - 1 : (RCLayoutIsCompact(screen) ? 1 : 0);
+    control.accessibilityLabel = (columns || lines) ? title : [title stringByAppendingString:@" Layout"];
+    if (columns || lines) {
         // Short choices: together as wide as List / Compact, so the controls line up
         for (NSInteger i = 0; i < 3; i++) [control setWidth:48 forSegmentAtIndex:i];
     }
@@ -574,4 +595,32 @@ UIImage *RCAppIconImage(NSString *bundleId, CGFloat side) {
     rounded = [rounded imageWithRenderingMode:UIImageRenderingModeAlwaysOriginal];
     [cache setObject:rounded forKey:key];
     return rounded;
+}
+
+UIImage *RCAppTriggerIconImage(NSString *bundleId, CGFloat side, BOOL exit) {
+    static NSCache *cache;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ cache = [[NSCache alloc] init]; });
+    NSString *key = [NSString stringWithFormat:@"%@@%.0f%@", bundleId, side, exit ? @"x" : @"v"];
+    UIImage *cached = [cache objectForKey:key];
+    if (cached) return cached;
+    UIImage *icon = RCAppIconImage(bundleId, side);
+    if (!icon) return nil;
+    CGFloat badge = round(side * 0.44);
+    UIImage *mark = [[UIImage systemImageNamed:exit ? @"xmark.circle.fill" : @"checkmark.circle.fill"
+                              withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:badge weight:UIImageSymbolWeightBold]]
+                     imageWithTintColor:exit ? [UIColor systemRedColor] : [UIColor systemGreenColor] renderingMode:UIImageRenderingModeAlwaysOriginal];
+    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(side, side)];
+    UIImage *result = [renderer imageWithActions:^(__unused UIGraphicsImageRendererContext *context) {
+        [icon drawInRect:CGRectMake(0, 0, side, side)];
+        CGRect circle = CGRectMake(side - badge, 0, badge, badge);
+        [[UIColor whiteColor] setFill];
+        [[UIBezierPath bezierPathWithOvalInRect:circle] fill];
+        // The symbol a little inside the white circle, so a white ring shows around it
+        CGFloat inset = MAX(1.0, badge * 0.1);
+        [mark drawInRect:CGRectInset(circle, inset, inset)];
+    }];
+    result = [result imageWithRenderingMode:UIImageRenderingModeAlwaysOriginal];
+    [cache setObject:result forKey:key];
+    return result;
 }

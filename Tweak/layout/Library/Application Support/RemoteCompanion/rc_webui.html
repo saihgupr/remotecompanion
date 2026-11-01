@@ -173,6 +173,8 @@
     }
 
     /* ── Section headers ── */
+    .section-header .section-icon { display: inline-flex; vertical-align: -2px; margin-right: 7px; }
+    .section-header .section-icon i { font-size: 13px; }
     .section-header {
       font-size: 13px;
       font-weight: 500;
@@ -276,6 +278,25 @@
       overflow: hidden;
     }
     .row-icon i { font-size: 16px; color: #fff; }
+    .row-icon svg { color: #fff; }
+    .row-icon { position: relative; }
+    /* A created trigger's letter, in the icon square's corner */
+    /* App Launch / App Exit: a green checkmark or red x in a white circle at the top right */
+    .row-icon-app-badge {
+      position: absolute; right: 0; top: 0;
+      width: 13px; height: 13px; border-radius: 50%;
+      background: #fff;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .row-icon .row-icon-app-badge i { font-size: 13px; line-height: 13px; }
+    .row-icon-app-badge.launch i { color: #34c759; }
+    .row-icon-app-badge.exit i { color: #ff3b30; }
+    .row-icon-letter {
+      position: absolute; right: 1px; bottom: 1px;
+      min-width: 12px; height: 12px; border-radius: 6px;
+      background: #fff; color: #000; font-size: 8.5px; font-weight: 800;
+      display: flex; align-items: center; justify-content: center;
+    }
 
     /* Row text */
     .row-text { flex: 1; min-width: 0; }
@@ -3205,7 +3226,7 @@ const TRIGGER_SECTIONS = [
   { title: 'Favorites',              id: 'favorites', keys: [] },
   { title: 'Volume Buttons',         id: 'volume',    keys: ['volume_up_hold','volume_down_hold','volume_both_press','volume_up_then_down','volume_down_then_up'] },
   { title: 'Power Button',           id: 'power',     keys: ['power_double_tap','power_triple_click','power_quadruple_click','power_volume_up','power_volume_down','power_long_press'] },
-  { title: 'Screen Gestures',        id: 'statusbar', keys: ['trigger_statusbar_left_hold','trigger_statusbar_center_hold','trigger_statusbar_right_hold','trigger_statusbar_swipe_left','trigger_statusbar_swipe_right','trigger_statusbar_double_tap'] },
+  { title: 'Status Bar',             id: 'statusbar', keys: ['trigger_statusbar_left_hold','trigger_statusbar_center_hold','trigger_statusbar_right_hold','trigger_statusbar_swipe_left','trigger_statusbar_swipe_right','trigger_statusbar_double_tap'] },
   { title: 'Edge Gestures',          id: 'edge',      keys: ['trigger_edge_left_swipe_up','trigger_edge_left_swipe_down','trigger_edge_right_swipe_up','trigger_edge_right_swipe_down'] },
   { title: 'Bottom Bar Gestures',    id: 'bottombar', keys: ['trigger_bottombar_swipe_left','trigger_bottombar_swipe_right','trigger_bottom_swipe_up_left','trigger_bottom_swipe_up_center','trigger_bottom_swipe_up_right'] },
   { title: 'Home Button',            id: 'home',      keys: ['trigger_home_double_click','trigger_home_triple_click','trigger_home_quadruple_click','trigger_home_hold','trigger_home_power','touchid_tap','touchid_hold'] },
@@ -3301,6 +3322,134 @@ const TRIGGER_ICONS = {
   trigger_media_track_change: { icon:'forward_fill', cls:'icon-purple' },
 };
 
+// The button and gesture triggers drawn as a tiny phone, as in the app: the pressed button filled
+// in, or the touched part of the screen with a dot or an arrow, and what happens inside
+const PHONE_ICONS = (() => {
+  const hold = 'clock';
+  return {
+    volume_up_hold: { buttons: ['volUp'], mark: hold },
+    volume_down_hold: { buttons: ['volDown'], mark: hold },
+    volume_both_press: { buttons: ['volUp', 'volDown'], mark: '+' },
+    volume_up_then_down: { buttons: ['volUp', 'volDown'], mark: 'arrows:up,down' },
+    volume_down_then_up: { buttons: ['volUp', 'volDown'], mark: 'arrows:down,up' },
+    power_double_tap: { buttons: ['power'], mark: '2×' },
+    power_triple_click: { buttons: ['power'], mark: '3×' },
+    power_quadruple_click: { buttons: ['power'], mark: '4×' },
+    power_volume_up: { buttons: ['power', 'volUp'], mark: '+' },
+    power_volume_down: { buttons: ['power', 'volDown'], mark: '+' },
+    power_long_press: { buttons: ['power'], mark: hold },
+    trigger_statusbar_left_hold: { zone: 'top', dot: 'L' },
+    trigger_statusbar_center_hold: { zone: 'top', dot: 'C' },
+    trigger_statusbar_right_hold: { zone: 'top', dot: 'R' },
+    trigger_statusbar_swipe_left: { zone: 'top', arrow: 'left' },
+    trigger_statusbar_swipe_right: { zone: 'top', arrow: 'right' },
+    trigger_statusbar_double_tap: { zone: 'top', mark: '2×' },
+    trigger_edge_left_swipe_up: { zone: 'left', arrow: 'up' },
+    trigger_edge_left_swipe_down: { zone: 'left', arrow: 'down' },
+    trigger_edge_right_swipe_up: { zone: 'right', arrow: 'up' },
+    trigger_edge_right_swipe_down: { zone: 'right', arrow: 'down' },
+    trigger_bottombar_swipe_left: { zone: 'bottom', arrow: 'left' },
+    trigger_bottombar_swipe_right: { zone: 'bottom', arrow: 'right' },
+    trigger_bottom_swipe_up_left: { arrowAt: 'L' },
+    trigger_bottom_swipe_up_center: { arrowAt: 'C' },
+    trigger_bottom_swipe_up_right: { arrowAt: 'R' },
+    trigger_home_double_click: { home: true, mark: '2×' },
+    trigger_home_triple_click: { home: true, mark: '3×' },
+    trigger_home_quadruple_click: { home: true, mark: '4×' },
+    trigger_home_hold: { home: true, mark: hold },
+    trigger_home_power: { home: true, buttons: ['power'], mark: '+' },
+    trigger_ringer_mute: { buttons: ['ringer'], mark: 'bell_slash' },
+    trigger_ringer_unmute: { buttons: ['ringer'], mark: 'bell' },
+    trigger_ringer_toggle: { buttons: ['ringer'], mark: 'arrows:up,down' },
+    shake: { shake: true },
+  };
+})();
+
+// An arrow in a 40 × 40 drawing: a line with a head, pointing dir, centred on (x, y)
+function svgArrow(x, y, dir, len, width) {
+  const d = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] }[dir];
+  const h = len / 2, head = len * 0.38;
+  const tx = x + d[0] * h, ty = y + d[1] * h, fx = x - d[0] * h, fy = y - d[1] * h;
+  const px = -d[1], py = d[0];
+  return `<path d="M${fx} ${fy} L${tx} ${ty} M${tx - d[0] * head + px * head} ${ty - d[1] * head + py * head} L${tx} ${ty} L${tx - d[0] * head - px * head} ${ty - d[1] * head - py * head}" fill="none" stroke="currentColor" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round"/>`;
+}
+
+function phoneIconSVG(spec) {
+  const parts = [];
+  const rect = (x, y, w, h, r, extra = 'fill="currentColor"') => parts.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" ${extra}/>`);
+  if (spec.shake) {
+    rect(9, 1, 22, 38, 5, 'fill="none" stroke="currentColor" stroke-width="2.4"');
+    [-1, 1].forEach(side => [0, 1].forEach(step => {
+      const x = 20 + side * (14.5 + step * 4), half = 5 - step * 1.2, ex = x - side * 1.2;
+      parts.push(`<path d="M${ex} ${20 - half} Q${x + side * 1.8} 20 ${ex} ${20 + half}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>`);
+    }));
+  } else {
+    rect(9, 1, 22, 38, 5, 'fill="none" stroke="currentColor" stroke-width="2.4"');
+    const buttons = { ringer: [5, 5, 3.4, 5], volUp: [5, 12, 3.4, 7], volDown: [5, 21, 3.4, 7], power: [31.6, 11, 3.4, 10] };
+    (spec.buttons || []).forEach(b => { const r = buttons[b]; if (r) rect(r[0], r[1], r[2], r[3], 1.4); });
+    if (spec.home) parts.push('<circle cx="20" cy="33.5" r="4" fill="none" stroke="currentColor" stroke-width="2.2"/>');
+    const zones = { top: [11, 3, 18, 8], bottom: [11, 29, 18, 8], left: [11, 3, 7, 34], right: [22, 3, 7, 34] };
+    const zone = zones[spec.zone];
+    if (zone) rect(zone[0], zone[1], zone[2], zone[3], 3, 'fill="currentColor" fill-opacity="0.42"');
+    if (spec.dot) parts.push(`<circle cx="${{ L: 15, C: 20, R: 25 }[spec.dot]}" cy="7" r="3" fill="currentColor"/>`);
+    if (spec.arrow && zone) {
+      const side = spec.zone === 'left' || spec.zone === 'right';
+      parts.push(svgArrow(zone[0] + zone[2] / 2, zone[1] + zone[3] / 2, spec.arrow, side ? 12 : 9, 2.6));
+    }
+    if (spec.arrowAt) {
+      parts.push(svgArrow({ L: 15, C: 20, R: 25 }[spec.arrowAt], 26, 'up', 11, 2.8));
+      rect(14, 35, 12, 1.8, 0.9);
+    }
+    const mark = spec.mark;
+    if (mark) {
+      const cy = spec.home ? 17 : spec.zone === 'top' ? 23 : 20;
+      if (mark === 'clock') {
+        parts.push(`<circle cx="20" cy="${cy}" r="5.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M20 ${cy - 3} V${cy} L22.5 ${cy + 1.5}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>`);
+      } else if (mark === 'bell' || mark === 'bell_slash') {
+        parts.push(`<path d="M20 ${cy - 6} c-3.2 0 -5 2.4 -5 5.3 v3.2 l-1.8 2.2 h13.6 l-1.8 -2.2 v-3.2 c0 -2.9 -1.8 -5.3 -5 -5.3z" fill="currentColor"/><circle cx="20" cy="${cy + 6.3}" r="1.6" fill="currentColor"/>`);
+        if (mark === 'bell_slash') parts.push(`<path d="M13 ${cy - 7} L27 ${cy + 8}" stroke="currentColor" stroke-width="3.6"/><path d="M13 ${cy - 7} L27 ${cy + 8}" stroke="#000" stroke-opacity="0.001" stroke-width="1"/>`);
+      } else if (mark.startsWith('arrows:')) {
+        const [a, b] = mark.slice(7).split(',');
+        parts.push(svgArrow(20, cy - 4.5, a, 7, 2.4), svgArrow(20, cy + 4.5, b, 7, 2.4));
+      } else {
+        parts.push(`<text x="20" y="${cy + 4}" text-anchor="middle" font-size="11" font-weight="800" font-family="-apple-system, system-ui, sans-serif" fill="currentColor">${mark}</text>`);
+      }
+    }
+  }
+  return `<svg viewBox="0 0 40 40" width="24" height="24" aria-hidden="true">${parts.join('')}</svg>`;
+}
+
+// A created trigger's letter (as in the app): the first of the user's name for it, else of its
+// network, device or topic; none for an unnamed NFC tag or schedule
+function letterForKey(key) {
+  if (!canRenameTrigger(key) || key.startsWith('app_')) return null;
+  let source = customNameForKey(key);
+  if (!source) {
+    const name = defaultNameForKey(key);
+    if (key.startsWith('wifi_') || key.startsWith('bt_') || key.startsWith('output_')) {
+      const m = name.match(/ (?:to|from) (.+)$/) || name.match(/: (.+)$/);
+      source = m ? m[1] : null;
+    } else if (key.startsWith('mqtt_') || key.startsWith('notif_') || key.startsWith('notify_')) {
+      const m = name.match(/: (.+)$/);
+      source = m ? m[1] : name;
+    }
+  }
+  const c = source ? source.match(/[\p{L}\p{N}]/u) : null;
+  return c ? c[0].toUpperCase() : null;
+}
+
+// The icon square's inside: the phone drawing, or the symbol with a created trigger's letter
+function triggerIconHTML(key) {
+  const phone = PHONE_ICONS[key];
+  if (phone) return phoneIconSVG(phone);
+  const { icon } = iconForKey(key);
+  const letter = letterForKey(key);
+  const exit = key.startsWith('app_exit_');
+  const appBadge = (exit || key.startsWith('app_launch_'))
+    ? `<span class="row-icon-app-badge ${exit ? 'exit' : 'launch'}"><i class="f7-icons">${exit ? 'xmark_circle_fill' : 'checkmark_circle_fill'}</i></span>` : '';
+  return `<i class="f7-icons">${icon}</i>${letter ? `<span class="row-icon-letter">${escHtml(letter)}</span>` : ''}${appBadge}`;
+}
+
 function iconForKey(key) {
   if (TRIGGER_ICONS[key]) return TRIGGER_ICONS[key];
   if (key.startsWith('nfc_'))        return { icon:'antenna_radiowaves_left_right', cls:'icon-cyan' };
@@ -3320,7 +3469,36 @@ function iconForKey(key) {
   return { icon:'hand_tap', cls:'icon-gray' };
 }
 
+// Created triggers (a tag, a network, a device, an app, a notification, a time, a topic) can
+// have a name of their own ("customName"); the built-in ones keep theirs, so they always say
+// what they are. As in the app.
+const RENAMEABLE_PREFIXES = ['nfc_', 'wifi_', 'bt_', 'output_', 'app_launch_', 'app_exit_', 'notif_', 'notify_', 'sched_', 'mqtt_'];
+function canRenameTrigger(key) {
+  return RENAMEABLE_PREFIXES.some(prefix => key.startsWith(prefix));
+}
+function customNameForKey(key) {
+  if (!canRenameTrigger(key)) return null;
+  const t = config.triggers[key];
+  const name = t && t.customName ? String(t.customName).trim() : '';
+  return name || null;
+}
 function nameForKey(key) {
+  return customNameForKey(key) || defaultNameForKey(key);
+}
+
+// A name of the user's own, or (left empty) back to the default
+function promptRenameTrigger(key) {
+  const t = config.triggers[key];
+  if (!t) return;
+  showDialog('Rename Trigger', `Leave empty for its default name, “${defaultNameForKey(key)}”.`, customNameForKey(key) || '', 'Save', val => {
+    const name = String(val || '').trim();
+    if (name) t.customName = name; else delete t.customName;
+    saveConfig(); renderAll();
+    openActionsPanel(key);
+  });
+}
+
+function defaultNameForKey(key) {
   if (TRIGGER_NAMES[key]) return TRIGGER_NAMES[key];
   const t = config.triggers[key];
   if (t && t.name) return t.name;
@@ -4257,7 +4435,8 @@ function renderAll() {
     // Section header
     const hdr = document.createElement('div');
     hdr.className = 'section-header' + (sec.id === 'favorites' ? ' favorites' : '');
-    hdr.textContent = sec.title.toUpperCase();
+    const catIcon = TRIGGER_CATEGORY_ICONS[sec.title];
+    hdr.innerHTML = (catIcon ? `<span class="section-icon">${catIcon.startsWith('<') ? catIcon : `<i class="f7-icons">${catIcon}</i>`}</span>` : '') + escHtml(sec.title.toUpperCase());
     root.appendChild(hdr);
 
     // Card
@@ -4267,6 +4446,31 @@ function renderAll() {
     root.appendChild(card);
   });
 }
+
+// A section's icon before its title (as in the app): a Framework7 icon, or a drawn screen area
+const SCREEN_AREA = (x, y, w, h) => `<svg viewBox="0 0 20 20" width="14" height="14" aria-hidden="true"><rect x="2.5" y="1.5" width="15" height="17" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="1.2" fill="currentColor"/></svg>`;
+const TRIGGER_CATEGORY_ICONS = {
+  'Favorites': 'star_fill',
+  'Volume Buttons': 'speaker_2_fill',
+  'Power Button': 'power',
+  'Status Bar': SCREEN_AREA(5, 4, 10, 4),
+  'Edge Gestures': SCREEN_AREA(5, 4, 4, 12),
+  'Bottom Bar Gestures': SCREEN_AREA(5, 12, 10, 4),
+  'Home Button': 'circle',
+  'Ringer Switch': 'bell_fill',
+  'Apple Watch': 'clock',
+  'Device State': 'device_phone_portrait',
+  'Motion Gestures': 'waveform_path',
+  'NFC Tags': 'dot_radiowaves_right',
+  'WiFi Network Triggers': 'wifi',
+  'Bluetooth Device Triggers': 'dot_radiowaves_left_right',
+  'Audio Output Triggers': 'airplayaudio',
+  'Notification Triggers': 'bell_circle_fill',
+  'App Launch Triggers': 'arrow_up_right_square_fill',
+  'App Exit Triggers': 'xmark_square_fill',
+  'Scheduled Triggers': 'clock_fill',
+  'MQTT Subscription Triggers': 'antenna_radiowaves_left_right',
+};
 
 // ── Trigger row (custom swipe — no Framework7 dependency) ─────────────────────
 let _openRow = null; // currently open swipeout row
@@ -4285,9 +4489,10 @@ function renderTriggerRow(key, deletable) {
   const name = nameForKey(key);
   const isFav = (config.favoriteTriggers || []).includes(key);
   const actions = data.actions || [];
-  const subtitle = actions.length > 0
+  let subtitle = actions.length > 0
     ? actions.map(a => nameForCmd(a)).join(' › ')
     : 'Not configured';
+  if (customNameForKey(key)) subtitle = `${defaultNameForKey(key)} · ${subtitle}`;
 
   const row = document.createElement('div');
   row.className = 'trigger-row';
@@ -4330,7 +4535,7 @@ function renderTriggerRow(key, deletable) {
   inner.className = 'trigger-row-inner';
   inner.innerHTML = `
     <div class="row-icon ${cls}">
-      <i class="f7-icons">${icon}</i>
+      ${triggerIconHTML(key)}
     </div>
     <div class="row-text">
       <div class="row-title">
@@ -4629,7 +4834,7 @@ function openActionsPanel(key) {
   const isBT = key.startsWith('bt_');
   const isApp = key.startsWith('app_launch_') || key.startsWith('app_exit_');
   
-  if (isSched || isNotif || isWiFi || isBT || isApp) {
+  if (isSched || isNotif || isWiFi || isBT || isApp || canRenameTrigger(key) || canKeepDefault(key)) {
     editBtn.style.display = 'flex';
   } else {
     editBtn.style.display = 'none';
@@ -4641,34 +4846,58 @@ function openActionsPanel(key) {
 
 function onEditTriggerSettings() {
   if (!currentKey) return;
+  const key = currentKey;
+  const settings = triggerSettingsAction(key);
+  const items = [];
+  if (canRenameTrigger(key)) items.push({ label: 'Rename', action: () => promptRenameTrigger(key) });
+  if (settings) items.push({ label: 'Edit Settings', action: settings });
+  if (canKeepDefault(key)) {
+    const keep = keepsDefault(key);
+    items.push({ label: `Keep Default Action: ${keep ? 'On' : 'Off'}`, action: () => setKeepsDefault(key, !keep) });
+  }
+  if (items.length === 1 && settings && items[0].action === settings) { settings(); return; }
+  if (items.length) showSheet(nameForKey(key), items);
+}
+
+// Triggers that take over what iOS normally does can keep it as well, as in the app: the ping
+// sounds, and with a Home button the Accessibility Shortcut, App Switcher, Siri and screenshot,
+// otherwise Siri, the Accessibility Shortcut, a screenshot and Wallet
+function keepDefaultKeys() {
+  const pings = ['trigger_watch_ping', 'trigger_watch_ping_hold'];
+  const home = typeof serverCapabilities === 'undefined' || serverCapabilities.home_button !== false;
+  return pings.concat(home
+    ? ['trigger_home_triple_click', 'trigger_home_double_click', 'trigger_home_hold', 'trigger_home_power']
+    : ['power_long_press', 'power_triple_click', 'power_volume_up', 'power_double_tap']);
+}
+function canKeepDefault(key) { return keepDefaultKeys().includes(key); }
+function keepsDefault(key) { return !!triggerData(key).keepDefault; }
+function setKeepsDefault(key, keep) {
+  const data = triggerData(key);
+  if (keep) data.keepDefault = true; else delete data.keepDefault;
+  saveConfig();
+}
+
+// What a trigger's settings button opens (its schedule, apps, network...), or null
+function triggerSettingsAction(currentKey) {
   const isSched = currentKey.startsWith('sched_');
   const isNotif = currentKey.startsWith('notif_') || currentKey.startsWith('notify_');
   const isWiFi = currentKey.startsWith('wifi_');
   const isBT = currentKey.startsWith('bt_');
   const isApp = currentKey.startsWith('app_launch_') || currentKey.startsWith('app_exit_');
   
-  if (isSched) promptSchedTrigger(currentKey);
-  else if (isNotif) promptNotifTrigger(currentKey);
-  else if (isWiFi) promptComplexTrigger('wifi', currentKey);
-  else if (isBT) promptComplexTrigger('bt', currentKey);
-  else if (isApp) promptAppEdit(currentKey);
+  if (isSched) return () => promptSchedTrigger(currentKey);
+  if (isNotif) return () => promptNotifTrigger(currentKey);
+  if (isWiFi) return () => promptComplexTrigger('wifi', currentKey);
+  if (isBT) return () => promptComplexTrigger('bt', currentKey);
+  if (isApp) return () => promptAppEdit(currentKey);
+  return null;
 }
 function promptAppEdit(key) {
   const data = config.triggers[key];
   if (!data) return;
   const bid = key.replace(/^app_(launch|exit)_/, '');
   const kind = key.startsWith('app_exit_') ? 'exit' : 'launch';
-  showSheet('Edit App Trigger', [
-    { label: 'Apps', action: () => promptAppLaunchPicker(null, kind, (data.apps && data.apps.length) ? data.apps : [bid], key) },
-    { label: 'Name', action: () => {
-      showDialog('Edit App Trigger', 'Display Name:', data.name, 'Save', val => {
-        if (!val) return;
-        data.name = val;
-        saveConfig(); renderAll();
-        openActionsPanel(key);
-      });
-    } },
-  ]);
+  promptAppLaunchPicker(null, kind, (data.apps && data.apps.length) ? data.apps : [bid], key);
 }
 
 function closeActionsPanel() {

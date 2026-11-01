@@ -281,6 +281,16 @@
     .row-icon svg { color: #fff; }
     .row-icon { position: relative; }
     /* A created trigger's letter, in the icon square's corner */
+    /* App Launch / App Exit: a green checkmark or red x in a white circle at the top right */
+    .row-icon-app-badge {
+      position: absolute; right: 0; top: 0;
+      width: 13px; height: 13px; border-radius: 50%;
+      background: #fff;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .row-icon .row-icon-app-badge i { font-size: 13px; line-height: 13px; }
+    .row-icon-app-badge.launch i { color: #34c759; }
+    .row-icon-app-badge.exit i { color: #ff3b30; }
     .row-icon-letter {
       position: absolute; right: 1px; bottom: 1px;
       min-width: 12px; height: 12px; border-radius: 6px;
@@ -3368,10 +3378,10 @@ function phoneIconSVG(spec) {
   const parts = [];
   const rect = (x, y, w, h, r, extra = 'fill="currentColor"') => parts.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" ${extra}/>`);
   if (spec.shake) {
-    rect(12.5, 4, 15, 32, 4, 'fill="none" stroke="currentColor" stroke-width="2.4"');
+    rect(9, 1, 22, 38, 5, 'fill="none" stroke="currentColor" stroke-width="2.4"');
     [-1, 1].forEach(side => [0, 1].forEach(step => {
-      const x = 20 + side * (12 + step * 5), half = 6 - step * 1.5, ex = x - side * 1.2;
-      parts.push(`<path d="M${ex} ${20 - half} Q${x + side * 1.8} 20 ${ex} ${20 + half}" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>`);
+      const x = 20 + side * (14.5 + step * 4), half = 5 - step * 1.2, ex = x - side * 1.2;
+      parts.push(`<path d="M${ex} ${20 - half} Q${x + side * 1.8} 20 ${ex} ${20 + half}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>`);
     }));
   } else {
     rect(9, 1, 22, 38, 5, 'fill="none" stroke="currentColor" stroke-width="2.4"');
@@ -3434,7 +3444,10 @@ function triggerIconHTML(key) {
   if (phone) return phoneIconSVG(phone);
   const { icon } = iconForKey(key);
   const letter = letterForKey(key);
-  return `<i class="f7-icons">${icon}</i>${letter ? `<span class="row-icon-letter">${escHtml(letter)}</span>` : ''}`;
+  const exit = key.startsWith('app_exit_');
+  const appBadge = (exit || key.startsWith('app_launch_'))
+    ? `<span class="row-icon-app-badge ${exit ? 'exit' : 'launch'}"><i class="f7-icons">${exit ? 'xmark_circle_fill' : 'checkmark_circle_fill'}</i></span>` : '';
+  return `<i class="f7-icons">${icon}</i>${letter ? `<span class="row-icon-letter">${escHtml(letter)}</span>` : ''}${appBadge}`;
 }
 
 function iconForKey(key) {
@@ -4821,7 +4834,7 @@ function openActionsPanel(key) {
   const isBT = key.startsWith('bt_');
   const isApp = key.startsWith('app_launch_') || key.startsWith('app_exit_');
   
-  if (isSched || isNotif || isWiFi || isBT || isApp || canRenameTrigger(key)) {
+  if (isSched || isNotif || isWiFi || isBT || isApp || canRenameTrigger(key) || canKeepDefault(key)) {
     editBtn.style.display = 'flex';
   } else {
     editBtn.style.display = 'none';
@@ -4835,10 +4848,33 @@ function onEditTriggerSettings() {
   if (!currentKey) return;
   const key = currentKey;
   const settings = triggerSettingsAction(key);
-  if (!canRenameTrigger(key)) { if (settings) settings(); return; }
-  const items = [{ label: 'Rename', action: () => promptRenameTrigger(key) }];
+  const items = [];
+  if (canRenameTrigger(key)) items.push({ label: 'Rename', action: () => promptRenameTrigger(key) });
   if (settings) items.push({ label: 'Edit Settings', action: settings });
-  showSheet(nameForKey(key), items);
+  if (canKeepDefault(key)) {
+    const keep = keepsDefault(key);
+    items.push({ label: `Keep Default Action: ${keep ? 'On' : 'Off'}`, action: () => setKeepsDefault(key, !keep) });
+  }
+  if (items.length === 1 && settings && items[0].action === settings) { settings(); return; }
+  if (items.length) showSheet(nameForKey(key), items);
+}
+
+// Triggers that take over what iOS normally does can keep it as well, as in the app: the ping
+// sounds, and with a Home button the Accessibility Shortcut, App Switcher, Siri and screenshot,
+// otherwise Siri, the Accessibility Shortcut, a screenshot and Wallet
+function keepDefaultKeys() {
+  const pings = ['trigger_watch_ping', 'trigger_watch_ping_hold'];
+  const home = typeof serverCapabilities === 'undefined' || serverCapabilities.home_button !== false;
+  return pings.concat(home
+    ? ['trigger_home_triple_click', 'trigger_home_double_click', 'trigger_home_hold', 'trigger_home_power']
+    : ['power_long_press', 'power_triple_click', 'power_volume_up', 'power_double_tap']);
+}
+function canKeepDefault(key) { return keepDefaultKeys().includes(key); }
+function keepsDefault(key) { return !!triggerData(key).keepDefault; }
+function setKeepsDefault(key, keep) {
+  const data = triggerData(key);
+  if (keep) data.keepDefault = true; else delete data.keepDefault;
+  saveConfig();
 }
 
 // What a trigger's settings button opens (its schedule, apps, network...), or null

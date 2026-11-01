@@ -50,6 +50,10 @@ CGFloat RCActionGridNoteHeight(NSString *note, CGFloat gridWidth);
 - (void)setFirst:(BOOL)first last:(BOOL)last;
 @end
 
+// The width a grid lays out in: its own, less the safe area at the sides (the Dynamic Island and
+// rounded corners in landscape)
+CGFloat RCGridWidth(UIScrollView *view);
+
 // A row's size in a list this wide
 CGSize RCActionRowSize(CGFloat listWidth, CGFloat height);
 
@@ -61,6 +65,12 @@ extern NSString *const RCLayoutBanners;
 // Triggers in Compact: how many per row, 2, 3 or 4 (its setting row is keyed by this)
 extern NSString *const RCLayoutTriggerColumns;
 NSInteger RCLayoutTriggerColumnCount(void);
+// Triggers in Compact: one continuous grid without section titles ("Compact" here means hidden)
+extern NSString *const RCLayoutTriggerSections;
+// Category bars: 1, 2 or 3 lines of chips (its setting row and change notice are keyed by this)
+extern NSString *const RCLayoutCategoryBarLines;
+NSInteger RCLayoutCategoryBarLineCount(void);
+void RCLayoutSetCategoryBarLineCount(NSInteger count);
 void RCLayoutSetTriggerColumnCount(NSInteger count);
 // Posted when a screen's layout changes (object: the screen's key)
 extern NSString *const RCLayoutChangedNotification;
@@ -76,3 +86,6 @@ UITableViewCell *RCLayoutSettingCell(NSString *title, NSString *screen);
 
 // An app's icon, rounded, this many points square; nil when the app isn't installed
 UIImage *RCAppIconImage(NSString *bundleId, CGFloat side);
+// The same, for an App Launch or App Exit trigger: a green checkmark (launch) or a red x (exit) in a
+// white circle at its top right
+UIImage *RCAppTriggerIconImage(NSString *bundleId, CGFloat side, BOOL exit);

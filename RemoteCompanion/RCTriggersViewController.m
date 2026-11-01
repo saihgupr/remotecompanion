@@ -234,9 +234,20 @@
     self.navigationItem.leftBarButtonItems = items;
 }
 
+// The grid's columns and margins follow a rotation (and the Dynamic Island in landscape)
+- (void)viewWillTransitionToSize:(CGSize)size withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator {
+    [super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
+    [coordinator animateAlongsideTransition:^(__unused id<UIViewControllerTransitionCoordinatorContext> context) {
+        [self.grid.collectionView.collectionViewLayout invalidateLayout];
+    } completion:^(__unused id<UIViewControllerTransitionCoordinatorContext> context) {
+        [self.grid reload];
+        [self.categoryBar layoutInScrollView:[self activeScrollView]];
+    }];
+}
+
 - (void)layoutSettingChanged:(NSNotification *)note {
     if ([note.object isEqual:RCLayoutTriggers]) [self applyLayout];
-    else if ([note.object isEqual:RCLayoutTriggerColumns]) {
+    else if ([note.object isEqual:RCLayoutTriggerColumns] || [note.object isEqual:RCLayoutTriggerSections]) {
         [self.grid.collectionView.collectionViewLayout invalidateLayout];
         [self.grid reload];
     }
@@ -988,9 +999,11 @@
     
     // Add Icon with tint based on section or type?
     // Using dark gray tint for a "premium" but subtle look
-    UIImage *icon = [self appIconForTrigger:triggerKey side:29] ?: RCTriggerIconImage(triggerKey, 22) ?: [self symbolIconForTrigger:triggerKey size:22];
+    UIImage *icon = [UIImage systemImageNamed:[RCTriggersViewController iconNameForTrigger:triggerKey]];
     cell.imageView.image = icon;
     cell.imageView.tintColor = [UIColor systemGrayColor];
+    // The trigger's own picture: its app's icon, the phone drawing, or its symbol with a letter
+    cell.imageView.image = [self appIconForTrigger:triggerKey side:29] ?: RCTriggerIconImage(triggerKey, 22) ?: [self symbolIconForTrigger:triggerKey size:22];
 
     cell.accessoryView = nil;
     cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
@@ -1174,7 +1187,7 @@
     if (custom) return custom;
     for (NSString *prefix in @[@"app_launch_", @"app_exit_"]) {
         if ([triggerKey hasPrefix:prefix]) {
-            UIImage *app = RCAppIconImage([triggerKey substringFromIndex:prefix.length], size + 7);
+            UIImage *app = RCAppTriggerIconImage([triggerKey substringFromIndex:prefix.length], size + 7, [prefix isEqualToString:@"app_exit_"]);
             if (app) return app;
         }
     }
@@ -1191,25 +1204,37 @@
     return nil;
 }
 
-// An App Launch or App Exit trigger's app icon (its first app's), or nil
+// An App Launch or App Exit trigger's app icon (its first app's) with its launch or exit badge, or nil
 - (UIImage *)appIconForTrigger:(NSString *)triggerKey side:(CGFloat)side {
     for (NSString *prefix in @[@"app_launch_", @"app_exit_"]) {
-        if ([triggerKey hasPrefix:prefix]) return RCAppIconImage([triggerKey substringFromIndex:prefix.length], side);
+        if ([triggerKey hasPrefix:prefix]) return RCAppTriggerIconImage([triggerKey substringFromIndex:prefix.length], side, [prefix isEqualToString:@"app_exit_"]);
     }
     return nil;
 }
 
 #pragma mark - Compact grid
 
+// Compact Sections: Hide (and no category picked) shows every trigger in one grid, without titles
+- (BOOL)gridIsOneSection {
+    return RCLayoutIsCompact(RCLayoutTriggerSections) && !self.selectedCategoryTitle;
+}
+
 - (NSInteger)gridSectionCount {
+    if ([self gridIsOneSection]) return self.sections.count ? 1 : 0;
     return [self displaySectionCount];
 }
 
 - (NSString *)gridTitleForSection:(NSInteger)section {
+    if ([self gridIsOneSection]) return @"";
     return self.sectionTitles[[self realSectionForDisplaySection:section]];
 }
 
 - (NSArray<NSString *> *)gridKeysInSection:(NSInteger)section {
+    if ([self gridIsOneSection]) {
+        NSMutableArray *all = [NSMutableArray array];
+        for (NSArray *keys in self.sections) [all addObjectsFromArray:keys];
+        return all;
+    }
     NSInteger real = [self realSectionForDisplaySection:section];
     return real < (NSInteger)self.sections.count ? self.sections[real] : @[];
 }
