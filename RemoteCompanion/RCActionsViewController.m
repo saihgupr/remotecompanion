@@ -1562,6 +1562,14 @@ static id g_actionClipboard = nil;
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                 [self presentIfConditionPickerForIndex:NSNotFound];
             });
+        } else if ([action isEqualToString:@"__REPEAT__"]) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                [self presentRepeatCountForIndex:NSNotFound];
+            });
+        } else if ([action isEqualToString:@"__REPEAT_WHILE__"]) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                [self presentIfConditionPickerForIndex:NSNotFound insertIndex:NSNotFound type:@"repeat_while"];
+            });
         } else if ([action isEqualToString:@"__LUA_SCRIPT__"]) {
             RCTextInputViewController *inputVC = [[RCTextInputViewController alloc] init];
             inputVC.promptTitle = @"Lua Script";
@@ -1631,6 +1639,29 @@ static id g_actionClipboard = nil;
     return [type isEqualToString:@"end_if"] || [type isEqualToString:@"end"];
 }
 
+// Repeat blocks: Repeat (a count) or Repeat While (a condition) ... End Repeat
+- (BOOL)isRepeatActionItem:(id)item {
+    NSString *type = [self actionTypeForItem:item];
+    return [type isEqualToString:@"repeat"] || [type isEqualToString:@"repeat_while"];
+}
+
+- (BOOL)isRepeatWhileActionItem:(id)item {
+    return [[self actionTypeForItem:item] isEqualToString:@"repeat_while"];
+}
+
+- (BOOL)isEndRepeatActionItem:(id)item {
+    return [[self actionTypeForItem:item] isEqualToString:@"end_repeat"];
+}
+
+// A block's first and last rows, If or Repeat: for nesting, moving and deleting whole blocks
+- (BOOL)isBlockStartItem:(id)item {
+    return [self isIfActionItem:item] || [self isRepeatActionItem:item];
+}
+
+- (BOOL)isBlockEndItem:(id)item {
+    return [self isEndIfActionItem:item] || [self isEndRepeatActionItem:item];
+}
+
 - (NSInteger)matchingElseIndexForIfAtIndex:(NSInteger)startIndex {
     if (startIndex < 0 || startIndex >= (NSInteger)self.actions.count) {
         return NSNotFound;
@@ -1658,16 +1689,16 @@ static id g_actionClipboard = nil;
     if (startIndex < 0 || startIndex >= (NSInteger)self.actions.count) {
         return NSNotFound;
     }
-    if (![self isIfActionItem:self.actions[startIndex]]) {
+    if (![self isBlockStartItem:self.actions[startIndex]]) {
         return NSNotFound;
     }
     
     NSInteger depth = 0;
     for (NSInteger idx = startIndex; idx < (NSInteger)self.actions.count; idx++) {
         id item = self.actions[idx];
-        if ([self isIfActionItem:item]) {
+        if ([self isBlockStartItem:item]) {
             depth++;
-        } else if ([self isEndIfActionItem:item]) {
+        } else if ([self isBlockEndItem:item]) {
             depth--;
             if (depth == 0) {
                 return idx;
@@ -1681,16 +1712,16 @@ static id g_actionClipboard = nil;
     if (endIndex < 0 || endIndex >= (NSInteger)self.actions.count) {
         return NSNotFound;
     }
-    if (![self isEndIfActionItem:self.actions[endIndex]]) {
+    if (![self isBlockEndItem:self.actions[endIndex]]) {
         return NSNotFound;
     }
     
     NSInteger depth = 0;
     for (NSInteger idx = endIndex; idx >= 0; idx--) {
         id item = self.actions[idx];
-        if ([self isEndIfActionItem:item]) {
+        if ([self isBlockEndItem:item]) {
             depth++;
-        } else if ([self isIfActionItem:item]) {
+        } else if ([self isBlockStartItem:item]) {
             depth--;
             if (depth == 0) {
                 return idx;
@@ -1706,12 +1737,12 @@ static id g_actionClipboard = nil;
     }
     
     id item = self.actions[index];
-    if ([self isIfActionItem:item]) {
+    if ([self isBlockStartItem:item]) {
         NSInteger endIndex = [self matchingEndIndexForIfAtIndex:index];
         if (endIndex != NSNotFound) {
             return NSMakeRange(index, endIndex - index + 1);
         }
-    } else if ([self isEndIfActionItem:item]) {
+    } else if ([self isBlockEndItem:item]) {
         NSInteger startIndex = [self matchingIfIndexForEndAtIndex:index];
         if (startIndex != NSNotFound) {
             return NSMakeRange(startIndex, index - startIndex + 1);
@@ -1725,15 +1756,15 @@ static id g_actionClipboard = nil;
     NSInteger depth = 0;
     for (NSInteger idx = 0; idx < row; idx++) {
         id item = self.actions[idx];
-        if ([self isIfActionItem:item]) {
+        if ([self isBlockStartItem:item]) {
             depth++;
-        } else if ([self isEndIfActionItem:item]) {
+        } else if ([self isBlockEndItem:item]) {
             depth = MAX(depth - 1, 0);
         }
     }
     
     id current = self.actions[row];
-    if ([self isEndIfActionItem:current] || [self isElseActionItem:current] || [self isElseIfActionItem:current]) {
+    if ([self isBlockEndItem:current] || [self isElseActionItem:current] || [self isElseIfActionItem:current]) {
         return MAX(depth - 1, 0);
     }
     return depth;
@@ -2085,17 +2116,19 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 // Else If belongs to the existing block and must not create another terminator.
 - (void)applyIfAction:(NSDictionary *)ifAction existingIndex:(NSInteger)existingIndex insertIndex:(NSInteger)insertIndex {
     BOOL isElseIf = [[ifAction[@"type"] description].lowercaseString isEqualToString:@"else_if"];
+    // A Repeat While block ends with End Repeat (same condition fields as If)
+    NSDictionary *endMarker = [self isRepeatActionItem:ifAction] ? @{ @"type": @"end_repeat" } : @{ @"type": @"end_if" };
     if (existingIndex != NSNotFound && existingIndex >= 0 && existingIndex < (NSInteger)self.actions.count) {
         self.actions[existingIndex] = ifAction;
     } else if (insertIndex != NSNotFound && insertIndex >= 0 && insertIndex <= (NSInteger)self.actions.count) {
         [self.actions insertObject:ifAction atIndex:insertIndex];
         if (!isElseIf) {
-            [self.actions insertObject:@{ @"type": @"end_if" } atIndex:insertIndex + 1];
+            [self.actions insertObject:endMarker atIndex:insertIndex + 1];
         }
     } else {
         [self.actions addObject:ifAction];
         if (!isElseIf) {
-            [self.actions addObject:@{ @"type": @"end_if" }];
+            [self.actions addObject:endMarker];
         }
     }
     [self saveActions];
@@ -2221,17 +2254,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
                 @"expectedTitle": rangeVal
             };
             
-            if (existingIndex != NSNotFound && existingIndex >= 0 && existingIndex < (NSInteger)strongSelf.actions.count) {
-                strongSelf.actions[existingIndex] = ifAction;
-            } else if (insertIndex != NSNotFound && insertIndex >= 0 && insertIndex <= (NSInteger)strongSelf.actions.count) {
-                [strongSelf.actions insertObject:ifAction atIndex:insertIndex];
-                [strongSelf.actions insertObject:@{ @"type": @"end_if" } atIndex:insertIndex + 1];
-            } else {
-                [strongSelf.actions addObject:ifAction];
-                [strongSelf.actions addObject:@{ @"type": @"end_if" }];
-            }
-            [strongSelf saveActions];
-            [strongSelf.tableView reloadData];
+            [strongSelf applyIfAction:ifAction existingIndex:existingIndex insertIndex:insertIndex];
         }]];
         [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
         [self configurePopoverSourceForAlert:alert];
@@ -2254,17 +2277,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
                 @"expectedTitle": name
             };
             
-            if (existingIndex != NSNotFound && existingIndex >= 0 && existingIndex < (NSInteger)strongSelf.actions.count) {
-                strongSelf.actions[existingIndex] = ifAction;
-            } else if (insertIndex != NSNotFound && insertIndex >= 0 && insertIndex <= (NSInteger)strongSelf.actions.count) {
-                [strongSelf.actions insertObject:ifAction atIndex:insertIndex];
-                [strongSelf.actions insertObject:@{ @"type": @"end_if" } atIndex:insertIndex + 1];
-            } else {
-                [strongSelf.actions addObject:ifAction];
-                [strongSelf.actions addObject:@{ @"type": @"end_if" }];
-            }
-            [strongSelf saveActions];
-            [strongSelf.tableView reloadData];
+            [strongSelf applyIfAction:ifAction existingIndex:existingIndex insertIndex:insertIndex];
             [strongSelf.navigationController popToViewController:strongSelf animated:YES];
         };
         appPicker.suppressAutoPop = YES; // back to this editor, past the condition picker
@@ -2293,17 +2306,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
                 @"expectedValue": value[@"value"] ?: @"",
                 @"expectedTitle": value[@"title"] ?: @"Value"
             };
-            if (existingIndex != NSNotFound && existingIndex >= 0 && existingIndex < (NSInteger)strongSelf.actions.count) {
-                strongSelf.actions[existingIndex] = ifAction;
-            } else if (insertIndex != NSNotFound && insertIndex >= 0 && insertIndex <= (NSInteger)strongSelf.actions.count) {
-                [strongSelf.actions insertObject:ifAction atIndex:insertIndex];
-                [strongSelf.actions insertObject:@{ @"type": @"end_if" } atIndex:insertIndex + 1];
-            } else {
-                [strongSelf.actions addObject:ifAction];
-                [strongSelf.actions addObject:@{ @"type": @"end_if" }];
-            }
-            [strongSelf saveActions];
-            [strongSelf.tableView reloadData];
+            [strongSelf applyIfAction:ifAction existingIndex:existingIndex insertIndex:insertIndex];
         }]];
     }
     
@@ -2313,7 +2316,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 }
 
 - (void)presentIfConditionPickerForIndex:(NSInteger)existingIndex insertIndex:(NSInteger)insertIndex type:(NSString *)type {
-    NSString *title = [type isEqualToString:@"else_if"] ? @"Else If Condition" : @"If Condition";
+    NSString *title = [type isEqualToString:@"else_if"] ? @"Else If Condition" : [type isEqualToString:@"repeat_while"] ? @"Repeat While" : @"If Condition";
     NSDictionary *existing = nil;
     if (existingIndex != NSNotFound && existingIndex >= 0 && existingIndex < (NSInteger)self.actions.count && [self.actions[existingIndex] isKindOfClass:[NSDictionary class]]) {
         existing = self.actions[existingIndex];
@@ -2337,12 +2340,46 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     [self.navigationController pushViewController:picker animated:YES];
 }
 
+// Repeat: how many times. Edits the Repeat at existingIndex, or adds a Repeat block at the end.
+- (void)presentRepeatCountForIndex:(NSInteger)existingIndex {
+    BOOL editing = existingIndex != NSNotFound && existingIndex >= 0 && existingIndex < (NSInteger)self.actions.count;
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Repeat"
+                                                                   message:@"Runs the actions inside this many times (up to 1,000)."
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    NSString *current = editing ? [self.actions[existingIndex][@"count"] description] : @"3";
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
+        textField.placeholder = @"3";
+        textField.text = current;
+        textField.keyboardType = UIKeyboardTypeNumberPad;
+    }];
+    __weak typeof(self) weakSelf = self;
+    [alert addAction:[UIAlertAction actionWithTitle:@"Save" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+        NSInteger count = MAX(1, MIN(1000, [alert.textFields[0].text integerValue]));
+        NSDictionary *repeat = @{ @"type": @"repeat", @"count": @(count) };
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        if (editing) {
+            strongSelf.actions[existingIndex] = repeat;
+        } else {
+            [strongSelf.actions addObject:repeat];
+            [strongSelf.actions addObject:@{ @"type": @"end_repeat" }];
+        }
+        [strongSelf saveActions];
+        [strongSelf.tableView reloadData];
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [self configurePopoverSourceForAlert:alert];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
 - (void)presentIfConditionPickerForIndex:(NSInteger)index {
     NSString *type = @"if";
     if (index != NSNotFound && index >= 0 && index < (NSInteger)self.actions.count) {
         id actionItem = self.actions[index];
         if ([self isElseIfActionItem:actionItem]) {
             type = @"else_if";
+        } else if ([self isRepeatWhileActionItem:actionItem]) {
+            type = @"repeat_while";
         }
     }
     [self presentIfConditionPickerForIndex:index insertIndex:NSNotFound type:type];
@@ -2591,9 +2628,24 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             }
         }
         
+        // Repeat blocks: change the count or condition, and add an If inside
+        if ([self isRepeatActionItem:item] || [self isEndRepeatActionItem:item]) {
+            if ([self isRepeatActionItem:item]) {
+                BOOL isWhile = [self isRepeatWhileActionItem:item];
+                [alert addAction:[UIAlertAction actionWithTitle:isWhile ? @"Edit Condition" : @"Edit Count" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+                    if (isWhile) [self presentIfConditionPickerForIndex:indexPath.row];
+                    else [self presentRepeatCountForIndex:indexPath.row];
+                }]];
+            }
+            [alert addAction:[UIAlertAction actionWithTitle:@"Add Nested If" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+                NSInteger insertIndex = [self isRepeatActionItem:item] ? indexPath.row + 1 : indexPath.row;
+                [self presentIfConditionPickerForIndex:NSNotFound insertIndex:insertIndex type:@"if"];
+            }]];
+        }
+
         // Add Nested If option for regular items inside if blocks
         NSInteger currentIndent = [self indentationLevelForRow:indexPath.row];
-        if (currentIndent > 0 && ![self isIfActionItem:item] && ![self isElseIfActionItem:item] && ![self isElseActionItem:item] && ![self isEndIfActionItem:item]) {
+        if (currentIndent > 0 && ![self isBlockStartItem:item] && ![self isElseIfActionItem:item] && ![self isElseActionItem:item] && ![self isBlockEndItem:item]) {
             [alert addAction:[UIAlertAction actionWithTitle:@"Add Nested If" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
                 [self presentIfConditionPickerForIndex:NSNotFound insertIndex:indexPath.row type:@"if"];
             }]];
@@ -2626,14 +2678,14 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         return destinationIndex;
     }
     
-    BOOL sourceIsControlRow = [self isIfActionItem:sourceItem] || [self isEndIfActionItem:sourceItem];
+    BOOL sourceIsControlRow = [self isBlockStartItem:sourceItem] || [self isBlockEndItem:sourceItem];
     if (sourceIsControlRow) {
         return destinationIndex;
     }
     
     id destinationItem = self.actions[destinationIndex];
-    BOOL destinationIsIf = [self isIfActionItem:destinationItem];
-    BOOL destinationIsEndIf = [self isEndIfActionItem:destinationItem];
+    BOOL destinationIsIf = [self isBlockStartItem:destinationItem];
+    BOOL destinationIsEndIf = [self isBlockEndItem:destinationItem];
     if (!destinationIsIf && !destinationIsEndIf) {
         return destinationIndex;
     }
@@ -2666,8 +2718,10 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         if (dict[@"command"] && [dict[@"command"] isKindOfClass:[NSString class]]) {
             actionData = dict[@"command"];
         } else {
-            if ([self isIfActionItem:actionData] || [self isElseIfActionItem:actionData]) {
+            if ([self isIfActionItem:actionData] || [self isElseIfActionItem:actionData] || [self isRepeatWhileActionItem:actionData]) {
                 [self presentIfConditionPickerForIndex:indexPath.row];
+            } else if ([self isRepeatActionItem:actionData]) {
+                [self presentRepeatCountForIndex:indexPath.row];
             }
             return;
         }
@@ -3500,7 +3554,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         // If / Else If rows can be long ("If Bluetooth Device Connected is …"): wrap to a second line
         cell.textLabel.numberOfLines = wrapLongNames ? 0 : 1;
         cell.textLabel.lineBreakMode = NSLineBreakByTruncatingTail;
-        BOOL isControl = [self isEndIfActionItem:actionItem] || [self isElseActionItem:actionItem];
+        BOOL isControl = [self isBlockEndItem:actionItem] || [self isElseActionItem:actionItem];
         cell.textLabel.textColor = isControl ? [UIColor secondaryLabelColor] : [UIColor labelColor];
         cell.detailTextLabel.text = nil;
         

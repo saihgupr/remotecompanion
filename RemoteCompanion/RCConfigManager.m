@@ -1012,7 +1012,15 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         } else if ([type isEqualToString:@"else"]) {
             return @"Else";
         } else if ([type isEqualToString:@"repeat"]) {
-            return [NSString stringWithFormat:@"Repeat %@", dict[@"count"] ?: @""];
+            NSInteger count = [dict[@"count"] integerValue];
+            return count == 1 ? @"Repeat 1 Time" : [NSString stringWithFormat:@"Repeat %ld Times", (long)count];
+        } else if ([type isEqualToString:@"repeat_while"]) {
+            NSString *conditionTitle = dict[@"conditionTitle"] ?: @"Condition";
+            NSString *expectedTitle = dict[@"expectedTitle"] ?: dict[@"expectedValue"] ?: @"";
+            if ([dict[@"conditionKey"] isEqualToString:@"time_between"]) return [NSString stringWithFormat:@"Repeat While Time is Between %@", expectedTitle];
+            return [NSString stringWithFormat:@"Repeat While %@ is %@", conditionTitle, expectedTitle];
+        } else if ([type isEqualToString:@"end_repeat"]) {
+            return @"End Repeat";
         } else if ([type isEqualToString:@"end"] || [type isEqualToString:@"end_if"]) {
             return @"End If";
         }
@@ -1520,9 +1528,9 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         NSString *type = [[dict[@"type"] description] lowercaseString];
         if ([type isEqualToString:@"if"] || [type isEqualToString:@"else_if"] || [type isEqualToString:@"else"]) {
             return @"arrow.triangle.branch";
-        } else if ([type isEqualToString:@"repeat"]) {
+        } else if ([type isEqualToString:@"repeat"] || [type isEqualToString:@"repeat_while"]) {
             return @"repeat";
-        } else if ([type isEqualToString:@"end"] || [type isEqualToString:@"end_if"]) {
+        } else if ([type isEqualToString:@"end"] || [type isEqualToString:@"end_if"] || [type isEqualToString:@"end_repeat"]) {
             return @"arrow.turn.up.left";
         }
         return @"square.grid.2x2";

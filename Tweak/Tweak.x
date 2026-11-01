@@ -2321,6 +2321,33 @@ static BOOL rc_is_end_if_action_item(id item) {
     return [type isEqualToString:@"end_if"] || [type isEqualToString:@"end"];
 }
 
+// Repeat blocks: "repeat" (count) or "repeat_while" (a condition, as for If) ... "end_repeat"
+static BOOL rc_is_repeat_action_item(id item) {
+    if (![item isKindOfClass:[NSDictionary class]]) return NO;
+    NSString *type = [[((NSDictionary *)item)[@"type"] description] lowercaseString];
+    return [type isEqualToString:@"repeat"] || [type isEqualToString:@"repeat_while"];
+}
+
+static BOOL rc_is_end_repeat_action_item(id item) {
+    if (![item isKindOfClass:[NSDictionary class]]) return NO;
+    return [[[((NSDictionary *)item)[@"type"] description] lowercaseString] isEqualToString:@"end_repeat"];
+}
+
+// The End Repeat of the Repeat at start, or NSNotFound
+static NSInteger rc_matching_end_repeat(NSArray *actions, NSInteger start) {
+    NSInteger depth = 0;
+    for (NSInteger i = start; i < (NSInteger)actions.count; i++) {
+        if (rc_is_repeat_action_item(actions[i])) depth++;
+        else if (rc_is_end_repeat_action_item(actions[i]) && --depth == 0) return i;
+    }
+    return NSNotFound;
+}
+
+// A loop can't run away: at most this many rounds, and a round that took less than the minimum
+// (no delay in it) waits out the rest before the next one
+#define RC_REPEAT_MAX_ROUNDS 1000
+#define RC_REPEAT_MIN_ROUND 0.1
+
 
 
 static NSString *rc_trimmed_uppercase_string(NSString *value) {
@@ -3046,8 +3073,12 @@ static BOOL rc_run_wait(double seconds) {
     return !rc_run_stopped();
 }
 
+static BOOL rc_evaluate_if_condition(NSDictionary *ifAction);
+
 static void rc_execute_action_sequence(NSArray *actions, NSString *triggerKey, BOOL simulationMode) {
     if (![actions isKindOfClass:[NSArray class]] || actions.count == 0) return;
+    // Repeat blocks running, innermost last: @{ start, rounds, roundStart }
+    NSMutableArray<NSMutableDictionary *> *loops = [NSMutableArray array];
     
     for (NSInteger idx = 0; idx < (NSInteger)actions.count; idx++) {
         id actionItem = actions[idx];
@@ -3143,6 +3174,52 @@ static void rc_execute_action_sequence(NSArray *actions, NSString *triggerKey, B
             }
         } else if ([type isEqualToString:@"end_if"] || [type isEqualToString:@"end"]) {
             continue;
+        } else if ([type isEqualToString:@"repeat"] || [type isEqualToString:@"repeat_while"]) {
+            BOOL isWhile = [type isEqualToString:@"repeat_while"];
+            BOOL enter;
+            if (isWhile) {
+                enter = rc_evaluate_if_condition(dictAction);
+                SRLogMin(@"[%@] Repeat While %@ == %@ -> %@", triggerKey, dictAction[@"conditionKey"], dictAction[@"expectedValue"], enter ? @"TRUE" : @"FALSE");
+            } else {
+                enter = [dictAction[@"count"] integerValue] > 0;
+                SRLogMin(@"[%@] Repeat %ld times", triggerKey, (long)[dictAction[@"count"] integerValue]);
+            }
+            if (!enter) {
+                NSInteger end = rc_matching_end_repeat(actions, idx);
+                if (end == NSNotFound) {
+                    SRLog(@"[%@] Missing End Repeat marker; stopping action execution.", triggerKey);
+                    break;
+                }
+                idx = end;
+                continue;
+            }
+            [loops addObject:[@{ @"start": @(idx), @"rounds": @1, @"roundStart": @(CFAbsoluteTimeGetCurrent()) } mutableCopy]];
+        } else if ([type isEqualToString:@"end_repeat"]) {
+            NSMutableDictionary *loop = loops.lastObject;
+            if (!loop) continue; // an End Repeat without its Repeat
+            NSInteger start = [loop[@"start"] integerValue];
+            NSDictionary *repeat = actions[start];
+            NSInteger rounds = [loop[@"rounds"] integerValue];
+            BOOL isWhile = [[[repeat[@"type"] description] lowercaseString] isEqualToString:@"repeat_while"];
+            BOOL again = isWhile ? YES : rounds < [repeat[@"count"] integerValue];
+            if (again && rounds >= RC_REPEAT_MAX_ROUNDS) {
+                SRLogMin(@"[%@] Repeat stopped after %d rounds (the most a loop runs)", triggerKey, RC_REPEAT_MAX_ROUNDS);
+                again = NO;
+            }
+            if (again) {
+                CFTimeInterval took = CFAbsoluteTimeGetCurrent() - [loop[@"roundStart"] doubleValue];
+                if (took < RC_REPEAT_MIN_ROUND) usleep((useconds_t)((RC_REPEAT_MIN_ROUND - took) * 1000000));
+                if (rc_run_stopped()) continue; // the top of the loop ends the run
+                if (isWhile) again = rc_evaluate_if_condition(repeat);
+            }
+            if (again) {
+                loop[@"rounds"] = @(rounds + 1);
+                loop[@"roundStart"] = @(CFAbsoluteTimeGetCurrent());
+                idx = start; // the loop's next step is the block's first action
+            } else {
+                SRLogMin(@"[%@] %@ ended after %ld round%@", triggerKey, isWhile ? @"Repeat While" : @"Repeat", (long)rounds, rounds == 1 ? @"" : @"s");
+                [loops removeLastObject];
+            }
         } else {
             SRLog(@"[%@] Skipping unsupported dictionary action type: %@", triggerKey, type);
         }

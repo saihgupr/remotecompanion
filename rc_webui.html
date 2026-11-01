@@ -3074,7 +3074,9 @@ function nameForCmd(cmd) {
     if (t === 'else_if') return isTime ? `Else If Time is Between ${cmd.expectedTitle||cmd.expectedValue||'Time Range'}` : `Else If ${cmd.conditionTitle||'Condition'} is ${cmd.expectedTitle||'Value'}`;
     if (t === 'else') return 'Else';
     if (t === 'end_if' || t === 'end') return 'End If';
-    if (t === 'repeat') return `Repeat ${cmd.count||''}`;
+    if (t === 'repeat') { const n = parseInt(cmd.count, 10) || 0; return n === 1 ? 'Repeat 1 Time' : `Repeat ${n} Times`; }
+    if (t === 'repeat_while') return (cmd.conditionKey === 'time_between') ? `Repeat While Time is Between ${cmd.expectedTitle||cmd.expectedValue||''}` : `Repeat While ${cmd.conditionTitle||'Condition'} is ${cmd.expectedTitle||'Value'}`;
+    if (t === 'end_repeat') return 'End Repeat';
     return 'Block';
   }
   const toggleInfo = parseToggleCmd(cmd);
@@ -3251,6 +3253,7 @@ function iconForCmd(cmd) {
     const t = (cmd.type||'').toLowerCase();
     if (t === 'if' || t === 'else_if' || t === 'else') return { icon:'arrow_triangle_branch', cls:'icon-purple' };
     if (t === 'end_if' || t === 'end') return { icon:'arrow_turn_up_left', cls:'icon-purple' };
+    if (t === 'end_repeat') return { icon:'arrow_turn_up_left', cls:'icon-green' };
     return { icon:'repeat', cls:'icon-green' };
   }
   const map = {
@@ -3416,6 +3419,8 @@ const ACTION_SECTIONS = [
   ]},
   { title:'Scripting & Logic', actions:[
     { name:'If Condition…',     cmd:'__IF_CONDITION__',icon:'arrow_triangle_branch', needs_input:true },
+    { name:'Repeat…',           cmd:'__REPEAT__',      icon:'repeat', needs_input:true },
+    { name:'Repeat While…',     cmd:'__REPEAT_WHILE__',icon:'repeat', needs_input:true },
     { name:'Delay…',            cmd:'__DELAY__',     icon:'hourglass', needs_input:true },
     { name:'Terminal Command…', cmd:'__CUSTOM__',    icon:'chevron_right_square_fill', needs_input:true },
     { name:'Lua Script…',       cmd:'__LUA_SCRIPT__',icon:'doc_text_fill', needs_input:true },
@@ -4076,7 +4081,7 @@ function renderActionList() {
   actions.forEach((action, idx) => {
     const isCtrl = typeof action === 'object';
     const type   = isCtrl ? (action.type||'').toLowerCase() : null;
-    const isEnd  = type === 'end_if' || type === 'end';
+    const isEnd  = type === 'end_if' || type === 'end' || type === 'end_repeat';
     const isElse = type === 'else';
     const isElseIf = type === 'else_if';
     const isIf   = type === 'if';
@@ -4239,7 +4244,7 @@ function renderActionList() {
     card.appendChild(row);
 
     // Update indent level for subsequent rows
-    if (isIf || type === 'repeat') indent++;
+    if (isIf || type === 'repeat' || type === 'repeat_while') indent++;
     else if (isEnd) indent = Math.max(0, indent - 1);
   });
 
@@ -4462,7 +4467,9 @@ function removeAction(idx) {
   const actions = triggerData(currentKey).actions || [];
   if (idx < 0 || idx >= actions.length) return;
   const action = actions[idx];
-  const isIf = typeof action === 'object' && action !== null && (action.type || '').toLowerCase() === 'if';
+  const startType = typeof action === 'object' && action !== null ? (action.type || '').toLowerCase() : '';
+  // An If or Repeat takes its End marker with it
+  const isIf = startType === 'if' || startType === 'repeat' || startType === 'repeat_while';
 
   if (isIf) {
     let depth = 1;
@@ -4471,9 +4478,9 @@ function removeAction(idx) {
       const a = actions[i];
       if (typeof a === 'object' && a !== null) {
         const t = (a.type || '').toLowerCase();
-        if (t === 'if') {
+        if (t === 'if' || t === 'repeat' || t === 'repeat_while') {
           depth++;
-        } else if (t === 'end_if' || t === 'end') {
+        } else if (t === 'end_if' || t === 'end' || t === 'end_repeat') {
           depth--;
           if (depth === 0) {
             matchingEndIdx = i;
@@ -5091,13 +5098,13 @@ function editAction(idx) {
   const act = actions[idx];
   if (typeof act === 'object') {
     const type = (act.type||'').toLowerCase();
-    if (type === 'if' || type === 'else_if') {
+    if (type === 'if' || type === 'else_if' || type === 'repeat_while') {
       openCondPicker(idx);
     }
     else if (type === 'repeat') {
-      showDialog('Edit Repeat Count', 'Times to loop:', String(act.count||1), 'Save', val => {
+      showDialog('Repeat', 'Runs the actions inside this many times (up to 1,000):', String(act.count||1), 'Save', val => {
         if (!val) return;
-        act.count = parseInt(val, 10) || 1;
+        act.count = Math.max(1, Math.min(1000, parseInt(val, 10) || 1));
         saveConfig(); renderActionList();
       }, true);
     }
@@ -5447,7 +5454,21 @@ function selectPickerAction(act) {
       if (val) addActionToCurrent(`airplay connect ${val}`);
     });
   } else if (c === '__IF_CONDITION__') {
+    condPickerNewType = 'if';
     openCondPicker(null);
+  } else if (c === '__REPEAT_WHILE__') {
+    condPickerNewType = 'repeat_while';
+    openCondPicker(null);
+  } else if (c === '__REPEAT__') {
+    showDialog('Repeat', 'Runs the actions inside this many times (up to 1,000):', '3', 'Add', val => {
+      if (!val) return;
+      const actions = triggerData(currentKey).actions || [];
+      actions.push({ type: 'repeat', count: Math.max(1, Math.min(1000, parseInt(val, 10) || 1)) });
+      actions.push({ type: 'end_repeat' });
+      triggerData(currentKey).actions = actions;
+      saveConfig();
+      renderActionList();
+    }, true);
   } else if (c === '__SET_FLASHLIGHT__') {
     showDialog('Flashlight Intensity', 'Brightness percentage (1-100):', '100', 'Add', val => {
       if (val) addActionToCurrent(`flashlight ${val}`);
@@ -5878,9 +5899,12 @@ function renderCondPicker() {
   });
 }
 
+// The kind of block a new condition makes: 'if', or 'repeat_while' (Repeat While)
+let condPickerNewType = 'if';
+
 function finishIfCondition(def, value, valueTitle, editIdx) {
   const actions = triggerData(currentKey).actions || [];
-  let existingType = 'if';
+  let existingType = editIdx === null ? condPickerNewType : 'if';
   if (editIdx !== null && actions[editIdx] && actions[editIdx].type) {
     existingType = actions[editIdx].type;
   }
@@ -5899,8 +5923,9 @@ function finishIfCondition(def, value, valueTitle, editIdx) {
     actions[editIdx] = item;
   } else {
     actions.push(item);
-    actions.push({ type: 'end_if' });
+    actions.push({ type: existingType === 'repeat_while' ? 'end_repeat' : 'end_if' });
   }
+  condPickerNewType = 'if';
   triggerData(currentKey).actions = actions;
   saveConfig();
   renderActionList();
@@ -6894,7 +6919,7 @@ function promptManualHAEntity() {
 // toggle, match, exclude }. "match"/"exclude" patterns ending in " ", ":" or "-"
 // are prefixes; anything else must equal the (lowercased) command.
 // Not offered: entries that don't run an action of their own, and Set Flashlight (covered by Flashlight)
-const BANNER_SKIP = new Set(['__IF_CONDITION__', '__DELAY__', '__TOAST__', '__SET_FLASHLIGHT__']);
+const BANNER_SKIP = new Set(['__IF_CONDITION__', '__REPEAT__', '__REPEAT_WHILE__', '__DELAY__', '__TOAST__', '__SET_FLASHLIGHT__']);
 // The app's names for the same actions, so both UIs share one setting
 const BANNER_ID_ALIASES = { '__SHORTCUT__': '__SHORTCUT_PICKER__', 'queuealbum': 'queue album', 'queueartist': 'queue artist',
   'shuffleall': 'shuffle all songs', 'deletesong': 'delete current song' };
