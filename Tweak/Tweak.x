@@ -2290,6 +2290,60 @@ static void rc_watch_ping_received(CFNotificationCenterRef center, void *observe
 }
 NSString *RCNFCScannerCommand(NSString *what);
 
+// Find My Sound trigger: Play Sound from Find My on another device or iCloud.com (see
+// RCFindMyPing.m, loaded into findmydeviced). The sound still plays. The daemon's sandbox keeps it
+// from posting notifications, so it writes a line to a file ("ready <count>", "ping <method>"),
+// and this watches the file: nothing runs until it changes.
+#define kRCFindMySignal "/var/mobile/tmp/rc_findmy_signal"
+static dispatch_source_t g_findMySource = nil;
+
+static void rc_findmy_signal_changed(void) {
+    NSString *line = [[NSString stringWithContentsOfFile:@kRCFindMySignal encoding:NSUTF8StringEncoding error:nil]
+                      stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if ([line hasPrefix:@"ready "]) {
+        SRLogMin(@"[FindMy] findmydeviced loaded: watching %@ methods for Play Sound", [line substringFromIndex:6]);
+    } else if ([line hasPrefix:@"ping "]) {
+        SRLogMin(@"[FindMy] Play Sound from Find My (seen by %@)", [line substringFromIndex:5]);
+        RCExecuteTrigger(@"trigger_device_findmy_sound");
+    }
+}
+
+// Tells the daemon whether a Play Sound should be silent: the trigger has actions and its Keep
+// Default Action is switched off (it's on unless set otherwise)
+#define kRCFindMyQuiet "/var/mobile/tmp/rc_findmy_quiet"
+static void RCFindMyConfigChanged(void) {
+    BOOL quiet = NO;
+    if (RC_MasterEnabled()) {
+        NSDictionary *triggers = g_triggerConfig[@"triggers"];
+        NSDictionary *trigger = [triggers isKindOfClass:[NSDictionary class]] ? triggers[@"trigger_device_findmy_sound"] : nil;
+        if ([trigger isKindOfClass:[NSDictionary class]] && [trigger[@"enabled"] boolValue]) {
+            id keep = trigger[@"keepDefault"];
+            NSArray *actions = trigger[@"actions"];
+            quiet = (keep && ![keep boolValue]) && [actions isKindOfClass:[NSArray class]] && actions.count > 0;
+        }
+    }
+    int fd = open(kRCFindMyQuiet, O_WRONLY | O_TRUNC | O_CREAT, 0666);
+    if (fd < 0) return;
+    fchmod(fd, 0666);
+    write(fd, quiet ? "1" : "0", 1);
+    close(fd);
+}
+
+static void rc_findmy_start_watching(void) {
+    // The file must already exist to be watched; the daemon only rewrites it
+    int fd = open(kRCFindMySignal, O_RDONLY | O_CREAT, 0666);
+    if (fd < 0) {
+        SRLogMin(@"[FindMy] Can't watch %s - no Find My Sound trigger", kRCFindMySignal);
+        return;
+    }
+    fchmod(fd, 0666);
+    g_findMySource = dispatch_source_create(DISPATCH_SOURCE_TYPE_VNODE, (uintptr_t)fd,
+                                            DISPATCH_VNODE_WRITE | DISPATCH_VNODE_EXTEND, dispatch_get_main_queue());
+    dispatch_source_set_event_handler(g_findMySource, ^{ rc_findmy_signal_changed(); });
+    dispatch_source_set_cancel_handler(g_findMySource, ^{ close(fd); });
+    dispatch_resume(g_findMySource);
+}
+
 static void config_changed_callback(CFNotificationCenterRef center, void *observer,
                                     CFStringRef name, const void *object, CFDictionaryRef userInfo) {
     SRLog(@"Config changed notification received.");
@@ -2305,6 +2359,7 @@ static void config_changed_callback(CFNotificationCenterRef center, void *observ
             update_edge_gestures(); 
             RCNFCConfigChanged();
             RCWatchPingConfigChanged();
+            RCFindMyConfigChanged();
             SRLog(@"Edge gestures updated. Checking schedule timer...");
             start_schedule_timer();
             SRLog(@"Checking MQTT subscriber...");
@@ -5361,6 +5416,8 @@ static void register_system_event_observers() {
                                     CFSTR(kRCWatchPing), NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
     if (!g_triggerConfig) load_trigger_config();
     RCWatchPingConfigChanged();
+    RCFindMyConfigChanged();
+    rc_findmy_start_watching();
 
     // Media State changes (Darwin Notifications)
     CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), 

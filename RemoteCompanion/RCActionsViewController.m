@@ -779,7 +779,10 @@ static id g_actionClipboard = nil;
 - (void)setKeepsDefaultAction:(BOOL)keep {
     RCConfigManager *config = [RCConfigManager sharedManager];
     NSMutableDictionary *data = [[config triggerDataForKey:_triggerKey] mutableCopy] ?: [NSMutableDictionary dictionary];
-    if (keep) data[@"keepDefault"] = @YES; else [data removeObjectForKey:@"keepDefault"];
+    // Find My Sound keeps its sound unless switched off, so off is the one written down
+    if ([_triggerKey isEqualToString:@"trigger_device_findmy_sound"]) {
+        if (keep) [data removeObjectForKey:@"keepDefault"]; else data[@"keepDefault"] = @NO;
+    } else if (keep) data[@"keepDefault"] = @YES; else [data removeObjectForKey:@"keepDefault"];
     [config updateTrigger:_triggerKey withData:data];
     self.moreButton.menu = [self moreMenu];
 }
@@ -856,10 +859,11 @@ static id g_actionClipboard = nil;
     // Home button the Accessibility Shortcut, App Switcher, Siri and screenshot, otherwise Siri, the
     // Accessibility Shortcut, a screenshot and Wallet
     NSArray *keepsDefault = [RCConfigManager hasHomeButton]
-        ? @[@"trigger_watch_ping", @"trigger_watch_ping_hold", @"trigger_home_triple_click", @"trigger_home_double_click", @"trigger_home_hold", @"trigger_home_power"]
-        : @[@"trigger_watch_ping", @"trigger_watch_ping_hold", @"power_long_press", @"power_triple_click", @"power_volume_up", @"power_double_tap"];
+        ? @[@"trigger_device_findmy_sound", @"trigger_watch_ping", @"trigger_watch_ping_hold", @"trigger_home_triple_click", @"trigger_home_double_click", @"trigger_home_hold", @"trigger_home_power"]
+        : @[@"trigger_device_findmy_sound", @"trigger_watch_ping", @"trigger_watch_ping_hold", @"power_long_press", @"power_triple_click", @"power_volume_up", @"power_double_tap"];
     if ([keepsDefault containsObject:_triggerKey]) {
-        BOOL keep = [[[RCConfigManager sharedManager] triggerDataForKey:_triggerKey][@"keepDefault"] boolValue];
+        id stored = [[RCConfigManager sharedManager] triggerDataForKey:_triggerKey][@"keepDefault"];
+        BOOL keep = stored ? [stored boolValue] : [_triggerKey isEqualToString:@"trigger_device_findmy_sound"];
         UIAction *sound = [UIAction actionWithTitle:@"Keep Default Action" image:[UIImage systemImageNamed:@"arrow.uturn.backward.circle"] identifier:nil handler:^(__kindof UIAction *a) {
             [weakSelf setKeepsDefaultAction:!keep];
         }];

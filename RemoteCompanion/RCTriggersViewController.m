@@ -78,6 +78,7 @@
     if ([triggerKey isEqualToString:@"shake"]) return @"waveform.path.ecg";
     if ([triggerKey isEqualToString:@"trigger_power_connect"]) return @"bolt.fill";
     if ([triggerKey isEqualToString:@"trigger_power_disconnect"]) return @"bolt.slash.fill";
+    if ([triggerKey isEqualToString:@"trigger_device_findmy_sound"]) return @"location.circle.fill";
     if ([triggerKey isEqualToString:@"trigger_carplay_connect"]) return @"car.fill";
     if ([triggerKey isEqualToString:@"trigger_carplay_disconnect"]) return @"car";
     if ([triggerKey isEqualToString:@"trigger_device_lock"]) return @"lock.fill";
@@ -382,6 +383,9 @@
     if ([configuredKeys containsObject:@"trigger_carplay_disconnect"]) {
         [deviceStateKeys addObject:@"trigger_carplay_disconnect"];
     }
+    if ([configuredKeys containsObject:@"trigger_device_findmy_sound"]) {
+        [deviceStateKeys addObject:@"trigger_device_findmy_sound"];
+    }
     if ([configuredKeys containsObject:@"trigger_media_play"]) {
         [deviceStateKeys addObject:@"trigger_media_play"];
     }
@@ -504,6 +508,7 @@
                              @[@"trigger_power_disconnect", @"Power Disconnected", @"bolt.slash.fill", @"Device"],
                              @[@"trigger_carplay_connect", @"CarPlay Connected", @"car.fill", @"Device"],
                              @[@"trigger_carplay_disconnect", @"CarPlay Disconnected", @"car", @"Device"],
+                             @[@"trigger_device_findmy_sound", @"Find My Sound", @"location.circle.fill", @"Device"],
                              @[@"trigger_media_play", @"Media Playing", @"play.fill", @"Media"],
                              @[@"trigger_media_pause", @"Media Paused", @"pause.fill", @"Media"],
                              @[@"trigger_media_track_change", @"Media Track Changed", @"forward.fill", @"Media"],

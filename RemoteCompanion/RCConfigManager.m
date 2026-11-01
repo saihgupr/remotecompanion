@@ -778,6 +778,7 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         @"trigger_device_unlock": @"Device Unlocked",
         @"trigger_power_connect": @"Power Connected",
         @"trigger_power_disconnect": @"Power Disconnected",
+        @"trigger_device_findmy_sound": @"Find My Sound",
         @"trigger_carplay_connect": @"CarPlay Connected",
         @"trigger_carplay_disconnect": @"CarPlay Disconnected",
         @"trigger_media_play": @"Media Playing",
