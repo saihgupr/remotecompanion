@@ -1,6 +1,10 @@
 #import <UIKit/UIKit.h>
 
-@interface RCTriggersViewController : UITableViewController
+// The Triggers screen: a table (List) or a grid of tiles (Compact), chosen in Settings
+@interface RCTriggersViewController : UIViewController <UITableViewDataSource, UITableViewDelegate>
+@property (nonatomic, strong) UITableView *tableView;
+@property (nonatomic, strong) UIRefreshControl *refreshControl;
+- (instancetype)initWithStyle:(UITableViewStyle)style;
 - (void)openSettings;
 - (void)addNewItem;
 - (void)openTriggerWithKey:(NSString *)triggerKey;

@@ -79,6 +79,9 @@ static NSArray<NSArray<NSDictionary *> *> *RCBannerCatalog(NSArray<NSString *> *
     self.collectionView.backgroundColor = bg;
     self.collectionView.alwaysBounceVertical = YES;
     [self.collectionView registerClass:[RCActionTileCell class] forCellWithReuseIdentifier:@"Tile"];
+    [self.collectionView registerClass:[RCActionRowCell class] forCellWithReuseIdentifier:@"Row"];
+    // List or Compact (Settings), followed while open
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(layoutChanged:) name:RCLayoutChangedNotification object:nil];
     [self.collectionView registerClass:[RCActionGridHeader class] forSupplementaryViewOfKind:UICollectionElementKindSectionHeader withReuseIdentifier:@"Header"];
     [self.collectionView registerClass:[RCActionGridHeader class] forSupplementaryViewOfKind:UICollectionElementKindSectionFooter withReuseIdentifier:@"Footer"];
 
@@ -243,9 +246,27 @@ static NSString *const RCBannersNote = @"Checked actions show a banner whenever 
     return self.displaySections[section].count;
 }
 
+- (BOOL)compact {
+    return RCLayoutIsCompact(RCLayoutBanners);
+}
+
+- (void)layoutChanged:(NSNotification *)note {
+    [self.collectionView.collectionViewLayout invalidateLayout];
+    [self.collectionView reloadData];
+}
+
 - (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView cellForItemAtIndexPath:(NSIndexPath *)indexPath {
-    RCActionTileCell *cell = [collectionView dequeueReusableCellWithReuseIdentifier:@"Tile" forIndexPath:indexPath];
     NSDictionary *item = self.displaySections[indexPath.section][indexPath.item];
+    if (![self compact]) {
+        // List: a row with a checkmark, in a rounded card per section
+        RCActionRowCell *row = [collectionView dequeueReusableCellWithReuseIdentifier:@"Row" forIndexPath:indexPath];
+        UIImage *rowImage = [item[@"image"] isKindOfClass:[UIImage class]] ? item[@"image"] : nil;
+        [row setName:item[@"name"] icon:item[@"icon"] image:rowImage];
+        row.checked = [self isChecked:item[@"command"]];
+        [row setFirst:indexPath.item == 0 last:indexPath.item == (NSInteger)self.displaySections[indexPath.section].count - 1];
+        return row;
+    }
+    RCActionTileCell *cell = [collectionView dequeueReusableCellWithReuseIdentifier:@"Tile" forIndexPath:indexPath];
     [cell setName:item[@"name"] icon:item[@"icon"]];
     cell.checked = [self isChecked:item[@"command"]];
     return cell;
@@ -261,7 +282,11 @@ static NSString *const RCBannersNote = @"Checked actions show a banner whenever 
 }
 
 - (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout sizeForItemAtIndexPath:(NSIndexPath *)indexPath {
-    return RCActionTileSize(collectionView.bounds.size.width);
+    return [self compact] ? RCActionTileSize(collectionView.bounds.size.width) : RCActionRowSize(collectionView.bounds.size.width, 48);
+}
+
+- (CGFloat)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout minimumLineSpacingForSectionAtIndex:(NSInteger)section {
+    return [self compact] ? ((UICollectionViewFlowLayout *)layout).minimumLineSpacing : 0; // a list's rows touch
 }
 
 - (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout referenceSizeForHeaderInSection:(NSInteger)section {

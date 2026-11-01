@@ -91,6 +91,9 @@
     [self rebuildSections];
     
     [self.collectionView registerClass:[RCActionTileCell class] forCellWithReuseIdentifier:@"ActionTile"];
+    [self.collectionView registerClass:[RCActionRowCell class] forCellWithReuseIdentifier:@"ActionRow"];
+    // List or Compact (Settings), followed while open
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(layoutChanged:) name:RCLayoutChangedNotification object:nil];
     [self.collectionView registerClass:[RCActionGridHeader class] forSupplementaryViewOfKind:UICollectionElementKindSectionHeader withReuseIdentifier:@"Header"];
     
     [self applyTweaks];
@@ -420,6 +423,15 @@
     [self.collectionView.collectionViewLayout invalidateLayout];
 }
 
+- (BOOL)compact {
+    return RCLayoutIsCompact(RCLayoutActionPicker);
+}
+
+- (void)layoutChanged:(NSNotification *)note {
+    [self.collectionView.collectionViewLayout invalidateLayout];
+    [self.collectionView reloadData];
+}
+
 // A tile isn't left looking picked after its popup is cancelled
 - (void)deselectTiles {
     for (NSIndexPath *path in self.collectionView.indexPathsForSelectedItems) [self.collectionView deselectItemAtIndexPath:path animated:YES];
@@ -481,6 +493,19 @@ static BOOL RCPickerActionOpensMore(NSString *command) {
 }
 
 - (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView cellForItemAtIndexPath:(NSIndexPath *)indexPath {
+    if (![self compact]) {
+        // List: a row, in a rounded card per section
+        RCActionRowCell *row = [collectionView dequeueReusableCellWithReuseIdentifier:@"ActionRow" forIndexPath:indexPath];
+        NSDictionary *action = [self actionAtIndexPath:indexPath];
+        NSString *icon = action[@"icon"];
+        if (@available(iOS 15.0, *)) {} else if ([icon isEqualToString:@"ear.badge.checkmark"]) icon = @"ear";
+        UIImage *custom = [action[@"image"] isKindOfClass:[UIImage class]] ? action[@"image"] : nil;
+        [row setName:action[@"name"] icon:icon image:custom];
+        row.opensMore = RCPickerActionOpensMore(action[@"command"]);
+        NSInteger count = [collectionView numberOfItemsInSection:indexPath.section];
+        [row setFirst:indexPath.item == 0 last:indexPath.item == count - 1];
+        return row;
+    }
     RCActionTileCell *cell = [collectionView dequeueReusableCellWithReuseIdentifier:@"ActionTile" forIndexPath:indexPath];
     NSDictionary *action = [self actionAtIndexPath:indexPath];
     NSString *icon = action[@"icon"];
@@ -497,7 +522,11 @@ static BOOL RCPickerActionOpensMore(NSString *command) {
 }
 
 - (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout sizeForItemAtIndexPath:(NSIndexPath *)indexPath {
-    return RCActionTileSize(collectionView.bounds.size.width);
+    return [self compact] ? RCActionTileSize(collectionView.bounds.size.width) : RCActionRowSize(collectionView.bounds.size.width, 56);
+}
+
+- (CGFloat)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout minimumLineSpacingForSectionAtIndex:(NSInteger)section {
+    return [self compact] ? ((UICollectionViewFlowLayout *)layout).minimumLineSpacing : 0; // a list's rows touch
 }
 
 - (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout referenceSizeForHeaderInSection:(NSInteger)section {

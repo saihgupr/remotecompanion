@@ -14,6 +14,9 @@
 #import "RCScheduledTriggerViewController.h"
 #import "RCMQTTTriggerViewController.h"
 #import "RCCategoryBar.h"
+#import "RCActionTile.h"
+#import "RCTriggersGrid.h"
+#import "RCTriggerIcons.h"
 #import "RCServerClient.h"
 
 #define kSimulateNotificationPrefix "com.pizzaman.rc.simulate."
@@ -29,7 +32,13 @@
 }
 @end
 
-@interface RCTriggersViewController ()
+@interface RCTriggersViewController () <RCTriggersGridSource>
+// Compact: the grid, its pull-to-refresh, and the bar buttons without Edit
+@property (nonatomic, strong) RCTriggersGrid *grid;
+@property (nonatomic, strong) UIRefreshControl *gridRefresh;
+@property (nonatomic, assign) BOOL pausedByAction; // Resume shows at the top left
+@property (nonatomic, strong) UIBarButtonItem *resumeItem;
+@property (nonatomic, assign) UITableViewStyle tableStyle;
 @property (nonatomic, strong) NSArray<NSArray<NSString *> *> *sections;
 @property (nonatomic, strong) NSArray<NSString *> *sectionTitles;
 // Category bar: the section shown on its own, or nil for all. Kept by title because
@@ -41,6 +50,23 @@
 @end
 
 @implementation RCTriggersViewController
+
+- (instancetype)initWithStyle:(UITableViewStyle)style {
+    self = [super initWithNibName:nil bundle:nil];
+    if (self) _tableStyle = style;
+    return self;
+}
+
+// The table (List) fills the view; the grid (Compact) is added beside it in viewDidLoad
+- (void)loadView {
+    UIView *view = [[UIView alloc] initWithFrame:UIScreen.mainScreen.bounds];
+    self.tableView = [[UITableView alloc] initWithFrame:view.bounds style:self.tableStyle];
+    self.tableView.dataSource = self;
+    self.tableView.delegate = self;
+    self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [view addSubview:self.tableView];
+    self.view = view;
+}
 
 // Helper to get short friendly names for command strings
 - (NSString *)nameForCommand:(NSString *)cmd truncate:(BOOL)shouldTruncate {
@@ -132,6 +158,7 @@
     self.categoryBar.onSelect = ^(NSInteger index) {
         weakSelf.selectedCategoryTitle = (index >= 0 && index < (NSInteger)weakSelf.sectionTitles.count) ? weakSelf.sectionTitles[index] : nil;
         [weakSelf.tableView reloadData];
+        [weakSelf.grid reload];
     };
     [self.categoryBar attachToTableView:self.tableView];
 
@@ -139,6 +166,7 @@
     self.refreshControl = [[UIRefreshControl alloc] init];
     self.refreshControl.tintColor = [UIColor systemGrayColor];
     [self.refreshControl addTarget:self action:@selector(handleRefresh) forControlEvents:UIControlEventValueChanged];
+    self.tableView.refreshControl = self.refreshControl;
 
     // Edit button will be shown/hidden based on favorites
 
@@ -162,7 +190,75 @@
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(wrapLongNamesSettingChanged:) name:@"RCWrapLongNamesSettingChanged" object:nil];
                                                
     [self setupFooterView];
+    [self setupGrid];
     [self applyTweaks];
+}
+
+#pragma mark - Layout (List or Compact)
+
+- (BOOL)compactLayout {
+    return RCLayoutIsCompact(RCLayoutTriggers);
+}
+
+- (UIScrollView *)activeScrollView {
+    return [self compactLayout] ? self.grid.collectionView : self.tableView;
+}
+
+- (void)setupGrid {
+    self.grid = [[RCTriggersGrid alloc] initWithSource:self];
+    UICollectionView *collection = self.grid.collectionView;
+    collection.frame = self.view.bounds;
+    collection.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [self.view addSubview:collection];
+    self.gridRefresh = [[UIRefreshControl alloc] init];
+    self.gridRefresh.tintColor = [UIColor systemGrayColor];
+    [self.gridRefresh addTarget:self action:@selector(handleRefresh) forControlEvents:UIControlEventValueChanged];
+    collection.refreshControl = self.gridRefresh;
+    // The same footer (name and version) under the grid
+    UIView *tableFooter = self.tableView.tableFooterView;
+    [self setupFooterView];
+    self.grid.footerView = self.tableView.tableFooterView;
+    self.tableView.tableFooterView = tableFooter;
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(layoutSettingChanged:) name:RCLayoutChangedNotification object:nil];
+    [self applyLayout];
+}
+
+// The top left: Edit in Compact, and Resume while button triggers are paused by the action
+- (void)updateLeftItems {
+    NSMutableArray *items = [NSMutableArray array];
+    if ([self compactLayout] && self.grid) [items addObject:self.editButtonItem];
+    if (self.pausedByAction) {
+        if (!self.resumeItem) self.resumeItem = [[UIBarButtonItem alloc] initWithTitle:@"Resume" style:UIBarButtonItemStylePlain target:self action:@selector(resumeButtonTriggers)];
+        [items addObject:self.resumeItem];
+    }
+    self.navigationItem.leftBarButtonItems = items;
+}
+
+- (void)layoutSettingChanged:(NSNotification *)note {
+    if ([note.object isEqual:RCLayoutTriggers]) [self applyLayout];
+}
+
+// Shows the table or the grid, with the category bar on it; Edit comes with the grid
+- (void)applyLayout {
+    BOOL compact = [self compactLayout];
+    // Edit ends on both: the setting has already changed, so setEditing: alone would end the wrong one
+    if (self.editing) [super setEditing:NO animated:NO];
+    self.grid.editing = NO;
+    [self.tableView setEditing:NO animated:NO];
+    UIScrollView *active = compact ? self.grid.collectionView : self.tableView;
+    UIScrollView *other = compact ? (UIScrollView *)self.tableView : self.grid.collectionView;
+    [self.categoryBar detachFromScrollView:other];
+    if (self.categoryBar.superview != active) [self.categoryBar attachToScrollView:active];
+    active.hidden = NO;
+    other.hidden = YES;
+    // The large title follows the first scroll view
+    [self.view sendSubviewToBack:other];
+    [self.view sendSubviewToBack:active];
+    if (@available(iOS 15.0, *)) [self setContentScrollView:active forEdge:NSDirectionalRectEdgeAll];
+    [self updateLeftItems];
+    [self.tableView reloadData];
+    [self.grid reload];
+    [self.categoryBar layoutInScrollView:active];
 }
 
 - (void)handleTweaksChanged:(NSNotification *)note {
@@ -179,7 +275,10 @@
     self.view.backgroundColor = [cm tweakColorForKey:@"mainBackground" defaultVal:0.09];
     self.navigationController.navigationBar.backgroundColor = [cm tweakColorForKey:@"navBar" defaultVal:0.09];
     self.tableView.separatorColor = [cm tweakColorForKey:@"separators" defaultVal:0.30];
+    self.tableView.backgroundColor = self.view.backgroundColor;
+    self.grid.collectionView.backgroundColor = self.view.backgroundColor;
     [self.tableView reloadData];
+    [self.grid reload];
 }
 
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
@@ -256,6 +355,7 @@
     
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [self.refreshControl endRefreshing];
+        [self.gridRefresh endRefreshing];
     });
 }
 
@@ -296,7 +396,8 @@
         prompt = @"Button triggers paused by another tweak";
     }
     self.navigationItem.prompt = prompt;
-    self.navigationItem.leftBarButtonItem = until ? [[UIBarButtonItem alloc] initWithTitle:@"Resume" style:UIBarButtonItemStylePlain target:self action:@selector(resumeButtonTriggers)] : nil;
+    self.pausedByAction = until != 0;
+    [self updateLeftItems];
 }
 
 - (void)resumeButtonTriggers {
@@ -467,11 +568,14 @@
     [self updatePauseState]; // the left button is Resume while paused, otherwise none
 
     [self.tableView reloadData];
+    [self.grid reload];
 }
 
 
 - (void)setEditing:(BOOL)editing animated:(BOOL)animated {
     [super setEditing:editing animated:animated];
+    if ([self compactLayout]) self.grid.editing = editing;
+    else [self.tableView setEditing:editing animated:animated];
     UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
     [haptic impactOccurred];
 }
@@ -725,6 +829,11 @@
     if (!indexPath) return;
     
     NSString *triggerKey = [self triggerKeyAtIndexPath:indexPath];
+    [self runTriggerNow:triggerKey view:[self.tableView cellForRowAtIndexPath:indexPath]];
+}
+
+// Long press: runs the trigger now (as if it had fired), showing it on its row or tile
+- (void)runTriggerNow:(NSString *)triggerKey view:(UIView *)view {
     
     RCConfigManager *config = [RCConfigManager sharedManager];
     NSArray *actions = [config actionsForTrigger:triggerKey];
@@ -741,11 +850,17 @@
     UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
     [haptic impactOccurred];
     
-    UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
-    [cell setHighlighted:YES animated:YES];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [cell setHighlighted:NO animated:YES];
-    });
+    if ([view isKindOfClass:[UITableViewCell class]]) {
+        UITableViewCell *cell = (UITableViewCell *)view;
+        [cell setHighlighted:YES animated:YES];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [cell setHighlighted:NO animated:YES];
+        });
+    } else {
+        [UIView animateWithDuration:0.15 animations:^{ view.alpha = 0.5; } completion:^(BOOL done) {
+            [UIView animateWithDuration:0.25 animations:^{ view.alpha = 1; }];
+        }];
+    }
     
     NSString *notificationName = [NSString stringWithFormat:@"%s%@", kSimulateNotificationPrefix, triggerKey];
     
@@ -761,7 +876,7 @@
 
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
-    [self.categoryBar layoutInScrollView:self.tableView];
+    [self.categoryBar layoutInScrollView:[self activeScrollView]];
 
     // The card backgrounds are drawn for the cell's width when it's displayed: redraw the
     // visible ones when the width changes (rotation), or they keep the old width
@@ -849,7 +964,7 @@
     
     // Add Icon with tint based on section or type?
     // Using dark gray tint for a "premium" but subtle look
-    UIImage *icon = [UIImage systemImageNamed:[RCTriggersViewController iconNameForTrigger:triggerKey]];
+    UIImage *icon = [self appIconForTrigger:triggerKey side:29] ?: RCTriggerIconImage(triggerKey, 22) ?: RCTriggerSymbolImage([RCTriggersViewController iconNameForTrigger:triggerKey], 22);
     cell.imageView.image = icon;
     cell.imageView.tintColor = [UIColor systemGrayColor];
 
@@ -926,7 +1041,7 @@
     NSString *triggerKey = [self triggerKeyAtIndexPath:indexPath];
 
     // Only allow delete for NFC, WiFi, BT, App, Notif, Sched, MQTT, Device State, Multi-Finger triggers
-    if (![triggerKey hasPrefix:@"nfc_"] && ![triggerKey hasPrefix:@"wifi_"] && ![triggerKey hasPrefix:@"bt_"] && ![triggerKey hasPrefix:@"app_launch_"] && ![triggerKey hasPrefix:@"app_exit_"] && ![triggerKey hasPrefix:@"output_"] && ![triggerKey hasPrefix:@"notif_"] && ![triggerKey hasPrefix:@"notify_"] && ![triggerKey hasPrefix:@"sched_"] && ![triggerKey hasPrefix:@"mqtt_"] && ![triggerKey hasPrefix:@"mqtt_sub_"] && ![triggerKey hasPrefix:@"trigger_device_"] && ![triggerKey hasPrefix:@"trigger_media_"] && ![triggerKey hasPrefix:@"trigger_power_"] && ![triggerKey hasPrefix:@"trigger_carplay_"] && ![triggerKey hasPrefix:@"trigger_watch_"] && ![triggerKey containsString:@"two_finger"]) {
+    if (![self canDeleteTrigger:triggerKey]) {
         return [UISwipeActionsConfiguration configurationWithActions:@[]];
     }
 
@@ -981,6 +1096,119 @@
     NSMutableArray *mutableSections = [_sections mutableCopy];
     mutableSections[realSection] = sectionData;
     _sections = mutableSections;
+}
+
+#pragma mark - Deleting, app icons
+
+// The triggers that can be deleted: the ones made for a tag, network, device, app, notification,
+// schedule, topic or state (the button and gesture triggers are always there)
+- (BOOL)canDeleteTrigger:(NSString *)triggerKey {
+    return !(![triggerKey hasPrefix:@"nfc_"] && ![triggerKey hasPrefix:@"wifi_"] && ![triggerKey hasPrefix:@"bt_"] && ![triggerKey hasPrefix:@"app_launch_"] && ![triggerKey hasPrefix:@"app_exit_"] && ![triggerKey hasPrefix:@"output_"] && ![triggerKey hasPrefix:@"notif_"] && ![triggerKey hasPrefix:@"notify_"] && ![triggerKey hasPrefix:@"sched_"] && ![triggerKey hasPrefix:@"mqtt_"] && ![triggerKey hasPrefix:@"mqtt_sub_"] && ![triggerKey hasPrefix:@"trigger_device_"] && ![triggerKey hasPrefix:@"trigger_media_"] && ![triggerKey hasPrefix:@"trigger_power_"] && ![triggerKey hasPrefix:@"trigger_carplay_"] && ![triggerKey hasPrefix:@"trigger_watch_"] && ![triggerKey containsString:@"two_finger"]);
+}
+
+// A trigger's own picture (an add-on's), or nil
+- (UIImage *)customIconForTrigger:(NSString *)triggerKey {
+    return nil;
+}
+
+// An App Launch or App Exit trigger's app icon (its first app's), or nil
+- (UIImage *)appIconForTrigger:(NSString *)triggerKey side:(CGFloat)side {
+    for (NSString *prefix in @[@"app_launch_", @"app_exit_"]) {
+        if ([triggerKey hasPrefix:prefix]) return RCAppIconImage([triggerKey substringFromIndex:prefix.length], side);
+    }
+    return nil;
+}
+
+#pragma mark - Compact grid
+
+- (NSInteger)gridSectionCount {
+    return [self displaySectionCount];
+}
+
+- (NSString *)gridTitleForSection:(NSInteger)section {
+    return self.sectionTitles[[self realSectionForDisplaySection:section]];
+}
+
+- (NSArray<NSString *> *)gridKeysInSection:(NSInteger)section {
+    NSInteger real = [self realSectionForDisplaySection:section];
+    return real < (NSInteger)self.sections.count ? self.sections[real] : @[];
+}
+
+- (BOOL)gridSectionIsFavorites:(NSInteger)section {
+    return [[self gridTitleForSection:section] isEqualToString:@"Favorites"];
+}
+
+- (NSString *)gridNameForTrigger:(NSString *)key {
+    return [[RCConfigManager sharedManager] displayNameForTrigger:key];
+}
+
+- (NSString *)gridIconForTrigger:(NSString *)key {
+    return [RCTriggersViewController iconNameForTrigger:key];
+}
+
+- (UIImage *)gridImageForTrigger:(NSString *)key {
+    UIImage *custom = [self customIconForTrigger:key];
+    if (custom) return custom;
+    return [self appIconForTrigger:key side:30] ?: RCTriggerIconImage(key, 26) ?: RCTriggerSymbolImage([self gridIconForTrigger:key], 26);
+}
+
+- (NSInteger)gridActionCountForTrigger:(NSString *)key {
+    return (NSInteger)[[RCConfigManager sharedManager] actionsForTrigger:key].count;
+}
+
+- (BOOL)gridTriggerIsFavorite:(NSString *)key {
+    return [[RCConfigManager sharedManager] isTriggerFavorite:key];
+}
+
+- (BOOL)gridCanDeleteTrigger:(NSString *)key {
+    return [self canDeleteTrigger:key];
+}
+
+- (void)gridOpenTrigger:(NSString *)key {
+    RCActionsViewController *actionsVC = [[RCActionsViewController alloc] initWithTriggerKey:key];
+    [self.navigationController pushViewController:actionsVC animated:YES];
+}
+
+- (void)gridRunTrigger:(NSString *)key fromView:(UIView *)view {
+    [self runTriggerNow:key view:view];
+}
+
+- (void)gridToggleFavorite:(NSString *)key {
+    RCConfigManager *config = [RCConfigManager sharedManager];
+    [[[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium] impactOccurred];
+    [config setTriggerFavorite:![config isTriggerFavorite:key] forTrigger:key];
+    [self reloadTableData];
+}
+
+// Asks first: deleting a trigger takes its actions with it
+- (void)gridDeleteTrigger:(NSString *)key fromView:(UIView *)view {
+    NSString *name = [[RCConfigManager sharedManager] displayNameForTrigger:key];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"Delete “%@”?", name]
+                                                                   message:@"Its actions are deleted too."
+                                                            preferredStyle:UIAlertControllerStyleActionSheet];
+    __weak typeof(self) weakSelf = self;
+    [alert addAction:[UIAlertAction actionWithTitle:@"Delete Trigger" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *a) {
+        [[RCConfigManager sharedManager] removeTrigger:key];
+        [weakSelf reloadTableData];
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    alert.popoverPresentationController.sourceView = view ?: self.view;
+    alert.popoverPresentationController.sourceRect = view ? view.bounds : CGRectMake(CGRectGetMidX(self.view.bounds), CGRectGetMidY(self.view.bounds), 1, 1);
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)gridMoveFavoriteFrom:(NSInteger)from to:(NSInteger)to {
+    NSMutableArray *favorites = [[RCConfigManager sharedManager] orderedFavorites].mutableCopy;
+    if (from < 0 || from >= (NSInteger)favorites.count || to < 0 || to >= (NSInteger)favorites.count) return;
+    NSString *moved = favorites[from];
+    [favorites removeObjectAtIndex:from];
+    [favorites insertObject:moved atIndex:to];
+    [[RCConfigManager sharedManager] setOrderedFavorites:favorites];
+    [self reloadTableData];
+}
+
+- (void)gridDidScroll:(UIScrollView *)scrollView {
+    [self.categoryBar scrollViewDidScroll:scrollView];
 }
 
 @end

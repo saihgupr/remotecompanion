@@ -21,6 +21,8 @@
 - (void)attachToTableView:(UITableView *)tableView;
 // The same for any scroll view, such as a collection view
 - (void)attachToScrollView:(UIScrollView *)scrollView;
+// Takes the bar off a scroll view it was attached to, giving back the space it made
+- (void)detachFromScrollView:(UIScrollView *)scrollView;
 - (void)scrollViewDidScroll:(UIScrollView *)scrollView;
 - (void)layoutInScrollView:(UIScrollView *)scrollView;
 

@@ -97,6 +97,20 @@
     [self layoutInScrollView:tableView];
 }
 
+- (void)detachFromScrollView:(UIScrollView *)scrollView {
+    if (self.superview != scrollView) return;
+    CGFloat height = [RCCategoryBar barHeight];
+    UIEdgeInsets inset = scrollView.contentInset;
+    inset.top = MAX(0, inset.top - height);
+    scrollView.contentInset = inset;
+    if (@available(iOS 13.0, *)) {
+        UIEdgeInsets indicators = scrollView.verticalScrollIndicatorInsets;
+        indicators.top = MAX(0, indicators.top - height);
+        scrollView.verticalScrollIndicatorInsets = indicators;
+    }
+    [self removeFromSuperview];
+}
+
 // Scroll position measured from the top of the content (0 = scrolled to the top)
 - (CGFloat)offsetInScrollView:(UIScrollView *)scrollView {
     return scrollView.contentOffset.y + scrollView.adjustedContentInset.top;
