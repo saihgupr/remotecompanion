@@ -237,7 +237,7 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
 
 @end
 
-@interface RCActionsViewController () <UITableViewDragDelegate, UITableViewDropDelegate>
+@interface RCActionsViewController () <UIGestureRecognizerDelegate>
 @property (nonatomic, strong) NSString *triggerKey;
 @property (nonatomic, strong) NSMutableArray *actions;
 @property (nonatomic, strong) UIBarButtonItem *moreButton;
@@ -256,6 +256,18 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
 @property (nonatomic, assign) BOOL debugRunSeen; // the followed run has shown up (it ending closes the view)
 @property (nonatomic, copy) NSArray<NSDictionary *> *stripRuns; // this trigger's runs, for the strip
 @property (nonatomic, weak) UILabel *stripLabel;
+// Reordering: the rows being dragged (one action, or a whole block), the picture of them that
+// follows the finger, the line where they'd land, and the gap (insert before this row) it marks
+@property (nonatomic, assign) NSRange reorderRange;
+@property (nonatomic, strong) UIView *reorderSnapshot;
+@property (nonatomic, strong) UIView *reorderLine;
+@property (nonatomic, assign) NSInteger reorderGap;
+@property (nonatomic, assign) CGFloat reorderGrabOffset; // finger to the picture's centre (it floats above the finger)
+@property (nonatomic, assign) CGPoint pressStart;
+@property (nonatomic, assign) BOOL pressMoved;
+@property (nonatomic, strong) CADisplayLink *reorderScrollLink;
+@property (nonatomic, assign) CGFloat reorderFingerY; // in the table's visible frame, for scrolling
+@property (nonatomic, strong) UISelectionFeedbackGenerator *reorderTick;
 // The one toast editor. New toasts and edits both come through here,
 // so they always look and save the same way.
 - (void)pushToastEditorWithTitle:(NSString *)title
@@ -1286,7 +1298,6 @@ static void RCSetRunWatching(BOOL watching) {
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    if (self.debugRunID) self.tableView.dragInteractionEnabled = NO;
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(appDidEnterBackground) name:UIApplicationDidEnterBackgroundNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(appWillEnterForeground) name:UIApplicationWillEnterForegroundNotification object:nil];
     
@@ -1356,9 +1367,6 @@ static void RCSetRunWatching(BOOL watching) {
         self.navigationItem.titleView = titleLabel;
     }
 
-    UILongPressGestureRecognizer *lpgr = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleLongPress:)];
-    lpgr.minimumPressDuration = 0.5;
-    [self.tableView addGestureRecognizer:lpgr];
     
     // Enable Large Titles
     self.navigationController.navigationBar.prefersLargeTitles = YES;
@@ -1384,9 +1392,10 @@ static void RCSetRunWatching(BOOL watching) {
     // Non-editing mode to allow swipe actions
     self.tableView.editing = NO;
     self.tableView.allowsSelectionDuringEditing = YES;
-    self.tableView.dragInteractionEnabled = YES;
-    self.tableView.dragDelegate = self;
-    self.tableView.dropDelegate = self;
+    // Reordering is the page's own drag (see "Reordering"): iOS's drag and drop drew the dragged row
+    // empty on iOS 14 and guessed whether a drop next to a block's edge went in or out
+    self.tableView.dragInteractionEnabled = NO;
+    [self installReorderGestures];
     
     // Deletion is handled via swipe actions (trailingSwipeActionsConfigurationForRowAtIndexPath)
     
@@ -2851,26 +2860,9 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     return finalIndex;
 }
 
-- (NSInteger)finalIndexFromDropDestinationIndex:(NSInteger)destinationIndex sourceIndex:(NSInteger)sourceIndex {
-    NSRange sourceRange = [self ifBlockRangeForIndex:sourceIndex];
-    if (sourceRange.location == NSNotFound || sourceRange.length == 0) {
-        return destinationIndex;
-    }
-    if (destinationIndex > (NSInteger)sourceRange.location) {
-        destinationIndex -= sourceRange.length;
-    }
-    return destinationIndex;
-}
-
-- (void)handleLongPress:(UILongPressGestureRecognizer *)gesture {
-    if (gesture.state != UIGestureRecognizerStateBegan) return;
+// The long-press menu (a row's options, or the page's when pressed below the rows)
+- (void)showOptionsAtPoint:(CGPoint)touchPoint {
     if ([self runShown]) return; // read-only while it runs
-    
-    UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
-    [haptic prepare];
-    [haptic impactOccurred];
-    
-    CGPoint touchPoint = [gesture locationInView:self.tableView];
     NSIndexPath *indexPath = [self.tableView indexPathForRowAtPoint:touchPoint];
     
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:indexPath ? @"Action Options" : @"Actions"
@@ -3067,41 +3059,6 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     [self configurePopoverSourceForAlert:alert];
     [self presentViewController:alert animated:YES completion:nil];
-}
-
-- (NSInteger)adjustedDestinationIndexForDropCoordinator:(id<UITableViewDropCoordinator>)coordinator
-                                   destinationIndexPath:(NSIndexPath *)destinationIndexPath
-                                             sourceItem:(id)sourceItem {
-    NSInteger destinationIndex = destinationIndexPath ? destinationIndexPath.row : self.actions.count;
-    if (!destinationIndexPath ||
-        destinationIndex < 0 ||
-        destinationIndex >= (NSInteger)self.actions.count) {
-        return destinationIndex;
-    }
-    
-    BOOL sourceIsControlRow = [self isBlockStartItem:sourceItem] || [self isBlockEndItem:sourceItem];
-    if (sourceIsControlRow) {
-        return destinationIndex;
-    }
-    
-    id destinationItem = self.actions[destinationIndex];
-    BOOL destinationIsIf = [self isBlockStartItem:destinationItem];
-    BOOL destinationIsEndIf = [self isBlockEndItem:destinationItem];
-    if (!destinationIsIf && !destinationIsEndIf) {
-        return destinationIndex;
-    }
-    
-    CGPoint dropPoint = [coordinator.session locationInView:self.tableView];
-    CGRect destinationRect = [self.tableView rectForRowAtIndexPath:destinationIndexPath];
-    BOOL lowerHalfDrop = dropPoint.y >= CGRectGetMidY(destinationRect);
-    
-    if (destinationIsIf) {
-        // Lower-half drop on "If" row means "place inside block", upper-half means before it.
-        return lowerHalfDrop ? destinationIndex + 1 : destinationIndex;
-    }
-    
-    // Lower-half drop on "End If" row means "place outside block", upper-half means inside.
-    return lowerHalfDrop ? destinationIndex + 1 : destinationIndex;
 }
 
 #pragma mark - Table View Data Source
@@ -4190,59 +4147,281 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     else cell.accessoryView.hidden = NO;
     NSInteger level = [self indentationLevelForRow:indexPath.row];
     [self applyIndentGuidesToCell:cell level:level];
+    // Rows being dragged stay dimmed as they scroll back into view (and a reused cell doesn't)
+    BOOL dragged = self.reorderSnapshot && NSLocationInRange(indexPath.row, self.reorderRange);
+    cell.alpha = dragged ? 0.3 : 1.0;
     [self fixColorsForDragOnCell:cell];
 }
 
-#pragma mark - UITableViewDragDelegate
+#pragma mark - Reordering
 
-- (NSArray<UIDragItem *> *)tableView:(UITableView *)tableView itemsForBeginningDragSession:(id<UIDragSession>)session atIndexPath:(NSIndexPath *)indexPath {
-    if ([self runShown]) return @[];
-    id action = self.actions[indexPath.row];
-    NSItemProvider *itemProvider = [[NSItemProvider alloc] initWithObject:@"rc-action"];
-    UIDragItem *dragItem = [[UIDragItem alloc] initWithItemProvider:itemProvider];
-    dragItem.localObject = action;
-    return @[dragItem];
+// Two ways to pick up a row: the grabber at once (a short press), or a long press anywhere that
+// then moves. A long press that doesn't move opens the row's options instead, on release.
+- (void)installReorderGestures {
+    UILongPressGestureRecognizer *grab = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleGrab:)];
+    grab.minimumPressDuration = 0.12;
+    grab.allowableMovement = 10; // a quick swipe or scroll from the grabber stays a swipe or scroll
+    grab.delegate = self;
+    grab.name = @"rc.grab";
+    [self.tableView addGestureRecognizer:grab];
+
+    UILongPressGestureRecognizer *press = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleRowPress:)];
+    press.minimumPressDuration = 0.5;
+    press.allowableMovement = 10;
+    press.delegate = self;
+    press.name = @"rc.press";
+    [self.tableView addGestureRecognizer:press];
 }
 
-// The row as it's dragged: its card colour (the cell itself is clear, which iOS 14 drew as black)
-- (UIDragPreviewParameters *)tableView:(UITableView *)tableView dragPreviewParametersForRowAtIndexPath:(NSIndexPath *)indexPath {
-    UIDragPreviewParameters *parameters = [[UIDragPreviewParameters alloc] init];
-    parameters.backgroundColor = [[RCConfigManager sharedManager] tweakColorForKey:@"blockBackground" defaultVal:0.12];
-    UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
-    if (cell) parameters.visiblePath = [UIBezierPath bezierPathWithRoundedRect:cell.bounds cornerRadius:12];
-    return parameters;
+// The grabber: the trailing end of a row
+- (BOOL)isOnGrabber:(CGPoint)point {
+    NSIndexPath *indexPath = [self.tableView indexPathForRowAtPoint:point];
+    if (!indexPath) return NO;
+    CGRect row = [self.tableView rectForRowAtIndexPath:indexPath];
+    return point.x >= CGRectGetMaxX(row) - 56;
 }
 
-#pragma mark - UITableViewDropDelegate
-
-- (UITableViewDropProposal *)tableView:(UITableView *)tableView dropSessionDidUpdate:(id<UIDropSession>)session withDestinationIndexPath:(NSIndexPath *)destinationIndexPath {
-    if (tableView.hasActiveDrag) {
-        return [[UITableViewDropProposal alloc] initWithDropOperation:UIDropOperationMove intent:UITableViewDropIntentInsertAtDestinationIndexPath];
+- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gesture {
+    if ([gesture.name isEqualToString:@"rc.grab"]) {
+        return ![self runShown] && !self.tableView.isEditing && [self isOnGrabber:[gesture locationInView:self.tableView]];
     }
-    return [[UITableViewDropProposal alloc] initWithDropOperation:UIDropOperationForbidden];
+    if ([gesture.name isEqualToString:@"rc.press"]) {
+        return !self.reorderSnapshot && ![self isOnGrabber:[gesture locationInView:self.tableView]];
+    }
+    return YES;
 }
 
-- (void)tableView:(UITableView *)tableView performDropWithCoordinator:(id<UITableViewDropCoordinator>)coordinator {
-    NSIndexPath *destinationIndexPath = coordinator.destinationIndexPath;
-    
-    for (id<UITableViewDropItem> item in coordinator.items) {
-        if (!item.sourceIndexPath) continue;
-        
-        NSInteger sourceIndex = item.sourceIndexPath.row;
-        id sourceItem = (sourceIndex >= 0 && sourceIndex < (NSInteger)self.actions.count) ? self.actions[sourceIndex] : nil;
-        NSInteger destinationIndex = [self adjustedDestinationIndexForDropCoordinator:coordinator
-                                                                 destinationIndexPath:destinationIndexPath
-                                                                           sourceItem:sourceItem];
-        NSInteger finalIndex = [self finalIndexFromDropDestinationIndex:destinationIndex sourceIndex:sourceIndex];
-        NSInteger insertedIndex = [self moveActionFromIndex:sourceIndex toFinalIndex:finalIndex];
-        
-        if (self.actions.count > 0) {
-            NSInteger safeInserted = (insertedIndex == NSNotFound) ? sourceIndex : insertedIndex;
-            NSInteger finalRow = MIN(MAX(safeInserted, 0), (NSInteger)self.actions.count - 1);
-            [coordinator dropItem:item.dragItem toRowAtIndexPath:[NSIndexPath indexPathForRow:finalRow inSection:0]];
+- (void)handleGrab:(UILongPressGestureRecognizer *)gesture {
+    CGPoint point = [gesture locationInView:self.tableView];
+    switch (gesture.state) {
+        case UIGestureRecognizerStateBegan: [self beginReorderAtPoint:point]; break;
+        case UIGestureRecognizerStateChanged: [self moveReorderToPoint:point]; break;
+        case UIGestureRecognizerStateEnded: [self endReorder:YES]; break;
+        default: [self endReorder:NO]; break;
+    }
+}
+
+- (void)handleRowPress:(UILongPressGestureRecognizer *)gesture {
+    CGPoint point = [gesture locationInView:self.tableView];
+    switch (gesture.state) {
+        case UIGestureRecognizerStateBegan: {
+            self.pressStart = point;
+            self.pressMoved = NO;
+            UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
+            [haptic impactOccurred];
+            break;
         }
-        break;
+        case UIGestureRecognizerStateChanged:
+            if (!self.pressMoved && hypot(point.x - self.pressStart.x, point.y - self.pressStart.y) > 10) {
+                self.pressMoved = YES;
+                if (![self runShown] && [self.tableView indexPathForRowAtPoint:self.pressStart]) [self beginReorderAtPoint:self.pressStart];
+            }
+            if (self.reorderSnapshot) [self moveReorderToPoint:point];
+            break;
+        case UIGestureRecognizerStateEnded:
+            if (self.reorderSnapshot) [self endReorder:YES];
+            else if (!self.pressMoved) [self showOptionsAtPoint:point];
+            break;
+        default:
+            [self endReorder:NO];
+            break;
     }
+}
+
+- (void)beginReorderAtPoint:(CGPoint)point {
+    if (self.reorderSnapshot) return;
+    NSIndexPath *indexPath = [self.tableView indexPathForRowAtPoint:point];
+    if (!indexPath || indexPath.row >= (NSInteger)self.actions.count) return;
+    NSRange range = [self ifBlockRangeForIndex:indexPath.row];
+    if (range.location == NSNotFound || range.length == 0) return;
+    self.reorderRange = range;
+    self.reorderGap = range.location;
+
+    // A picture of the rows (as far as they're on screen), taken by the page itself
+    CGRect first = [self.tableView rectForRowAtIndexPath:[NSIndexPath indexPathForRow:range.location inSection:0]];
+    CGRect last = [self.tableView rectForRowAtIndexPath:[NSIndexPath indexPathForRow:NSMaxRange(range) - 1 inSection:0]];
+    CGRect visible = CGRectMake(0, self.tableView.contentOffset.y, self.tableView.bounds.size.width, self.tableView.bounds.size.height);
+    CGRect area = CGRectIntersection(CGRectUnion(first, last), visible);
+    if (CGRectIsEmpty(area)) area = first;
+    UIView *snapshot = [self.tableView resizableSnapshotViewFromRect:area afterScreenUpdates:NO withCapInsets:UIEdgeInsetsZero];
+    if (!snapshot) return;
+    snapshot.frame = area;
+    snapshot.layer.shadowColor = [UIColor blackColor].CGColor;
+    snapshot.layer.shadowOpacity = 0.35;
+    snapshot.layer.shadowRadius = 10;
+    snapshot.layer.shadowOffset = CGSizeMake(0, 4);
+    [self.tableView addSubview:snapshot];
+    self.reorderSnapshot = snapshot;
+    // Held above the finger and a little to the right, so the line where it lands (at the finger)
+    // stays in sight
+    self.reorderGrabOffset = -(area.size.height / 2 + 18);
+
+    UIView *line = [[UIView alloc] init];
+    line.backgroundColor = [UIColor systemBlueColor];
+    line.layer.cornerRadius = 2;
+    line.hidden = YES;
+    [self.tableView addSubview:line];
+    self.reorderLine = line;
+
+    [self setReorderRowsDimmed:YES];
+    CGPoint lifted = CGPointMake(CGRectGetMidX(area) + 16, point.y + self.reorderGrabOffset);
+    [UIView animateWithDuration:0.18 animations:^{
+        snapshot.transform = CGAffineTransformMakeScale(0.96, 0.96);
+        snapshot.center = lifted;
+        snapshot.alpha = 0.92;
+    }];
+    UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
+    [haptic impactOccurred];
+    self.reorderTick = [[UISelectionFeedbackGenerator alloc] init];
+    [self.reorderTick prepare];
+
+    self.reorderScrollLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(reorderAutoScroll)];
+    [self.reorderScrollLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+    self.tableView.scrollEnabled = NO; // the finger moves the rows, not the list (it scrolls at the edges)
+    [self moveReorderToPoint:point];
+}
+
+- (void)setReorderRowsDimmed:(BOOL)dimmed {
+    for (NSUInteger row = self.reorderRange.location; row < NSMaxRange(self.reorderRange); row++) {
+        UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:row inSection:0]];
+        cell.alpha = dimmed ? 0.3 : 1.0;
+    }
+}
+
+- (void)moveReorderToPoint:(CGPoint)point {
+    if (!self.reorderSnapshot) return;
+    CGPoint center = self.reorderSnapshot.center;
+    center.y = point.y + self.reorderGrabOffset;
+    self.reorderSnapshot.center = center;
+    self.reorderFingerY = point.y - self.tableView.contentOffset.y;
+
+    // The gap the finger is nearest: above a row's middle is before it, below is after it
+    NSInteger gap = self.reorderGap;
+    NSIndexPath *indexPath = [self.tableView indexPathForRowAtPoint:CGPointMake(CGRectGetMidX(self.tableView.bounds), point.y)];
+    if (indexPath) {
+        CGRect rect = [self.tableView rectForRowAtIndexPath:indexPath];
+        gap = point.y < CGRectGetMidY(rect) ? indexPath.row : indexPath.row + 1;
+    } else if (self.actions.count) {
+        CGRect lastRect = [self.tableView rectForRowAtIndexPath:[NSIndexPath indexPathForRow:self.actions.count - 1 inSection:0]];
+        gap = point.y > CGRectGetMaxY(lastRect) ? (NSInteger)self.actions.count : 0;
+    }
+    // Inside the rows being moved: where they are now
+    if (gap > (NSInteger)self.reorderRange.location && gap < (NSInteger)NSMaxRange(self.reorderRange)) gap = self.reorderRange.location;
+    // Only where the blocks stay whole (an Else stays in its If, an End with its start)
+    if (gap != self.reorderGap && ![self reorderGapIsValid:gap]) gap = self.reorderGap;
+    if (gap != self.reorderGap) {
+        self.reorderGap = gap;
+        [self.reorderTick selectionChanged];
+        [self.reorderTick prepare];
+    }
+    [self placeReorderLine];
+}
+
+// The actions as they'd be with the dragged rows moved to the gap
+- (NSArray *)actionsAfterMovingToGap:(NSInteger)gap {
+    NSMutableArray *moved = [self.actions mutableCopy];
+    NSArray *items = [moved subarrayWithRange:self.reorderRange];
+    [moved removeObjectsInRange:self.reorderRange];
+    NSInteger insertAt = gap > (NSInteger)self.reorderRange.location ? gap - (NSInteger)self.reorderRange.length : gap;
+    insertAt = MAX(0, MIN(insertAt, (NSInteger)moved.count));
+    [moved insertObjects:items atIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(insertAt, items.count)]];
+    return moved;
+}
+
+// Whether the If and Repeat blocks are all whole: each End closes its own kind, Else and Else If
+// only directly inside an If, nothing left open
+- (BOOL)actionsAreWellFormed:(NSArray *)actions {
+    NSMutableArray *open = [NSMutableArray array];
+    for (id item in actions) {
+        if ([self isIfActionItem:item]) [open addObject:@"if"];
+        else if ([self isRepeatActionItem:item]) [open addObject:@"repeat"];
+        else if ([self isElseActionItem:item] || [self isElseIfActionItem:item]) {
+            if (![open.lastObject isEqualToString:@"if"]) return NO;
+        } else if ([self isEndIfActionItem:item]) {
+            if (![open.lastObject isEqualToString:@"if"]) return NO;
+            [open removeLastObject];
+        } else if ([self isEndRepeatActionItem:item]) {
+            if (![open.lastObject isEqualToString:@"repeat"]) return NO;
+            [open removeLastObject];
+        }
+    }
+    return open.count == 0;
+}
+
+- (BOOL)reorderGapIsValid:(NSInteger)gap {
+    if (gap == (NSInteger)self.reorderRange.location || gap == (NSInteger)NSMaxRange(self.reorderRange)) return YES; // where it is
+    // A list already out of shape doesn't hold every move back
+    if (![self actionsAreWellFormed:self.actions]) return YES;
+    return [self actionsAreWellFormed:[self actionsAfterMovingToGap:gap]];
+}
+
+// The line between the rows at the gap, indented as deep as the moved rows would sit
+- (void)placeReorderLine {
+    NSInteger gap = self.reorderGap;
+    BOOL inPlace = gap == (NSInteger)self.reorderRange.location || gap == (NSInteger)NSMaxRange(self.reorderRange);
+    self.reorderLine.hidden = inPlace;
+    if (inPlace || !self.actions.count) return;
+    CGFloat y;
+    if (gap < (NSInteger)self.actions.count) y = CGRectGetMinY([self.tableView rectForRowAtIndexPath:[NSIndexPath indexPathForRow:gap inSection:0]]);
+    else y = CGRectGetMaxY([self.tableView rectForRowAtIndexPath:[NSIndexPath indexPathForRow:self.actions.count - 1 inSection:0]]);
+    NSInteger depth = 0;
+    for (NSInteger i = 0; i < gap; i++) {
+        if (i >= (NSInteger)self.reorderRange.location && i < (NSInteger)NSMaxRange(self.reorderRange)) continue;
+        id item = self.actions[i];
+        if ([self isBlockStartItem:item]) depth++;
+        else if ([self isBlockEndItem:item]) depth = MAX(0, depth - 1);
+    }
+    CGRect row = [self.tableView rectForRowAtIndexPath:[NSIndexPath indexPathForRow:MIN(gap, (NSInteger)self.actions.count - 1) inSection:0]];
+    CGFloat x = CGRectGetMinX(row) + 14 + depth * 14;
+    self.reorderLine.frame = CGRectMake(x, y - 2, CGRectGetMaxX(row) - 12 - x, 4);
+    [self.tableView bringSubviewToFront:self.reorderLine];
+    [self.tableView bringSubviewToFront:self.reorderSnapshot];
+}
+
+// Near the top or bottom of the list, it scrolls (faster the closer the finger)
+- (void)reorderAutoScroll {
+    if (!self.reorderSnapshot) return;
+    UITableView *table = self.tableView;
+    CGFloat top = table.adjustedContentInset.top, height = table.bounds.size.height;
+    CGFloat edge = 70, step = 0;
+    if (self.reorderFingerY < top + edge) step = -(top + edge - self.reorderFingerY) / 6;
+    else if (self.reorderFingerY > height - edge) step = (self.reorderFingerY - (height - edge)) / 6;
+    if (step == 0) return;
+    CGFloat minY = -top;
+    CGFloat maxY = MAX(minY, table.contentSize.height + table.adjustedContentInset.bottom - height);
+    CGFloat newY = MAX(minY, MIN(maxY, table.contentOffset.y + step));
+    if (newY == table.contentOffset.y) return;
+    table.contentOffset = CGPointMake(table.contentOffset.x, newY);
+    [self moveReorderToPoint:CGPointMake(0, newY + self.reorderFingerY)];
+}
+
+- (void)endReorder:(BOOL)commit {
+    if (!self.reorderSnapshot) return;
+    [self.reorderScrollLink invalidate];
+    self.reorderScrollLink = nil;
+    self.tableView.scrollEnabled = YES;
+    UIView *snapshot = self.reorderSnapshot;
+    UIView *line = self.reorderLine;
+    self.reorderSnapshot = nil;
+    self.reorderLine = nil;
+    NSInteger gap = self.reorderGap;
+    NSRange range = self.reorderRange;
+    BOOL moves = commit && gap != (NSInteger)range.location && gap != (NSInteger)NSMaxRange(range) && [self reorderGapIsValid:gap];
+    [self setReorderRowsDimmed:NO];
+    [line removeFromSuperview];
+    if (moves) {
+        NSInteger finalIndex = gap > (NSInteger)range.location ? gap - (NSInteger)range.length : gap;
+        [self moveActionFromIndex:range.location toFinalIndex:finalIndex];
+        [snapshot removeFromSuperview];
+        return;
+    }
+    // Back where it came from
+    CGRect home = [self.tableView rectForRowAtIndexPath:[NSIndexPath indexPathForRow:range.location inSection:0]];
+    [UIView animateWithDuration:0.2 animations:^{
+        snapshot.transform = CGAffineTransformIdentity;
+        snapshot.frame = CGRectMake(snapshot.frame.origin.x, home.origin.y, snapshot.frame.size.width, snapshot.frame.size.height);
+        snapshot.alpha = 0;
+    } completion:^(__unused BOOL finished) { [snapshot removeFromSuperview]; }];
 }
 
 // Swipe Actions
