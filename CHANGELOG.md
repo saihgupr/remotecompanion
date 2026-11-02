@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Security
 - **New SSH host editor**: adding or editing a host now opens a proper Settings-style screen (Server details plus a Password / Private Key picker) instead of a cramped popup. The password field is masked with a show/hide eye button and never displays the saved password: leave it blank to keep the current one.
+- **New SSH command editor**: creating or editing an `ssh-run` action now shows a host picker plus a full command editor, instead of a one-line popup with the raw `ssh-run <id> ...` string.
 - **Hardened `ssh-run`**: the remote command, user@host and key path are now POSIX single-quoted, so `$(...)` and backticks are evaluated only on the remote host and never on the phone. Passwords are passed through `sshpass -e` (the `SSHPASS` environment variable) instead of `-p`, so they no longer appear in `ps`.
 - **`rc-root` caller check**: the setuid helper now runs shell commands only when its parent process is SpringBoard (where RemoteCommand spawns it). Other apps, tweaks, or scripts running as `mobile` that call `rc-root <command>` directly are refused instead of getting root. Root actions, `rc -r`, and touch injection (`rc-root iohid …`) work as before. Settings > Advanced Settings > Security > Allow Direct Root Helper Calls switches the check off for scripts, terminals and other tools; it is off by default.
 

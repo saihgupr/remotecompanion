@@ -1,6 +1,7 @@
 #import "RCActionsViewController.h"
 #import "RCConfigManager.h"
 #import "RCActionPickerViewController.h"
+#import "RCSSHActionEditorViewController.h"
 #import "RCShortcutPickerViewController.h"
 #import "RCAppPickerViewController.h"
 #import "RCConditionPickerViewController.h"
@@ -2982,6 +2983,9 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             [strongSelf saveActions];
             [strongSelf.tableView reloadData];
         }];
+    } else if ([currentAction hasPrefix:@"ssh-run "]) {
+        [self promptEditSSHRunActionAtIndex:indexPath.row];
+        return;
     } else {
         // Generic edit for other commands - show alert with current command
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Edit Action"
@@ -3006,6 +3010,54 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 
         [self presentViewController:alert animated:YES completion:nil];
     }
+}
+
+- (void)promptEditSSHRunActionAtIndex:(NSInteger)index {
+    if (index < 0 || index >= (NSInteger)self.actions.count) return;
+
+    NSArray<NSDictionary *> *hosts = [RCConfigManager sharedManager].sshHosts;
+    if (hosts.count == 0) {
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"No SSH Hosts"
+            message:@"Add a server in Settings > Integrations > SSH Hosts first."
+            preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:alert animated:YES completion:nil];
+        return;
+    }
+
+    NSString *action = nil;
+    id actionData = self.actions[index];
+    if ([actionData isKindOfClass:[NSDictionary class]]) {
+        action = ((NSDictionary *)actionData)[@"command"];
+    } else if ([actionData isKindOfClass:[NSString class]]) {
+        action = (NSString *)actionData;
+    }
+    if (![action isKindOfClass:[NSString class]] || ![action hasPrefix:@"ssh-run "]) return;
+
+    NSString *payload = [action substringFromIndex:8];
+    NSRange firstSpace = [payload rangeOfString:@" "];
+    NSString *hostId = firstSpace.location == NSNotFound ? payload : [payload substringToIndex:firstSpace.location];
+    NSString *command = firstSpace.location == NSNotFound ? @"" : [payload substringFromIndex:firstSpace.location + 1];
+
+    RCSSHActionEditorViewController *editor = [[RCSSHActionEditorViewController alloc] initWithHostId:hostId command:command];
+    __weak typeof(self) weakSelf = self;
+    editor.onSave = ^(NSString *newHostId, NSString *newCommand) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        NSString *newAction = [NSString stringWithFormat:@"ssh-run %@ %@", newHostId, newCommand];
+        id existing = strongSelf.actions[index];
+        if ([existing isKindOfClass:[NSDictionary class]]) {
+            NSMutableDictionary *dict = [(NSDictionary *)existing mutableCopy];
+            dict[@"command"] = newAction;
+            strongSelf.actions[index] = dict;
+        } else {
+            strongSelf.actions[index] = newAction;
+        }
+        [strongSelf saveActions];
+        [strongSelf.tableView reloadData];
+        [strongSelf.navigationController popViewControllerAnimated:YES];
+    };
+    [self.navigationController pushViewController:editor animated:YES];
 }
 
 // The one toast editor. New toasts and edits both come through here,

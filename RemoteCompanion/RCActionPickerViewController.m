@@ -6,6 +6,7 @@
 #import "RCHAEntityPickerViewController.h"
 #import "RCKMMacroPickerViewController.h"
 #import "RCCategoryBar.h"
+#import "RCSSHActionEditorViewController.h"
 
 @interface RCActionPickerViewController () <UISearchResultsUpdating>
 @property (nonatomic, strong) NSArray<NSString *> *sectionTitles;
@@ -1128,37 +1129,26 @@
 }
 
 - (void)promptForSSHCommandWithHost:(NSDictionary *)host {
-    NSString *hostName = host[@"name"] ?: host[@"host"];
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"SSH: %@", hostName]
-                                                                   message:@"Enter the remote shell command to execute"
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    [alert addTextFieldWithConfigurationHandler:^(UITextField * _Nonnull textField) {
-        textField.placeholder = @"e.g. pmset sleepnow or uptime";
-        textField.autocapitalizationType = UITextAutocapitalizationTypeNone;
-        textField.autocorrectionType = UITextAutocorrectionTypeNo;
-    }];
+    RCSSHActionEditorViewController *editor = [[RCSSHActionEditorViewController alloc]
+        initWithHostId:host[@"id"] command:@""];
     __weak typeof(self) weakSelf = self;
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Add Action" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+    editor.onSave = ^(NSString *hostId, NSString *command) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf) return;
-        NSString *cmdText = alert.textFields.firstObject.text;
-        cmdText = [cmdText stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        if (cmdText.length > 0) {
-            NSString *actionString = [NSString stringWithFormat:@"ssh-run %@ %@", host[@"id"], cmdText];
-            if (strongSelf.onActionSelected) {
-                strongSelf.onActionSelected(actionString);
-            }
-            if (strongSelf.searchController.isActive) {
-                [strongSelf.searchController dismissViewControllerAnimated:NO completion:^{
-                    [strongSelf dismissViewControllerAnimated:YES completion:nil];
-                }];
-            } else {
-                [strongSelf dismissViewControllerAnimated:YES completion:nil];
-            }
+        NSString *actionString = [NSString stringWithFormat:@"ssh-run %@ %@", hostId, command];
+        if (strongSelf.onActionSelected) {
+            strongSelf.onActionSelected(actionString);
         }
-    }]];
-    [self presentViewController:alert animated:YES completion:nil];
+        if (strongSelf.searchController.isActive) {
+            [strongSelf.searchController dismissViewControllerAnimated:NO completion:^{
+                [strongSelf dismissViewControllerAnimated:YES completion:nil];
+            }];
+        } else {
+            [strongSelf dismissViewControllerAnimated:YES completion:nil];
+        }
+    };
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:editor];
+    [self presentViewController:nav animated:YES completion:nil];
 }
 
 @end
