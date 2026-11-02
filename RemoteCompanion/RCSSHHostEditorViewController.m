@@ -7,7 +7,8 @@
 @property (nonatomic, assign) BOOL isEditingHost;
 @property (nonatomic, assign) BOOL useKeyAuth;
 
-// Form fields, kept alive so values survive scrolling
+// One field per row, created once so values and first responder state survive reloads
+@property (nonatomic, strong) UIButton *revealButton;
 @property (nonatomic, strong) UITextField *nameField;
 @property (nonatomic, strong) UITextField *hostField;
 @property (nonatomic, strong) UITextField *portField;
@@ -42,6 +43,8 @@
         initWithBarButtonSystemItem:UIBarButtonSystemItemSave
         target:self action:@selector(saveTapped)];
 
+    [self buildFields];
+
     self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
     self.tableView.delegate = self;
     self.tableView.dataSource = self;
@@ -66,6 +69,76 @@
     [self applyTweaks];
 }
 
+- (void)buildFields {
+    self.nameField = [self fieldWithPlaceholder:@"MacBook Pro"];
+    self.nameField.text = self.existingHost[@"name"] ?: @"";
+    self.nameField.autocapitalizationType = UITextAutocapitalizationTypeWords;
+    self.nameField.returnKeyType = UIReturnKeyNext;
+
+    self.hostField = [self fieldWithPlaceholder:@"192.168.1.50"];
+    self.hostField.text = self.existingHost[@"host"] ?: @"";
+    self.hostField.keyboardType = UIKeyboardTypeURL;
+    self.hostField.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    self.hostField.returnKeyType = UIReturnKeyNext;
+
+    self.portField = [self fieldWithPlaceholder:@"22"];
+    self.portField.text = self.existingHost
+        ? [NSString stringWithFormat:@"%@", self.existingHost[@"port"] ?: @22]
+        : @"22";
+    self.portField.keyboardType = UIKeyboardTypeNumberPad;
+    self.portField.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    self.portField.inputAccessoryView = [self doneToolbar];
+
+    self.userField = [self fieldWithPlaceholder:@"mobile"];
+    self.userField.text = self.existingHost[@"user"] ?: @"";
+    self.userField.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    self.userField.returnKeyType = UIReturnKeyDone;
+
+    // The saved password is never loaded into the field.
+    BOOL hasSavedPassword = self.isEditingHost
+        && [self.existingHost[@"authType"] isEqualToString:@"password"]
+        && [self.existingHost[@"password"] length] > 0;
+    self.passwordField = [self fieldWithPlaceholder:(hasSavedPassword ? @"Leave blank to keep" : @"Optional")];
+    self.passwordField.text = @"";
+    self.passwordField.secureTextEntry = YES;
+    self.passwordField.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    self.passwordField.autocorrectionType = UITextAutocorrectionTypeNo;
+    self.passwordField.returnKeyType = UIReturnKeyDone;
+
+    self.revealButton = [UIButton buttonWithType:UIButtonTypeCustom];
+    [self.revealButton setImage:[UIImage systemImageNamed:@"eye.slash"] forState:UIControlStateNormal];
+    self.revealButton.tintColor = [UIColor secondaryLabelColor];
+    self.revealButton.frame = CGRectMake(0, 0, 34, 24);
+    [self.revealButton addTarget:self action:@selector(revealTapped:) forControlEvents:UIControlEventTouchUpInside];
+    self.passwordField.rightView = self.revealButton;
+    self.passwordField.rightViewMode = UITextFieldViewModeAlways;
+
+    self.keyPathField = [self fieldWithPlaceholder:@"~/.ssh/id_rsa"];
+    self.keyPathField.text = self.existingHost[@"keyPath"] ?: @"";
+    self.keyPathField.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    self.keyPathField.autocorrectionType = UITextAutocorrectionTypeNo;
+    self.keyPathField.keyboardType = UIKeyboardTypeURL;
+    self.keyPathField.returnKeyType = UIReturnKeyDone;
+
+    self.authSegment = [[UISegmentedControl alloc] initWithItems:@[@"Password", @"Private Key"]];
+    self.authSegment.selectedSegmentIndex = self.useKeyAuth ? 1 : 0;
+    [self.authSegment addTarget:self action:@selector(authSegmentChanged:) forControlEvents:UIControlEventValueChanged];
+}
+
+- (UITextField *)fieldWithPlaceholder:(NSString *)placeholder {
+    UITextField *field = [[UITextField alloc] init];
+    field.placeholder = placeholder;
+    field.font = [UIFont systemFontOfSize:16];
+    field.textColor = [UIColor labelColor];
+    field.tintColor = [UIColor labelColor];
+    field.textAlignment = NSTextAlignmentRight;
+    field.clearButtonMode = UITextFieldViewModeWhileEditing;
+    field.delegate = self;
+    field.translatesAutoresizingMaskIntoConstraints = NO;
+    [field setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
+    return field;
+}
+
 - (void)dealloc {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
@@ -88,22 +161,29 @@
 #pragma mark - Actions
 
 - (void)cancelTapped {
-    [self.navigationController popViewControllerAnimated:YES];
+    if (self.navigationController.viewControllers.firstObject == self
+        && self.navigationController.presentingViewController != nil) {
+        [self.navigationController dismissViewControllerAnimated:YES completion:nil];
+    } else {
+        [self.navigationController popViewControllerAnimated:YES];
+    }
 }
 
 - (void)authSegmentChanged:(UISegmentedControl *)sender {
+    [self.view endEditing:YES];
     self.useKeyAuth = (sender.selectedSegmentIndex == 1);
     [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:1]
                   withRowAnimation:UITableViewRowAnimationAutomatic];
 }
 
-- (void)eyeTapped:(UIButton *)sender {
+- (void)revealTapped:(UIButton *)sender {
     self.passwordField.secureTextEntry = !self.passwordField.secureTextEntry;
-    NSString *current = self.passwordField.text;
-    self.passwordField.text = @"";
-    self.passwordField.text = current;
     UIImage *image = [UIImage systemImageNamed:self.passwordField.secureTextEntry ? @"eye.slash" : @"eye"];
-    [sender setImage:image forState:UIControlStateNormal];
+    [self.revealButton setImage:image forState:UIControlStateNormal];
+    // Windows redraw the text only after a text change, so nudge it without touching the value.
+    NSString *value = self.passwordField.text;
+    self.passwordField.text = @"";
+    self.passwordField.text = value;
 }
 
 - (void)saveTapped {
@@ -140,12 +220,9 @@
         authType = @"password";
         password = passwordInput;
     } else if (self.isEditingHost && [self.existingHost[@"authType"] isEqualToString:@"password"]) {
-        // Password left blank and this host already used password auth: keep the saved password.
         authType = @"password";
         password = self.existingHost[@"password"] ?: @"";
     } else {
-        // New host with no password, or switched over from key auth: password auth with no
-        // password yet (key agent / passwordless login). Nothing secret is stored.
         authType = @"password";
     }
 
@@ -173,6 +250,18 @@
     [self presentViewController:alert animated:YES completion:nil];
 }
 
+- (UIToolbar *)doneToolbar {
+    UIToolbar *toolbar = [[UIToolbar alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, 44)];
+    UIBarButtonItem *flex = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil];
+    UIBarButtonItem *done = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(dismissKeyboard)];
+    toolbar.items = @[flex, done];
+    return toolbar;
+}
+
+- (void)dismissKeyboard {
+    [self.view endEditing:YES];
+}
+
 #pragma mark - Table View
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
@@ -181,7 +270,7 @@
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if (section == 0) return 4; // Name, Host, Port, Username
-    return 2; // Auth method picker + credential field
+    return 2; // Auth picker + one credential field
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
@@ -203,149 +292,59 @@
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (indexPath.section == 0) {
+        NSArray *labels = @[@"Name", @"Host", @"Port", @"Username"];
+        NSArray *fields = @[self.nameField, self.hostField, self.portField, self.userField];
+        return [self cellWithLabel:labels[indexPath.row] control:fields[indexPath.row]];
+    }
+
+    if (indexPath.row == 0) {
+        return [self cellWithLabel:nil control:self.authSegment];
+    }
+    if (self.useKeyAuth) {
+        return [self cellWithLabel:@"Key Path" control:self.keyPathField];
+    }
+    return [self cellWithLabel:@"Password" control:self.passwordField];
+}
+
+// A Settings row: label on the left, control filling the rest of the width. A fixed label
+// column keeps the control from collapsing against UITableViewCell's own text label.
+- (UITableViewCell *)cellWithLabel:(NSString *)labelText control:(UIView *)control {
     RCConfigManager *cm = [RCConfigManager sharedManager];
     UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
     cell.backgroundColor = [cm tweakColorForKey:@"blockBackground" defaultVal:0.12];
     cell.selectionStyle = UITableViewCellSelectionStyleNone;
-    cell.textLabel.textColor = [UIColor labelColor];
 
-    if (indexPath.section == 0) {
-        NSArray *labels = @[@"Name", @"Host", @"Port", @"Username"];
-        NSArray *placeholders = @[@"MacBook Pro", @"192.168.1.50", @"22", @"mobile"];
-        cell.textLabel.text = labels[indexPath.row];
-        cell.textLabel.font = [UIFont systemFontOfSize:16];
+    [control removeFromSuperview];
+    [cell.contentView addSubview:control];
 
-        UITextField *field = [[UITextField alloc] init];
-        field.delegate = self;
-        field.textAlignment = NSTextAlignmentRight;
-        field.placeholder = placeholders[indexPath.row];
-        field.autocorrectionType = UITextAutocorrectionTypeNo;
-        field.clearButtonMode = UITextFieldViewModeWhileEditing;
-        field.translatesAutoresizingMaskIntoConstraints = NO;
-        [cell.contentView addSubview:field];
+    NSLayoutConstraint *leadingConstraint;
+    if (labelText.length > 0) {
+        UILabel *label = [[UILabel alloc] init];
+        label.text = labelText;
+        label.font = [UIFont systemFontOfSize:16];
+        label.textColor = [UIColor labelColor];
+        label.translatesAutoresizingMaskIntoConstraints = NO;
+        [label setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+        [label setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+        [cell.contentView addSubview:label];
         [NSLayoutConstraint activateConstraints:@[
-            [field.leadingAnchor constraintEqualToAnchor:cell.textLabel.trailingAnchor constant:12],
-            [field.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-16],
-            [field.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
-            [field.heightAnchor constraintEqualToConstant:34]
+            [label.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:16],
+            [label.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor]
         ]];
-
-        if (indexPath.row == 0) {
-            field.autocapitalizationType = UITextAutocapitalizationTypeWords;
-            field.returnKeyType = UIReturnKeyNext;
-            field.text = self.nameField.text ?: self.existingHost[@"name"] ?: @"";
-            self.nameField = field;
-        } else if (indexPath.row == 1) {
-            field.keyboardType = UIKeyboardTypeURL;
-            field.autocapitalizationType = UITextAutocapitalizationTypeNone;
-            field.returnKeyType = UIReturnKeyNext;
-            field.text = self.hostField.text ?: self.existingHost[@"host"] ?: @"";
-            self.hostField = field;
-        } else if (indexPath.row == 2) {
-            field.keyboardType = UIKeyboardTypeNumberPad;
-            field.autocapitalizationType = UITextAutocapitalizationTypeNone;
-            NSString *fallback = self.existingHost
-                ? [NSString stringWithFormat:@"%@", self.existingHost[@"port"] ?: @22]
-                : @"22";
-            field.text = self.portField.text ?: fallback;
-            field.inputAccessoryView = [self doneToolbar];
-            self.portField = field;
-        } else {
-            field.autocapitalizationType = UITextAutocapitalizationTypeNone;
-            field.returnKeyType = UIReturnKeyDone;
-            field.text = self.userField.text ?: self.existingHost[@"user"] ?: @"";
-            self.userField = field;
-        }
+        leadingConstraint = [control.leadingAnchor constraintGreaterThanOrEqualToAnchor:label.trailingAnchor constant:12];
     } else {
-        if (indexPath.row == 0) {
-            if (!self.authSegment) {
-                self.authSegment = [[UISegmentedControl alloc] initWithItems:@[@"Password", @"Private Key"]];
-                [self.authSegment addTarget:self action:@selector(authSegmentChanged:) forControlEvents:UIControlEventValueChanged];
-            }
-            self.authSegment.selectedSegmentIndex = self.useKeyAuth ? 1 : 0;
-            self.authSegment.translatesAutoresizingMaskIntoConstraints = NO;
-            [cell.contentView addSubview:self.authSegment];
-            [NSLayoutConstraint activateConstraints:@[
-                [self.authSegment.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:16],
-                [self.authSegment.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-16],
-                [self.authSegment.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor]
-            ]];
-        } else if (!self.useKeyAuth) {
-            cell.textLabel.text = @"Password";
-            cell.textLabel.font = [UIFont systemFontOfSize:16];
-
-            if (!self.passwordField) {
-                self.passwordField = [[UITextField alloc] init];
-                self.passwordField.delegate = self;
-                self.passwordField.secureTextEntry = YES;
-                self.passwordField.autocapitalizationType = UITextAutocapitalizationTypeNone;
-                self.passwordField.autocorrectionType = UITextAutocorrectionTypeNo;
-                self.passwordField.returnKeyType = UIReturnKeyDone;
-            }
-            BOOL hasSaved = self.isEditingHost
-                && [self.existingHost[@"authType"] isEqualToString:@"password"]
-                && [self.existingHost[@"password"] length] > 0;
-            self.passwordField.placeholder = hasSaved ? @"Leave blank to keep" : @"Optional";
-            self.passwordField.textAlignment = NSTextAlignmentRight;
-            self.passwordField.clearButtonMode = UITextFieldViewModeWhileEditing;
-            self.passwordField.translatesAutoresizingMaskIntoConstraints = NO;
-
-            UIButton *eye = [UIButton buttonWithType:UIButtonTypeCustom];
-            UIImage *eyeImage = [UIImage systemImageNamed:self.passwordField.secureTextEntry ? @"eye.slash" : @"eye"];
-            [eye setImage:eyeImage forState:UIControlStateNormal];
-            eye.tintColor = [UIColor secondaryLabelColor];
-            eye.frame = CGRectMake(0, 0, 32, 24);
-            [eye addTarget:self action:@selector(eyeTapped:) forControlEvents:UIControlEventTouchUpInside];
-            self.passwordField.rightView = eye;
-            self.passwordField.rightViewMode = UITextFieldViewModeAlways;
-
-            [cell.contentView addSubview:self.passwordField];
-            [NSLayoutConstraint activateConstraints:@[
-                [self.passwordField.leadingAnchor constraintEqualToAnchor:cell.textLabel.trailingAnchor constant:12],
-                [self.passwordField.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-16],
-                [self.passwordField.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
-                [self.passwordField.heightAnchor constraintEqualToConstant:34]
-            ]];
-        } else {
-            cell.textLabel.text = @"Key Path";
-            cell.textLabel.font = [UIFont systemFontOfSize:16];
-
-            if (!self.keyPathField) {
-                self.keyPathField = [[UITextField alloc] init];
-                self.keyPathField.delegate = self;
-                self.keyPathField.autocapitalizationType = UITextAutocapitalizationTypeNone;
-                self.keyPathField.autocorrectionType = UITextAutocorrectionTypeNo;
-                self.keyPathField.keyboardType = UIKeyboardTypeURL;
-                self.keyPathField.returnKeyType = UIReturnKeyDone;
-                self.keyPathField.text = self.existingHost[@"keyPath"] ?: @"";
-            }
-            self.keyPathField.placeholder = @"~/.ssh/id_rsa";
-            self.keyPathField.textAlignment = NSTextAlignmentRight;
-            self.keyPathField.clearButtonMode = UITextFieldViewModeWhileEditing;
-            self.keyPathField.translatesAutoresizingMaskIntoConstraints = NO;
-            [cell.contentView addSubview:self.keyPathField];
-            [NSLayoutConstraint activateConstraints:@[
-                [self.keyPathField.leadingAnchor constraintEqualToAnchor:cell.textLabel.trailingAnchor constant:12],
-                [self.keyPathField.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-16],
-                [self.keyPathField.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
-                [self.keyPathField.heightAnchor constraintEqualToConstant:34]
-            ]];
-        }
+        leadingConstraint = [control.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:16];
     }
 
+    [NSLayoutConstraint activateConstraints:@[
+        leadingConstraint,
+        [control.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-16],
+        [control.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
+        [control.heightAnchor constraintEqualToConstant:34]
+    ]];
+
     return cell;
-}
-
-- (UIToolbar *)doneToolbar {
-    UIToolbar *toolbar = [[UIToolbar alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, 44)];
-    UIBarButtonItem *flex = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil];
-    UIBarButtonItem *done = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(dismissKeyboard)];
-    toolbar.items = @[flex, done];
-    return toolbar;
-}
-
-- (void)dismissKeyboard {
-    [self.view endEditing:YES];
 }
 
 #pragma mark - UITextFieldDelegate
@@ -355,7 +354,7 @@
         [self.hostField becomeFirstResponder];
     } else if (textField == self.hostField) {
         [self.portField becomeFirstResponder];
-    } else if (textField == self.userField || textField == self.passwordField || textField == self.keyPathField) {
+    } else {
         [textField resignFirstResponder];
     }
     return YES;
