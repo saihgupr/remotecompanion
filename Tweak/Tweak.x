@@ -3022,7 +3022,12 @@ static BOOL rc_is_api_token_valid(NSString *providedToken) {
     if (trimmedExpected.length == 0 || trimmedProvided.length == 0) {
         return NO;
     }
-    return [trimmedProvided isEqualToString:trimmedExpected];
+    if (trimmedProvided.length != trimmedExpected.length) return NO;
+    const char *a = [trimmedProvided UTF8String];
+    const char *b = [trimmedExpected UTF8String];
+    volatile unsigned char diff = 0;
+    for (NSUInteger i = 0; i < trimmedProvided.length; i++) diff |= a[i] ^ b[i];
+    return diff == 0;
 }
 
 static NSString *rc_extract_token_from_headers(NSString *requestHeaders) {

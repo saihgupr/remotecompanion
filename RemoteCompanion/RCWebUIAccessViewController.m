@@ -92,22 +92,28 @@ typedef NS_ENUM(NSInteger, RCWebUIAccessSection) {
 
 - (void)viewWillDisappear:(BOOL)animated {
     [super viewWillDisappear:animated];
+    [self saveTokenField];
     if (self.tokenTextField.isFirstResponder) {
         [self.tokenTextField resignFirstResponder];
     }
 }
 
 - (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView {
+    [self saveTokenField];
     if (self.tokenTextField.isFirstResponder) {
         [self.tokenTextField resignFirstResponder];
     }
 }
 
-- (void)tokenFieldChanged:(UITextField *)sender {
-    [RCConfigManager sharedManager].webUIApiToken = sender.text;
+- (void)saveTokenField {
+    NSString *current = self.tokenTextField.text ?: @"";
+    if (![[RCConfigManager sharedManager].webUIApiToken isEqualToString:current]) {
+        [RCConfigManager sharedManager].webUIApiToken = current;
+    }
 }
 
 - (BOOL)textFieldShouldReturn:(UITextField *)textField {
+    if (textField == self.tokenTextField) [self saveTokenField];
     [textField resignFirstResponder];
     return YES;
 }
@@ -244,7 +250,7 @@ typedef NS_ENUM(NSInteger, RCWebUIAccessSection) {
             tf.delegate = self;
             tf.font = [UIFont monospacedSystemFontOfSize:14 weight:UIFontWeightRegular];
             tf.textColor = [UIColor labelColor];
-            [tf addTarget:self action:@selector(tokenFieldChanged:) forControlEvents:UIControlEventEditingChanged];
+            [tf addTarget:self action:@selector(saveTokenField) forControlEvents:UIControlEventEditingDidEnd];
             tf.translatesAutoresizingMaskIntoConstraints = NO;
             self.tokenTextField = tf;
             [cell.contentView addSubview:tf];
