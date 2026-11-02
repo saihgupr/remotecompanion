@@ -10,6 +10,9 @@ All notable changes to this project will be documented in this file.
 - **Auto-Lock / Display Sleep Aliases & Discovery**: Renamed Auto-Lock to "Auto-Lock (Display Sleep)" with search keywords (`display`, `sleep`, `timeout`, `time off`, `screen`), updated the duration selector to include "Never (Off)", and added command aliases `rc display sleep [duration]` and `rc display time off`.
 - **Deep Linking URL Scheme & CLI Navigation**: added `remotecompanion://` URL scheme support and `rc nav <panel>` CLI command to jump directly into Settings, Integrations (Home Assistant, Keyboard Maestro, MQTT), New Trigger picker, or Triggers list from Siri Shortcuts, automation scripts, or terminal.
 
+### Fixed
+- **Trigger options menu overlap**: Display "When Triggered Again" inline (`UIMenuOptionsDisplayInline`) in the trigger actions menu (`...`) to prevent iOS from rendering the submenu on top of parent menu items.
+
 ## [4.1.0] - 2026-10-31
 
 ### Added

@@ -950,7 +950,7 @@ static id g_actionClipboard = nil;
         action.state = [current isEqualToString:choice[0]] ? UIMenuElementStateOn : UIMenuElementStateOff;
         [modes addObject:action];
     }
-    UIMenu *whenFired = [UIMenu menuWithTitle:@"When Triggered Again" image:[UIImage systemImageNamed:@"repeat"] identifier:nil options:0 children:modes];
+    UIMenu *whenFired = [UIMenu menuWithTitle:@"When Triggered Again" image:[UIImage systemImageNamed:@"repeat"] identifier:nil options:UIMenuOptionsDisplayInline children:modes];
 
     NSMutableArray *menuActions = [NSMutableArray arrayWithObject:whenFired];
     // Triggers that take over what iOS normally does can keep it as well: the ping sound, and with a
