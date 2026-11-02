@@ -276,6 +276,35 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
     [self saveConfig];
 }
 
+- (NSString *)webUIApiToken {
+    NSString *token = _config[@"webUIApiToken"];
+    return [token isKindOfClass:[NSString class]] ? token : @"";
+}
+
+- (void)setWebUIApiToken:(NSString *)token {
+    if (token && [token isKindOfClass:[NSString class]]) {
+        NSString *trimmed = [token stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (trimmed.length > 0) {
+            _config[@"webUIApiToken"] = trimmed;
+        } else {
+            [_config removeObjectForKey:@"webUIApiToken"];
+        }
+    } else {
+        [_config removeObjectForKey:@"webUIApiToken"];
+    }
+    [self saveConfig];
+}
+
+- (NSString *)generateRandomApiToken {
+    uint8_t randomBytes[16];
+    arc4random_buf(randomBytes, sizeof(randomBytes));
+    NSMutableString *token = [NSMutableString stringWithCapacity:sizeof(randomBytes) * 2];
+    for (NSUInteger i = 0; i < sizeof(randomBytes); i++) {
+        [token appendFormat:@"%02x", randomBytes[i]];
+    }
+    return [token copy];
+}
+
 - (BOOL)freezeListsDuringGestures {
     if (!_config[@"freezeListsDuringGestures"]) {
         return YES;

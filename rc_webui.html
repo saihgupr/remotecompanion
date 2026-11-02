@@ -1830,6 +1830,12 @@
           <input type="checkbox" class="ios-toggle" id="setting-webui" onchange="config.webUIEnabled=this.checked;saveConfig()">
         </div>
       </div>
+      <div class="settings-row" id="webui-token-row">
+        <span class="settings-label">API Token</span>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <input type="password" id="setting-webui-token" placeholder="Optional token" style="background:#2c2c2e;border:1px solid #3a3a3c;border-radius:6px;color:#fff;padding:4px 8px;font-size:13px;width:140px;" onchange="onApiTokenChange(this.value)">
+        </div>
+      </div>
     </div>
 
     <div class="action-list-header">Integrations</div>
@@ -3900,6 +3906,44 @@ async function runTrigger(key) {
   } catch(e) { showToast('⚠ Could not connect to device'); }
 }
 
+async function sendCommand(cmdStr) {
+  if (!cmdStr) return null;
+  const token = localStorage.getItem('rc_api_token');
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return fetch(`/api/command?cmd=${encodeURIComponent(cmdStr)}`, {
+    method: 'POST',
+    headers: headers
+  });
+}
+
+function promptApiTokenModal(retryAction) {
+  showDialog(
+    'Enter API Token',
+    'Privileged commands (root, sudo, exec) require an API Token configured in Settings > Web UI > Access on your iPhone:',
+    localStorage.getItem('rc_api_token') || '',
+    'Save & Run',
+    async (token) => {
+      const trimmed = (token || '').trim();
+      if (trimmed) {
+        localStorage.setItem('rc_api_token', trimmed);
+      } else {
+        localStorage.removeItem('rc_api_token');
+      }
+      if (retryAction) {
+        await runSingleAction(retryAction);
+      }
+    },
+    false,
+    false,
+    false
+  );
+  const input = document.getElementById('dialog-input');
+  if (input) input.placeholder = 'API Token';
+}
+
 async function runSingleAction(action) {
   let cmdStr = null;
   if (typeof action === 'string') {
@@ -3909,9 +3953,22 @@ async function runSingleAction(action) {
   }
   if (!cmdStr) return;
   try {
-    const res = await fetch(`/api/command?cmd=${encodeURIComponent(cmdStr)}`, { method: 'POST' });
+    const res = await sendCommand(cmdStr);
+    if (!res) return;
     if (res.status === 403) {
-      showToast('⚠ Enable Web UI in Settings first');
+      let isTokenErr = false;
+      try {
+        const text = await res.text();
+        if (text && text.includes('requires valid token')) {
+          isTokenErr = true;
+        }
+      } catch(e) {}
+
+      if (isTokenErr) {
+        promptApiTokenModal(action);
+      } else {
+        showToast('⚠ Enable Web UI in Settings first');
+      }
     } else {
       showToast(res.ok ? '▶ Action Sent' : '⚠ Server Error');
     }
@@ -4694,8 +4751,8 @@ function copyWebUIUrl() {
 
 function triggerRespringAction() {
   showConfirm('Restart SpringBoard?', 'Are you sure you want to respring your iOS device?', () => {
-    fetch('/api/command?cmd=respring').then(r => {
-      if (!r.ok) throw new Error('respring ' + r.status);
+    sendCommand('respring').then(r => {
+      if (!r || !r.ok) throw new Error('respring ' + (r ? r.status : 'error'));
       showToast('Respringing SpringBoard…');
     }).catch(() => {
       showToast('Failed to respring');
@@ -4705,8 +4762,8 @@ function triggerRespringAction() {
 
 function triggerSafeModeAction() {
   showConfirm('Enter Safe Mode?', 'Are you sure you want to put your iOS device into Safe Mode (restart SpringBoard with tweaks disabled)?', () => {
-    fetch('/api/command?cmd=safemode').then(r => {
-      if (!r.ok) throw new Error('safemode ' + r.status);
+    sendCommand('safemode').then(r => {
+      if (!r || !r.ok) throw new Error('safemode ' + (r ? r.status : 'error'));
       showToast('Entering Safe Mode…');
     }).catch(() => {
       showToast('Failed to enter Safe Mode');
@@ -6067,11 +6124,24 @@ function importDialogOk() {
   showToast(`✓ Imported ${imported.length} actions`);
 }
 
+function onApiTokenChange(val) {
+  const trimmed = (val || '').trim();
+  if (trimmed) {
+    localStorage.setItem('rc_api_token', trimmed);
+  } else {
+    localStorage.removeItem('rc_api_token');
+  }
+}
+
 // ── Settings ─────────────────────────────────────────────────────────────────
 function openSettings() {
   document.getElementById('setting-master').checked = !!config.masterEnabled;
   document.getElementById('setting-nfc').checked    = !!config.nfcEnabled;
   document.getElementById('setting-webui').checked  = !!config.webUIEnabled;
+  const tokenField = document.getElementById('setting-webui-token');
+  if (tokenField) {
+    tokenField.value = localStorage.getItem('rc_api_token') || '';
+  }
   document.getElementById('setting-loglevel').value = ['off','minimal','full'].includes(config.logLevel) ? config.logLevel : 'minimal';
   updateBannersCount();
   updateIntegrationsStatus();

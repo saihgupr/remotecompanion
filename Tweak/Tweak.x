@@ -3000,6 +3000,57 @@ static BOOL rc_web_client_allowed(const struct sockaddr_storage *addr) {
     return wifi && [networks isKindOfClass:[NSArray class]] && [networks containsObject:wifi];
 }
 
+static BOOL rc_is_privileged_command(NSString *cmd) {
+    if (!cmd || ![cmd isKindOfClass:[NSString class]]) return NO;
+    NSString *trimmed = [cmd stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    return [trimmed hasPrefix:@"root "] || [trimmed isEqualToString:@"root"] ||
+           [trimmed hasPrefix:@"sudo "] || [trimmed isEqualToString:@"sudo"] ||
+           [trimmed hasPrefix:@"exec "] || [trimmed isEqualToString:@"exec"];
+}
+
+static BOOL rc_is_api_token_valid(NSString *providedToken) {
+    load_trigger_config();
+    NSString *expectedToken = g_triggerConfig[@"webUIApiToken"];
+    if (!expectedToken || ![expectedToken isKindOfClass:[NSString class]] || expectedToken.length == 0) {
+        return NO; // No token configured -> remote privileged execution disabled
+    }
+    if (!providedToken || ![providedToken isKindOfClass:[NSString class]] || providedToken.length == 0) {
+        return NO;
+    }
+    NSString *trimmedProvided = [providedToken stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    NSString *trimmedExpected = [expectedToken stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (trimmedExpected.length == 0 || trimmedProvided.length == 0) {
+        return NO;
+    }
+    return [trimmedProvided isEqualToString:trimmedExpected];
+}
+
+static NSString *rc_extract_token_from_headers(NSString *requestHeaders) {
+    if (!requestHeaders || ![requestHeaders isKindOfClass:[NSString class]]) return nil;
+    NSArray *lines = [requestHeaders componentsSeparatedByString:@"\r\n"];
+    for (NSUInteger i = 1; i < lines.count; i++) {
+        NSString *line = lines[i];
+        if (line.length == 0) break; // End of HTTP headers
+        
+        NSRange colonRange = [line rangeOfString:@":"];
+        if (colonRange.location == NSNotFound) continue;
+        
+        NSString *headerName = [[line substringToIndex:colonRange.location] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        NSString *headerValue = [[line substringFromIndex:colonRange.location + 1] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        
+        if ([headerName caseInsensitiveCompare:@"Authorization"] == NSOrderedSame) {
+            if ([headerValue.lowercaseString hasPrefix:@"bearer "]) {
+                NSString *token = [[headerValue substringFromIndex:7] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+                if (token.length > 0) return token;
+            }
+        } else if ([headerName caseInsensitiveCompare:@"X-API-Key"] == NSOrderedSame) {
+            NSString *token = [headerValue stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            if (token.length > 0) return token;
+        }
+    }
+    return nil;
+}
+
 // A trigger's runs. Each firing runs the actions on a thread of its own; a run carries its
 // trigger's generation and stops (before its next step, or out of a wait) once that changes - when
 // the trigger is fired again in Restart mode, or stopped by a "stop trigger" action.
@@ -10530,8 +10581,41 @@ static NSString *handle_command(NSString *cmd) {
         } else if ([sub isEqualToString:@"wifi"]) {
             // The Wi-Fi network this iPhone is on, for adding it as a trusted network
             return [NSString stringWithFormat:@"%@\n", rc_current_wifi_name() ?: @""];
+        } else if ([sub isEqualToString:@"token"] || [sub isEqualToString:@"token get"]) {
+            NSString *token = mConfig[@"webUIApiToken"];
+            if (token && [token isKindOfClass:[NSString class]] && token.length > 0) return [NSString stringWithFormat:@"Web UI API Token: %@\n", token];
+            return @"No API token configured\n";
+        } else if ([sub hasPrefix:@"token set "]) {
+            NSString *newTok = [[sub substringFromIndex:10] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            if (newTok.length > 0) {
+                mConfig[@"webUIApiToken"] = newTok;
+                rc_set_trigger_config([mConfig copy]);
+                save_trigger_config();
+                return [NSString stringWithFormat:@"Web UI API Token set to: %@\n", newTok];
+            } else {
+                [mConfig removeObjectForKey:@"webUIApiToken"];
+                rc_set_trigger_config([mConfig copy]);
+                save_trigger_config();
+                return @"Web UI API Token cleared\n";
+            }
+        } else if ([sub isEqualToString:@"token clear"]) {
+            [mConfig removeObjectForKey:@"webUIApiToken"];
+            rc_set_trigger_config([mConfig copy]);
+            save_trigger_config();
+            return @"Web UI API Token cleared\n";
+        } else if ([sub isEqualToString:@"token generate"]) {
+            uint8_t randomBytes[16];
+            arc4random_buf(randomBytes, sizeof(randomBytes));
+            NSMutableString *token = [NSMutableString stringWithCapacity:sizeof(randomBytes) * 2];
+            for (NSUInteger i = 0; i < sizeof(randomBytes); i++) {
+                [token appendFormat:@"%02x", randomBytes[i]];
+            }
+            mConfig[@"webUIApiToken"] = [token copy];
+            rc_set_trigger_config([mConfig copy]);
+            save_trigger_config();
+            return [NSString stringWithFormat:@"Generated Web UI API Token: %@\n", token];
         }
-        return @"Usage: rc webui <on|off|status|access any|access networks|access local|wifi>\n";
+        return @"Usage: rc webui <on|off|status|access any|access networks|access local|wifi|token [get|set <tok>|generate|clear]>\n";
     } else if ([cleanCmd isEqualToString:@"respring"]) {
         SRLog(@"Triggering Respring");
         
@@ -11020,7 +11104,7 @@ static void start_web_server() {
                             NSString *path = requestLine[1];
                             
                             // CORS headers
-                            NSString *cors = @"Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\n";
+                            NSString *cors = @"Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization, X-API-Key\r\n";
                             NSString *responseString = [NSString stringWithFormat:@"HTTP/1.1 404 Not Found\r\n%@Content-Length: 9\r\n\r\nNot Found", cors];
                             
                             if ([method isEqualToString:@"OPTIONS"]) {
@@ -11704,7 +11788,11 @@ static void start_web_server() {
                                     responseString = [NSString stringWithFormat:@"HTTP/1.1 403 Forbidden\r\n%@Content-Length: 17\r\n\r\nWeb UI is disabled", cors];
                                 } else {
                                     __block NSString *command = nil;
-                                    
+                                    NSString *clientToken = nil;
+
+                                    // Extract Token from Headers
+                                    clientToken = rc_extract_token_from_headers(requestString);
+
                                     // 1. Try Query Parameters (Allow for both GET and POST)
                                     NSRange qMarkRange = [path rangeOfString:@"?"];
                                     if (qMarkRange.location != NSNotFound) {
@@ -11715,15 +11803,19 @@ static void start_web_server() {
                                             if (kv.count == 2) {
                                                 NSString *key = [kv[0] lowercaseString];
                                                 if ([key isEqualToString:@"cmd"] || [key isEqualToString:@"command"]) {
-                                                    command = [kv[1] stringByRemovingPercentEncoding];
-                                                    break;
+                                                    NSString *val = [kv[1] stringByReplacingOccurrencesOfString:@"+" withString:@" "];
+                                                    command = [val stringByRemovingPercentEncoding];
+                                                } else if ([key isEqualToString:@"token"] || [key isEqualToString:@"key"]) {
+                                                    if (!clientToken || clientToken.length == 0) {
+                                                        clientToken = [kv[1] stringByRemovingPercentEncoding];
+                                                    }
                                                 }
                                             }
                                         }
                                     }
 
-                                    // 2. If no query param found, and it's a POST, check the body
-                                    if (!command && [method isEqualToString:@"POST"]) {
+                                    // 2. If it's a POST, check the body
+                                    if ([method isEqualToString:@"POST"]) {
                                         NSRange clRange = [requestString rangeOfString:@"Content-Length: " options:NSCaseInsensitiveSearch];
                                         int contentLength = 0;
                                         if (clRange.location != NSNotFound) {
@@ -11753,8 +11845,14 @@ static void start_web_server() {
                                             if (bodyText.length > 0) {
                                                 if ([bodyText hasPrefix:@"{"]) {
                                                     NSDictionary *json = [NSJSONSerialization JSONObjectWithData:bodyData options:0 error:nil];
-                                                    if (json && json[@"command"]) command = json[@"command"];
-                                                } else {
+                                                    if (json && [json isKindOfClass:[NSDictionary class]]) {
+                                                        if (!command && json[@"command"]) command = json[@"command"];
+                                                        if (!clientToken || clientToken.length == 0) {
+                                                            if (json[@"token"]) clientToken = json[@"token"];
+                                                            else if (json[@"key"]) clientToken = json[@"key"];
+                                                        }
+                                                    }
+                                                } else if (!command) {
                                                     command = [bodyText stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
                                                 }
                                             }
@@ -11762,22 +11860,30 @@ static void start_web_server() {
                                     }
 
                                     if (command && command.length > 0) {
-                                        // Action commands use async to avoid SpringBoard deadlocks
-                                        dispatch_async(dispatch_get_main_queue(), ^{
-                                            handle_command(command);
-                                        });
-                                        NSString *safeCommand = command;
-                                        if ([command hasPrefix:@"unlock "]) {
-                                            safeCommand = @"unlock ****";
-                                        } else if ([command hasPrefix:@"lock-toggle "] || [command hasPrefix:@"lock toggle "]) {
-                                            safeCommand = @"lock-toggle ****";
-                                        } else if ([command hasPrefix:@"testkit passcode/set"]) {
-                                            safeCommand = @"testkit passcode/set (redacted)";
+                                        BOOL isLocal = RCCommandFromLocalSocket();
+                                        BOOL isPrivileged = rc_is_privileged_command(command);
+                                        if (!isLocal && isPrivileged && !rc_is_api_token_valid(clientToken)) {
+                                            NSString *errJson = @"{\"ok\":false,\"error\":\"Privileged command requires valid token\"}";
+                                            NSData *errData = [errJson dataUsingEncoding:NSUTF8StringEncoding];
+                                            responseString = [NSString stringWithFormat:@"HTTP/1.1 403 Forbidden\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)errData.length, errJson];
+                                        } else {
+                                            // Action commands use async to avoid SpringBoard deadlocks
+                                            dispatch_async(dispatch_get_main_queue(), ^{
+                                                handle_command(command);
+                                            });
+                                            NSString *safeCommand = command;
+                                            if ([command hasPrefix:@"unlock "]) {
+                                                safeCommand = @"unlock ****";
+                                            } else if ([command hasPrefix:@"lock-toggle "] || [command hasPrefix:@"lock toggle "]) {
+                                                safeCommand = @"lock-toggle ****";
+                                            } else if ([command hasPrefix:@"testkit passcode/set"]) {
+                                                safeCommand = @"testkit passcode/set (redacted)";
+                                            }
+                                            NSDictionary *resp = @{@"ok": @YES, @"command": safeCommand, @"status": @"Acknowledged"};
+                                            NSData *respData = [NSJSONSerialization dataWithJSONObject:resp options:0 error:nil];
+                                            NSString *jsonStr = [[NSString alloc] initWithData:respData encoding:NSUTF8StringEncoding];
+                                            responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)respData.length, jsonStr];
                                         }
-                                        NSDictionary *resp = @{@"ok": @YES, @"command": safeCommand, @"status": @"Acknowledged"};
-                                        NSData *respData = [NSJSONSerialization dataWithJSONObject:resp options:0 error:nil];
-                                        NSString *jsonStr = [[NSString alloc] initWithData:respData encoding:NSUTF8StringEncoding];
-                                        responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)respData.length, jsonStr];
                                     } else {
                                         responseString = [NSString stringWithFormat:@"HTTP/1.1 400 Bad Request\r\n%@Content-Length: 15\r\n\r\nMissing command", cors];
                                     }
