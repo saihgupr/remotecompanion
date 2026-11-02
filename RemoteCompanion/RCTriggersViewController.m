@@ -340,7 +340,15 @@
     addSection(@[@"trigger_statusbar_left_hold", @"trigger_statusbar_center_hold", @"trigger_statusbar_right_hold", @"trigger_statusbar_swipe_left", @"trigger_statusbar_swipe_right", @"trigger_statusbar_double_tap"], @"Screen Gestures", NO);
     addSection(@[@"trigger_edge_left_swipe_up", @"trigger_edge_left_swipe_down", @"trigger_edge_right_swipe_up", @"trigger_edge_right_swipe_down"], @"Edge Gestures", NO);
     addSection(@[@"trigger_bottombar_swipe_left", @"trigger_bottombar_swipe_right", @"trigger_bottom_swipe_up_left", @"trigger_bottom_swipe_up_center", @"trigger_bottom_swipe_up_right"], @"Bottom Bar Gestures", NO);
-    addSection(@[@"trigger_statusbar_two_finger_swipe_down", @"trigger_bottom_two_finger_swipe_up"], @"Multi-Finger Gestures", NO);
+    // Multi-Finger Gestures Section (Only show if configured, hide if empty)
+    NSMutableArray *multiFingerKeys = [NSMutableArray array];
+    for (NSString *key in @[@"trigger_statusbar_two_finger_swipe_down", @"trigger_bottom_two_finger_swipe_up"]) {
+        NSDictionary *trig = [[RCConfigManager sharedManager] triggerDataForKey:key];
+        if (trig && ([trig[@"enabled"] boolValue] || [trig[@"actions"] count] > 0)) {
+            [multiFingerKeys addObject:key];
+        }
+    }
+    addSection(multiFingerKeys, @"Multi-Finger Gestures", YES);
     if ([RCConfigManager hasHomeButton]) {
         addSection(@[@"trigger_home_double_click", @"trigger_home_triple_click", @"trigger_home_quadruple_click", @"trigger_home_hold", @"trigger_home_power", @"touchid_tap", @"touchid_hold"], @"Home Button", NO);
     }
@@ -487,9 +495,10 @@
     };
 
     // System events can only be added once; one that exists just opens
-    NSArray *configured = [[RCConfigManager sharedManager] allConfiguredTriggerKeys];
     NSMutableArray *systemEvents = [NSMutableArray array];
-    for (NSArray *event in @[@[@"trigger_device_lock", @"Device Locked", @"lock.fill", @"Device"],
+    for (NSArray *event in @[@[@"trigger_statusbar_two_finger_swipe_down", @"2-Finger Top Slide Down", @"hand.draw", @"Gestures"],
+                             @[@"trigger_bottom_two_finger_swipe_up", @"2-Finger Bottom Slide Up", @"hand.draw", @"Gestures"],
+                             @[@"trigger_device_lock", @"Device Locked", @"lock.fill", @"Device"],
                              @[@"trigger_device_unlock", @"Device Unlocked", @"lock.open.fill", @"Device"],
                              @[@"trigger_power_connect", @"Power Connected", @"bolt.fill", @"Device"],
                              @[@"trigger_power_disconnect", @"Power Disconnected", @"bolt.slash.fill", @"Device"],
@@ -504,10 +513,17 @@
         NSMutableDictionary *item = [@{ @"title": title, @"icon": event[2], @"section": event[3], @"handler": ^{
             if (![[[RCConfigManager sharedManager] allConfiguredTriggerKeys] containsObject:key]) {
                 [[RCConfigManager sharedManager] updateTrigger:key withData:@{@"name": title, @"enabled": @YES, @"actions": @[]}];
+            } else {
+                NSMutableDictionary *data = [[[RCConfigManager sharedManager] triggerDataForKey:key] mutableCopy] ?: [NSMutableDictionary dictionary];
+                data[@"enabled"] = @YES;
+                [[RCConfigManager sharedManager] updateTrigger:key withData:data];
             }
             push([[RCActionsViewController alloc] initWithTriggerKey:key]);
         } } mutableCopy];
-        if ([configured containsObject:key]) item[@"detail"] = @"Added";
+        NSDictionary *trig = [[RCConfigManager sharedManager] triggerDataForKey:key];
+        if (trig && ([trig[@"enabled"] boolValue] || [trig[@"actions"] count] > 0)) {
+            item[@"detail"] = @"Added";
+        }
         [systemEvents addObject:item];
     }
 
@@ -909,8 +925,8 @@
 - (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
     NSString *triggerKey = [self triggerKeyAtIndexPath:indexPath];
 
-    // Only allow delete for NFC, WiFi, BT, App, Notif, Sched, MQTT, Device State triggers
-    if (![triggerKey hasPrefix:@"nfc_"] && ![triggerKey hasPrefix:@"wifi_"] && ![triggerKey hasPrefix:@"bt_"] && ![triggerKey hasPrefix:@"app_launch_"] && ![triggerKey hasPrefix:@"app_exit_"] && ![triggerKey hasPrefix:@"output_"] && ![triggerKey hasPrefix:@"notif_"] && ![triggerKey hasPrefix:@"notify_"] && ![triggerKey hasPrefix:@"sched_"] && ![triggerKey hasPrefix:@"mqtt_"] && ![triggerKey hasPrefix:@"mqtt_sub_"] && ![triggerKey hasPrefix:@"trigger_device_"] && ![triggerKey hasPrefix:@"trigger_media_"] && ![triggerKey hasPrefix:@"trigger_power_"] && ![triggerKey hasPrefix:@"trigger_carplay_"] && ![triggerKey hasPrefix:@"trigger_watch_"]) {
+    // Only allow delete for NFC, WiFi, BT, App, Notif, Sched, MQTT, Device State, Multi-Finger triggers
+    if (![triggerKey hasPrefix:@"nfc_"] && ![triggerKey hasPrefix:@"wifi_"] && ![triggerKey hasPrefix:@"bt_"] && ![triggerKey hasPrefix:@"app_launch_"] && ![triggerKey hasPrefix:@"app_exit_"] && ![triggerKey hasPrefix:@"output_"] && ![triggerKey hasPrefix:@"notif_"] && ![triggerKey hasPrefix:@"notify_"] && ![triggerKey hasPrefix:@"sched_"] && ![triggerKey hasPrefix:@"mqtt_"] && ![triggerKey hasPrefix:@"mqtt_sub_"] && ![triggerKey hasPrefix:@"trigger_device_"] && ![triggerKey hasPrefix:@"trigger_media_"] && ![triggerKey hasPrefix:@"trigger_power_"] && ![triggerKey hasPrefix:@"trigger_carplay_"] && ![triggerKey hasPrefix:@"trigger_watch_"] && ![triggerKey containsString:@"two_finger"]) {
         return [UISwipeActionsConfiguration configurationWithActions:@[]];
     }
 

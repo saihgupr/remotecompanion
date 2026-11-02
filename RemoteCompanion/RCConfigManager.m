@@ -87,8 +87,6 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
                              @"trigger_statusbar_left_hold", @"trigger_statusbar_center_hold", @"trigger_statusbar_right_hold", 
                              @"trigger_statusbar_swipe_left", @"trigger_statusbar_swipe_right",
                              @"trigger_statusbar_double_tap",
-                             @"trigger_statusbar_two_finger_swipe_down",
-                             @"trigger_bottom_two_finger_swipe_up",
                              @"trigger_home_triple_click", @"trigger_home_quadruple_click", @"trigger_home_double_click",
                              @"trigger_home_hold", @"trigger_home_power",
                              @"trigger_edge_left_swipe_up", @"trigger_edge_left_swipe_down", 
@@ -102,6 +100,14 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
                              @"trigger_media_play", @"trigger_media_pause", @"trigger_media_track_change"];
         
         BOOL needsSave = NO;
+        // Clean up unconfigured multi-finger triggers so they don't show in the main menu by default
+        for (NSString *mfKey in @[@"trigger_statusbar_two_finger_swipe_down", @"trigger_bottom_two_finger_swipe_up"]) {
+            NSDictionary *t = triggers[mfKey];
+            if (t && ![t[@"enabled"] boolValue] && [t[@"actions"] count] == 0) {
+                [triggers removeObjectForKey:mfKey];
+                needsSave = YES;
+            }
+        }
         for (NSString *key in allKeys) {
             if (!triggers[key]) {
                 triggers[key] = [@{ @"enabled": @NO, @"actions": @[] } mutableCopy];
@@ -192,8 +198,6 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
                 @"trigger_statusbar_swipe_left": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
                 @"trigger_statusbar_swipe_right": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
                 @"trigger_statusbar_double_tap": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"trigger_statusbar_two_finger_swipe_down": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"trigger_bottom_two_finger_swipe_up": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
                 @"trigger_home_triple_click": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
                 @"trigger_home_quadruple_click": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
                 @"trigger_home_hold": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
