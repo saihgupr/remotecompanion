@@ -13,7 +13,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - **Terminal command hangs as its waiting for a response**: `rc wifi off` (and toggle-to-off) now returns `WiFi Disabled` immediately and performs the actual shutoff 0.5s later, so a remote call over WiFi SSH gets its reply before the transport drops; redundant `wifi on`/`off` calls short-circuit with `Already ON/OFF` without touching the radio. Remote `rc` ssh also has a dead-connection bound so killing WiFi mid-session can't hang automations.
-- **Trigger options menu overlap**: Display "When Triggered Again" inline (`UIMenuOptionsDisplayInline`) in the trigger actions menu (`...`) to prevent iOS from rendering the submenu on top of parent menu items.
+- **Trigger options retrigger mode presentation**: Present "When Triggered Again" as a clean row with current mode subtitle in the trigger options menu (`...`) that opens a native action sheet dropdown on tap, eliminating iOS nested submenu bleed-through.
 
 ## [4.1.0] - 2026-10-31
 
