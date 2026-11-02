@@ -4851,6 +4851,13 @@ static const char* rc_shell_path(void) {
     return "/bin/sh";
 }
 
+// Encloses a string in single quotes and escapes internal single quotes.
+// In POSIX shell, everything inside '...' is 100% literal (no variable expansion, no $(...)).
+static NSString *rc_sh_quote(NSString *val) {
+    if (!val || val.length == 0) return @"''";
+    return [NSString stringWithFormat:@"'%@'", [val stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"]];
+}
+
 static int rc_posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *file_actions, const posix_spawnattr_t *attrp, char *const argv[], char *const envp[]) {
     posix_spawnattr_t local_attr;
     posix_spawnattr_init(&local_attr);
@@ -10237,6 +10244,10 @@ static NSString *handle_command(NSString *cmd) {
         }
         
         NSString *host = targetHost[@"host"] ?: @"";
+        if (host.length == 0) {
+            SRLogMin(@"[RCSSH] Error: Host address for '%@' is empty", hostId);
+            return [NSString stringWithFormat:@"Error: Host address for '%@' is empty\n", hostId];
+        }
         NSString *user = targetHost[@"user"] ?: @"mobile";
         NSNumber *portNum = targetHost[@"port"] ?: @22;
         NSInteger port = [portNum integerValue] > 0 ? [portNum integerValue] : 22;
@@ -10244,37 +10255,53 @@ static NSString *handle_command(NSString *cmd) {
         NSString *password = targetHost[@"password"] ?: @"";
         NSString *keyPath = targetHost[@"keyPath"] ?: @"";
         
-        // Escape remote command for sh execution
-        NSString *escapedRemoteCmd = [remoteCmd stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
-        
+        // 2. Build SSH target and options safely
+        NSString *targetDestination = user.length > 0
+            ? [NSString stringWithFormat:@"%@@%@", user, host]
+            : host;
+            
+        // 3. Assemble command string using strict single-quote escaping for the remote command
         NSString *fullSSHCmd = nil;
+        BOOL useSSHPass = NO;
         if ([authType isEqualToString:@"key"] && keyPath.length > 0) {
-            fullSSHCmd = [NSString stringWithFormat:@"ssh -i \"%@\" -p %ld -o StrictHostKeyChecking=no -o ConnectTimeout=5 %@%@ \"%@\"",
-                          keyPath, (long)port, user.length ? [NSString stringWithFormat:@"%@@", user] : @"", host, escapedRemoteCmd];
+            NSString *effectiveKeyPath = [keyPath stringByExpandingTildeInPath];
+            fullSSHCmd = [NSString stringWithFormat:@"ssh -i %@ -p %ld -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 %@ %@",
+                          rc_sh_quote(effectiveKeyPath),
+                          (long)port,
+                          rc_sh_quote(targetDestination),
+                          rc_sh_quote(remoteCmd)];
         } else if (password.length > 0) {
-            // Use sshpass with password
-            fullSSHCmd = [NSString stringWithFormat:@"sshpass -p \"%@\" ssh -p %ld -o StrictHostKeyChecking=no -o ConnectTimeout=5 %@%@ \"%@\"",
-                          password, (long)port, user.length ? [NSString stringWithFormat:@"%@@", user] : @"", host, escapedRemoteCmd];
+            useSSHPass = YES;
+            // -e reads password from the SSHPASS environment variable, hiding it from `ps`
+            fullSSHCmd = [NSString stringWithFormat:@"sshpass -e ssh -p %ld -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 %@ %@",
+                          (long)port,
+                          rc_sh_quote(targetDestination),
+                          rc_sh_quote(remoteCmd)];
         } else {
-            // Default OpenSSH with agent / default key
-            fullSSHCmd = [NSString stringWithFormat:@"ssh -p %ld -o StrictHostKeyChecking=no -o ConnectTimeout=5 %@%@ \"%@\"",
-                          (long)port, user.length ? [NSString stringWithFormat:@"%@@", user] : @"", host, escapedRemoteCmd];
+            // Default OpenSSH key / agent
+            fullSSHCmd = [NSString stringWithFormat:@"ssh -p %ld -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 %@ %@",
+                          (long)port,
+                          rc_sh_quote(targetDestination),
+                          rc_sh_quote(remoteCmd)];
         }
         
         SRLog(@"[RCSSH] Executing remote SSH command on %@: %@", host, remoteCmd);
         
+        // 4. Pass SSHPASS securely via environment
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
             NSString *basePath = @"/var/jb/usr/local/bin:/var/jb/usr/bin:/var/jb/bin:/var/jb/usr/sbin:/var/jb/sbin:/usr/bin:/bin:/usr/sbin:/sbin";
             extern char **environ;
             NSMutableArray *envArray = [NSMutableArray array];
             for (char **env = environ; *env != NULL; env++) {
                 NSString *envStr = [NSString stringWithUTF8String:*env];
-                if (![envStr hasPrefix:@"PATH="]) {
+                if (envStr && ![envStr hasPrefix:@"PATH="] && ![envStr hasPrefix:@"SSHPASS="]) {
                     [envArray addObject:envStr];
                 }
             }
             [envArray addObject:[NSString stringWithFormat:@"PATH=%@", basePath]];
-            
+            if (useSSHPass && password.length > 0) {
+                [envArray addObject:[NSString stringWithFormat:@"SSHPASS=%@", password]];
+            }
             char **newEnviron = malloc(sizeof(char*) * (envArray.count + 1));
             for (NSUInteger i = 0; i < envArray.count; i++) {
                 newEnviron[i] = strdup([envArray[i] UTF8String]);
@@ -10297,7 +10324,10 @@ static NSString *handle_command(NSString *cmd) {
             }
             
             for (NSUInteger i = 0; i < envArray.count; i++) {
-                free(newEnviron[i]);
+                if (newEnviron[i]) {
+                    memset(newEnviron[i], 0, strlen(newEnviron[i]));
+                    free(newEnviron[i]);
+                }
             }
             free(newEnviron);
             

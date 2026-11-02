@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Security
+- **Hardened `ssh-run`**: the remote command, user@host and key path are now POSIX single-quoted, so `$(...)` and backticks are evaluated only on the remote host and never on the phone. Passwords are passed through `sshpass -e` (the `SSHPASS` environment variable) instead of `-p`, so they no longer appear in `ps`.
+
 ### Added
 - **Deep Linking URL Scheme & CLI Navigation**: added `remotecompanion://` URL scheme support and `rc nav <panel>` CLI command to jump directly into Settings, Integrations (Home Assistant, Keyboard Maestro, MQTT), New Trigger picker, or Triggers list from Siri Shortcuts, automation scripts, or terminal.
 
