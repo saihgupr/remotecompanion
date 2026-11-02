@@ -3320,6 +3320,7 @@ void RCExecuteTrigger(NSString *triggerKey) {
     
     SRLogMin(@"TRIGGER FIRED: '%@' -> Executing %lu actions", triggerKey, (unsigned long)actions.count);
     RCTKEvent(@"trigger.fired", @{ @"key": triggerKey, @"actions": @(actions.count) });
+    RCTriggerHapticFor(triggerKey);
     
     // Execute on background queue to allow for delays and blocking operations
     // Fired again while a run is going: "parallel" (the default) runs alongside, "restart" stops the
@@ -12473,29 +12474,72 @@ static void RC_ReplayWalletDoublePress(void) {
 
 
 
-// Helper to trigger haptic feedback
-void RCTriggerHapticFor(NSString *triggerKey) {
-    if (RC_IsForegroundAppExcluded()) return;
+static BOOL RC_DefaultHapticsForTrigger(NSString *triggerKey) {
+    if (!triggerKey.length) return NO;
+    if ([triggerKey hasPrefix:@"power_"]) return YES;
+    if ([triggerKey hasPrefix:@"volume_"]) return YES;
+    if ([triggerKey hasPrefix:@"touchid_"]) return YES;
+    if ([triggerKey hasPrefix:@"nfc_"]) return YES;
+    if ([triggerKey isEqualToString:@"trigger_home_power"]) return YES;
+    if ([triggerKey hasPrefix:@"trigger_home_"]) return YES;
+    if ([triggerKey hasPrefix:@"trigger_statusbar_"]) return YES;
+    if ([triggerKey hasPrefix:@"trigger_bottombar_"]) return YES;
+    if ([triggerKey hasPrefix:@"trigger_bottom_swipe_up_"]) return YES;
+    if ([triggerKey hasPrefix:@"trigger_edge_"]) return YES;
+    return NO;
+}
+
+static BOOL RC_IsHapticsEnabledForTrigger(NSString *triggerKey) {
+    if (!triggerKey.length) return YES;
     if (!g_triggerConfig) load_trigger_config();
     if (g_triggerConfig) {
         id globalHaptics = g_triggerConfig[@"hapticsEnabled"];
         if (globalHaptics && [globalHaptics respondsToSelector:@selector(boolValue)] && ![globalHaptics boolValue]) {
-            return;
+            return NO;
         }
-        if (triggerKey.length > 0) {
-            id triggers = g_triggerConfig[@"triggers"];
-            if ([triggers isKindOfClass:[NSDictionary class]]) {
-                id trigger = triggers[triggerKey];
-                if ([trigger isKindOfClass:[NSDictionary class]]) {
-                    id hapticsVal = trigger[@"haptics"];
-                    if (hapticsVal && [hapticsVal respondsToSelector:@selector(boolValue)] && ![hapticsVal boolValue]) {
-                        SRLog(@"[Haptic] Trigger '%@' has haptics disabled - skipping", triggerKey);
-                        return;
-                    }
+        id triggers = g_triggerConfig[@"triggers"];
+        if ([triggers isKindOfClass:[NSDictionary class]]) {
+            id trigger = triggers[triggerKey];
+            if ([trigger isKindOfClass:[NSDictionary class]]) {
+                id hapticsVal = trigger[@"haptics"];
+                if (hapticsVal != nil && [hapticsVal respondsToSelector:@selector(boolValue)]) {
+                    return [hapticsVal boolValue];
                 }
             }
         }
     }
+    return RC_DefaultHapticsForTrigger(triggerKey);
+}
+
+// Helper to trigger haptic feedback
+void RCTriggerHapticFor(NSString *triggerKey) {
+    if (RC_IsForegroundAppExcluded()) return;
+    if (triggerKey.length > 0 && !RC_IsHapticsEnabledForTrigger(triggerKey)) {
+        return;
+    }
+    if (!triggerKey.length) {
+        if (!g_triggerConfig) load_trigger_config();
+        if (g_triggerConfig) {
+            id globalHaptics = g_triggerConfig[@"hapticsEnabled"];
+            if (globalHaptics && [globalHaptics respondsToSelector:@selector(boolValue)] && ![globalHaptics boolValue]) {
+                return;
+            }
+        }
+    }
+
+    if (triggerKey.length > 0) {
+        static CFAbsoluteTime s_lastHapticTime = 0;
+        static NSString *s_lastHapticKey = nil;
+        CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+        if (s_lastHapticKey && [s_lastHapticKey isEqualToString:triggerKey]) {
+            if (now - s_lastHapticTime < 0.35) {
+                return;
+            }
+        }
+        s_lastHapticTime = now;
+        s_lastHapticKey = [triggerKey copy];
+    }
+
     AudioServicesPlaySystemSound(1520);
 }
 

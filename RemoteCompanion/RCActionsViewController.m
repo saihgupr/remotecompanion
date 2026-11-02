@@ -921,23 +921,11 @@ static id g_actionClipboard = nil;
 }
 
 - (BOOL)isHapticsEnabledForTrigger {
-    NSDictionary *data = [[RCConfigManager sharedManager] triggerDataForKey:_triggerKey];
-    NSNumber *val = data[@"haptics"];
-    if (val != nil && [val respondsToSelector:@selector(boolValue)]) {
-        return [val boolValue];
-    }
-    return YES;
+    return [[RCConfigManager sharedManager] isHapticsEnabledForTrigger:_triggerKey];
 }
 
 - (void)setHapticsEnabledForTrigger:(BOOL)enabled {
-    RCConfigManager *config = [RCConfigManager sharedManager];
-    NSMutableDictionary *data = [[config triggerDataForKey:_triggerKey] mutableCopy] ?: [NSMutableDictionary dictionary];
-    if (enabled) {
-        [data removeObjectForKey:@"haptics"];
-    } else {
-        data[@"haptics"] = @NO;
-    }
-    [config updateTrigger:_triggerKey withData:data];
+    [[RCConfigManager sharedManager] setHapticsEnabled:enabled forTrigger:_triggerKey];
     self.moreButton.menu = [self moreMenu];
 }
 

@@ -5906,10 +5906,32 @@ function finishIfCondition(def, value, valueTitle, editIdx) {
   renderActionList();
 }
 
+function defaultHapticsForTrigger(key) {
+  if (!key) return false;
+  if (key.startsWith('power_')) return true;
+  if (key.startsWith('volume_')) return true;
+  if (key.startsWith('touchid_')) return true;
+  if (key.startsWith('nfc_')) return true;
+  if (key === 'trigger_home_power') return true;
+  if (key.startsWith('trigger_home_')) return true;
+  if (key.startsWith('trigger_statusbar_')) return true;
+  if (key.startsWith('trigger_bottombar_')) return true;
+  if (key.startsWith('trigger_bottom_swipe_up_')) return true;
+  if (key.startsWith('trigger_edge_')) return true;
+  return false;
+}
+
+function isHapticsEnabledForTrigger(key) {
+  const t = triggerData(key) || {};
+  if (t.haptics !== undefined && t.haptics !== null) {
+    return !!t.haptics;
+  }
+  return defaultHapticsForTrigger(key);
+}
+
 // ── Ellipsis Menu ─────────────────────────────────────────────────────────────
 function showEllipsisMenu(e) {
-  const trigger = triggerData(currentKey) || {};
-  const hapticsEnabled = trigger.haptics !== false;
+  const hapticsEnabled = isHapticsEnabledForTrigger(currentKey);
   const items = [
     {
       label: hapticsEnabled ? 'Disable Haptics' : 'Enable Haptics',
@@ -5926,13 +5948,15 @@ function showEllipsisMenu(e) {
 function toggleCurrentTriggerHaptics() {
   const t = triggerData(currentKey);
   if (!t) return;
-  if (t.haptics === false) {
+  const current = isHapticsEnabledForTrigger(currentKey);
+  const next = !current;
+  const def = defaultHapticsForTrigger(currentKey);
+  if (next === def) {
     delete t.haptics;
-    showToast('✓ Haptics Enabled');
   } else {
-    t.haptics = false;
-    showToast('✓ Haptics Disabled');
+    t.haptics = next;
   }
+  showToast(next ? '✓ Haptics Enabled' : '✓ Haptics Disabled');
   saveConfig();
 }
 

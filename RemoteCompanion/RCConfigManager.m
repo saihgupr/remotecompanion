@@ -716,6 +716,43 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
     [self saveConfig];
 }
 
++ (BOOL)defaultHapticsForTrigger:(NSString *)triggerKey {
+    if (!triggerKey.length) return NO;
+    if ([triggerKey hasPrefix:@"power_"]) return YES;
+    if ([triggerKey hasPrefix:@"volume_"]) return YES;
+    if ([triggerKey hasPrefix:@"touchid_"]) return YES;
+    if ([triggerKey hasPrefix:@"nfc_"]) return YES;
+    if ([triggerKey isEqualToString:@"trigger_home_power"]) return YES;
+    if ([triggerKey hasPrefix:@"trigger_home_"]) return YES;
+    if ([triggerKey hasPrefix:@"trigger_statusbar_"]) return YES;
+    if ([triggerKey hasPrefix:@"trigger_bottombar_"]) return YES;
+    if ([triggerKey hasPrefix:@"trigger_bottom_swipe_up_"]) return YES;
+    if ([triggerKey hasPrefix:@"trigger_edge_"]) return YES;
+    return NO;
+}
+
+- (BOOL)isHapticsEnabledForTrigger:(NSString *)triggerKey {
+    if (!triggerKey.length) return NO;
+    NSDictionary *data = [self triggerDataForKey:triggerKey];
+    id val = data[@"haptics"];
+    if (val != nil && [val respondsToSelector:@selector(boolValue)]) {
+        return [val boolValue];
+    }
+    return [RCConfigManager defaultHapticsForTrigger:triggerKey];
+}
+
+- (void)setHapticsEnabled:(BOOL)enabled forTrigger:(NSString *)triggerKey {
+    if (!triggerKey.length) return;
+    NSMutableDictionary *data = [self triggerDict:triggerKey];
+    BOOL def = [RCConfigManager defaultHapticsForTrigger:triggerKey];
+    if (enabled == def) {
+        [data removeObjectForKey:@"haptics"];
+    } else {
+        data[@"haptics"] = @(enabled);
+    }
+    [self saveConfig];
+}
+
 - (BOOL)isTriggerFavorite:(NSString *)triggerKey {
     NSArray *favorites = _config[@"favoriteTriggers"];
     return [favorites containsObject:triggerKey];
