@@ -9766,6 +9766,10 @@ static NSString *handle_command(NSString *cmd) {
     } else if ([cleanCmd isEqualToString:@"wifi-on"] || [cleanCmd isEqualToString:@"wi-on"] || [cleanCmd isEqualToString:@"wifi on"]) {
         SBWiFiManager *manager = [objc_getClass("SBWiFiManager") sharedInstance];
         if (manager) {
+            BOOL cur = [manager wiFiEnabled];
+            if (cur) {
+                return @"WiFi Already ON\n";
+            }
             [manager setWiFiEnabled:YES];
             SRLog(@"WiFi enabled");
             return @"WiFi Enabled\n";
@@ -9781,8 +9785,17 @@ static NSString *handle_command(NSString *cmd) {
     } else if ([cleanCmd isEqualToString:@"wifi-off"] || [cleanCmd isEqualToString:@"wi-off"] || [cleanCmd isEqualToString:@"wifi off"]) {
         SBWiFiManager *manager = [objc_getClass("SBWiFiManager") sharedInstance];
         if (manager) {
-            [manager setWiFiEnabled:NO];
-            SRLog(@"WiFi disabled");
+            BOOL cur = [manager wiFiEnabled];
+            if (!cur) {
+                return @"WiFi Already OFF\n";
+            }
+            // Defer the actual shutoff so the response is written + the socket
+            // closed while WiFi is still up (remote `rc wifi off` over WiFi SSH
+            // would otherwise kill its own transport before the reply arrives).
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                [manager setWiFiEnabled:NO];
+                SRLog(@"WiFi disabled");
+            });
             return @"WiFi Disabled\n";
         }
         return @"Error: SBWiFiManager not found\n";
@@ -9790,8 +9803,16 @@ static NSString *handle_command(NSString *cmd) {
         SBWiFiManager *manager = [objc_getClass("SBWiFiManager") sharedInstance];
         if (manager) {
             BOOL current = [manager wiFiEnabled];
-            [manager setWiFiEnabled:!current];
-            SRLog(@"WiFi toggled: %d -> %d", current, !current);
+            if (current) {
+                // Turning OFF: same deferred-shutoff treatment as `wifi off`.
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                    [manager setWiFiEnabled:NO];
+                    SRLog(@"WiFi toggled: %d -> %d", current, !current);
+                });
+            } else {
+                [manager setWiFiEnabled:!current];
+                SRLog(@"WiFi toggled: %d -> %d", current, !current);
+            }
             return [NSString stringWithFormat:@"WiFi Toggled: %@\n", !current ? @"ON" : @"OFF"];
         }
         return @"Error: SBWiFiManager not found\n";

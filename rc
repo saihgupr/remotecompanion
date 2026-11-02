@@ -132,7 +132,7 @@ else
     # Tunnel to the unix socket on the device
     # We try /var/jb/usr/bin/rc-client (rootless) then rootful path, then nc -U as final fallback
     REMOTE_CMD="echo -n '$_CMD' | /var/jb/usr/bin/rc-client 2>/dev/null || echo -n '$_CMD' | /usr/bin/rc-client 2>/dev/null || echo -n '$_CMD' | nc -U $SOCKET_PATH 2>/dev/null"
-    RESPONSE=$(ssh -o ConnectTimeout=3 -o StrictHostKeyChecking=no mobile@$IP "$REMOTE_CMD" 2>/dev/null)
+    RESPONSE=$(ssh -o ConnectTimeout=3 -o ServerAliveInterval=2 -o ServerAliveCountMax=2 -o StrictHostKeyChecking=no mobile@$IP "$REMOTE_CMD" 2>/dev/null)
 fi
 
 # Output handling
