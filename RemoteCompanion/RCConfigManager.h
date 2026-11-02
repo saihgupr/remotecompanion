@@ -53,6 +53,10 @@
 @property (nonatomic, copy) NSString *mqttPassword;
 @property (nonatomic, copy) NSString *mqttClientId;
 @property (nonatomic, copy) NSString *mqttTopicPrefix;
+@property (nonatomic, strong) NSArray<NSDictionary *> *sshHosts;
+- (void)addOrUpdateSSHHost:(NSDictionary *)host;
+- (void)deleteSSHHostWithId:(NSString *)hostId;
+- (NSDictionary *)sshHostForId:(NSString *)hostId;
 
 
 + (instancetype)sharedManager;

@@ -10212,6 +10212,99 @@ static NSString *handle_command(NSString *cmd) {
     } else if ([cleanCmd hasPrefix:@"lua "]) {
         NSString *scriptPath = [[cleanCmd substringFromIndex:4] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         return execute_lua_script(scriptPath);
+    } else if ([cleanCmd hasPrefix:@"ssh-run "]) {
+        NSString *payload = [[cleanCmd substringFromIndex:8] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        NSRange firstSpace = [payload rangeOfString:@" "];
+        if (firstSpace.location == NSNotFound) {
+            return @"Usage: ssh-run <hostId> <command>\n";
+        }
+        NSString *hostId = [payload substringToIndex:firstSpace.location];
+        NSString *remoteCmd = [payload substringFromIndex:firstSpace.location + 1];
+        
+        load_trigger_config();
+        NSArray *hosts = g_triggerConfig[@"sshHosts"] ?: @[];
+        NSDictionary *targetHost = nil;
+        for (NSDictionary *h in hosts) {
+            if ([h[@"id"] isEqualToString:hostId]) {
+                targetHost = h;
+                break;
+            }
+        }
+        
+        if (!targetHost) {
+            SRLogMin(@"[RCSSH] Error: SSH Host with ID %@ not found", hostId);
+            return [NSString stringWithFormat:@"SSH Host '%@' not found\n", hostId];
+        }
+        
+        NSString *host = targetHost[@"host"] ?: @"";
+        NSString *user = targetHost[@"user"] ?: @"mobile";
+        NSNumber *portNum = targetHost[@"port"] ?: @22;
+        NSInteger port = [portNum integerValue] > 0 ? [portNum integerValue] : 22;
+        NSString *authType = targetHost[@"authType"] ?: @"password";
+        NSString *password = targetHost[@"password"] ?: @"";
+        NSString *keyPath = targetHost[@"keyPath"] ?: @"";
+        
+        // Escape remote command for sh execution
+        NSString *escapedRemoteCmd = [remoteCmd stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
+        
+        NSString *fullSSHCmd = nil;
+        if ([authType isEqualToString:@"key"] && keyPath.length > 0) {
+            fullSSHCmd = [NSString stringWithFormat:@"ssh -i \"%@\" -p %ld -o StrictHostKeyChecking=no -o ConnectTimeout=5 %@%@ \"%@\"",
+                          keyPath, (long)port, user.length ? [NSString stringWithFormat:@"%@@", user] : @"", host, escapedRemoteCmd];
+        } else if (password.length > 0) {
+            // Use sshpass with password
+            fullSSHCmd = [NSString stringWithFormat:@"sshpass -p \"%@\" ssh -p %ld -o StrictHostKeyChecking=no -o ConnectTimeout=5 %@%@ \"%@\"",
+                          password, (long)port, user.length ? [NSString stringWithFormat:@"%@@", user] : @"", host, escapedRemoteCmd];
+        } else {
+            // Default OpenSSH with agent / default key
+            fullSSHCmd = [NSString stringWithFormat:@"ssh -p %ld -o StrictHostKeyChecking=no -o ConnectTimeout=5 %@%@ \"%@\"",
+                          (long)port, user.length ? [NSString stringWithFormat:@"%@@", user] : @"", host, escapedRemoteCmd];
+        }
+        
+        SRLog(@"[RCSSH] Executing remote SSH command on %@: %@", host, remoteCmd);
+        
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            NSString *basePath = @"/var/jb/usr/local/bin:/var/jb/usr/bin:/var/jb/bin:/var/jb/usr/sbin:/var/jb/sbin:/usr/bin:/bin:/usr/sbin:/sbin";
+            extern char **environ;
+            NSMutableArray *envArray = [NSMutableArray array];
+            for (char **env = environ; *env != NULL; env++) {
+                NSString *envStr = [NSString stringWithUTF8String:*env];
+                if (![envStr hasPrefix:@"PATH="]) {
+                    [envArray addObject:envStr];
+                }
+            }
+            [envArray addObject:[NSString stringWithFormat:@"PATH=%@", basePath]];
+            
+            char **newEnviron = malloc(sizeof(char*) * (envArray.count + 1));
+            for (NSUInteger i = 0; i < envArray.count; i++) {
+                newEnviron[i] = strdup([envArray[i] UTF8String]);
+            }
+            newEnviron[envArray.count] = NULL;
+            
+            pid_t pid;
+            const char *sh = rc_shell_path();
+            char *args[] = {(char *)sh, "-c", (char *)[fullSSHCmd UTF8String], NULL};
+            int spawn_result = rc_posix_spawn(&pid, sh, NULL, NULL, args, newEnviron);
+            int result = -1;
+            if (spawn_result == 0) {
+                int status;
+                waitpid(pid, &status, 0);
+                if (WIFEXITED(status)) {
+                    result = WEXITSTATUS(status);
+                }
+            } else {
+                SRLogMin(@"[RCSSH] posix_spawn failed: %d", spawn_result);
+            }
+            
+            for (NSUInteger i = 0; i < envArray.count; i++) {
+                free(newEnviron[i]);
+            }
+            free(newEnviron);
+            
+            SRLog(@"[RCSSH] Remote command on %@ finished with exit code: %d", host, result);
+        });
+        
+        return [NSString stringWithFormat:@"Executing SSH command on %@: %@\n", host, remoteCmd];
 
     // -- Touch gesture commands ------------------------------------------------
     // taptest show|hide|reset|status|run [system|app]

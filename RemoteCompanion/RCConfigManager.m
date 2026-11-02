@@ -79,6 +79,12 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         } else if (![_config[@"notificationTriggers"] isKindOfClass:[NSMutableArray class]]) {
             _config[@"notificationTriggers"] = [_config[@"notificationTriggers"] mutableCopy];
         }
+
+        if (!_config[@"sshHosts"]) {
+            _config[@"sshHosts"] = [NSMutableArray array];
+        } else if (![_config[@"sshHosts"] isKindOfClass:[NSMutableArray class]]) {
+            _config[@"sshHosts"] = [_config[@"sshHosts"] mutableCopy];
+        }
         
         // Auto-add any missing triggers (for upgrades)
         NSMutableDictionary *triggers = _config[@"triggers"];
@@ -177,6 +183,7 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
             @"freezeListsDuringGestures": @YES,
             @"nfcEnabled": @YES,
             @"rootEnabled": @YES,
+            @"sshHosts": [NSMutableArray array],
             @"triggers": [@{
                 @"volume_up_hold": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
                 @"volume_down_hold": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
@@ -550,6 +557,58 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
 - (void)setMqttTopicPrefix:(NSString *)mqttTopicPrefix {
     _config[@"mqttTopicPrefix"] = mqttTopicPrefix ?: @"remotecompanion";
     [self saveConfig];
+}
+
+- (NSArray<NSDictionary *> *)sshHosts {
+    NSArray *hosts = _config[@"sshHosts"];
+    if (![hosts isKindOfClass:[NSArray class]]) {
+        return @[];
+    }
+    return hosts;
+}
+
+- (void)setSshHosts:(NSArray<NSDictionary *> *)hosts {
+    _config[@"sshHosts"] = [hosts mutableCopy] ?: [NSMutableArray array];
+    [self saveConfig];
+}
+
+- (void)addOrUpdateSSHHost:(NSDictionary *)host {
+    if (!host || !host[@"id"]) return;
+    NSMutableArray *hosts = [self.sshHosts mutableCopy];
+    NSUInteger foundIdx = NSNotFound;
+    for (NSUInteger i = 0; i < hosts.count; i++) {
+        if ([hosts[i][@"id"] isEqualToString:host[@"id"]]) {
+            foundIdx = i;
+            break;
+        }
+    }
+    if (foundIdx != NSNotFound) {
+        hosts[foundIdx] = host;
+    } else {
+        [hosts addObject:host];
+    }
+    self.sshHosts = hosts;
+}
+
+- (void)deleteSSHHostWithId:(NSString *)hostId {
+    if (!hostId) return;
+    NSMutableArray *hosts = [self.sshHosts mutableCopy];
+    for (NSInteger i = (NSInteger)hosts.count - 1; i >= 0; i--) {
+        if ([hosts[i][@"id"] isEqualToString:hostId]) {
+            [hosts removeObjectAtIndex:i];
+        }
+    }
+    self.sshHosts = hosts;
+}
+
+- (NSDictionary *)sshHostForId:(NSString *)hostId {
+    if (!hostId) return nil;
+    for (NSDictionary *h in self.sshHosts) {
+        if ([h[@"id"] isEqualToString:hostId]) {
+            return h;
+        }
+    }
+    return nil;
 }
 
 - (NSDictionary *)triggerDataForKey:(NSString *)triggerKey {
@@ -1245,6 +1304,18 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
             result = [NSString stringWithFormat:@"Open Camera (%@%@)", modeName, detStr];
         } else if ([cmd hasPrefix:@"root "]) {
             result = [NSString stringWithFormat:@"[root] %@", [cmd substringFromIndex:5]];
+        } else if ([cmd hasPrefix:@"ssh-run "]) {
+            NSString *payload = [originalCmd substringFromIndex:8];
+            NSRange firstSpace = [payload rangeOfString:@" "];
+            if (firstSpace.location != NSNotFound) {
+                NSString *hostId = [payload substringToIndex:firstSpace.location];
+                NSString *remoteCmd = [payload substringFromIndex:firstSpace.location + 1];
+                NSDictionary *host = [self sshHostForId:hostId];
+                NSString *hostName = host[@"name"] ?: host[@"host"] ?: @"SSH";
+                result = [NSString stringWithFormat:@"SSH [%@]: %@", hostName, remoteCmd];
+            } else {
+                result = [NSString stringWithFormat:@"SSH: %@", payload];
+            }
         } else if ([cmd hasPrefix:@"exec-root "]) {
             result = [NSString stringWithFormat:@"[root] %@", [cmd substringFromIndex:10]];
         } else if ([cmd hasPrefix:@"exec "]) {
@@ -1526,6 +1597,7 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
     }
 
     NSString *cmd = [[(NSString *)cmdId stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString];
+    if ([cmd hasPrefix:@"ssh-run "] || [cmd hasPrefix:@"ssh "]) return @"terminal.fill";
     if ([cmd hasPrefix:@"audiohandoff enabled "] || [cmd hasPrefix:@"audiohandoff auto "]) return @"headphones";
     if ([cmd isEqualToString:@"camera record"]) return @"video.circle.fill";
     if ([cmd isEqualToString:@"camera shutter"]) return @"camera.circle.fill";

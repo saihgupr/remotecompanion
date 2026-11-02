@@ -3557,6 +3557,19 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             if ([action hasPrefix:@"exec "]) {
                 cell.textLabel.text = [action substringFromIndex:5];
                 subtitle = @"Terminal Command";
+            } else if ([action hasPrefix:@"ssh-run "]) {
+                NSString *payload = [action substringFromIndex:8];
+                NSRange firstSpace = [payload rangeOfString:@" "];
+                if (firstSpace.location != NSNotFound) {
+                    NSString *hostId = [payload substringToIndex:firstSpace.location];
+                    NSString *remoteCmd = [payload substringFromIndex:firstSpace.location + 1];
+                    NSDictionary *host = [[RCConfigManager sharedManager] sshHostForId:hostId];
+                    cell.textLabel.text = remoteCmd;
+                    subtitle = [NSString stringWithFormat:@"SSH: %@", host[@"name"] ?: host[@"host"] ?: @"Remote Host"];
+                } else {
+                    cell.textLabel.text = payload;
+                    subtitle = @"SSH Command";
+                }
             } else if ([action hasPrefix:@"root "]) {
                 cell.textLabel.text = [action substringFromIndex:5];
                 subtitle = @"Root Command";
@@ -3607,7 +3620,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
 
         // Use monospace for code-like things
-        if ([action hasPrefix:@"exec "] || [action hasPrefix:@"root "] || [action hasPrefix:@"Lua "] || [action hasPrefix:@"lua "]) {
+        if ([action hasPrefix:@"exec "] || [action hasPrefix:@"root "] || [action hasPrefix:@"Lua "] || [action hasPrefix:@"lua "] || [action hasPrefix:@"ssh-run "]) {
             cell.textLabel.font = [UIFont monospacedSystemFontOfSize:15 weight:UIFontWeightRegular];
             cell.textLabel.numberOfLines = wrapLongNames ? 0 : 1;
             cell.textLabel.lineBreakMode = NSLineBreakByTruncatingTail;
