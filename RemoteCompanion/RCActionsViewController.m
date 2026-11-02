@@ -29,6 +29,7 @@
 #import "RCKMMacroPickerViewController.h"
 #import <notify.h>
 #import <objc/runtime.h>
+#import "RCFocusTriggerViewController.h"
 
 #define kSimulateNotificationPrefix "com.pizzaman.rc.simulate."
 
@@ -1227,6 +1228,7 @@ static void RCSetRunWatching(BOOL watching) {
     BOOL isConfigurable = [_triggerKey hasPrefix:@"sched_"] ||
                           [_triggerKey hasPrefix:@"notif_"] ||
                           [_triggerKey hasPrefix:@"notify_"] ||
+                          [_triggerKey hasPrefix:@"trigger_device_focus_"] ||
                           [_triggerKey hasPrefix:@"wifi_"] ||
                           [_triggerKey hasPrefix:@"bt_"] ||
                           [_triggerKey hasPrefix:@"output_"] ||
@@ -1461,6 +1463,7 @@ static void RCSetRunWatching(BOOL watching) {
         return;
     }
     
+    if (!vc && [_triggerKey hasPrefix:@"trigger_device_focus_"]) vc = [[RCFocusTriggerViewController alloc] initWithTriggerKey:_triggerKey];
     if (vc) {
         [self.navigationController pushViewController:vc animated:YES];
     }

@@ -32,6 +32,7 @@ RemoteCompanion_FILES += RCVariablesViewController.m RCSetVariableViewController
 
 # Reorganized Settings submenus
 RemoteCompanion_FILES += RCAdvancedSettingsViewController.m
+RemoteCompanion_FILES += RCFocusTriggerViewController.m
 RemoteCompanion_FILES += RCSSHSettingsViewController.m
 RemoteCompanion_FILES += RCSSHHostEditorViewController.m
 RemoteCompanion_FILES += RCSSHActionEditorViewController.m
