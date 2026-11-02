@@ -856,8 +856,9 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
     NSLog(@"[RCConfigManager] Saved to app Documents: %@", appConfigPath);
     
     // 2. Also save to shared path using POSIX (bypasses sandbox)
+    // 0600: config holds SSH passwords, tokens, and passcodes
     const char *sharedPath = [kConfigPath UTF8String];
-    int fd = open(sharedPath, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    int fd = open(sharedPath, O_WRONLY | O_CREAT | O_TRUNC, 0600);
     if (fd >= 0) {
         write(fd, [data bytes], [data length]);
         close(fd);

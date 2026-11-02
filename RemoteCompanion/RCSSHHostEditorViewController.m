@@ -200,6 +200,14 @@
         [self showErrorWithTitle:@"Host Required" message:@"Enter a hostname or IP address."];
         return;
     }
+    if ([host hasPrefix:@"-"] || [host rangeOfString:@" "].location != NSNotFound) {
+        [self showErrorWithTitle:@"Invalid Host" message:@"Hostname may not start with - or contain spaces."];
+        return;
+    }
+    if ([user hasPrefix:@"-"] || [user rangeOfString:@" "].location != NSNotFound) {
+        [self showErrorWithTitle:@"Invalid Username" message:@"Username may not start with - or contain spaces."];
+        return;
+    }
     if (self.useKeyAuth && keyInput.length == 0) {
         [self showErrorWithTitle:@"Key Path Required" message:@"Enter the path to the private key, e.g. ~/.ssh/id_rsa."];
         return;
@@ -286,7 +294,7 @@
         && [self.existingHost[@"authType"] isEqualToString:@"password"]
         && [self.existingHost[@"password"] length] > 0;
     if (hasSavedPassword) {
-        return @"The saved password is never shown. Leave the field blank to keep it, or type a new one to replace it. Empty means no password (key agent).";
+        return @"The saved password is never shown. Leave the field blank to keep it, or type a new one to replace it.";
     }
     return @"Saved passwords are never shown once stored. Leave empty for key-agent logins.";
 }

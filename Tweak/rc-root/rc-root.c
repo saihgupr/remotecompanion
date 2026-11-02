@@ -271,6 +271,15 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    // All privileged operations (shell and touch injection) are restricted to calls
+    // made by SpringBoard (RemoteCommand's tweak), unless the user turned on
+    // Allow Direct Root Helper Calls in Advanced Settings
+    if (!rc_direct_calls_allowed() && !rc_parent_is_springboard()) {
+        fprintf(stderr, "Error: rc-root may only be run by RemoteCommand (permission denied).\n");
+        fprintf(stderr, "To allow scripts and other tools to call rc-root directly, turn on Allow Direct Root Helper Calls in Settings > Advanced Settings > Security.\n");
+        return 1;
+    }
+
     if (strcmp(argv[1], "iohid") == 0) {
         if (argc < 3) {
             fprintf(stderr, "Usage: rc-root iohid <tap|hold|swipe> [args...]\n");
@@ -297,14 +306,6 @@ int main(int argc, char *argv[]) {
             return 0;
         }
         fprintf(stderr, "Invalid iohid subcommand or arguments\n");
-        return 1;
-    }
-
-    // Shell execution is restricted to calls made by SpringBoard (RemoteCommand's tweak),
-    // unless the user turned on Allow Direct Root Helper Calls in Advanced Settings
-    if (!rc_direct_calls_allowed() && !rc_parent_is_springboard()) {
-        fprintf(stderr, "Error: rc-root shell commands may only be run by RemoteCommand (permission denied).\n");
-        fprintf(stderr, "To allow scripts and other tools to call rc-root directly, turn on Allow Direct Root Helper Calls in Settings > Advanced Settings > Security.\n");
         return 1;
     }
 

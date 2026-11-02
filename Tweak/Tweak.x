@@ -10249,6 +10249,11 @@ static NSString *handle_command(NSString *cmd) {
             return [NSString stringWithFormat:@"Error: Host address for '%@' is empty\n", hostId];
         }
         NSString *user = targetHost[@"user"] ?: @"mobile";
+        if ([host hasPrefix:@"-"] || [host rangeOfString:@" "].location != NSNotFound ||
+            [user hasPrefix:@"-"] || [user rangeOfString:@" "].location != NSNotFound) {
+            SRLogMin(@"[RCSSH] Error: Invalid host or user for '%@'", hostId);
+            return [NSString stringWithFormat:@"Error: Invalid host or user for '%@'\n", hostId];
+        }
         NSNumber *portNum = targetHost[@"port"] ?: @22;
         NSInteger port = [portNum integerValue] > 0 ? [portNum integerValue] : 22;
         NSString *authType = targetHost[@"authType"] ?: @"password";

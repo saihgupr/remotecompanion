@@ -195,7 +195,8 @@
 
 - (void)updateSaveButton {
     NSString *trimmed = [self.commandView.text ?: self.command stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    self.saveButton.enabled = (self.hostId.length > 0 && trimmed.length > 0);
+    BOOL hostValid = (self.hostId.length > 0 && [[RCConfigManager sharedManager] sshHostForId:self.hostId] != nil);
+    self.saveButton.enabled = (hostValid && trimmed.length > 0);
 }
 
 #pragma mark - Actions
