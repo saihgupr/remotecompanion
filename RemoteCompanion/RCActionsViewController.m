@@ -20,6 +20,7 @@
 #import "RCWiFiTriggerViewController.h"
 #import "RCBluetoothTriggerViewController.h"
 #import "RCAudioOutputTriggerViewController.h"
+#import "RCBatteryTriggerViewController.h"
 #import "RCWrapSizing.h"
 #import "RCToastPill.h"
 #import "RCNFCTriggerViewController.h"
@@ -1230,6 +1231,7 @@ static void RCSetRunWatching(BOOL watching) {
                           [_triggerKey hasPrefix:@"wifi_"] ||
                           [_triggerKey hasPrefix:@"bt_"] ||
                           [_triggerKey hasPrefix:@"output_"] ||
+                          [_triggerKey hasPrefix:@"trigger_device_battery_"] ||
                           [_triggerKey hasPrefix:@"app_launch_"] ||
                           [_triggerKey hasPrefix:@"app_exit_"];
     
@@ -1424,6 +1426,10 @@ static void RCSetRunWatching(BOOL watching) {
 
 - (void)editTriggerSettings {
     UIViewController *vc = nil;
+    if ([_triggerKey hasPrefix:@"trigger_device_battery_"]) {
+        [self.navigationController pushViewController:[[RCBatteryTriggerViewController alloc] initWithTriggerKey:_triggerKey] animated:YES];
+        return;
+    }
     
     if ([_triggerKey hasPrefix:@"sched_"]) {
         vc = [[RCScheduledTriggerViewController alloc] initWithTriggerKey:_triggerKey];

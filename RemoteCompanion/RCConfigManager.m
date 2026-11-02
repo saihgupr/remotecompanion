@@ -831,6 +831,10 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         return customName ?: [NSString stringWithFormat:@"NFC Tag %@", [triggerKey substringFromIndex:4]];
     }
 
+    if ([triggerKey hasPrefix:@"trigger_device_battery_"]) {
+        return _config[@"triggers"][triggerKey][@"name"] ?: triggerKey;
+    }
+
     if ([triggerKey hasPrefix:@"wifi_"] || [triggerKey hasPrefix:@"bt_"] || [triggerKey hasPrefix:@"app_launch_"] || [triggerKey hasPrefix:@"app_exit_"] || [triggerKey hasPrefix:@"output_"] || [triggerKey hasPrefix:@"notif_"] || [triggerKey hasPrefix:@"notify_"] || [triggerKey hasPrefix:@"sched_"] || [triggerKey hasPrefix:@"mqtt_"] || [triggerKey hasPrefix:@"mqtt_sub_"]) {
         return _config[@"triggers"][triggerKey][@"name"] ?: triggerKey;
     }

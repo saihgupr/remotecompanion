@@ -2173,6 +2173,8 @@ static NSString *get_human_name_for_trigger(NSString *key, NSDictionary *trigger
     if ([key hasPrefix:@"output_unset_"]) return [NSString stringWithFormat:@"Audio Output Unset: %@", [key substringFromIndex:13]];
     if ([key hasPrefix:@"notif_"] || [key hasPrefix:@"notify_"]) return @"Notification Trigger";
     if ([key hasPrefix:@"sched_"]) return @"Scheduled Automation";
+    if ([key hasPrefix:@"trigger_device_battery_below_"]) return [NSString stringWithFormat:@"Battery Drops to %@%%", [key substringFromIndex:29]];
+    if ([key hasPrefix:@"trigger_device_battery_above_"]) return [NSString stringWithFormat:@"Battery Rises to %@%%", [key substringFromIndex:29]];
     
     return key;
 }
@@ -5272,6 +5274,39 @@ static void handle_media_state_change() {
     });
 }
 
+#pragma mark - Battery level triggers
+
+// Battery Level triggers: trigger_device_battery_below_<N> fires when the level drops from above N% to N% or
+// less, trigger_device_battery_above_<N> when it rises from below N% to N% or more. Only a change in the level
+// is checked, so a trigger fires once per crossing.
+static int g_rcBatteryPercent = -1;
+
+static int rc_battery_percent(void) {
+    UIDevice *device = [UIDevice currentDevice];
+    device.batteryMonitoringEnabled = YES;
+    float level = device.batteryLevel;
+    return level < 0 ? -1 : (int)lroundf(level * 100.0f);
+}
+
+static void rc_battery_level_changed(void) {
+    int now = rc_battery_percent();
+    int before = g_rcBatteryPercent;
+    if (now < 0 || now == before) return;
+    g_rcBatteryPercent = now;
+    if (before < 0) return; // the first reading: nothing crossed yet
+    NSDictionary *triggers = g_triggerConfig[@"triggers"];
+    if (![triggers isKindOfClass:[NSDictionary class]]) return;
+    for (NSString *key in triggers) {
+        BOOL below = [key hasPrefix:@"trigger_device_battery_below_"];
+        if (!below && ![key hasPrefix:@"trigger_device_battery_above_"]) continue;
+        int level = [[key substringFromIndex:29] intValue];
+        BOOL crossed = below ? (before > level && now <= level) : (before < level && now >= level);
+        if (!crossed) continue;
+        SRLogMin(@"🔋 [RCSystem] Battery %d%% -> %d%%: %@.", before, now, key);
+        RCExecuteTrigger(key);
+    }
+}
+
 static void handle_media_state_notification(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
     NSString *notifName = (__bridge NSString *)name;
     SRLog(@"🎵 [RCSystem] Received Media State Notification: %@", notifName);
@@ -5300,7 +5335,9 @@ static void register_system_event_observers() {
                      queue:[NSOperationQueue mainQueue] 
                 usingBlock:^(NSNotification *note) {
         handle_power_state_transition(is_device_power_connected(), @"UIDeviceBatteryLevelDidChangeNotification");
+        rc_battery_level_changed();
     }];
+    g_rcBatteryPercent = rc_battery_percent();
 
     // Power State: Darwin Notifications
     CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), 

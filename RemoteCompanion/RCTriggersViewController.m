@@ -8,6 +8,7 @@
 #import "RCWiFiTriggerViewController.h"
 #import "RCBluetoothTriggerViewController.h"
 #import "RCAudioOutputTriggerViewController.h"
+#import "RCBatteryTriggerViewController.h"
 #import "RCWrapSizing.h"
 #import "RCAppPickerViewController.h"
 #import "RCNotificationTriggerViewController.h"
@@ -70,6 +71,8 @@
     if ([triggerKey hasPrefix:@"wifi_"]) return @"wifi";
     if ([triggerKey hasPrefix:@"bt_"]) return @"bolt.horizontal.fill";
     if ([triggerKey hasPrefix:@"output_"]) return @"airplayaudio";
+    if ([triggerKey hasPrefix:@"trigger_device_battery_above_"]) return @"battery.100";
+    if ([triggerKey hasPrefix:@"trigger_device_battery_below_"]) return @"battery.25";
     if ([triggerKey hasPrefix:@"app_launch_"]) return @"app.badge";
     if ([triggerKey hasPrefix:@"app_exit_"]) return @"rectangle.portrait.and.arrow.right";
     if ([triggerKey hasPrefix:@"notif_"] || [triggerKey hasPrefix:@"notify_"]) return @"bell.badge.fill";
@@ -364,6 +367,16 @@
     // Device State Section (Only show if configured, hide if empty)
     NSMutableArray *deviceStateKeys = [NSMutableArray array];
     NSArray *configuredKeys = [[RCConfigManager sharedManager] allConfiguredTriggerKeys];
+    // Battery Level triggers, lowest level first
+    NSMutableArray *batteryKeys = [NSMutableArray array];
+    for (NSString *key in configuredKeys) {
+        if ([key hasPrefix:@"trigger_device_battery_"]) [batteryKeys addObject:key];
+    }
+    [batteryKeys sortUsingComparator:^NSComparisonResult(NSString *a, NSString *b) {
+        NSComparisonResult byLevel = [@([[a substringFromIndex:29] integerValue]) compare:@([[b substringFromIndex:29] integerValue])];
+        return byLevel != NSOrderedSame ? byLevel : [b compare:a]; // "below" before "above"
+    }];
+    [deviceStateKeys addObjectsFromArray:batteryKeys];
     if ([configuredKeys containsObject:@"trigger_device_lock"]) {
         [deviceStateKeys addObject:@"trigger_device_lock"];
     }
@@ -572,6 +585,7 @@
         @{ @"title": @"Scheduled Trigger", @"icon": @"calendar.badge.clock", @"section": @"Time", @"handler": ^{ push([[RCScheduledTriggerViewController alloc] init]); } },
     ] mutableCopy];
     [items addObjectsFromArray:systemEvents];
+    [items addObject:@{ @"title": @"Battery Level", @"icon": [UIImage systemImageNamed:@"battery.50"] ? @"battery.50" : @"battery.25", @"section": @"Device", @"handler": ^{ push([[RCBatteryTriggerViewController alloc] init]); } }];
     [items addObject:@{ @"title": @"MQTT Topic", @"icon": @"antenna.radiowaves.left.and.right", @"section": @"Integrations", @"handler": ^{ push([[RCMQTTTriggerViewController alloc] init]); } }];
     [self.navigationController pushViewController:[[RCNewTriggerViewController alloc] initWithItems:items] animated:YES];
 }
