@@ -920,6 +920,27 @@ static id g_actionClipboard = nil;
     self.moreButton.menu = [self moreMenu];
 }
 
+- (BOOL)isHapticsEnabledForTrigger {
+    NSDictionary *data = [[RCConfigManager sharedManager] triggerDataForKey:_triggerKey];
+    NSNumber *val = data[@"haptics"];
+    if (val != nil && [val respondsToSelector:@selector(boolValue)]) {
+        return [val boolValue];
+    }
+    return YES;
+}
+
+- (void)setHapticsEnabledForTrigger:(BOOL)enabled {
+    RCConfigManager *config = [RCConfigManager sharedManager];
+    NSMutableDictionary *data = [[config triggerDataForKey:_triggerKey] mutableCopy] ?: [NSMutableDictionary dictionary];
+    if (enabled) {
+        [data removeObjectForKey:@"haptics"];
+    } else {
+        data[@"haptics"] = @NO;
+    }
+    [config updateTrigger:_triggerKey withData:data];
+    self.moreButton.menu = [self moreMenu];
+}
+
 - (UIMenu *)moreMenu {
     __weak typeof(self) weakSelf = self;
     NSMutableArray *modes = [NSMutableArray array];
@@ -949,6 +970,14 @@ static id g_actionClipboard = nil;
         sound.state = keep ? UIMenuElementStateOn : UIMenuElementStateOff;
         [menuActions addObject:sound];
     }
+    BOOL hapticsOn = [self isHapticsEnabledForTrigger];
+    UIImage *hapticImg = [UIImage systemImageNamed:@"iphone.radiowaves.left.and.right"] ?: [UIImage systemImageNamed:@"waveform"];
+    UIAction *hapticAction = [UIAction actionWithTitle:@"Haptic Feedback" image:hapticImg identifier:nil handler:^(__kindof UIAction *a) {
+        [weakSelf setHapticsEnabledForTrigger:!hapticsOn];
+    }];
+    hapticAction.state = hapticsOn ? UIMenuElementStateOn : UIMenuElementStateOff;
+    [menuActions addObject:hapticAction];
+
     [menuActions addObject:[UIAction actionWithTitle:@"Import Actions" image:[UIImage systemImageNamed:@"square.and.arrow.down"] identifier:nil handler:^(__kindof UIAction *a) {
         [weakSelf importActions];
     }]];

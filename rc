@@ -53,6 +53,8 @@ if [ -z "$1" ]; then
     echo "  unlock [pin]      - Unlock the device screen"
     echo "  lock-toggle [pin] - Toggle device lock/unlock state"
     echo "  is-locked         - Check if device is locked"
+    echo "  autolock [30s|1m-5m|never|off|toggle|status] - Configure auto-lock timeout"
+    echo "  display sleep [30s|1m-5m|never|off] - Change when display goes to sleep"
     echo "  dnd on/off/debug   - Toggle Do Not Disturb or inspect state"
     echo "  audiomix on/off/toggle/status - Control AudioMix tweak"
     echo "  screenrecord [toggle|start|stop] - Control system screen recording"

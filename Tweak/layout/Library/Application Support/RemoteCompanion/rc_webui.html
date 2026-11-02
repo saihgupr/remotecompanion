@@ -3015,7 +3015,7 @@ const CMD_NAMES = {
   'open control center':'Control Center',
   'ldrestart':'Soft Reboot','userspace-reboot':'Userspace Reboot','uicache':'Refresh Icon Cache',
   'low power on':'Low Power On','low power off':'Low Power Off','low power toggle':'Low Power Toggle',
-  'autolock toggle':'Auto-Lock Toggle','autolock 30s':'Auto-Lock 30 Seconds','autolock 1m':'Auto-Lock 1 Minute','autolock 2m':'Auto-Lock 2 Minutes','autolock 3m':'Auto-Lock 3 Minutes','autolock 4m':'Auto-Lock 4 Minutes','autolock 5m':'Auto-Lock 5 Minutes','autolock never':'Auto-Lock Never',
+  'autolock toggle':'Auto-Lock Toggle','autolock 30s':'Auto-Lock 30 Seconds','autolock 1m':'Auto-Lock 1 Minute','autolock 2m':'Auto-Lock 2 Minutes','autolock 3m':'Auto-Lock 3 Minutes','autolock 4m':'Auto-Lock 4 Minutes','autolock 5m':'Auto-Lock 5 Minutes','autolock never':'Auto-Lock Never (Off)','autolock off':'Auto-Lock Never (Off)',
   'anc on':'Noise Cancellation On','anc off':'Noise Cancellation Off','anc transparency':'Transparency Mode',
   'airplay disconnect':'Disconnect AirPlay',
   'vibration silent-toggle':'Silent Vibrate Toggle','vibration ring-toggle':'Ring Vibrate Toggle',
@@ -3383,7 +3383,7 @@ const ACTION_SECTIONS = [
     { name:'Do Not Disturb',    cmd:'dnd toggle',    icon:'moon_circle_fill', is_toggle:true },
     { name:'Set Focus…',        cmd:'__FOCUS__',     icon:'moon_circle_fill', needs_input:true },
     { name:'Low Power Mode',    cmd:'low power toggle',icon:'battery_25', is_toggle:true },
-    { name:'Auto-Lock',         cmd:'autolock toggle', icon:'timer', is_toggle:true },
+    { name:'Auto-Lock (Display Sleep)', cmd:'autolock toggle', icon:'timer', is_toggle:true, keywords:'display sleep timeout screen time off autolock' },
   ]},
   { title:'Connectivity', actions:[
     { name:'Wi-Fi',             cmd:'wifi toggle',  icon:'wifi', is_toggle:true },
@@ -4289,7 +4289,7 @@ function parseToggleCmd(cmd) {
   const definitions = [
     { key:'airplane', name:'Airplane Mode', icon:'airplane', prefixes:['airplane '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'] },
     { key:'low_power', name:'Low Power Mode', icon:'battery_25', prefixes:['low power ','lpm ','low power mode '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'] },
-    { key:'autolock', name:'Auto-Lock', icon:'timer', prefixes:['autolock ','auto-lock '], suffixes:['toggle','30s','1m','2m','3m','4m','5m','never'], displaySuffixes:['Toggle (Never / Previous)','30 Seconds','1 Minute','2 Minutes','3 Minutes','4 Minutes','5 Minutes','Never'] },
+    { key:'autolock', name:'Auto-Lock', icon:'timer', prefixes:['autolock ','auto-lock ','display sleep ','display-sleep ','display timeout ','display time off '], suffixes:['toggle','30s','1m','2m','3m','4m','5m','never'], displaySuffixes:['Toggle (Never / Previous)','30 Seconds','1 Minute','2 Minutes','3 Minutes','4 Minutes','5 Minutes','Never (Off)'], exactMatches: { 'autolock':'toggle','auto-lock':'toggle','display sleep':'toggle','display sleep off':'never','display time off':'never','autolock off':'never','auto-lock off':'never' } },
     { key:'dnd', name:'Do Not Disturb', icon:'moon_circle_fill', prefixes:['dnd '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'] },
     { key:'wifi', name:'Wi-Fi', icon:'wifi', prefixes:['wifi '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'] },
     { key:'cellular', name:'Cellular Data', icon:'antenna_radiowaves_left_right', prefixes:['cellular ','cell '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'] },
@@ -5359,7 +5359,7 @@ function renderPickerSections() {
   sections.forEach(sec => {
     const actions = sec.actions.filter(a => pickerActionAvailable(sec, a));
     const filtered = query
-      ? actions.filter(a => a.name.toLowerCase().includes(query) || (a.cmd && a.cmd.toLowerCase().includes(query)))
+      ? actions.filter(a => a.name.toLowerCase().includes(query) || (a.cmd && a.cmd.toLowerCase().includes(query)) || (a.keywords && a.keywords.toLowerCase().includes(query)))
       : actions;
     if (filtered.length === 0) return;
 
@@ -5908,12 +5908,32 @@ function finishIfCondition(def, value, valueTitle, editIdx) {
 
 // ── Ellipsis Menu ─────────────────────────────────────────────────────────────
 function showEllipsisMenu(e) {
+  const trigger = triggerData(currentKey) || {};
+  const hapticsEnabled = trigger.haptics !== false;
   const items = [
+    {
+      label: hapticsEnabled ? 'Disable Haptics' : 'Enable Haptics',
+      icon: hapticsEnabled ? 'waveform_slash' : 'waveform_path_ecg',
+      action: () => toggleCurrentTriggerHaptics()
+    },
     { label: 'Import Actions', icon: 'square_arrow_down', action: () => showImportDialog() },
     { label: 'Export Actions', icon: 'square_arrow_up', action: () => exportCurrentActions() },
     { label: 'Clear All Actions', icon: 'trash_fill', destructive: true, action: () => clearCurrentActions() }
   ];
   showContextMenu(e, items);
+}
+
+function toggleCurrentTriggerHaptics() {
+  const t = triggerData(currentKey);
+  if (!t) return;
+  if (t.haptics === false) {
+    delete t.haptics;
+    showToast('✓ Haptics Enabled');
+  } else {
+    t.haptics = false;
+    showToast('✓ Haptics Disabled');
+  }
+  saveConfig();
 }
 
 function clearCurrentActions() {

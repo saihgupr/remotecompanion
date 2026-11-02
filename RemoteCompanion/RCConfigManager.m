@@ -1126,7 +1126,8 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         @"autolock 3m": @"Auto-Lock 3 Minutes",
         @"autolock 4m": @"Auto-Lock 4 Minutes",
         @"autolock 5m": @"Auto-Lock 5 Minutes",
-        @"autolock never": @"Auto-Lock Never",
+        @"autolock never": @"Auto-Lock Never (Off)",
+        @"autolock off": @"Auto-Lock Never (Off)",
         @"mute toggle": @"Mute Toggle",
         @"mute on": @"Mute On",
         @"mute off": @"Mute Off",
@@ -1724,7 +1725,7 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         if ([cmd hasPrefix:@"exec "]) return @"chevron.right.square";
         if ([cmd hasPrefix:@"flashlight "] || [cmd hasPrefix:@"flash "]) return @"flashlight.on.fill";
         if ([cmd hasPrefix:@"low power "]) return @"battery.100.bolt";
-        if ([cmd hasPrefix:@"autolock "] || [cmd hasPrefix:@"auto-lock "]) return @"timer";
+        if ([cmd hasPrefix:@"autolock "] || [cmd hasPrefix:@"auto-lock "] || [cmd hasPrefix:@"display sleep "] || [cmd hasPrefix:@"display timeout "] || [cmd hasPrefix:@"display time off "]) return @"timer";
         if ([cmd hasPrefix:@"unlock "]) return @"lock.open.fill";
         if ([cmd hasPrefix:@"lock-toggle "] || [cmd hasPrefix:@"lock toggle "]) return @"lock.circle";
     }
@@ -1842,9 +1843,18 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
             @"key": @"autolock",
             @"name": @"Auto-Lock",
             @"icon": @"timer",
-            @"prefixes": @[@"autolock ", @"auto-lock "],
+            @"prefixes": @[@"autolock ", @"auto-lock ", @"display sleep ", @"display-sleep ", @"display timeout ", @"display time off "],
             @"suffixes": @[@"toggle", @"30s", @"1m", @"2m", @"3m", @"4m", @"5m", @"never"],
-            @"displaySuffixes": @[@"Toggle (Never / Previous)", @"30 Seconds", @"1 Minute", @"2 Minutes", @"3 Minutes", @"4 Minutes", @"5 Minutes", @"Never"]
+            @"displaySuffixes": @[@"Toggle (Never / Previous)", @"30 Seconds", @"1 Minute", @"2 Minutes", @"3 Minutes", @"4 Minutes", @"5 Minutes", @"Never (Off)"],
+            @"exactMatches": @{
+                @"autolock": @"toggle",
+                @"auto-lock": @"toggle",
+                @"display sleep": @"toggle",
+                @"display sleep off": @"never",
+                @"display time off": @"never",
+                @"autolock off": @"never",
+                @"auto-lock off": @"never"
+            }
         },
         @{
             @"key": @"dnd",

@@ -41,6 +41,7 @@
 
 @class SBProximitySensorManager;
 
+void RCTriggerHapticFor(NSString *triggerKey);
 static void trigger_haptic();
 static void toggle_system_vibration(BOOL silentMode, BOOL enable);
 static BOOL get_system_vibration(BOOL silentMode);
@@ -2773,7 +2774,7 @@ static void rc_banner_show_toggle_state(NSString *cmd, NSString *title, NSString
             @{ @"key": @"screenrecord", @"prefixes": @[@"screenrecord "], @"status": @"screenrecord status", @"cond": @"screenrecord" },
             @{ @"key": @"silent_vibration", @"prefixes": @[@"vibration silent-"], @"status": @"vibration silent-status" },
             @{ @"key": @"ring_vibration", @"prefixes": @[@"vibration ring-"], @"status": @"vibration ring-status" },
-            @{ @"key": @"autolock", @"prefixes": @[@"autolock ", @"auto-lock "], @"status": @"autolock status" },
+            @{ @"key": @"autolock", @"prefixes": @[@"autolock ", @"auto-lock ", @"display sleep ", @"display-sleep ", @"display timeout ", @"display time off "], @"status": @"autolock status" },
             @{ @"key": @"haptics", @"prefixes": @[@"haptics "], @"words": @{ @"always": @"Always Play", @"silent-only": @"Play in Silent Mode",
                                                                          @"ring-only": @"Don't Play in Silent Mode", @"never": @"Never Play" } },
             @{ @"key": @"anc", @"prefixes": @[@"anc "], @"words": @{ @"on": @"Noise Cancellation", @"nc": @"Noise Cancellation", @"transparency": @"Transparency",
@@ -7830,10 +7831,10 @@ static NSString *rc_autolock_label(int seconds) {
     return [NSString stringWithFormat:@"%d Seconds", seconds];
 }
 
-// "30s", "30 sec", "2m", "2 min", "120", "never" -> seconds; -1 if unrecognized
+// "30s", "30 sec", "2m", "2 min", "120", "never", "off" -> seconds; -1 if unrecognized
 static int rc_autolock_parse(NSString *arg) {
     NSString *a = [[arg lowercaseString] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    if ([a isEqualToString:@"never"]) return kRCAutoLockNever;
+    if ([a isEqualToString:@"never"] || [a isEqualToString:@"off"] || [a isEqualToString:@"disable"] || [a isEqualToString:@"disabled"]) return kRCAutoLockNever;
     NSScanner *scanner = [NSScanner scannerWithString:a];
     int n = 0;
     if (![scanner scanInt:&n] || n <= 0) return -1;
@@ -7869,7 +7870,7 @@ static NSString *rc_handle_autolock(NSString *arg) {
         }
     } else {
         target = rc_autolock_parse(a);
-        if (target < 0) return [NSString stringWithFormat:@"Error: unknown Auto-Lock value '%@' (use 30s, 1m-5m, never, toggle or status)\n", arg];
+        if (target < 0) return [NSString stringWithFormat:@"Error: unknown Auto-Lock value '%@' (use 30s, 1m-5m, never, off, toggle or status)\n", arg];
     }
 
     [mc setValue:@(target) forSetting:@"maxInactivity"];
@@ -7937,8 +7938,36 @@ static NSString *handle_command(NSString *cmd) {
         return nil;
     } else if ([cleanCmd isEqualToString:@"testkit"] || [cleanCmd hasPrefix:@"testkit "]) {
         return RCTKHandleCommand([cleanCmd substringFromIndex:7]);
-    } else if ([[cleanCmd lowercaseString] hasPrefix:@"autolock "] || [[cleanCmd lowercaseString] hasPrefix:@"auto-lock "]) {
-        return rc_handle_autolock([cleanCmd substringFromIndex:[cleanCmd rangeOfString:@" "].location + 1]);
+    } else if ([[cleanCmd lowercaseString] hasPrefix:@"autolock"] ||
+               [[cleanCmd lowercaseString] hasPrefix:@"auto-lock"] ||
+               [[cleanCmd lowercaseString] hasPrefix:@"display sleep"] ||
+               [[cleanCmd lowercaseString] hasPrefix:@"display-sleep"] ||
+               [[cleanCmd lowercaseString] hasPrefix:@"display time off"] ||
+               [[cleanCmd lowercaseString] hasPrefix:@"display-time-off"] ||
+               [[cleanCmd lowercaseString] hasPrefix:@"display timeout"] ||
+               [[cleanCmd lowercaseString] hasPrefix:@"display-timeout"]) {
+        NSString *sub = nil;
+        NSString *lower = [cleanCmd lowercaseString];
+        NSArray *prefixes = @[
+            @"display time off ", @"display-time-off ",
+            @"display timeout ", @"display-timeout ",
+            @"display sleep ", @"display-sleep ",
+            @"auto-lock ", @"autolock "
+        ];
+        for (NSString *p in prefixes) {
+            if ([lower hasPrefix:p]) {
+                sub = [cleanCmd substringFromIndex:p.length];
+                break;
+            }
+        }
+        if (!sub) {
+            if ([lower isEqualToString:@"display time off"] || [lower isEqualToString:@"display-time-off"]) {
+                sub = @"never";
+            } else {
+                sub = @"status";
+            }
+        }
+        return rc_handle_autolock(sub);
     } else if ([cleanCmd isEqualToString:@"proximity"] || [cleanCmd hasPrefix:@"proximity "]) {
         NSString *sub = nil;
         if ([cleanCmd hasPrefix:@"proximity "]) {
@@ -12020,7 +12049,7 @@ static void RC_NoteHomePowerChord(void) {
         g_homePowerChordClaimed = !keep;
         dispatch_async(dispatch_get_main_queue(), ^{
             SRLog(@"[Home] Home + Power trigger%@", keep ? @" (keeping the screenshot)" : @" - no screenshot");
-            trigger_haptic();
+            RCTriggerHapticFor(@"trigger_home_power");
             RCExecuteTrigger(@"trigger_home_power");
         });
     }
@@ -12445,10 +12474,33 @@ static void RC_ReplayWalletDoublePress(void) {
 
 
 // Helper to trigger haptic feedback
-// Helper to trigger haptic feedback
-static void trigger_haptic() {
+void RCTriggerHapticFor(NSString *triggerKey) {
     if (RC_IsForegroundAppExcluded()) return;
+    if (!g_triggerConfig) load_trigger_config();
+    if (g_triggerConfig) {
+        id globalHaptics = g_triggerConfig[@"hapticsEnabled"];
+        if (globalHaptics && [globalHaptics respondsToSelector:@selector(boolValue)] && ![globalHaptics boolValue]) {
+            return;
+        }
+        if (triggerKey.length > 0) {
+            id triggers = g_triggerConfig[@"triggers"];
+            if ([triggers isKindOfClass:[NSDictionary class]]) {
+                id trigger = triggers[triggerKey];
+                if ([trigger isKindOfClass:[NSDictionary class]]) {
+                    id hapticsVal = trigger[@"haptics"];
+                    if (hapticsVal && [hapticsVal respondsToSelector:@selector(boolValue)] && ![hapticsVal boolValue]) {
+                        SRLog(@"[Haptic] Trigger '%@' has haptics disabled - skipping", triggerKey);
+                        return;
+                    }
+                }
+            }
+        }
+    }
     AudioServicesPlaySystemSound(1520);
+}
+
+static void trigger_haptic(void) {
+    RCTriggerHapticFor(nil);
 }
 
 // --- SAFE VOLUME HOLD IMPLEMENTATION ---
@@ -12604,7 +12656,7 @@ static BOOL g_isSwappingVolume = NO;
             RC_SetScreenshotRecognizerSuppressed(YES);
             if (g_volUpTimer) { [g_volUpTimer invalidate]; g_volUpTimer = nil; }
             if (g_volDownTimer) { [g_volDownTimer invalidate]; g_volDownTimer = nil; }
-            trigger_haptic();
+            RCTriggerHapticFor(@"power_volume_up");
             RCExecuteTrigger(@"power_volume_up");
             return;
         }
@@ -12633,7 +12685,7 @@ static BOOL g_isSwappingVolume = NO;
             g_volSeqJustFired = YES;
             if (g_volUpTimer) { [g_volUpTimer invalidate]; g_volUpTimer = nil; }
             if (g_volDownTimer) { [g_volDownTimer invalidate]; g_volDownTimer = nil; }
-            trigger_haptic();
+            RCTriggerHapticFor(@"volume_down_then_up");
             RCExecuteTrigger(@"volume_down_then_up");
             return;
         }
@@ -12646,7 +12698,7 @@ static BOOL g_isSwappingVolume = NO;
             SRLog(@"Volume Down then Up sequence triggered! (Down had gone to native; this Up cancels it)");
             g_volUpSeqArmedUntil = 0;
             g_volUpSkipArm = YES;
-            trigger_haptic();
+            RCTriggerHapticFor(@"volume_down_then_up");
             RCExecuteTrigger(@"volume_down_then_up");
             g_volUpLastPassedThrough = YES;
             g_volUpNativeSessionActive = YES;
@@ -12688,7 +12740,7 @@ static BOOL g_isSwappingVolume = NO;
             g_volComboTriggered = YES;
             RC_VolComboUsePresses();
             SRLog(@"Volume Both Press combo triggered (from Vol Up Hook)");
-            trigger_haptic();
+            RCTriggerHapticFor(@"volume_both_press");
             RCExecuteTrigger(@"volume_both_press");
         } else {
             g_volComboTriggered = YES;
@@ -12741,7 +12793,7 @@ static BOOL g_isSwappingVolume = NO;
                 if (RC_VolumePressWasPowerCombo(now) || !g_volUpIsDown) return;
                 if (holdEnabled) {
                     g_volUpTriggered = YES;
-                    trigger_haptic();
+                    RCTriggerHapticFor(@"volume_up_hold");
                     RCExecuteTrigger(@"volume_up_hold");
                 } else {
                     // We only armed this timer to watch for volume_both_press or a
@@ -12891,7 +12943,7 @@ static BOOL g_isSwappingVolume = NO;
             RC_MarkPowerVolComboFired();
             if (g_volUpTimer) { [g_volUpTimer invalidate]; g_volUpTimer = nil; }
             if (g_volDownTimer) { [g_volDownTimer invalidate]; g_volDownTimer = nil; }
-            trigger_haptic();
+            RCTriggerHapticFor(@"power_volume_down");
             RCExecuteTrigger(@"power_volume_down");
             return;
         }
@@ -12930,7 +12982,7 @@ static BOOL g_isSwappingVolume = NO;
             g_volSeqJustFired = YES;
             if (g_volUpTimer) { [g_volUpTimer invalidate]; g_volUpTimer = nil; }
             if (g_volDownTimer) { [g_volDownTimer invalidate]; g_volDownTimer = nil; }
-            trigger_haptic();
+            RCTriggerHapticFor(@"volume_up_then_down");
             RCExecuteTrigger(@"volume_up_then_down");
             return;
         }
@@ -12943,7 +12995,7 @@ static BOOL g_isSwappingVolume = NO;
             SRLog(@"Volume Up then Down sequence triggered! (Up had gone to native; this Down cancels it)");
             g_volDownSeqArmedUntil = 0;
             g_volDownSkipArm = YES;
-            trigger_haptic();
+            RCTriggerHapticFor(@"volume_up_then_down");
             RCExecuteTrigger(@"volume_up_then_down");
             g_volDownLastPassedThrough = YES;
             g_volDownNativeSessionActive = YES;
@@ -12982,7 +13034,7 @@ static BOOL g_isSwappingVolume = NO;
             g_volComboTriggered = YES;
             RC_VolComboUsePresses();
             SRLog(@"Volume Both Press combo triggered (from Vol Down Hook)");
-            trigger_haptic();
+            RCTriggerHapticFor(@"volume_both_press");
             RCExecuteTrigger(@"volume_both_press");
         } else {
             g_volComboTriggered = YES;
@@ -13028,7 +13080,7 @@ static BOOL g_isSwappingVolume = NO;
                 if (RC_VolumePressWasPowerCombo(now) || !g_volDownIsDown) return;
                 if (holdEnabled) {
                     g_volDownTriggered = YES;
-                    trigger_haptic();
+                    RCTriggerHapticFor(@"volume_down_hold");
                     RCExecuteTrigger(@"volume_down_hold");
                 } else {
                     // We only armed this timer to watch for volume_both_press or a
@@ -13330,7 +13382,7 @@ static void RC_CheckAndFire() {
     // 3. IMMEDIATE FIRE CHECK (Quadruple)
     if (quadEnabled && g_homeClickCount >= 4) {
         SRLog(@"🚀 QUAD CLICK (4+) REACHED! Firing immediately.");
-        trigger_haptic();
+        RCTriggerHapticFor(@"trigger_home_quadruple_click");
         RCExecuteTrigger(@"trigger_home_quadruple_click");
         RC_FinishHomeActions(g_homeClickCount, YES);
         g_homeClickCount = 0; // Reset Sequence
@@ -13358,7 +13410,7 @@ static void RC_CheckAndFire() {
             BOOL enabled = [g_triggerConfig[@"triggers"][triggerKey][@"enabled"] boolValue];
             if (enabled) {
                 SRLog(@"✅ FIRING TRIGGER: %@", triggerKey);
-                trigger_haptic();
+                RCTriggerHapticFor(triggerKey);
                 RCExecuteTrigger(triggerKey);
                 fired = YES;
             }
@@ -13402,7 +13454,7 @@ static void RC_CheckAndFirePower() {
     // 3. IMMEDIATE FIRE CHECK (Quadruple)
     if (quadEnabled && g_powerClickCount >= 4) {
         SRLog(@"🚀 POWER QUAD CLICK (4+) REACHED! Firing.");
-        trigger_haptic();
+        RCTriggerHapticFor(@"power_quadruple_click");
         RCExecuteTrigger(@"power_quadruple_click");
         g_powerClickCount = 0;
         // Quad just claimed the sequence - any deferred Wallet double-press
@@ -13459,7 +13511,7 @@ static void RC_CheckAndFirePower() {
             BOOL enabled = [g_triggerConfig[@"triggers"][triggerKey][@"enabled"] boolValue];
             if (enabled) {
                 SRLog(@"✅ FIRING POWER TRIGGER: %@", triggerKey);
-                trigger_haptic();
+                RCTriggerHapticFor(triggerKey);
                 RCExecuteTrigger(triggerKey);
                 claimed = YES;
                 higherClaimed = (count >= 3);
@@ -13606,7 +13658,7 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
                         }
 
                         if ([g_triggerConfig[@"triggers"][@"touchid_tap"][@"enabled"] boolValue]) {
-                            trigger_haptic();
+                            RCTriggerHapticFor(@"touchid_tap");
                             RCExecuteTrigger(@"touchid_tap");
                         }
                     }
@@ -13661,7 +13713,7 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
                         if (g_triggerConfig) {
                             NSDictionary *holdTrigger = g_triggerConfig[@"triggers"][@"touchid_hold"];
                             if ([holdTrigger[@"enabled"] boolValue] && [holdTrigger[@"actions"] count] > 0) {
-                                trigger_haptic();
+                                RCTriggerHapticFor(@"touchid_hold");
                                 RCExecuteTrigger(@"touchid_hold");
                             }
                         }
@@ -13813,7 +13865,7 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
                                  cancel_pending_volume_sequences();
                                  if (g_volUpTimer) { [g_volUpTimer invalidate]; g_volUpTimer = nil; }
                                  if (g_volDownTimer) { [g_volDownTimer invalidate]; g_volDownTimer = nil; }
-                                 trigger_haptic();
+                                 RCTriggerHapticFor(triggerKey);
                                  RCExecuteTrigger(triggerKey);
                             });
                         } else if (!enabled) {
@@ -13920,7 +13972,7 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
                     }
                     if (g_volUpTimer) { [g_volUpTimer invalidate]; g_volUpTimer = nil; }
                     if (g_volDownTimer) { [g_volDownTimer invalidate]; g_volDownTimer = nil; }
-                    trigger_haptic();
+                    RCTriggerHapticFor(triggerKey);
                     RCExecuteTrigger(triggerKey);
                 });
             }
@@ -13945,7 +13997,7 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
                         cancel_pending_volume_sequences();
                         if (g_volUpTimer) { [g_volUpTimer invalidate]; g_volUpTimer = nil; }
                         if (g_volDownTimer) { [g_volDownTimer invalidate]; g_volDownTimer = nil; }
-                        trigger_haptic();
+                        RCTriggerHapticFor(@"volume_both_press");
                         RCExecuteTrigger(@"volume_both_press");
                     });
                 }
@@ -14094,7 +14146,7 @@ static void setup_background_hid_listener() {
             if (g_volUpIsDown) RC_SetScreenshotRecognizerSuppressed(YES);
             if (g_volUpTimer) { [g_volUpTimer invalidate]; g_volUpTimer = nil; }
             if (g_volDownTimer) { [g_volDownTimer invalidate]; g_volDownTimer = nil; }
-            trigger_haptic();
+            RCTriggerHapticFor(triggerKey);
             RCExecuteTrigger(triggerKey);
             return;
         }
@@ -14135,7 +14187,7 @@ static void setup_background_hid_listener() {
                 }
                 g_lockButtonTriggered = YES;
                 g_powerPressWasLongPress = YES;
-                trigger_haptic();
+                RCTriggerHapticFor(@"power_long_press");
                 RCExecuteTrigger(@"power_long_press");
                 SRLog(@"Power Long Press Fired (Stage 1)!");
                 
@@ -14371,7 +14423,7 @@ static void setup_background_hid_listener() {
     // Keep Default Action: the actions run and iOS goes on to Siri
     if (longPressEnabled && RC_TriggerKeepsDefault(@"power_long_press") && !g_lockButtonTriggered) {
         SRLog(@"Power Long Press Fired, keeping the default action (Siri)");
-        trigger_haptic();
+        RCTriggerHapticFor(@"power_long_press");
         RCExecuteTrigger(@"power_long_press");
         %orig;
         return;
@@ -14385,7 +14437,7 @@ static void setup_background_hid_listener() {
             }
             g_lockButtonTriggered = YES;
             g_powerPressWasLongPress = YES;
-            trigger_haptic();
+            RCTriggerHapticFor(@"power_long_press");
             RCExecuteTrigger(@"power_long_press");
             SRLog(@"Power Long Press Fired (via performLongPressActions)!");
             
@@ -14493,7 +14545,7 @@ static BOOL RC_HomeSinglePressIsPartOfHeldClicks(void) {
     if (!g_homeActionReplaying && RC_HomeTriggerArmed(@"trigger_home_hold", &keep) && !RC_IsForegroundAppExcluded()) {
         SRLog(@"[Home] Home Hold%@", keep ? @", keeping the default action (Siri)" : @" - no Siri");
         g_homeHoldFired = YES;
-        trigger_haptic();
+        RCTriggerHapticFor(@"trigger_home_hold");
         RCExecuteTrigger(@"trigger_home_hold");
         if (keep) %orig;
         return;
@@ -15141,7 +15193,7 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
                         if (now - g_lastStatusBarDoubleTapTime > 0.4) {
                             g_lastStatusBarDoubleTapTime = now;
                             g_statusBarHoldTriggered = YES;
-                            trigger_haptic();
+                            RCTriggerHapticFor(@"trigger_statusbar_double_tap");
                             RCExecuteTrigger(@"trigger_statusbar_double_tap");
                             SRLog(@"[RCStatus] Status Bar Double Tap FIRED!");
                         } else {
@@ -15178,7 +15230,7 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
                             
                             if (enabled) {
                                 g_statusBarHoldTriggered = YES;
-                                trigger_haptic();
+                                RCTriggerHapticFor(g_pendingStatusBarTrigger);
                                 if (RC_TriggerIsActionable(g_pendingStatusBarTrigger)) RC_FreezeGestureScrolling();
                                 RCExecuteTrigger(g_pendingStatusBarTrigger);
                                 SRLog(@"%@ FIRED!", g_pendingStatusBarTrigger);
@@ -15252,7 +15304,7 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
                         NSString *trigger = (user_dx > 0) ? @"trigger_statusbar_swipe_right" : @"trigger_statusbar_swipe_left";
                         load_trigger_config();
                         if (RC_MasterEnabled() && [g_triggerConfig[@"triggers"][trigger][@"enabled"] boolValue]) {
-                            trigger_haptic();
+                            RCTriggerHapticFor(trigger);
                         }
                         if (RC_TriggerIsActionable(trigger)) RC_FreezeGestureScrolling();
                         g_statusBarSwipeHapticFired = YES;
@@ -15278,7 +15330,7 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
                         NSString *trigger = (user_dx > 0) ? @"trigger_bottombar_swipe_right" : @"trigger_bottombar_swipe_left";
                         load_trigger_config();
                         if (RC_MasterEnabled() && [g_triggerConfig[@"triggers"][trigger][@"enabled"] boolValue]) {
-                            trigger_haptic();
+                            RCTriggerHapticFor(trigger);
                         }
                         if (RC_TriggerIsActionable(trigger)) RC_FreezeGestureScrolling();
                         g_bottomBarHapticFired = YES;
@@ -15302,7 +15354,7 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
                         if (enabled) {
                             g_bottomBarSwipeUpTriggered = YES;
                             g_lastBottomSwipeTriggerTime = [[NSDate date] timeIntervalSince1970];
-                            trigger_haptic();
+                            RCTriggerHapticFor(g_pendingBottomBarSwipeUpTrigger);
                             if (RC_TriggerIsActionable(g_pendingBottomBarSwipeUpTrigger)) RC_FreezeGestureScrolling();
                             RCExecuteTrigger(g_pendingBottomBarSwipeUpTrigger);
                             SRLog(@"[RCBottom] %@ FIRED during move!", g_pendingBottomBarSwipeUpTrigger);
@@ -15332,7 +15384,7 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
                             if (enabled) {
                                 g_bottomBarSwipeUpTriggered = YES;
                                 g_lastBottomSwipeTriggerTime = [[NSDate date] timeIntervalSince1970];
-                                trigger_haptic();
+                                RCTriggerHapticFor(g_pendingBottomBarSwipeUpTrigger);
                                 if (RC_TriggerIsActionable(g_pendingBottomBarSwipeUpTrigger)) RC_FreezeGestureScrolling();
                                 RCExecuteTrigger(g_pendingBottomBarSwipeUpTrigger);
                                 SRLog(@"[RCBottom] %@ FIRED on ended!", g_pendingBottomBarSwipeUpTrigger);
@@ -15577,7 +15629,7 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
                 
                 if (enabled) {
                     // Haptic feedback ONLY if enabled
-                    trigger_haptic();
+                    RCTriggerHapticFor(triggerKey);
                     if (RC_TriggerIsActionable(triggerKey)) RC_FreezeGestureScrolling();
                     RCExecuteTrigger(triggerKey);
                     SRLog(@"%@ FIRED INSTANTLY!", triggerKey);
