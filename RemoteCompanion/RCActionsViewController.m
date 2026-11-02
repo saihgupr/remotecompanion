@@ -2486,7 +2486,16 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     if (indexPath) {
         id item = self.actions[indexPath.row];
         BOOL isDisabled = [[RCConfigManager sharedManager] isActionDisabled:item];
-        
+
+        // Run Action option (mirrors web UI "Run Action Now": single action only, runs regardless of disabled state;
+        // hidden for non-executable structural rows like If/Else/EndIf that carry no command string)
+        NSString *runCmdStr = [item isKindOfClass:[NSDictionary class]] ? ((NSDictionary *)item)[@"command"] : item;
+        if ([runCmdStr isKindOfClass:[NSString class]] && runCmdStr.length > 0) {
+            [alert addAction:[UIAlertAction actionWithTitle:@"Run Action" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+                [[RCServerClient sharedClient] executeCommand:runCmdStr completion:^(NSString * _Nullable output, NSError * _Nullable error) {}];
+            }]];
+        }
+
         // Disable / Enable option
         NSString *toggleTitle = isDisabled ? @"Enable Action" : @"Disable Action";
         [alert addAction:[UIAlertAction actionWithTitle:toggleTitle style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
