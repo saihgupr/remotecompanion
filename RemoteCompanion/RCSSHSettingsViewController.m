@@ -1,4 +1,5 @@
 #import "RCSSHSettingsViewController.h"
+#import "RCSSHHostEditorViewController.h"
 #import "RCConfigManager.h"
 #import "RCUITweaker.h"
 
@@ -85,103 +86,8 @@
 }
 
 - (void)presentHostEditorForHost:(NSDictionary *)existingHost {
-    BOOL isEditing = (existingHost != nil);
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:isEditing ? @"Edit SSH Host" : @"Add SSH Host"
-                                                                   message:@"Configure remote SSH server details"
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-        textField.placeholder = @"Friendly Name (e.g. MacBook Pro)";
-        textField.text = existingHost[@"name"] ?: @"";
-        textField.autocapitalizationType = UITextAutocapitalizationTypeWords;
-    }];
-    
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-        textField.placeholder = @"Host / IP (e.g. 192.168.1.50)";
-        textField.text = existingHost[@"host"] ?: @"";
-        textField.autocapitalizationType = UITextAutocapitalizationTypeNone;
-        textField.autocorrectionType = UITextAutocorrectionTypeNo;
-        textField.keyboardType = UIKeyboardTypeURL;
-    }];
-    
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-        textField.placeholder = @"Port (default: 22)";
-        textField.text = existingHost ? [NSString stringWithFormat:@"%@", existingHost[@"port"] ?: @22] : @"22";
-        textField.keyboardType = UIKeyboardTypeNumberPad;
-    }];
-    
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-        textField.placeholder = @"Username (e.g. mobile)";
-        textField.text = existingHost[@"user"] ?: @"";
-        textField.autocapitalizationType = UITextAutocapitalizationTypeNone;
-        textField.autocorrectionType = UITextAutocorrectionTypeNo;
-    }];
-    
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-        NSString *existingAuth = existingHost[@"password"];
-        if (!existingAuth || existingAuth.length == 0) existingAuth = existingHost[@"keyPath"];
-        textField.placeholder = @"Password or /path/to/private_key";
-        textField.text = existingAuth ?: @"";
-        textField.autocapitalizationType = UITextAutocapitalizationTypeNone;
-        textField.autocorrectionType = UITextAutocorrectionTypeNo;
-    }];
-    
-    __weak typeof(self) weakSelf = self;
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:isEditing ? @"Save" : @"Add" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
-        __strong typeof(weakSelf) strongSelf = weakSelf;
-        if (!strongSelf) return;
-        
-        NSArray<UITextField *> *fields = alert.textFields;
-        NSString *name = [fields[0].text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        NSString *host = [fields[1].text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        NSString *portStr = [fields[2].text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        NSString *user = [fields[3].text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        NSString *authStr = [fields[4].text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        
-        if (host.length == 0) {
-            UIAlertController *errAlert = [UIAlertController alertControllerWithTitle:@"Invalid Host"
-                                                                              message:@"Hostname or IP address is required."
-                                                                       preferredStyle:UIAlertControllerStyleAlert];
-            [errAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-            [strongSelf presentViewController:errAlert animated:YES completion:nil];
-            return;
-        }
-        
-        NSInteger port = [portStr integerValue];
-        if (port <= 0 || port > 65535) port = 22;
-        if (name.length == 0) name = host;
-        if (user.length == 0) user = @"mobile";
-        
-        NSString *authType = @"password";
-        NSString *password = @"";
-        NSString *keyPath = @"";
-        
-        if ([authStr hasPrefix:@"/"] || [authStr hasPrefix:@"~"]) {
-            authType = @"key";
-            keyPath = authStr;
-        } else {
-            authType = @"password";
-            password = authStr;
-        }
-        
-        NSString *hostId = isEditing ? existingHost[@"id"] : [[NSUUID UUID] UUIDString];
-        NSDictionary *hostDict = @{
-            @"id": hostId,
-            @"name": name,
-            @"host": host,
-            @"port": @(port),
-            @"user": user,
-            @"authType": authType,
-            @"password": password,
-            @"keyPath": keyPath
-        };
-        
-        [[RCConfigManager sharedManager] addOrUpdateSSHHost:hostDict];
-        [strongSelf.tableView reloadData];
-    }]];
-    
-    [self presentViewController:alert animated:YES completion:nil];
+    RCSSHHostEditorViewController *editor = [[RCSSHHostEditorViewController alloc] initWithHost:existingHost];
+    [self.navigationController pushViewController:editor animated:YES];
 }
 
 #pragma mark - Table View Data Source
