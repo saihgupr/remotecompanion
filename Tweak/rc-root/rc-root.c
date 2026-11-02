@@ -33,6 +33,35 @@ static int rc_parent_is_springboard(void) {
     return strcmp(path, "/System/Library/CoreServices/SpringBoard.app/SpringBoard") == 0;
 }
 
+// RemoteCommand's config, written by the app: Settings > Advanced Settings > Security
+#define RC_CONFIG_PATH "/var/mobile/Documents/rc_triggers.plist"
+
+// "Allow Direct Root Helper Calls", off unless the user turns it on. Reading this file is safe:
+// a bad value just means the check below stays in force.
+static int rc_direct_calls_allowed(void) {
+    CFURLRef url = CFURLCreateFromFileSystemRepresentation(kCFAllocatorDefault, (const UInt8 *)RC_CONFIG_PATH, strlen(RC_CONFIG_PATH), false);
+    if (!url) return 0;
+    CFReadStreamRef stream = CFReadStreamCreateWithFile(kCFAllocatorDefault, url);
+    CFRelease(url);
+    if (!stream) return 0;
+    int allowed = 0;
+    if (CFReadStreamOpen(stream)) {
+        CFPropertyListRef plist = CFPropertyListCreateWithStream(kCFAllocatorDefault, stream, 0, kCFPropertyListImmutable, NULL, NULL);
+        if (plist) {
+            if (CFGetTypeID(plist) == CFDictionaryGetTypeID()) {
+                CFTypeRef value = CFDictionaryGetValue((CFDictionaryRef)plist, CFSTR("allowDirectRootHelper"));
+                if (value && CFGetTypeID(value) == CFBooleanGetTypeID()) {
+                    allowed = CFBooleanGetValue((CFBooleanRef)value) ? 1 : 0;
+                }
+            }
+            CFRelease(plist);
+        }
+        CFReadStreamClose(stream);
+    }
+    CFRelease(stream);
+    return allowed;
+}
+
 // IOHIDEvent types and private function pointers
 typedef struct __IOHIDEvent *IOHIDEventRef;
 typedef struct __IOHIDEventSystemClient *IOHIDEventSystemClientRef;
@@ -271,9 +300,11 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // Shell execution is restricted to calls made by SpringBoard (RemoteCommand's tweak)
-    if (!rc_parent_is_springboard()) {
+    // Shell execution is restricted to calls made by SpringBoard (RemoteCommand's tweak),
+    // unless the user turned on Allow Direct Root Helper Calls in Advanced Settings
+    if (!rc_direct_calls_allowed() && !rc_parent_is_springboard()) {
         fprintf(stderr, "Error: rc-root shell commands may only be run by RemoteCommand (permission denied).\n");
+        fprintf(stderr, "To allow scripts and other tools to call rc-root directly, turn on Allow Direct Root Helper Calls in Settings > Advanced Settings > Security.\n");
         return 1;
     }
 

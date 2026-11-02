@@ -154,6 +154,12 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
             [self saveConfig];
         }
 
+        // Auto-add allowDirectRootHelper (default to NO: only SpringBoard may run root shell commands)
+        if (_config[@"allowDirectRootHelper"] == nil) {
+            _config[@"allowDirectRootHelper"] = @NO;
+            [self saveConfig];
+        }
+
         // Cleanup deprecated watch triggers
         BOOL didChange = NO;
         if (triggers[@"watch_near"]) { [triggers removeObjectForKey:@"watch_near"]; didChange = YES; }
@@ -181,6 +187,7 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
             @"tcpEnabled": @YES,
             @"webUIEnabled": @NO,
             @"freezeListsDuringGestures": @YES,
+            @"allowDirectRootHelper": @NO,
             @"nfcEnabled": @YES,
             @"rootEnabled": @YES,
             @"sshHosts": [NSMutableArray array],
@@ -375,6 +382,15 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
 
 - (void)setRootEnabled:(BOOL)rootEnabled {
     _config[@"rootEnabled"] = @(rootEnabled);
+    [self saveConfig];
+}
+
+- (BOOL)allowDirectRootHelper {
+    return [_config[@"allowDirectRootHelper"] boolValue];
+}
+
+- (void)setAllowDirectRootHelper:(BOOL)allowDirectRootHelper {
+    _config[@"allowDirectRootHelper"] = @(allowDirectRootHelper);
     [self saveConfig];
 }
 

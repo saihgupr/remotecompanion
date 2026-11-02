@@ -39,6 +39,10 @@
 @property (nonatomic, assign) BOOL nfcBackgroundReading;
 + (BOOL)nfcBackgroundReadingSupported;
 @property (nonatomic, assign) BOOL rootEnabled;
+// The root helper only runs shell commands when SpringBoard asks it to. Turn this on to let
+// scripts, terminals and other tools call it directly. Off by default (Settings > Advanced
+// Settings > Security).
+@property (nonatomic, assign) BOOL allowDirectRootHelper;
 @property (nonatomic, assign) BOOL haEnabled;
 @property (nonatomic, copy) NSString *haUrl;
 @property (nonatomic, copy) NSString *haToken;
