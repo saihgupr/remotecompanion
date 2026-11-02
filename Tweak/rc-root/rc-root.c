@@ -1,6 +1,6 @@
 /*
  * rc-root - Setuid root helper for RemoteCommand
- * Executes shell commands as root when called from mobile user
+ * Executes shell commands as root when called by SpringBoard (RemoteCommand), and IOHID touch injection
  *
  * Must be installed with: chown root:wheel rc-root && chmod 4755 rc-root
  */
@@ -17,6 +17,21 @@
 #include <mach/mach_time.h>
 
 extern char **environ;
+
+// proc_pidpath lives in libSystem but is not exposed in the iOS SDK headers
+extern int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
+
+// rc-root is setuid root, so it must not run arbitrary shell commands for whichever process
+// happens to call it. Shell commands are only honoured when the direct parent is SpringBoard,
+// which is where RemoteCommand's tweak spawns this helper. The kernel sets the parent PID, so
+// another app cannot fake it.
+static int rc_parent_is_springboard(void) {
+    pid_t ppid = getppid();
+    if (ppid <= 1) return 0;
+    char path[4096];
+    if (proc_pidpath(ppid, path, sizeof(path)) <= 0) return 0;
+    return strcmp(path, "/System/Library/CoreServices/SpringBoard.app/SpringBoard") == 0;
+}
 
 // IOHIDEvent types and private function pointers
 typedef struct __IOHIDEvent *IOHIDEventRef;
@@ -253,6 +268,12 @@ int main(int argc, char *argv[]) {
             return 0;
         }
         fprintf(stderr, "Invalid iohid subcommand or arguments\n");
+        return 1;
+    }
+
+    // Shell execution is restricted to calls made by SpringBoard (RemoteCommand's tweak)
+    if (!rc_parent_is_springboard()) {
+        fprintf(stderr, "Error: rc-root shell commands may only be run by RemoteCommand (permission denied).\n");
         return 1;
     }
 
