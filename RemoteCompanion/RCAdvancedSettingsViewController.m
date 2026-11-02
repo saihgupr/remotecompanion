@@ -136,7 +136,7 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
     } else if (section == RCAdvancedSettingsSectionButtons) {
         return @"How long a press waits for the next one before it counts. A shorter time responds sooner and needs quicker presses.";
     } else if (section == RCAdvancedSettingsSectionSecurity) {
-        return @"RemoteCommand runs root commands through a helper that only SpringBoard may call. Turn this on to let scripts, terminals and other tools call the helper directly. Any app on this device can then get root, so leave it off unless you need it.";
+        return @"Lets scripts, terminals and other tools call the root helper directly. Any app on this device can then get root, so leave it off unless you need it.";
     }
     return nil;
 }
