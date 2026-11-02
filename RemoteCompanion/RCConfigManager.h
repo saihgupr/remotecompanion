@@ -74,6 +74,8 @@
 + (BOOL)defaultHapticsForTrigger:(NSString *)triggerKey;
 - (BOOL)isHapticsEnabledForTrigger:(NSString *)triggerKey;
 - (void)setHapticsEnabled:(BOOL)enabled forTrigger:(NSString *)triggerKey;
+- (BOOL)isToastsEnabledForTrigger:(NSString *)triggerKey;
+- (void)setToastsEnabled:(BOOL)enabled forTrigger:(NSString *)triggerKey;
 
 // Saves an App Launch ("app_launch_") or App Exit ("app_exit_") trigger for these apps and
 // returns its key, which is the first app's. The actions of the trigger it replaces (oldKey),

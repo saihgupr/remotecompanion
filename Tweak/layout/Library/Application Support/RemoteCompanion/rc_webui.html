@@ -5929,14 +5929,28 @@ function isHapticsEnabledForTrigger(key) {
   return defaultHapticsForTrigger(key);
 }
 
+function isToastsEnabledForTrigger(key) {
+  const t = triggerData(key) || {};
+  if (t.toasts !== undefined && t.toasts !== null) {
+    return !!t.toasts;
+  }
+  return true;
+}
+
 // ── Ellipsis Menu ─────────────────────────────────────────────────────────────
 function showEllipsisMenu(e) {
   const hapticsEnabled = isHapticsEnabledForTrigger(currentKey);
+  const toastsEnabled = isToastsEnabledForTrigger(currentKey);
   const items = [
     {
       label: hapticsEnabled ? 'Disable Haptics' : 'Enable Haptics',
       icon: hapticsEnabled ? 'waveform_slash' : 'waveform_path_ecg',
       action: () => toggleCurrentTriggerHaptics()
+    },
+    {
+      label: toastsEnabled ? 'Disable Toasts' : 'Enable Toasts',
+      icon: toastsEnabled ? 'slash_circle' : 'text_bubble',
+      action: () => toggleCurrentTriggerToasts()
     },
     { label: 'Import Actions', icon: 'square_arrow_down', action: () => showImportDialog() },
     { label: 'Export Actions', icon: 'square_arrow_up', action: () => exportCurrentActions() },
@@ -5957,6 +5971,20 @@ function toggleCurrentTriggerHaptics() {
     t.haptics = next;
   }
   showToast(next ? '✓ Haptics Enabled' : '✓ Haptics Disabled');
+  saveConfig();
+}
+
+function toggleCurrentTriggerToasts() {
+  const t = triggerData(currentKey);
+  if (!t) return;
+  const current = isToastsEnabledForTrigger(currentKey);
+  const next = !current;
+  if (next === true) {
+    delete t.toasts;
+  } else {
+    t.toasts = false;
+  }
+  showToast(next ? '✓ Toasts Enabled' : '✓ Toasts Disabled');
   saveConfig();
 }
 

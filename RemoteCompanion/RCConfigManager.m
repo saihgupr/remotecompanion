@@ -753,6 +753,27 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
     [self saveConfig];
 }
 
+- (BOOL)isToastsEnabledForTrigger:(NSString *)triggerKey {
+    if (!triggerKey.length) return YES;
+    NSDictionary *data = [self triggerDataForKey:triggerKey];
+    id val = data[@"toasts"];
+    if (val != nil && [val respondsToSelector:@selector(boolValue)]) {
+        return [val boolValue];
+    }
+    return YES;
+}
+
+- (void)setToastsEnabled:(BOOL)enabled forTrigger:(NSString *)triggerKey {
+    if (!triggerKey.length) return;
+    NSMutableDictionary *data = [self triggerDict:triggerKey];
+    if (enabled) {
+        [data removeObjectForKey:@"toasts"];
+    } else {
+        data[@"toasts"] = @NO;
+    }
+    [self saveConfig];
+}
+
 - (BOOL)isTriggerFavorite:(NSString *)triggerKey {
     NSArray *favorites = _config[@"favoriteTriggers"];
     return [favorites containsObject:triggerKey];

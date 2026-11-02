@@ -929,6 +929,15 @@ static id g_actionClipboard = nil;
     self.moreButton.menu = [self moreMenu];
 }
 
+- (BOOL)isToastsEnabledForTrigger {
+    return [[RCConfigManager sharedManager] isToastsEnabledForTrigger:_triggerKey];
+}
+
+- (void)setToastsEnabledForTrigger:(BOOL)enabled {
+    [[RCConfigManager sharedManager] setToastsEnabled:enabled forTrigger:_triggerKey];
+    self.moreButton.menu = [self moreMenu];
+}
+
 - (UIMenu *)moreMenu {
     __weak typeof(self) weakSelf = self;
     NSMutableArray *modes = [NSMutableArray array];
@@ -965,6 +974,14 @@ static id g_actionClipboard = nil;
     }];
     hapticAction.state = hapticsOn ? UIMenuElementStateOn : UIMenuElementStateOff;
     [menuActions addObject:hapticAction];
+
+    BOOL toastsOn = [self isToastsEnabledForTrigger];
+    UIImage *toastImg = [UIImage systemImageNamed:@"text.bubble"] ?: [UIImage systemImageNamed:@"capsule"];
+    UIAction *toastAction = [UIAction actionWithTitle:@"Toast Notifications" image:toastImg identifier:nil handler:^(__kindof UIAction *a) {
+        [weakSelf setToastsEnabledForTrigger:!toastsOn];
+    }];
+    toastAction.state = toastsOn ? UIMenuElementStateOn : UIMenuElementStateOff;
+    [menuActions addObject:toastAction];
 
     [menuActions addObject:[UIAction actionWithTitle:@"Import Actions" image:[UIImage systemImageNamed:@"square.and.arrow.down"] identifier:nil handler:^(__kindof UIAction *a) {
         [weakSelf importActions];

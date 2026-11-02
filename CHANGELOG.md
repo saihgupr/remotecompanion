@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Per-Trigger Toast Notifications Suppression**: Added a Toast Notifications toggle in the trigger options menu (`...`) in both the iOS companion app and Web UI (enabled by default); when unchecked, all HUD toasts, action banners, and integration notifications produced by actions in that trigger automation are suppressed.
 - **Per-Trigger Haptic Feedback Toggle**: Added a Haptic Feedback toggle in the trigger actions menu (`...`) in both the iOS companion app and Web UI with intelligent defaults (tactile buttons, screen gestures, and NFC tags enabled; background event and app triggers disabled), and support for opt-in vibration on event triggers.
 - **Auto-Lock / Display Sleep Aliases & Discovery**: Renamed Auto-Lock to "Auto-Lock (Display Sleep)" with search keywords (`display`, `sleep`, `timeout`, `time off`, `screen`), updated the duration selector to include "Never (Off)", and added command aliases `rc display sleep [duration]` and `rc display time off`.
 - **Deep Linking URL Scheme & CLI Navigation**: added `remotecompanion://` URL scheme support and `rc nav <panel>` CLI command to jump directly into Settings, Integrations (Home Assistant, Keyboard Maestro, MQTT), New Trigger picker, or Triggers list from Siri Shortcuts, automation scripts, or terminal.

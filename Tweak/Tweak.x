@@ -1125,6 +1125,12 @@ static NSArray<NSString *> *rc_parse_quoted_arguments(NSString *argString) {
 // whatever is underneath (the test kit's prompts, which sit over the status bar while the
 // status-bar gestures are being tested).
 static void rc_show_hud_toast_ex(NSString *title, NSString *subtitle, NSString *iconSymbol, NSTimeInterval hold, BOOL passThrough) {
+    if (!passThrough) {
+        if ([[NSThread currentThread].threadDictionary[@"rcRunToastsDisabled"] boolValue]) {
+            SRLog(@"[Toast] Suppressed: toasts disabled for this trigger sequence");
+            return;
+        }
+    }
     dispatch_async(dispatch_get_main_queue(), ^{
         if (g_rcHUDWindow) {
             [g_rcHUDWindow.layer removeAllAnimations];
@@ -3047,9 +3053,36 @@ static BOOL rc_run_wait(double seconds) {
     return !rc_run_stopped();
 }
 
+static BOOL RC_IsToastsEnabledForTrigger(NSString *triggerKey) {
+    if (!triggerKey.length) return YES;
+    NSString *cleanKey = triggerKey;
+    if ([cleanKey hasPrefix:@"SIMULATE:"]) cleanKey = [cleanKey substringFromIndex:9];
+    if (!g_triggerConfig) load_trigger_config();
+    if (g_triggerConfig) {
+        NSDictionary *triggers = g_triggerConfig[@"triggers"];
+        if ([triggers isKindOfClass:[NSDictionary class]]) {
+            NSDictionary *trigger = triggers[cleanKey];
+            if ([trigger isKindOfClass:[NSDictionary class]]) {
+                id val = trigger[@"toasts"];
+                if (val != nil && [val respondsToSelector:@selector(boolValue)]) {
+                    return [val boolValue];
+                }
+            }
+        }
+    }
+    return YES;
+}
+
 static void rc_execute_action_sequence(NSArray *actions, NSString *triggerKey, BOOL simulationMode) {
     if (![actions isKindOfClass:[NSArray class]] || actions.count == 0) return;
     
+    BOOL toastsEnabled = RC_IsToastsEnabledForTrigger(triggerKey);
+    NSMutableDictionary *threadDict = [NSThread currentThread].threadDictionary;
+    BOOL previouslyDisabled = [threadDict[@"rcRunToastsDisabled"] boolValue];
+    if (!toastsEnabled) {
+        threadDict[@"rcRunToastsDisabled"] = @YES;
+    }
+
     for (NSInteger idx = 0; idx < (NSInteger)actions.count; idx++) {
         id actionItem = actions[idx];
 
@@ -3068,7 +3101,9 @@ static void rc_execute_action_sequence(NSArray *actions, NSString *triggerKey, B
             SRLogMin(@"[%@] -> %@", triggerKey, action);
             RCTKEvent(@"action", @{ @"trigger": triggerKey ?: @"", @"command": action });
             handle_command(action);
-            rc_maybe_show_action_banner(action);
+            if (toastsEnabled) {
+                rc_maybe_show_action_banner(action);
+            }
             usleep(simulationMode ? 50000 : 10000);
             continue;
         }
@@ -3147,6 +3182,9 @@ static void rc_execute_action_sequence(NSArray *actions, NSString *triggerKey, B
         } else {
             SRLog(@"[%@] Skipping unsupported dictionary action type: %@", triggerKey, type);
         }
+    }
+    if (!toastsEnabled && !previouslyDisabled) {
+        [threadDict removeObjectForKey:@"rcRunToastsDisabled"];
     }
 }
 
@@ -3351,8 +3389,11 @@ void RCExecuteTrigger(NSString *triggerKey) {
         thread[@"rcRunKey"] = triggerKey;
         thread[@"rcRunGeneration"] = generation;
         thread[@"rcRunWait"] = wait;
+        if (!RC_IsToastsEnabledForTrigger(triggerKey)) {
+            thread[@"rcRunToastsDisabled"] = @YES;
+        }
         rc_execute_action_sequence(actions, triggerKey, NO);
-        [thread removeObjectsForKeys:@[@"rcRunKey", @"rcRunGeneration", @"rcRunWait"]];
+        [thread removeObjectsForKeys:@[@"rcRunKey", @"rcRunGeneration", @"rcRunWait", @"rcRunToastsDisabled"]];
         @synchronized (rc_run_lock()) {
             [g_runWaits[triggerKey] removeObject:wait];
             NSUInteger left = g_runCount[triggerKey].unsignedIntegerValue;
@@ -6779,13 +6820,14 @@ static NSString *rc_execute_km_command(NSString *cmdArgs) {
         sessionConfig.timeoutIntervalForRequest = 10.0;
         sessionConfig.timeoutIntervalForResource = 10.0;
         NSURLSession *session = [NSURLSession sessionWithConfiguration:sessionConfig delegate:[RCInsecureSessionDelegate sharedDelegate] delegateQueue:nil];
+        BOOL kmToastsDisabled = [[NSThread currentThread].threadDictionary[@"rcRunToastsDisabled"] boolValue];
         [[session dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *err) {
             if (err) {
                 respMsg = [NSString stringWithFormat:@"Error: %@\n", err.localizedDescription];
             } else {
                 NSHTTPURLResponse *http = (NSHTTPURLResponse *)resp;
                 if (http.statusCode >= 200 && http.statusCode < 400) {
-                    if (rc_own_banner_enabled(@"__KM_TRIGGER__")) rc_show_hud_toast(@"Keyboard Maestro", @"Triggered URL Macro", @"command");
+                    if (!kmToastsDisabled && rc_own_banner_enabled(@"__KM_TRIGGER__")) rc_show_hud_toast(@"Keyboard Maestro", @"Triggered URL Macro", @"command");
                     respMsg = [NSString stringWithFormat:@"Keyboard Maestro trigger succeeded (HTTP %ld)\n", (long)http.statusCode];
                 } else if (http.statusCode == 401) {
                     respMsg = @"Keyboard Maestro error (HTTP 401: Unauthorized - Check Username/Password)\n";
