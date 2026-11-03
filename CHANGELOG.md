@@ -2,14 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [4.1.0] - 2026-11-03
 
 ### Added
 - **Deep Linking URL Scheme & CLI Navigation**: added `remotecompanion://` URL scheme support and `rc nav <panel>` CLI command to jump directly into Settings, Integrations (Home Assistant, Keyboard Maestro, MQTT), New Trigger picker, or Triggers list from Siri Shortcuts, automation scripts, or terminal.
-
-## [4.1.0] - 2026-10-31
-
-### Added
 - **Web UI access control**: Settings > General > Access limits where the Web UI can be reached from — Any Network (default, as before), Trusted Networks (only while on listed Wi-Fi networks), or This iPhone Only. The check runs per-connection before any endpoint, so it covers `/api/*` too, and the phone itself can always connect. Also `rc webui access any|networks|local` and `rc webui wifi` (#105).
 - **CarPlay triggers and condition**: new CarPlay Connected / Disconnected triggers plus a CarPlay connection condition; device/media triggers flattened in the New Trigger screen, Home Button section hidden on button-less phones (#67).
 - **On-device test kit**: Settings > Diagnostics > Test Kit self-tests conditions, toggles, gestures, and button presses and produces a shareable report; also fixed a SpringBoard crash when saving config from the Web UI (#68).
