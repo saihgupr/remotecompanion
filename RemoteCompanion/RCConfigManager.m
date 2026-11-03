@@ -412,6 +412,15 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
     [self saveConfig];
 }
 
+- (BOOL)toastsWakeScreen {
+    return [_config[@"toastsWakeScreen"] boolValue];
+}
+
+- (void)setToastsWakeScreen:(BOOL)toastsWakeScreen {
+    _config[@"toastsWakeScreen"] = @(toastsWakeScreen);
+    [self saveConfig];
+}
+
 - (BOOL)hapticsEnabled {
     // Default to YES if missing
     if (!_config[@"hapticsEnabled"]) {

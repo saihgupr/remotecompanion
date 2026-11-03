@@ -32,6 +32,8 @@
 @property (nonatomic, copy) NSArray<NSDictionary *> *bannerActions;
 // Actions with a banner of their own that have been switched off in Settings > Banners
 @property (nonatomic, copy) NSArray<NSString *> *bannerOptOut;
+// A banner that comes while the screen is off turns it on (off: the banner waits for the screen to turn on)
+@property (nonatomic, assign) BOOL toastsWakeScreen;
 @property (nonatomic, assign) BOOL nfcEnabled;
 // Seconds the NFC scan keeps going after the screen turns off (0: only while the screen is on)
 @property (nonatomic, assign) double nfcScreenOffSeconds;
