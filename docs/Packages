@@ -9,6 +9,8 @@ Section: Tweaks
 Architecture: iphoneos-arm64
 Version: 3.0.0
 Installed-Size: 1900
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_3.0.0_iphoneos-arm64.deb
 Size: 618338
 MD5sum: 2a08d89e35d7ec39ec585cd4e55b04b1
@@ -27,6 +29,8 @@ Conflicts: com.pizzaman.remotecommand
 Architecture: iphoneos-arm
 Version: 2.2.4
 Installed-Size: 1564
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_2.2.4_iphoneos-arm.deb
 Size: 303568
 MD5sum: 031c36bd491643c7943b7e8ef65961b7
@@ -45,6 +49,8 @@ Conflicts: com.pizzaman.remotecommand
 Architecture: iphoneos-arm
 Version: 2.1.0
 Installed-Size: 1920
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_2.1.0_iphoneos-arm.deb
 Size: 324838
 MD5sum: d3a692ec1ec0b9cfcf0276cb5cc5f93b
@@ -62,6 +68,8 @@ Section: Tweaks
 Architecture: iphoneos-arm64
 Version: 3.5.0
 Installed-Size: 2064
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_3.5.0_iphoneos-arm64.deb
 Size: 802836
 MD5sum: 03aa2a5ed71a02458f1fba7296965da7
@@ -79,6 +87,8 @@ Section: Tweaks
 Architecture: iphoneos-arm
 Version: 4.0.0
 Installed-Size: 3388
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_4.0.0_iphoneos-arm.deb
 Size: 1072856
 MD5sum: 8c54687634a580f32d6718c3282a179e
@@ -95,6 +105,8 @@ Section: Tweaks
 Architecture: iphoneos-arm
 Version: 2.4.1~beta.1
 Installed-Size: 1460
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_2.4.1~beta.1_iphoneos-arm.deb
 Size: 306190
 MD5sum: e307731876d3583fec2d0ca865dfcb02
@@ -112,6 +124,8 @@ Section: Tweaks
 Architecture: iphoneos-arm
 Version: 3.6.3
 Installed-Size: 2888
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_3.6.3_iphoneos-arm.deb
 Size: 987398
 MD5sum: 89fc60253f2fb1210796c4ed16cb38fe
@@ -129,6 +143,8 @@ Section: Tweaks
 Architecture: iphoneos-arm
 Version: 3.4.0
 Installed-Size: 2408
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_3.4.0_iphoneos-arm.deb
 Size: 886614
 MD5sum: 7d33b2dbd117c4c15b1861c39d8ad16c
@@ -146,6 +162,8 @@ Section: Tweaks
 Architecture: iphoneos-arm64
 Version: 3.3.1
 Installed-Size: 2308
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_3.3.1_iphoneos-arm64.deb
 Size: 862570
 MD5sum: 2b4b2cd6f11860afc07b8fb8b672811c
@@ -163,6 +181,8 @@ Section: Tweaks
 Architecture: iphoneos-arm64
 Version: 4.0.0
 Installed-Size: 3388
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_4.0.0_iphoneos-arm64.deb
 Size: 1071954
 MD5sum: 008cb79dd4face85cb484c5ad3e13867
@@ -181,6 +201,8 @@ Conflicts: com.pizzaman.remotecommand
 Architecture: iphoneos-arm64
 Version: 1.1.0
 Installed-Size: 1048
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_1.1.0_iphoneos-arm64.deb
 Size: 247214
 MD5sum: 0819edba367730142650252b65271ac7
@@ -198,6 +220,8 @@ Section: Tweaks
 Architecture: iphoneos-arm64
 Version: 3.6.1
 Installed-Size: 2888
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_3.6.1_iphoneos-arm64.deb
 Size: 986926
 MD5sum: 71fcc8e1be9d4b15e6aceef6f4878178
@@ -215,6 +239,8 @@ Section: Tweaks
 Architecture: iphoneos-arm64
 Version: 3.6.2
 Installed-Size: 2888
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_3.6.2_iphoneos-arm64.deb
 Size: 987268
 MD5sum: 0bccedbfdf9fda5bc9cff4166729f801
@@ -231,6 +257,8 @@ Section: Tweaks
 Architecture: iphoneos-arm64
 Version: 2.4.0
 Installed-Size: 1460
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_2.4.0_iphoneos-arm64.deb
 Size: 301284
 MD5sum: 14887cbd08430cd000e268e70869e637
@@ -248,6 +276,8 @@ Section: Tweaks
 Architecture: iphoneos-arm
 Version: 3.7.0
 Installed-Size: 2988
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_3.7.0_iphoneos-arm.deb
 Size: 1001044
 MD5sum: e74226c18e23fb2cd5d38ba752c17a0d
@@ -264,6 +294,8 @@ Section: Tweaks
 Architecture: iphoneos-arm64
 Version: 2.4.1~beta.1
 Installed-Size: 1460
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_2.4.1~beta.1_iphoneos-arm64.deb
 Size: 305254
 MD5sum: 65882356c75f17509eef4ae04e718863
@@ -282,6 +314,8 @@ Conflicts: com.pizzaman.remotecommand
 Architecture: iphoneos-arm64
 Version: 2.1.0
 Installed-Size: 1372
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_2.1.0_iphoneos-arm64.deb
 Size: 286530
 MD5sum: 86b95e4ffcbf6128d30ac666ab553735
@@ -300,6 +334,8 @@ Conflicts: com.pizzaman.remotecommand
 Architecture: iphoneos-arm
 Version: 2.2.0
 Installed-Size: 1056
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_2.2.0_iphoneos-arm.deb
 Size: 252284
 MD5sum: 698ce285794f9b5a0121159dddbfc3e9
@@ -317,6 +353,8 @@ Section: Tweaks
 Architecture: iphoneos-arm64
 Version: 4.1.0
 Installed-Size: 4684
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_4.1.0_iphoneos-arm64.deb
 Size: 1287816
 MD5sum: 943bb6b71cf398abaffa25bffe2f214d
@@ -333,6 +371,8 @@ Section: Tweaks
 Architecture: iphoneos-arm
 Version: 2.4.0
 Installed-Size: 1460
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_2.4.0_iphoneos-arm.deb
 Size: 301488
 MD5sum: c2ab1d5cbc8b8c0e866bdad757cd6863
@@ -351,6 +391,8 @@ Conflicts: com.pizzaman.remotecommand
 Architecture: iphoneos-arm
 Version: 2.2.5
 Installed-Size: 1180
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_2.2.5_iphoneos-arm.deb
 Size: 272082
 MD5sum: 51032154367ea101fdca5c15a212eb46
@@ -368,6 +410,8 @@ Section: Tweaks
 Architecture: iphoneos-arm64
 Version: 3.4.0
 Installed-Size: 2408
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_3.4.0_iphoneos-arm64.deb
 Size: 886916
 MD5sum: 29b1e3d0b6c5f945b074b6aa8c99382b
@@ -385,6 +429,8 @@ Section: Tweaks
 Architecture: iphoneos-arm
 Version: 3.6.2
 Installed-Size: 2888
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_3.6.2_iphoneos-arm.deb
 Size: 987208
 MD5sum: dcf72e832a07b0b0858798d1664c3570
@@ -402,6 +448,8 @@ Section: Tweaks
 Architecture: iphoneos-arm
 Version: 3.2.0
 Installed-Size: 2184
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_3.2.0_iphoneos-arm.deb
 Size: 838202
 MD5sum: cc06519bd8955f9f2a9dbcb83cff129a
@@ -419,6 +467,8 @@ Section: Tweaks
 Architecture: iphoneos-arm
 Version: 3.5.2
 Installed-Size: 2616
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_3.5.2_iphoneos-arm.deb
 Size: 922272
 MD5sum: f004eb0c93c3e51dbff555ead4e48eaa
@@ -437,6 +487,8 @@ Conflicts: com.pizzaman.remotecommand
 Architecture: iphoneos-arm64
 Version: 2.2.4
 Installed-Size: 1564
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_2.2.4_iphoneos-arm64.deb
 Size: 304268
 MD5sum: 5e1202456d05998c3a1d10e743fb9ec3
@@ -455,6 +507,8 @@ Conflicts: com.pizzaman.remotecommand
 Architecture: iphoneos-arm64
 Version: 1.0.3
 Installed-Size: 1068
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_1.0.3_iphoneos-arm64.deb
 Size: 250390
 MD5sum: acc552cf2e49c20fa891b0e293574585
@@ -473,6 +527,8 @@ Conflicts: com.pizzaman.remotecommand
 Architecture: iphoneos-arm64
 Version: 2.0.0
 Installed-Size: 1060
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_2.0.0_iphoneos-arm64.deb
 Size: 251538
 MD5sum: 0293e6363db1a14eb3e81a72df7c4817
@@ -492,6 +548,8 @@ Conflicts: com.pizzaman.remotecommand
 Architecture: iphoneos-arm64
 Version: 2.3.0
 Installed-Size: 1428
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_2.3.0_iphoneos-arm64.deb
 Size: 296476
 MD5sum: c51383346cd12eb37fb065581a5380af
@@ -509,6 +567,8 @@ Section: Tweaks
 Architecture: iphoneos-arm
 Version: 3.6.1
 Installed-Size: 2888
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_3.6.1_iphoneos-arm.deb
 Size: 987050
 MD5sum: deb7635bb47084eef0874e5be7916715
@@ -526,6 +586,8 @@ Section: Tweaks
 Architecture: iphoneos-arm
 Version: 3.3.0
 Installed-Size: 2308
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_3.3.0_iphoneos-arm.deb
 Size: 862756
 MD5sum: 336e5f9634bb22975476662a335a5403
@@ -544,6 +606,8 @@ Conflicts: com.pizzaman.remotecommand
 Architecture: iphoneos-arm
 Version: 2.1.2
 Installed-Size: 1372
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_2.1.2_iphoneos-arm.deb
 Size: 286712
 MD5sum: e5a96b8a0e20bd2ec8c98b248d8d9235
@@ -562,6 +626,8 @@ Conflicts: com.pizzaman.remotecommand
 Architecture: iphoneos-arm64
 Version: 2.2.5
 Installed-Size: 1180
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_2.2.5_iphoneos-arm64.deb
 Size: 272336
 MD5sum: 4aa04feb91f389cfa84311a5b8b7902f
@@ -580,6 +646,8 @@ Conflicts: com.pizzaman.remotecommand
 Architecture: iphoneos-arm64
 Version: 1.0.2
 Installed-Size: 1016
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_1.0.2_iphoneos-arm64.deb
 Size: 240368
 MD5sum: c33db0028071b17366202bec57814256
@@ -597,6 +665,8 @@ Section: Tweaks
 Architecture: iphoneos-arm64
 Version: 3.7.0
 Installed-Size: 2988
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_3.7.0_iphoneos-arm64.deb
 Size: 1001138
 MD5sum: bb14e7dbaf61901a8b8f8dabb040a7bd
@@ -615,6 +685,8 @@ Conflicts: com.pizzaman.remotecommand
 Architecture: iphoneos-arm64
 Version: 1.0.1
 Installed-Size: 1000
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_1.0.1_iphoneos-arm64.deb
 Size: 239956
 MD5sum: 8e043dc5bf0f002b6ac953c19719ec91
@@ -632,6 +704,8 @@ Section: Tweaks
 Architecture: iphoneos-arm64
 Version: 3.2.0
 Installed-Size: 2184
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_3.2.0_iphoneos-arm64.deb
 Size: 838276
 MD5sum: f0c84b2ef93bdbc98ea06984c495fd4a
@@ -649,6 +723,8 @@ Section: Tweaks
 Architecture: iphoneos-arm
 Version: 3.5.1
 Installed-Size: 2556
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_3.5.1_iphoneos-arm.deb
 Size: 913206
 MD5sum: 28ba39d34cc602729fbb3249a0680c5d
@@ -666,6 +742,8 @@ Section: Tweaks
 Architecture: iphoneos-arm
 Version: 3.0.0
 Installed-Size: 1900
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_3.0.0_iphoneos-arm.deb
 Size: 618510
 MD5sum: 841498d3a7ac09301487e3247dff3d68
@@ -683,6 +761,8 @@ Section: Tweaks
 Architecture: iphoneos-arm
 Version: 3.6.0
 Installed-Size: 2644
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_3.6.0_iphoneos-arm.deb
 Size: 932134
 MD5sum: 2841c22460adf1023e425400d305697a
@@ -700,6 +780,8 @@ Section: Tweaks
 Architecture: iphoneos-arm
 Version: 3.3.1
 Installed-Size: 2308
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_3.3.1_iphoneos-arm.deb
 Size: 862376
 MD5sum: 9e652097a542dcc401e74747f8f0050e
@@ -718,6 +800,8 @@ Conflicts: com.pizzaman.remotecommand
 Architecture: iphoneos-arm64
 Version: 2.1.1
 Installed-Size: 1372
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_2.1.1_iphoneos-arm64.deb
 Size: 286132
 MD5sum: d7bf7db96890add56a4f14d274b541b7
@@ -736,6 +820,8 @@ Conflicts: com.pizzaman.remotecommand
 Architecture: iphoneos-arm64
 Version: 1.1.2
 Installed-Size: 1048
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_1.1.2_iphoneos-arm64.deb
 Size: 247566
 MD5sum: ca98711e360d7b0cbf9652422207e395
@@ -753,6 +839,8 @@ Section: Tweaks
 Architecture: iphoneos-arm64
 Version: 3.6.3
 Installed-Size: 2888
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_3.6.3_iphoneos-arm64.deb
 Size: 987300
 MD5sum: 7bfb0fd6b4272a1e174637e991d914a8
@@ -771,6 +859,8 @@ Conflicts: com.pizzaman.remotecommand
 Architecture: iphoneos-arm64
 Version: 2.2.0
 Installed-Size: 1568
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_2.2.0_iphoneos-arm64.deb
 Size: 305026
 MD5sum: 54925420052e712c6b84fef98bcb23f8
@@ -790,6 +880,8 @@ Conflicts: com.pizzaman.remotecommand
 Architecture: iphoneos-arm
 Version: 2.3.0
 Installed-Size: 1428
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_2.3.0_iphoneos-arm.deb
 Size: 296802
 MD5sum: b1b8de6620008c7e41f7fc61b8be0a15
@@ -807,6 +899,8 @@ Section: Tweaks
 Architecture: iphoneos-arm64
 Version: 3.5.2
 Installed-Size: 2616
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_3.5.2_iphoneos-arm64.deb
 Size: 922010
 MD5sum: ba4cd70585b7cc4c6c0cab4488a7fcca
@@ -825,6 +919,8 @@ Conflicts: com.pizzaman.remotecommand
 Architecture: iphoneos-arm
 Version: 2.2.3
 Installed-Size: 1564
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_2.2.3_iphoneos-arm.deb
 Size: 303998
 MD5sum: 79976976a44d0ab1872ca697af37ac76
@@ -842,6 +938,8 @@ Section: Tweaks
 Architecture: iphoneos-arm64
 Version: 3.5.1
 Installed-Size: 2556
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_3.5.1_iphoneos-arm64.deb
 Size: 912672
 MD5sum: 8faa20553a31aec67a6e24bf7482d4d8
@@ -860,6 +958,8 @@ Conflicts: com.pizzaman.remotecommand
 Architecture: iphoneos-arm64
 Version: 1.0.4
 Installed-Size: 1068
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_1.0.4_iphoneos-arm64.deb
 Size: 250724
 MD5sum: b3f38c30d3cd1f8514714ef748fd1908
@@ -878,6 +978,8 @@ Conflicts: com.pizzaman.remotecommand
 Architecture: iphoneos-arm64
 Version: 2.2.3
 Installed-Size: 1564
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_2.2.3_iphoneos-arm64.deb
 Size: 303410
 MD5sum: fa21b6d417590f3fa8ddacf64315358e
@@ -896,6 +998,8 @@ Conflicts: com.pizzaman.remotecommand
 Architecture: iphoneos-arm64
 Version: 1.1.1
 Installed-Size: 1048
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_1.1.1_iphoneos-arm64.deb
 Size: 247746
 MD5sum: 18d80968e586a03e10a1263ab5d650a8
@@ -913,6 +1017,8 @@ Section: Tweaks
 Architecture: iphoneos-arm64
 Version: 3.6.0
 Installed-Size: 2644
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_3.6.0_iphoneos-arm64.deb
 Size: 931990
 MD5sum: f5835627e8369c1eb94ea060e18b6850
@@ -930,6 +1036,8 @@ Section: Tweaks
 Architecture: iphoneos-arm
 Version: 4.1.0
 Installed-Size: 4684
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_4.1.0_iphoneos-arm.deb
 Size: 1285738
 MD5sum: fe107ae8c7af3a6d05c517454f358a5c
@@ -947,6 +1055,8 @@ Section: Tweaks
 Architecture: iphoneos-arm
 Version: 3.5.0
 Installed-Size: 2064
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_3.5.0_iphoneos-arm.deb
 Size: 802880
 MD5sum: 20d7257d6014b9a5e7a79e1c51706a06
@@ -965,6 +1075,8 @@ Conflicts: com.pizzaman.remotecommand
 Architecture: iphoneos-arm64
 Version: 2.1.2
 Installed-Size: 1372
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_2.1.2_iphoneos-arm64.deb
 Size: 286594
 MD5sum: 72eb7f8322816c99ce00172c8dce2625
@@ -982,6 +1094,8 @@ Section: Tweaks
 Architecture: iphoneos-arm64
 Version: 3.3.0
 Installed-Size: 2308
+Depiction: https://saihgupr.github.io/remotecompanion/
+SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Filename: ./com.saihgupr.remotecompanion_3.3.0_iphoneos-arm64.deb
 Size: 862818
 MD5sum: 0ab46294f71336dbdad13c1180f250a5

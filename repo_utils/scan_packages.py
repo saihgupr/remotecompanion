@@ -106,6 +106,14 @@ def main():
         
         if not arch_found and arch_override:
             new_lines.append(f"Architecture: {arch_override}")
+
+        depiction_found = any(l.startswith("Depiction:") for l in lines)
+        sileo_depiction_found = any(l.startswith("SileoDepiction:") for l in lines)
+
+        if not depiction_found:
+            new_lines.append("Depiction: https://saihgupr.github.io/remotecompanion/")
+        if not sileo_depiction_found:
+            new_lines.append("SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json")
             
         control_content = "\n".join(new_lines)
 
