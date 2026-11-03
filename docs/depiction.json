@@ -1,0 +1,106 @@
+{
+  "minVersion": "0.4",
+  "class": "DepictionTabView",
+  "headerImage": "https://saihgupr.github.io/remotecompanion/images/Banner.png",
+  "tintColor": "#007aff",
+  "tabs": [
+    {
+      "class": "DepictionStackView",
+      "tabname": "Details",
+      "views": [
+        {
+          "class": "DepictionHeaderView",
+          "title": "RemoteCompanion",
+          "useBoldText": true
+        },
+        {
+          "class": "DepictionSubheaderView",
+          "title": "Modern Activator Replacement & Automation Hub"
+        },
+        {
+          "class": "DepictionScreenshotsView",
+          "itemCornerRadius": 10,
+          "itemSize": "{160, 346}",
+          "screenshots": [
+            {
+              "url": "https://saihgupr.github.io/remotecompanion/images/4.1.0/01_dashboard.png",
+              "accessibilityText": "Main Dashboard"
+            },
+            {
+              "url": "https://saihgupr.github.io/remotecompanion/images/4.1.0/02_add_trigger.png",
+              "accessibilityText": "New Trigger"
+            },
+            {
+              "url": "https://saihgupr.github.io/remotecompanion/images/4.1.0/03_action_conditions.png",
+              "accessibilityText": "Action Conditions"
+            },
+            {
+              "url": "https://saihgupr.github.io/remotecompanion/images/4.1.0/04_settings.png",
+              "accessibilityText": "Settings"
+            },
+            {
+              "url": "https://saihgupr.github.io/remotecompanion/images/4.1.0/05_home_assistant.png",
+              "accessibilityText": "Home Assistant Integration"
+            },
+            {
+              "url": "https://saihgupr.github.io/remotecompanion/images/4.1.0/06_advanced_settings.png",
+              "accessibilityText": "Advanced Settings"
+            },
+            {
+              "url": "https://saihgupr.github.io/remotecompanion/images/4.1.0/06_keyboard_maestro.png",
+              "accessibilityText": "Keyboard Maestro Integration"
+            },
+            {
+              "url": "https://saihgupr.github.io/remotecompanion/images/4.1.0/07_testkit.png",
+              "accessibilityText": "On-Device Test Kit"
+            }
+          ]
+        },
+        {
+          "class": "DepictionMarkdownView",
+          "markdown": "RemoteCompanion is a free, open-source Activator replacement and automation tweak for modern jailbroken iOS (iOS 14 - 17, with partial iOS 26 support). Bind physical hardware buttons, multi-touch gestures, NFC tags, network events, and schedules to customizable action sequences.\n\n### Key Highlights\n* **Hardware Controls**: Volume, Power, and Home button clicks, holds, and combos.\n* **Modern Gestures**: Status bar swipes/holds, edge swipes, and bottom bar gestures.\n* **Integrations**: Home Assistant, Keyboard Maestro, and MQTT triggers.\n* **Browser Hub**: Full web dashboard for remote control and live diagnostics.\n* **No Battery Drain**: Built on Grand Central Dispatch to sleep when idle."
+        },
+        {
+          "class": "DepictionTableButtonView",
+          "title": "GitHub Repository",
+          "action": "https://github.com/saihgupr/remotecompanion",
+          "openExternal": true
+        },
+        {
+          "class": "DepictionTableButtonView",
+          "title": "Report an Issue",
+          "action": "https://github.com/saihgupr/remotecompanion/issues",
+          "openExternal": true
+        }
+      ]
+    },
+    {
+      "class": "DepictionStackView",
+      "tabname": "Changelog",
+      "views": [
+        {
+          "class": "DepictionHeaderView",
+          "title": "Version 4.1.0",
+          "useBoldText": true
+        },
+        {
+          "class": "DepictionSubheaderView",
+          "title": "Released November 3, 2026"
+        },
+        {
+          "class": "DepictionMarkdownView",
+          "markdown": "### Added\n* **Deep Linking URL Scheme & CLI Navigation**: `remotecompanion://` URL scheme and `rc nav <panel>` CLI command to jump directly into Settings, Integrations, New Trigger picker, or Triggers.\n* **Web UI Access Control**: Restrict Web UI and `/api/*` access to Any Network, Trusted Networks, or This iPhone Only (#105).\n* **CarPlay Triggers & Condition**: Connected and Disconnected triggers plus connection condition (#67).\n* **On-Device Test Kit**: Self-tests conditions, toggles, gestures, and button presses with shareable reports (#68).\n* **Focus Modes**: Set Focus action and Focus If condition on iOS 15+ (#80).\n* **Shortcuts without SpringCuts**: Run shortcuts in background with optional Run Silently mode (#94).\n* **Retrigger Options & Stop Trigger**: When Triggered Again (Run Alongside / Restart / Ignore) and Stop Trigger action (#95).\n* **Experimental NFC Mode**: iOS background tag reader keeping Apple Pay, Express Transit, and car keys working (#98).\n* **Apple Watch Ping Triggers**: Tap or hold Ping iPhone on paired Apple Watch to fire custom actions (#100).\n* **Keep Default Action**: Let button triggers run alongside Siri, screenshots, Wallet, and stock actions (#101).\n* **Home Button Triggers**: Home (Hold) and Home + Power for Home-button devices (#102).\n* **Button Triggers Action**: Temporarily pause hardware button triggers for 15m, 1h, or until resumed (#103).\n* **Accessibility Shortcut Action**: Trigger stock Accessibility Shortcut (#92).\n* **Lock Toggle Passcode Support**: Automatic passcode unlocking when device is locked (#99).\n* **Kill Current App Action**: Force-close foreground app via button or script (#93).\n* **Web UI Settings Parity**: Inset-grouped sub-panels matching iOS Settings.\n\n### Changed\n* Apple Watch triggers hidden from main list until configured.\n* Banners screen groups enabled actions at the top (#89).\n* Toast dialog simplified with live preview pill.\n* Settings reorganized with Backup & Diagnostics section at root.\n* iOS 14 fat binary architecture documentation clarified.\n\n### Fixed\n* Power Long Press no longer sleeps device on button release (#109).\n* Commands up to 256KB no longer cut off at 1KB (#107).\n* Apple Pay / Wallet NFC scan stepping-aside fix (#97).\n* Toast editor live preview measurement and modal reuse.\n* Landscape edge and bottom bar trigger coordinate mirroring.\n* Control Center open from Bottom Swipe Up no longer swallowed (#57).\n* Web UI Diagnostics buttons and URL copy fallback.\n* Passcode masking and security hardening (#41)."
+        },
+        {
+          "class": "DepictionHeaderView",
+          "title": "Version 4.0.0",
+          "useBoldText": true
+        },
+        {
+          "class": "DepictionMarkdownView",
+          "markdown": "### Highlights\n* **Button Timing Engine**: Granular control of sequence and click windows.\n* **Sound & Haptics**: Silent Mode, Ringer Volume, Haptics modes, unified Noise Control (ANC).\n* **Navigation Overhaul**: Dedicated New Trigger screen with category filter pills.\n* **Expanded Automations**: 13 new If Conditions and Auto-Lock controls."
+        }
+      ]
+    }
+  ]
+}
