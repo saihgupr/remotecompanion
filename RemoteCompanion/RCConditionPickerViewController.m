@@ -18,6 +18,8 @@ static NSArray<NSString *> *RCDayNames(void) { return @[@"Monday", @"Tuesday", @
 @property (nonatomic, strong) NSMutableOrderedSet<NSString *> *tickedDays;
 @property (nonatomic, strong) NSArray<NSString *> *bluetoothDevices; // nil until loaded
 @property (nonatomic, assign) BOOL loadingBluetooth;
+@property (nonatomic, strong) NSArray<NSString *> *focusModes; // nil until loaded
+@property (nonatomic, assign) BOOL loadingFocus;
 @end
 
 @implementation RCConditionPickerViewController
@@ -86,6 +88,7 @@ static NSArray<NSString *> *RCDayNames(void) { return @[@"Monday", @"Tuesday", @
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
     if ([self.expandedKey isEqualToString:@"bt_device"]) [self loadBluetoothDevices];
+    if ([self.expandedKey isEqualToString:@"focus"]) [self loadFocusModes];
     // Editing: bring the expanded condition into view
     NSIndexPath *path = [self indexPathOfConditionKey:self.expandedKey];
     if (path) [self.tableView scrollToRowAtIndexPath:path atScrollPosition:UITableViewScrollPositionMiddle animated:NO];
@@ -152,6 +155,17 @@ static NSArray<NSString *> *RCDayNames(void) { return @[@"Monday", @"Tuesday", @
             }
         }
         [rows addObject:@{ @"kind": @"input", @"title": @"Other Name…" }];
+    } else if ([key isEqualToString:@"focus"]) {
+        // None on, any, then the Focus modes (from the tweak) by name
+        [rows addObject:@{ @"kind": @"value", @"value": @{ @"value": @"OFF", @"title": @"Off" } }];
+        [rows addObject:@{ @"kind": @"value", @"value": @{ @"value": @"ON", @"title": @"Any Focus" } }];
+        if (!self.focusModes) {
+            [rows addObject:@{ @"kind": @"loading", @"title": @"Loading Focus modes…" }];
+        } else {
+            for (NSString *name in self.focusModes) {
+                [rows addObject:@{ @"kind": @"value", @"value": @{ @"value": name, @"title": name } }];
+            }
+        }
     } else if ([condition[@"values"] isKindOfClass:[NSArray class]] && [condition[@"values"] count]) {
         for (NSDictionary *value in condition[@"values"]) {
             [rows addObject:@{ @"kind": @"value", @"value": value }];
@@ -298,6 +312,7 @@ static NSArray<NSString *> *RCDayNames(void) { return @[@"Monday", @"Tuesday", @
         }
         [self setExpandedKey:collapsing ? nil : condition[@"key"] animated:YES];
         if (!collapsing && [condition[@"key"] isEqualToString:@"bt_device"]) [self loadBluetoothDevices];
+        if (!collapsing && [condition[@"key"] isEqualToString:@"focus"]) [self loadFocusModes];
         if (!collapsing) {
             NSIndexPath *path = [self indexPathOfConditionKey:condition[@"key"]];
             NSInteger options = [self optionRowsForCondition:condition].count;
@@ -389,6 +404,28 @@ static NSArray<NSString *> *RCDayNames(void) { return @[@"Monday", @"Tuesday", @
             self.bluetoothDevices = names;
             self.loadingBluetooth = NO;
             if ([self.expandedKey isEqualToString:@"bt_device"]) [self.tableView reloadData];
+        });
+    }];
+}
+
+- (void)loadFocusModes {
+    if (self.focusModes || self.loadingFocus) return;
+    self.loadingFocus = YES;
+    __weak typeof(self) weakSelf = self;
+    [[RCServerClient sharedClient] executeCommand:@"focus list" completion:^(NSString * _Nullable output, NSError * _Nullable error) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            __strong typeof(weakSelf) self = weakSelf;
+            if (!self) return;
+            // One per line: the name, a tab, its SF Symbol
+            NSMutableArray *names = [NSMutableArray array];
+            for (NSString *line in [output componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]]) {
+                NSArray *parts = [line componentsSeparatedByString:@"\t"];
+                NSString *name = [parts.firstObject stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+                if (parts.count >= 2 && name.length && ![names containsObject:name]) [names addObject:name];
+            }
+            self.focusModes = names;
+            self.loadingFocus = NO;
+            if ([self.expandedKey isEqualToString:@"focus"]) [self.tableView reloadData];
         });
     }];
 }

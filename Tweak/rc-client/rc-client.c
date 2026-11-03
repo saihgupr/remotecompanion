@@ -44,11 +44,10 @@ int main(int argc, char *argv[]) {
         write(sockfd, cmd, strlen(cmd));
         free(cmd);
     } else {
-        // Read from stdin (piping logic)
-        size_t bytes_read = fread(buffer, 1, sizeof(buffer) - 1, stdin);
-        if (bytes_read > 0) {
-            buffer[bytes_read] = '\0';
-            write(sockfd, buffer, bytes_read);
+        // Read from stdin (piping logic): all of it, so a long command isn't cut at 1 KB
+        size_t bytes_read;
+        while ((bytes_read = fread(buffer, 1, sizeof(buffer), stdin)) > 0) {
+            if (write(sockfd, buffer, bytes_read) < 0) break;
         }
     }
     

@@ -10,10 +10,15 @@
 #import "RCNotificationTriggerViewController.h"
 #import "RCWiFiTriggerViewController.h"
 #import "RCBluetoothTriggerViewController.h"
+#import "RCAudioOutputTriggerViewController.h"
+#import "RCWrapSizing.h"
+#import "RCToastPill.h"
 #import "RCNFCTriggerViewController.h"
 #import "RCDevicePickerViewController.h"
+#import "RCFocusPickerViewController.h"
 #import "RCKMMacroPickerViewController.h"
 #import <notify.h>
+#import <objc/runtime.h>
 
 #define kSimulateNotificationPrefix "com.pizzaman.rc.simulate."
 
@@ -61,6 +66,119 @@ static void rc_parse_km_cmd(NSString *cmd, NSString **outMacro, NSString **outPa
     if (outParam) *outParam = param ?: @"";
 }
 
+// Favorite icons shown at the top of the picker. Anything else can still
+// be typed by name and is stored verbatim.
+static NSArray<NSDictionary *> *RCToastIconChoices(void) {
+    return @[
+        @{ @"name": @"Info", @"symbol": @"info.circle" },
+        @{ @"name": @"Done", @"symbol": @"checkmark.circle.fill" },
+        @{ @"name": @"Warning", @"symbol": @"exclamationmark.triangle.fill" },
+        @{ @"name": @"Bell", @"symbol": @"bell.fill" },
+        @{ @"name": @"Star", @"symbol": @"star.fill" },
+        @{ @"name": @"Heart", @"symbol": @"heart.fill" },
+        @{ @"name": @"Music", @"symbol": @"music.note" }
+    ];
+}
+
+// A browsable list of common icon names. The picker also accepts any typed
+// name verbatim, so this list is for discovery, not a limit.
+static NSArray<NSString *> *RCToastIconCatalog(void) {
+    return @[
+        @"airplane", @"alarm.fill", @"antenna.radiowaves.left.and.right",
+        @"app.fill", @"archivebox.fill", @"arrow.counterclockwise", @"arrow.up.right.circle.fill",
+        @"bag.fill", @"battery.100", @"bell", @"bell.fill", @"bell.slash.fill",
+        @"binoculars.fill", @"bold", @"bolt.fill", @"book.fill", @"bookmark.fill",
+        @"briefcase.fill", @"bubble.left.fill", @"bubble.right.fill", @"building.2.fill",
+        @"calendar", @"calendar.circle.fill", @"camera.fill", @"car.fill",
+        @"cart.fill", @"checkmark", @"checkmark.circle", @"checkmark.circle.fill",
+        @"checkmark.seal.fill", @"clock.fill", @"cloud.fill", @"cloud.rain.fill",
+        @"cloud.sun.fill", @"compass.fill", @"creditcard.fill", @"crop",
+        @"cup.and.saucer.fill", @"desktopcomputer", @"doc.fill", @"doc.on.doc.fill",
+        @"dollarsign.circle.fill", @"drop.fill", @"ear.fill", @"envelope.fill",
+        @"exclamationmark.circle.fill", @"exclamationmark.triangle.fill",
+        @"eye.fill", @"eye.slash.fill", @"face.smiling.fill", @"film.fill",
+        @"flag.fill", @"flashlight.on.fill", @"folder.fill", @"gamecontroller.fill",
+        @"gear", @"gift.fill", @"globe", @"graduationcap.fill",
+        @"guitars.fill", @"hammer.fill", @"hand.thumbsup.fill", @"hare.fill",
+        @"headphones", @"heart", @"heart.fill", @"heart.circle.fill",
+        @"house.fill", @"hourglass", @"info.circle", @"info.circle.fill",
+        @"ipad", @"iphone", @"key.fill", @"keyboard.fill",
+        @"laptopcomputer", @"leaf.fill", @"lightbulb.fill", @"location.fill",
+        @"lock.fill", @"lock.open.fill", @"magnifyingglass", @"map.fill",
+        @"message.fill", @"mic.fill", @"moon.fill", @"music.note",
+        @"music.note.list", @"network", @"newspaper.fill", @"paintbrush.fill",
+        @"paperplane.fill", @"party.popper.fill", @"pawprint.fill", @"pencil",
+        @"person.2.fill", @"person.fill", @"phone.fill", @"photo.fill",
+        @"pin.fill", @"play.fill", @"plus.circle.fill", @"printer.fill",
+        @"puzzlepiece.fill", @"qrcode", @"quote.bubble.fill", @"radio.fill",
+        @"rosette", @"scissors", @"shield.fill", @"shippingbox.fill",
+        @"sparkles", @"speaker.wave.2.fill", @"sportscourt.fill", @"star",
+        @"star.fill", @"star.circle.fill", @"sun.max.fill", @"tag.fill",
+        @"thermometer", @"timer", @"tortoise.fill", @"trash.fill",
+        @"tray.fill", @"tv.fill", @"umbrella.fill", @"video.fill",
+        @"wallet.pass.fill", @"wand.and.stars", @"watch", @"wifi",
+        @"wind", @"wrench.fill", @"xmark.circle.fill", @"zzz"
+    ];
+}
+
+static NSString *RCToastIconNameForString(NSString *symbol) {
+    if (!symbol || symbol.length == 0) return @"None";
+    for (NSDictionary *choice in RCToastIconChoices()) {
+        if ([choice[@"symbol"] isEqualToString:symbol]) return choice[@"name"];
+    }
+    return symbol;
+}
+
+static UIImage *RCToastIconImage(NSString *symbol) {
+    if (!symbol || symbol.length == 0) return nil;
+    UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:16 weight:UIImageSymbolWeightMedium];
+    return [UIImage systemImageNamed:symbol withConfiguration:cfg];
+}
+
+// Splits `toast "title" ["subtitle"] ["icon"]` into its parts.
+static void rc_parse_toast_cmd(NSString *cmd, NSString **outTitle, NSString **outSubtitle, NSString **outIcon) {
+    NSString *argsStr = @"";
+    if ([cmd hasPrefix:@"toast "] && cmd.length > 6) {
+        argsStr = [[cmd substringFromIndex:6] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    }
+    NSMutableArray *args = [NSMutableArray array];
+    NSScanner *scanner = [NSScanner scannerWithString:argsStr];
+    [scanner setCharactersToBeSkipped:nil];
+    while (![scanner isAtEnd]) {
+        [scanner scanCharactersFromSet:[NSCharacterSet whitespaceCharacterSet] intoString:NULL];
+        if ([scanner isAtEnd]) break;
+        NSString *arg = nil;
+        if ([scanner scanString:@"\"" intoString:NULL]) {
+            [scanner scanUpToString:@"\"" intoString:&arg];
+            [scanner scanString:@"\"" intoString:NULL];
+            if (!arg) arg = @"";
+        } else {
+            [scanner scanUpToCharactersFromSet:[NSCharacterSet whitespaceCharacterSet] intoString:&arg];
+        }
+        if (arg) {
+            arg = [arg stringByReplacingOccurrencesOfString:@"\\\"" withString:@"\""];
+            [args addObject:arg];
+        }
+    }
+    if (outTitle) *outTitle = args.count > 0 ? args[0] : @"";
+    if (outSubtitle) *outSubtitle = args.count > 1 ? args[1] : @"";
+    if (outIcon) *outIcon = args.count > 2 ? args[2] : @"";
+}
+
+// Builds `toast "title" ["subtitle"] ["icon"]` with the same quoting as before.
+static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSString *icon) {
+    NSString *escTitle = [(title ?: @"") stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
+    NSString *escSub = [(subtitle ?: @"") stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
+    NSString *escIcon = [(icon ?: @"") stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
+    if (escIcon.length > 0) {
+        return [NSString stringWithFormat:@"toast \"%@\" \"%@\" \"%@\"", escTitle, escSub ?: @"", escIcon];
+    } else if (escSub.length > 0) {
+        return [NSString stringWithFormat:@"toast \"%@\" \"%@\"", escTitle, escSub];
+    } else {
+        return [NSString stringWithFormat:@"toast \"%@\"", escTitle];
+    }
+}
+
 
 @interface UIImage (Private)
 + (UIImage *)_applicationIconImageForBundleIdentifier:(NSString *)bundleIdentifier format:(int)format scale:(CGFloat)scale;
@@ -74,6 +192,12 @@ static void rc_parse_km_cmd(NSString *cmd, NSString **outMacro, NSString **outPa
 - (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier {
     self = [super initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:reuseIdentifier];
     return self;
+}
+
+// Grows to show the whole title and subtitle, never below the usual row height
+- (CGSize)systemLayoutSizeFittingSize:(CGSize)targetSize withHorizontalFittingPriority:(UILayoutPriority)horizontalFittingPriority verticalFittingPriority:(UILayoutPriority)verticalFittingPriority {
+    if (![[NSUserDefaults standardUserDefaults] boolForKey:@"RCWrapLongNamesEnabled"]) return CGSizeMake(targetSize.width, 70.0);
+    return CGSizeMake(targetSize.width, RCWrappedCellHeight(self, targetSize.width, 70.0));
 }
 
 - (void)layoutSubviews {
@@ -114,6 +238,512 @@ static void rc_parse_km_cmd(NSString *cmd, NSString **outMacro, NSString **outPa
 @interface RCActionsViewController () <UITableViewDragDelegate, UITableViewDropDelegate>
 @property (nonatomic, strong) NSString *triggerKey;
 @property (nonatomic, strong) NSMutableArray *actions;
+@property (nonatomic, strong) UIBarButtonItem *moreButton;
+// The one toast editor. New toasts and edits both come through here,
+// so they always look and save the same way.
+- (void)pushToastEditorWithTitle:(NSString *)title
+                        message:(NSString *)message
+                           icon:(NSString *)icon
+                          isNew:(BOOL)isNew
+                         onSave:(void (^)(NSString *cmd))onSave;
+@end
+
+// Searchable icon browser. Favorites on top, then every common icon.
+// Typing any name offers a "Use ..." row that saves it verbatim, with a
+// live preview so a typo simply shows as missing.
+@interface RCToastIconBrowserViewController : UITableViewController <UISearchResultsUpdating>
+- (instancetype)initWithCurrentIcon:(NSString *)icon;
+@property (nonatomic, copy) void (^onPick)(NSString *icon);
+@end
+
+@implementation RCToastIconBrowserViewController {
+    NSString *_currentIcon;
+    NSString *_searchText;
+    NSArray<NSString *> *_filtered;
+    UISearchController *_searchController;
+}
+
+- (instancetype)initWithCurrentIcon:(NSString *)icon {
+    self = [super initWithStyle:UITableViewStyleInsetGrouped];
+    if (self) {
+        _currentIcon = [icon copy] ?: @"";
+        _searchText = @"";
+        _filtered = @[];
+    }
+    return self;
+}
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = @"Choose Icon";
+    _searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
+    _searchController.searchResultsUpdater = self;
+    _searchController.obscuresBackgroundDuringPresentation = NO;
+    _searchController.searchBar.placeholder = @"Search or type icon name";
+    _searchController.searchBar.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    _searchController.searchBar.autocorrectionType = UITextAutocorrectionTypeNo;
+    self.navigationItem.searchController = _searchController;
+    self.navigationItem.hidesSearchBarWhenScrolling = NO;
+    self.definesPresentationContext = YES;
+}
+
+- (BOOL)isSearching {
+    return _searchText.length > 0;
+}
+
+- (BOOL)hasCustomRow {
+    if (_currentIcon.length == 0) return NO;
+    for (NSDictionary *c in RCToastIconChoices()) {
+        if ([c[@"symbol"] isEqualToString:_currentIcon]) return NO;
+    }
+    return ![RCToastIconCatalog() containsObject:_currentIcon];
+}
+
+- (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
+    NSString *t = [[searchController.searchBar.text ?: @"" stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] copy];
+    _searchText = t;
+    if (t.length == 0) {
+        _filtered = @[];
+    } else {
+        NSMutableArray *hits = [NSMutableArray array];
+        NSMutableSet *seen = [NSMutableSet set];
+        for (NSDictionary *c in RCToastIconChoices()) {
+            NSString *sym = c[@"symbol"];
+            NSString *name = c[@"name"];
+            if ([sym localizedCaseInsensitiveContainsString:t] || [name localizedCaseInsensitiveContainsString:t]) {
+                if (![seen containsObject:sym]) { [hits addObject:sym]; [seen addObject:sym]; }
+            }
+        }
+        for (NSString *sym in RCToastIconCatalog()) {
+            if ([sym localizedCaseInsensitiveContainsString:t]) {
+                if (![seen containsObject:sym]) { [hits addObject:sym]; [seen addObject:sym]; }
+            }
+        }
+        [hits sortUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
+        _filtered = hits;
+    }
+    [self.tableView reloadData];
+}
+
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
+    if ([self isSearching]) return 1;
+    return [self hasCustomRow] ? 3 : 2;
+}
+
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    if ([self isSearching]) return 1 + _filtered.count;
+    if ([self hasCustomRow]) {
+        if (section == 0) return 1;
+        if (section == 1) return 1 + RCToastIconChoices().count;
+        return RCToastIconCatalog().count;
+    }
+    if (section == 0) return 1 + RCToastIconChoices().count;
+    return RCToastIconCatalog().count;
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+    if ([self isSearching]) return @"Matches";
+    if ([self hasCustomRow]) {
+        if (section == 0) return @"Current";
+        if (section == 1) return @"Favorites";
+        return @"All Icons";
+    }
+    if (section == 0) return @"Favorites";
+    return @"All Icons";
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+    if ([self isSearching] && section == 0) return @"Type any name to use it, even if there is no preview.";
+    if (![self isSearching]) {
+        NSInteger last = [self numberOfSectionsInTableView:tableView] - 1;
+        if (section == last) return @"Type any name to use it, even if there is no preview.";
+    }
+    return nil;
+}
+
+- (UITableViewCell *)browserCellForTable:(UITableView *)tableView {
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"RCToastBrowserCell"];
+    if (!cell) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"RCToastBrowserCell"];
+    }
+    cell.imageView.tintColor = [UIColor secondaryLabelColor];
+    return cell;
+}
+
+- (void)configureCell:(UITableViewCell *)cell withSymbol:(NSString *)symbol displayName:(NSString *)display detail:(NSString *)detail checked:(BOOL)checked {
+    UIImage *img = RCToastIconImage(symbol);
+    if (symbol.length == 0) {
+        cell.textLabel.text = @"None";
+        cell.detailTextLabel.text = nil;
+        cell.imageView.image = nil;
+    } else if (img) {
+        cell.textLabel.text = display ?: symbol;
+        cell.detailTextLabel.text = detail;
+        cell.imageView.image = img;
+    } else {
+        cell.textLabel.text = display ?: symbol;
+        cell.detailTextLabel.text = @"No preview for this name";
+        cell.imageView.image = [UIImage systemImageNamed:@"questionmark.circle"];
+        cell.imageView.tintColor = [UIColor tertiaryLabelColor];
+    }
+    if (symbol.length > 0 && img) cell.imageView.tintColor = [UIColor secondaryLabelColor];
+    cell.accessoryType = checked ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = [self browserCellForTable:tableView];
+    if ([self isSearching]) {
+        if (indexPath.row == 0) {
+            NSString *typed = _searchText;
+            UIImage *img = RCToastIconImage(typed);
+            cell.textLabel.text = [NSString stringWithFormat:@"Use \"%@\"", typed];
+            if (img) {
+                cell.detailTextLabel.text = typed;
+                cell.imageView.image = img;
+                cell.imageView.tintColor = [UIColor secondaryLabelColor];
+            } else {
+                cell.detailTextLabel.text = @"No preview for this name";
+                cell.imageView.image = [UIImage systemImageNamed:@"questionmark.circle"];
+                cell.imageView.tintColor = [UIColor tertiaryLabelColor];
+            }
+            cell.accessoryType = [_currentIcon isEqualToString:typed] ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+            return cell;
+        }
+        NSString *sym = _filtered[indexPath.row - 1];
+        [self configureCell:cell withSymbol:sym displayName:sym detail:nil checked:[_currentIcon isEqualToString:sym]];
+        return cell;
+    }
+    if ([self hasCustomRow]) {
+        if (indexPath.section == 0) {
+            [self configureCell:cell withSymbol:_currentIcon displayName:_currentIcon detail:nil checked:YES];
+            return cell;
+        }
+        if (indexPath.section == 1) {
+            if (indexPath.row == 0) {
+                [self configureCell:cell withSymbol:@"" displayName:nil detail:nil checked:(_currentIcon.length == 0)];
+                return cell;
+            }
+            NSDictionary *c = RCToastIconChoices()[indexPath.row - 1];
+            [self configureCell:cell withSymbol:c[@"symbol"] displayName:c[@"name"] detail:nil checked:[_currentIcon isEqualToString:c[@"symbol"]]];
+            return cell;
+        }
+        NSString *sym = RCToastIconCatalog()[indexPath.row];
+        [self configureCell:cell withSymbol:sym displayName:sym detail:nil checked:[_currentIcon isEqualToString:sym]];
+        return cell;
+    }
+    if (indexPath.section == 0) {
+        if (indexPath.row == 0) {
+            [self configureCell:cell withSymbol:@"" displayName:nil detail:nil checked:(_currentIcon.length == 0)];
+            return cell;
+        }
+        NSDictionary *c = RCToastIconChoices()[indexPath.row - 1];
+        [self configureCell:cell withSymbol:c[@"symbol"] displayName:c[@"name"] detail:nil checked:[_currentIcon isEqualToString:c[@"symbol"]]];
+        return cell;
+    }
+    NSString *sym = RCToastIconCatalog()[indexPath.row];
+    [self configureCell:cell withSymbol:sym displayName:sym detail:nil checked:[_currentIcon isEqualToString:sym]];
+    return cell;
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    NSString *picked = nil;
+    if ([self isSearching]) {
+        if (indexPath.row == 0) picked = _searchText;
+        else picked = _filtered[indexPath.row - 1];
+    } else if ([self hasCustomRow]) {
+        if (indexPath.section == 0) picked = _currentIcon;
+        else if (indexPath.section == 1) {
+            if (indexPath.row == 0) picked = @"";
+            else picked = RCToastIconChoices()[indexPath.row - 1][@"symbol"];
+        } else picked = RCToastIconCatalog()[indexPath.row];
+    } else {
+        if (indexPath.section == 0) {
+            if (indexPath.row == 0) picked = @"";
+            else picked = RCToastIconChoices()[indexPath.row - 1][@"symbol"];
+        } else picked = RCToastIconCatalog()[indexPath.row];
+    }
+    if (!picked) return;
+    _currentIcon = [picked copy];
+    if (self.onPick) self.onPick(picked);
+    [self.navigationController popViewControllerAnimated:YES];
+}
+
+@end
+
+// The one toast editor: grouped sections, plain words, live preview.
+// New toasts and edits share it, so they never diverge.
+@interface RCToastEditorViewController : UITableViewController <UITextFieldDelegate>
+- (instancetype)initWithToastTitle:(NSString *)title message:(NSString *)message icon:(NSString *)icon isNew:(BOOL)isNew;
+@property (nonatomic, copy) void (^onSave)(NSString *title, NSString *message, NSString *icon);
+@end
+
+@implementation RCToastEditorViewController {
+    BOOL _isNew;
+    NSString *_initialTitle;
+    NSString *_initialMessage;
+    UITextField *_titleField;
+    UITextField *_messageField;
+    UITableViewCell *_previewCell;
+    RCToastPillView *_previewPill;
+    NSLayoutConstraint *_previewPillWidth;
+    NSLayoutConstraint *_previewPillHeight;
+    UITableViewCell *_titleCell;
+    UITableViewCell *_messageCell;
+    NSString *_selectedIcon;
+    UIBarButtonItem *_saveButton;
+}
+
+- (instancetype)initWithToastTitle:(NSString *)title message:(NSString *)message icon:(NSString *)icon isNew:(BOOL)isNew {
+    self = [super initWithStyle:UITableViewStyleInsetGrouped];
+    if (self) {
+        _isNew = isNew;
+        _initialTitle = [title copy] ?: @"";
+        _initialMessage = [message copy] ?: @"";
+        _selectedIcon = [icon copy] ?: @"";
+    }
+    return self;
+}
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = _isNew ? @"New Toast" : @"Edit Toast";
+
+    self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc]
+        initWithBarButtonSystemItem:UIBarButtonSystemItemCancel
+        target:self
+        action:@selector(cancelToast)];
+    _saveButton = [[UIBarButtonItem alloc] initWithTitle:(_isNew ? @"Add" : @"Save")
+                                                   style:UIBarButtonItemStyleDone
+                                                  target:self
+                                                  action:@selector(saveToast)];
+    self.navigationItem.rightBarButtonItem = _saveButton;
+
+    self.tableView.rowHeight = UITableViewAutomaticDimension;
+    self.tableView.estimatedRowHeight = 56;
+
+    _titleCell = nil; _messageCell = nil;
+    UITextField *titleField = nil, *messageField = nil;
+    _titleCell = [self toastFieldCellWithLabel:@"Title"
+                                  placeholder:@"Required"
+                                         text:_initialTitle
+                                  returnKey:UIReturnKeyNext
+                                     fieldOut:&titleField];
+    _titleField = titleField;
+    _messageCell = [self toastFieldCellWithLabel:@"Message"
+                                    placeholder:@"Optional"
+                                           text:_initialMessage
+                                    returnKey:UIReturnKeyDone
+                                       fieldOut:&messageField];
+    _messageField = messageField;
+    [self buildPreviewCell];
+    [self refreshToastPreview];
+}
+
+- (void)viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated];
+    if (_isNew) [_titleField becomeFirstResponder];
+}
+
+- (UITableViewCell *)toastFieldCellWithLabel:(NSString *)labelText
+                                 placeholder:(NSString *)placeholder
+                                        text:(NSString *)text
+                                   returnKey:(UIReturnKeyType)ret
+                                    fieldOut:(UITextField **)out {
+    UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
+    cell.selectionStyle = UITableViewCellSelectionStyleNone;
+    UILabel *label = [[UILabel alloc] init];
+    label.text = labelText;
+    label.font = [UIFont systemFontOfSize:17];
+    label.translatesAutoresizingMaskIntoConstraints = NO;
+    [cell.contentView addSubview:label];
+    UITextField *field = [[UITextField alloc] init];
+    field.text = text;
+    field.placeholder = placeholder;
+    field.clearButtonMode = UITextFieldViewModeWhileEditing;
+    field.autocapitalizationType = UITextAutocapitalizationTypeSentences;
+    field.returnKeyType = ret;
+    field.delegate = self;
+    field.translatesAutoresizingMaskIntoConstraints = NO;
+    [field addTarget:self action:@selector(toastFieldChanged:) forControlEvents:UIControlEventEditingChanged];
+    [cell.contentView addSubview:field];
+    [NSLayoutConstraint activateConstraints:@[
+        [label.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:20],
+        [label.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
+        [label.widthAnchor constraintEqualToConstant:78],
+        [field.leadingAnchor constraintEqualToAnchor:label.trailingAnchor constant:8],
+        [field.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-20],
+        [field.topAnchor constraintEqualToAnchor:cell.contentView.topAnchor constant:11],
+        [field.bottomAnchor constraintEqualToAnchor:cell.contentView.bottomAnchor constant:-11],
+    ]];
+    if (out) *out = field;
+    return cell;
+}
+
+- (void)buildPreviewCell {
+    _previewCell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
+    _previewCell.selectionStyle = UITableViewCellSelectionStyleNone;
+    _previewCell.userInteractionEnabled = NO;
+    _previewCell.backgroundColor = [UIColor clearColor];
+    _previewCell.contentView.backgroundColor = [UIColor clearColor];
+    _previewCell.backgroundView = nil;
+
+    // The exact pill the device draws, shared with the tweak. No extra
+    // styling here (no shadow, no own metrics) so the preview cannot drift.
+    _previewPill = [[RCToastPillView alloc] initWithTitle:@"" message:@"" iconName:@""];
+    _previewPill.showsPlaceholderTitle = YES;
+    _previewPill.translatesAutoresizingMaskIntoConstraints = NO;
+    [_previewCell.contentView addSubview:_previewPill];
+
+    _previewPillWidth = [_previewPill.widthAnchor constraintEqualToConstant:140];
+    _previewPillWidth.priority = 999;
+    _previewPillHeight = [_previewPill.heightAnchor constraintEqualToConstant:40];
+    [NSLayoutConstraint activateConstraints:@[
+        [_previewPill.topAnchor constraintEqualToAnchor:_previewCell.contentView.topAnchor constant:12],
+        [_previewPill.bottomAnchor constraintEqualToAnchor:_previewCell.contentView.bottomAnchor constant:-12],
+        [_previewPill.centerXAnchor constraintEqualToAnchor:_previewCell.contentView.centerXAnchor],
+        _previewPillWidth, _previewPillHeight,
+    ]];
+    // Keep the pill inside the row when the text is long.
+    NSLayoutConstraint *maxW = [_previewPill.widthAnchor constraintLessThanOrEqualToAnchor:_previewCell.contentView.widthAnchor constant:-16];
+    maxW.priority = UILayoutPriorityRequired;
+    maxW.active = YES;
+}
+
+- (void)refreshToastPreview {
+    NSString *t = _titleField.text ?: @"";
+    NSString *m = _messageField.text ?: @"";
+    NSString *symbol = _selectedIcon ?: @"";
+
+    // Same sizing rule as the fired toast; an empty title measures the
+    // "Title" placeholder the pill displays in that state.
+    CGFloat maxW = [RCToastPillView maxPillWidthForScreenWidth:[UIScreen mainScreen].bounds.size.width];
+    CGFloat cellW = _previewCell.contentView.bounds.size.width;
+    if (cellW > 0) maxW = MIN(maxW, cellW - 16);
+    CGSize pillSize = [RCToastPillView sizeForTitle:(t.length > 0 ? t : @"Title")
+                                           message:m
+                                          iconName:symbol
+                                      wrapsMessage:NO
+                                          maxWidth:maxW];
+    // The pill's height drives the preview row's height (pill + 12pt top and
+    // bottom padding). The table caches row heights, so when the message
+    // appears or disappears (40pt <-> 50pt) the row must be re-measured or
+    // the pill is squeezed into the stale height and the message's bottom
+    // padding is clipped, unlike the fired toast. Width-only changes need
+    // no table work: the row height is unchanged.
+    BOOL previewHeightChanged = (_previewPillHeight.constant != pillSize.height);
+    _previewPillWidth.constant = pillSize.width;
+    _previewPillHeight.constant = pillSize.height;
+
+    _previewPill.pillTitle = t;
+    _previewPill.pillMessage = m;
+    _previewPill.pillIconName = symbol;
+
+    if (previewHeightChanged && self.tableView.window) {
+        [self.tableView beginUpdates];
+        [self.tableView endUpdates];
+    }
+
+    _saveButton.enabled = (t.length > 0);
+}
+
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+    [super traitCollectionDidChange:previousTraitCollection];
+    if (@available(iOS 13.0, *)) {
+        if ([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection]) {
+            [self refreshToastPreview];
+        }
+    }
+}
+
+- (void)toastFieldChanged:(UITextField *)field {
+    [self refreshToastPreview];
+}
+
+- (BOOL)textFieldShouldReturn:(UITextField *)textField {
+    if (textField == _titleField) {
+        [_messageField becomeFirstResponder];
+    } else {
+        [textField resignFirstResponder];
+    }
+    return YES;
+}
+
+- (void)cancelToast {
+    [self.navigationController popViewControllerAnimated:YES];
+}
+
+- (void)saveToast {
+    NSString *title = _titleField.text ?: @"";
+    if (title.length == 0) return;
+    NSString *message = _messageField.text ?: @"";
+    NSString *icon = _selectedIcon ?: @"";
+    if (self.onSave) self.onSave(title, message, icon);
+    [self.navigationController popViewControllerAnimated:YES];
+}
+
+- (void)openIconPicker {
+    [_titleField resignFirstResponder];
+    [_messageField resignFirstResponder];
+    RCToastIconBrowserViewController *browser = [[RCToastIconBrowserViewController alloc] initWithCurrentIcon:_selectedIcon];
+    __weak typeof(self) weakSelf = self;
+    browser.onPick = ^(NSString *picked) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        strongSelf->_selectedIcon = picked ?: @"";
+        [strongSelf.tableView reloadRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:0 inSection:2]] withRowAnimation:UITableViewRowAnimationNone];
+        [strongSelf refreshToastPreview];
+    };
+    [self.navigationController pushViewController:browser animated:YES];
+}
+
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
+    return 3;
+}
+
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    if (section == 0) return 1;
+    if (section == 1) return 2;
+    return 1;
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+    if (section == 1) return @"Message";
+    if (section == 2) return @"Icon";
+    return nil;
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+    if (section == 1) return @"Shows as a popup on this device.";
+    if (section == 2) return @"Optional. Adds a small picture to the popup.";
+    return nil;
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (indexPath.section == 0) return _previewCell;
+    if (indexPath.section == 1) return indexPath.row == 0 ? _titleCell : _messageCell;
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"RCToastIconPickerCell"];
+    if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"RCToastIconPickerCell"];
+    cell.textLabel.text = @"Icon";
+    cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    if (_selectedIcon.length == 0) {
+        cell.detailTextLabel.text = @"None";
+        cell.imageView.image = nil;
+    } else {
+        cell.detailTextLabel.text = RCToastIconNameForString(_selectedIcon);
+        UIImage *img = RCToastIconImage(_selectedIcon);
+        cell.imageView.image = img ?: [UIImage systemImageNamed:@"questionmark.circle"];
+        cell.imageView.tintColor = img ? [UIColor secondaryLabelColor] : [UIColor tertiaryLabelColor];
+    }
+    return cell;
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    if (indexPath.section != 2) return;
+    [self openIconPicker];
+}
+
 @end
 
 @implementation RCActionsViewController
@@ -150,12 +780,15 @@ static id g_actionClipboard = nil;
             baseText = @"Flashlight ";
             paramText = [NSString stringWithFormat:@"%@%%", val];
         }
+    } else if ([lower hasPrefix:@"stop trigger "]) {
+        baseText = @"Stop: ";
+        paramText = [[RCConfigManager sharedManager] displayNameForTrigger:[cmd substringFromIndex:13]];
     } else if ([lower hasPrefix:@"delay "]) {
         baseText = @"Wait ";
         paramText = [NSString stringWithFormat:@"%@s", [cmd substringFromIndex:6]];
     } else if ([lower hasPrefix:@"shortcut:"]) {
         baseText = @"Shortcut: ";
-        paramText = [cmd substringFromIndex:9];
+        paramText = [RCConfigManager shortcutNameForAction:cmd silent:NULL input:NULL];
     } else if ([lower hasPrefix:@"uiopen "]) {
         baseText = @"Open ";
         NSString *bundleId = [cmd substringFromIndex:7];
@@ -174,6 +807,14 @@ static id g_actionClipboard = nil;
 #pragma clang diagnostic pop
         }
         paramText = appName;
+    } else if ([lower isEqualToString:@"kill current"] || [lower isEqualToString:@"kill front"] ||
+               [lower isEqualToString:@"kill foreground"] || [lower isEqualToString:@"kill current app"] ||
+               [lower isEqualToString:@"kill front app"]) {
+        // Runtime-resolved target, not a bundle ID: plain label, no accent
+        return [[NSAttributedString alloc] initWithString:@"Kill Current App" attributes:@{
+            NSFontAttributeName: [UIFont systemFontOfSize:17 weight:UIFontWeightMedium],
+            NSForegroundColorAttributeName: [UIColor labelColor]
+        }];
     } else if ([lower hasPrefix:@"kill "]) {
         baseText = @"Kill ";
         NSString *bundleId = [cmd substringFromIndex:5];
@@ -201,6 +842,12 @@ static id g_actionClipboard = nil;
     } else if ([lower hasPrefix:@"bt disconnect "] || [lower hasPrefix:@"bluetooth disconnect "]) {
         baseText = @"Disconnect ";
         paramText = [cmd substringFromIndex:[lower hasPrefix:@"bt disconnect "] ? 14 : 21];
+    } else if ([lower hasPrefix:@"focus on "]) {
+        baseText = @"Turn On ";
+        paramText = [cmd substringFromIndex:9];
+    } else if ([lower hasPrefix:@"focus toggle "]) {
+        baseText = @"Toggle ";
+        paramText = [cmd substringFromIndex:13];
     } else if ([lower hasPrefix:@"toast "]) {
         baseText = @"Toast ";
         NSString *argString = [cmd substringFromIndex:6];
@@ -221,6 +868,12 @@ static id g_actionClipboard = nil;
             }
         }
         paramText = firstArg;
+    } else if ([lower hasPrefix:@"unlock "]) {
+        baseText = @"Unlock Device ";
+        paramText = @"(Passcode)";
+    } else if ([lower hasPrefix:@"lock-toggle "] || [lower hasPrefix:@"lock toggle "]) {
+        baseText = @"Lock Toggle ";
+        paramText = @"(Passcode)";
     }
     
     if (baseText && paramText) {
@@ -240,6 +893,91 @@ static id g_actionClipboard = nil;
 
 - (NSString *)iconForCommand:(id)cmd {
     return [[RCConfigManager sharedManager] iconForCommand:cmd];
+}
+
+// What happens when the trigger fires again while its actions are still running (in a wait):
+// "parallel" runs them again alongside, "restart" stops the run that's going and starts over,
+// "single" ignores the new firing
+- (NSString *)runMode {
+    NSString *mode = [[RCConfigManager sharedManager] triggerDataForKey:_triggerKey][@"mode"];
+    return [mode isKindOfClass:[NSString class]] ? mode : @"parallel";
+}
+
+- (void)setRunMode:(NSString *)mode {
+    RCConfigManager *config = [RCConfigManager sharedManager];
+    NSMutableDictionary *data = [[config triggerDataForKey:_triggerKey] mutableCopy] ?: [NSMutableDictionary dictionary];
+    if ([mode isEqualToString:@"parallel"]) [data removeObjectForKey:@"mode"]; else data[@"mode"] = mode;
+    [config updateTrigger:_triggerKey withData:data];
+    self.moreButton.menu = [self moreMenu];
+    [self.tableView reloadData];
+}
+
+- (void)setKeepsDefaultAction:(BOOL)keep {
+    RCConfigManager *config = [RCConfigManager sharedManager];
+    NSMutableDictionary *data = [[config triggerDataForKey:_triggerKey] mutableCopy] ?: [NSMutableDictionary dictionary];
+    if (keep) data[@"keepDefault"] = @YES; else [data removeObjectForKey:@"keepDefault"];
+    [config updateTrigger:_triggerKey withData:data];
+    self.moreButton.menu = [self moreMenu];
+}
+
+- (UIMenu *)moreMenu {
+    __weak typeof(self) weakSelf = self;
+    NSMutableArray *modes = [NSMutableArray array];
+    NSString *current = [self runMode];
+    NSArray *choices = @[@[@"parallel", @"Run Alongside", @"square.stack"], @[@"restart", @"Restart", @"arrow.counterclockwise"], @[@"single", @"Ignore", @"nosign"]];
+    for (NSArray *choice in choices) {
+        UIAction *action = [UIAction actionWithTitle:choice[1] image:[UIImage systemImageNamed:choice[2]] identifier:nil handler:^(__kindof UIAction *a) {
+            [weakSelf setRunMode:choice[0]];
+        }];
+        action.state = [current isEqualToString:choice[0]] ? UIMenuElementStateOn : UIMenuElementStateOff;
+        [modes addObject:action];
+    }
+    UIMenu *whenFired = [UIMenu menuWithTitle:@"When Triggered Again" image:[UIImage systemImageNamed:@"repeat"] identifier:nil options:0 children:modes];
+
+    NSMutableArray *menuActions = [NSMutableArray arrayWithObject:whenFired];
+    // Triggers that take over what iOS normally does can keep it as well: the ping sound, and with a
+    // Home button the Accessibility Shortcut, App Switcher, Siri and screenshot, otherwise Siri, the
+    // Accessibility Shortcut, a screenshot and Wallet
+    NSArray *keepsDefault = [RCConfigManager hasHomeButton]
+        ? @[@"trigger_watch_ping", @"trigger_watch_ping_hold", @"trigger_home_triple_click", @"trigger_home_double_click", @"trigger_home_hold", @"trigger_home_power"]
+        : @[@"trigger_watch_ping", @"trigger_watch_ping_hold", @"power_long_press", @"power_triple_click", @"power_volume_up", @"power_double_tap"];
+    if ([keepsDefault containsObject:_triggerKey]) {
+        BOOL keep = [[[RCConfigManager sharedManager] triggerDataForKey:_triggerKey][@"keepDefault"] boolValue];
+        UIAction *sound = [UIAction actionWithTitle:@"Keep Default Action" image:[UIImage systemImageNamed:@"arrow.uturn.backward.circle"] identifier:nil handler:^(__kindof UIAction *a) {
+            [weakSelf setKeepsDefaultAction:!keep];
+        }];
+        sound.state = keep ? UIMenuElementStateOn : UIMenuElementStateOff;
+        [menuActions addObject:sound];
+    }
+    [menuActions addObject:[UIAction actionWithTitle:@"Import Actions" image:[UIImage systemImageNamed:@"square.and.arrow.down"] identifier:nil handler:^(__kindof UIAction *a) {
+        [weakSelf importActions];
+    }]];
+    [menuActions addObject:[UIAction actionWithTitle:@"Export Actions" image:[UIImage systemImageNamed:@"square.and.arrow.up"] identifier:nil handler:^(__kindof UIAction *a) {
+        [weakSelf exportActions];
+    }]];
+    UIAction *clearAction = [UIAction actionWithTitle:@"Clear All Actions" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(__kindof UIAction *a) {
+        [weakSelf clearAllActions];
+    }];
+    clearAction.attributes = UIMenuElementAttributesDestructive;
+    [menuActions addObject:clearAction];
+    return [UIMenu menuWithTitle:@"" children:menuActions];
+}
+
+// Picks a trigger for a "stop trigger" action; done gets its key
+- (void)pickTriggerToStop:(void (^)(NSString *key))done {
+    RCConfigManager *config = [RCConfigManager sharedManager];
+    NSMutableArray *keys = [NSMutableArray array];
+    for (NSString *key in [config allConfiguredTriggerKeys]) if (![key isEqualToString:_triggerKey]) [keys addObject:key];
+    [keys sortUsingComparator:^NSComparisonResult(NSString *a, NSString *b) {
+        return [[config displayNameForTrigger:a] localizedCaseInsensitiveCompare:[config displayNameForTrigger:b]];
+    }];
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Stop Trigger" message:@"Stops that trigger's actions while they're still running, such as during a delay." preferredStyle:UIAlertControllerStyleActionSheet];
+    for (NSString *key in keys) {
+        [sheet addAction:[UIAlertAction actionWithTitle:[config displayNameForTrigger:key] style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) { done(key); }]];
+    }
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    sheet.popoverPresentationController.barButtonItem = self.navigationItem.rightBarButtonItems.lastObject;
+    [self presentViewController:sheet animated:YES completion:nil];
 }
 
 - (instancetype)initWithTriggerKey:(NSString *)triggerKey {
@@ -265,32 +1003,9 @@ static id g_actionClipboard = nil;
         target:self 
         action:@selector(addAction)];
     
-    // More options menu (Import, Export)
-    NSMutableArray *menuActions = [NSMutableArray array];
-    __weak typeof(self) weakSelf = self;
-    [menuActions addObject:[UIAction actionWithTitle:@"Import Actions" 
-                                               image:[UIImage systemImageNamed:@"square.and.arrow.down"] 
-                                          identifier:nil 
-                                             handler:^(__kindof UIAction * _Nonnull action) {
-        [weakSelf importActions];
-    }]];
-    [menuActions addObject:[UIAction actionWithTitle:@"Export Actions" 
-                                               image:[UIImage systemImageNamed:@"square.and.arrow.up"] 
-                                          identifier:nil 
-                                             handler:^(__kindof UIAction * _Nonnull action) {
-        [weakSelf exportActions];
-    }]];
-    UIAction *clearAction = [UIAction actionWithTitle:@"Clear All Actions" 
-                                                image:[UIImage systemImageNamed:@"trash"] 
-                                           identifier:nil 
-                                              handler:^(__kindof UIAction * _Nonnull action) {
-        [weakSelf clearAllActions];
-    }];
-    clearAction.attributes = UIMenuElementAttributesDestructive;
-    [menuActions addObject:clearAction];
-    
-    UIMenu *shareMenu = [UIMenu menuWithTitle:@"" children:menuActions];
-    UIBarButtonItem *moreButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"] menu:shareMenu];
+    // More options menu (when fired again, Import, Export, Clear)
+    UIBarButtonItem *moreButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"] menu:[self moreMenu]];
+    self.moreButton = moreButton;
     
     NSMutableArray *rightItems = [NSMutableArray arrayWithArray:@[moreButton, plusButton]];
     
@@ -299,7 +1014,9 @@ static id g_actionClipboard = nil;
                           [_triggerKey hasPrefix:@"notify_"] ||
                           [_triggerKey hasPrefix:@"wifi_"] ||
                           [_triggerKey hasPrefix:@"bt_"] ||
-                          [_triggerKey hasPrefix:@"app_launch_"];
+                          [_triggerKey hasPrefix:@"output_"] ||
+                          [_triggerKey hasPrefix:@"app_launch_"] ||
+                          [_triggerKey hasPrefix:@"app_exit_"];
     
     if (isConfigurable) {
         UIBarButtonItem *settingsButton = [[UIBarButtonItem alloc] 
@@ -351,10 +1068,12 @@ static id g_actionClipboard = nil;
                                              selector:@selector(handleConfigChanged:) 
                                                   name:RCConfigChangedNotification 
                                                object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(wrapLongNamesSettingChanged:) name:@"RCWrapLongNamesSettingChanged" object:nil];
     [self applyTweaks];
     
     // Load actions
     _actions = [[[RCConfigManager sharedManager] actionsForTrigger:_triggerKey] mutableCopy];
+    [self updateWrappedTitle];
     
     // Non-editing mode to allow swipe actions
     self.tableView.editing = NO;
@@ -368,7 +1087,60 @@ static id g_actionClipboard = nil;
     // rightBarButtonItems set above
 
     [self.tableView registerClass:[RCActionCell class] forCellReuseIdentifier:@"ActionCell"];
-    self.tableView.rowHeight = 70; // Fixed height as in V2.1.2
+    // Long names wrap and the row grows with them, never below the usual 70
+    self.tableView.rowHeight = [[NSUserDefaults standardUserDefaults] boolForKey:@"RCWrapLongNamesEnabled"] ? UITableViewAutomaticDimension : 70.0;
+    self.tableView.estimatedRowHeight = 70;
+}
+
+- (void)wrapLongNamesSettingChanged:(NSNotification *)note {
+    self.tableView.rowHeight = [[NSUserDefaults standardUserDefaults] boolForKey:@"RCWrapLongNamesEnabled"] ? UITableViewAutomaticDimension : 70.0;
+    [self.tableView reloadData];
+}
+
+// A long trigger name ("Launch Alaska, Amazon, Notes") is cut off in a large title, which can't wrap:
+// when it doesn't fit, the name is shown wrapped above the list instead, and the bar title is left empty.
+// Once the screen shows the name that way it keeps doing so until it is closed: the navigation bar
+// can't be switched back to a large title in place (it stayed at its small size), so a name that
+// becomes short just shows in the same header at the large-title size.
+- (void)updateWrappedTitle {
+    if ([_triggerKey hasPrefix:@"nfc_"]) return; // has its own tappable title
+    NSString *name = self.title ?: @"";
+    // Known before the screen is laid out for the first time, so the right title is there from the start
+    CGFloat width = self.tableView.bounds.size.width;
+    if (width <= 0) width = self.navigationController.view.bounds.size.width;
+    if (width <= 0) width = [UIScreen mainScreen].bounds.size.width;
+    CGFloat available = width - 40.0;
+    UIFont *largeFont = [UIFont systemFontOfSize:34 weight:UIFontWeightBold];
+    BOOL fits = ceil([name sizeWithAttributes:@{ NSFontAttributeName: largeFont }].width) <= available;
+    BOOL showingHeader = (self.tableView.tableHeaderView != nil);
+    if (fits && !showingHeader) return; // an ordinary large title
+
+    if (!showingHeader) {
+        self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
+        self.navigationItem.titleView = [[UIView alloc] init];
+    }
+    UILabel *label = [[UILabel alloc] init];
+    label.numberOfLines = 0;
+    label.lineBreakMode = NSLineBreakByWordWrapping;
+    label.font = fits ? largeFont : [UIFont systemFontOfSize:28 weight:UIFontWeightBold];
+    label.textColor = [UIColor labelColor];
+    label.text = name;
+    CGSize size = [label sizeThatFits:CGSizeMake(available, CGFLOAT_MAX)];
+    UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, available + 40.0, ceil(size.height) + 24.0)];
+    label.frame = CGRectMake(20.0, 4.0, available, ceil(size.height));
+    label.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    [header addSubview:label];
+    self.tableView.tableHeaderView = header;
+}
+
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    static const void *kWidthKey = &kWidthKey;
+    NSNumber *last = objc_getAssociatedObject(self, kWidthKey);
+    if (!last || fabs(last.doubleValue - self.tableView.bounds.size.width) > 0.5) {
+        objc_setAssociatedObject(self, kWidthKey, @(self.tableView.bounds.size.width), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        [self updateWrappedTitle];
+    }
 }
 
 - (void)handleTweaksChanged:(NSNotification *)note {
@@ -422,34 +1194,27 @@ static id g_actionClipboard = nil;
         vc = [[RCWiFiTriggerViewController alloc] initWithTriggerKey:_triggerKey];
     } else if ([_triggerKey hasPrefix:@"bt_"]) {
         vc = [[RCBluetoothTriggerViewController alloc] initWithTriggerKey:_triggerKey];
-    } else if ([_triggerKey hasPrefix:@"app_launch_"]) {
+    } else if ([_triggerKey hasPrefix:@"output_"]) {
+        vc = [[RCAudioOutputTriggerViewController alloc] initWithTriggerKey:_triggerKey];
+    } else if ([_triggerKey hasPrefix:@"app_launch_"] || [_triggerKey hasPrefix:@"app_exit_"]) {
+        BOOL isExit = [_triggerKey hasPrefix:@"app_exit_"];
+        NSString *prefix = isExit ? @"app_exit_" : @"app_launch_";
         RCAppPickerViewController *appVC = [[RCAppPickerViewController alloc] init];
-        appVC.onAppSelected = ^(NSString *appName, NSString *bundleId) {
-            NSString *newKey = [NSString stringWithFormat:@"app_launch_%@", bundleId];
-            NSString *friendlyName = [NSString stringWithFormat:@"Launch %@", appName];
-            
+        appVC.allowsMultipleApps = YES;
+        NSArray *apps = [[RCConfigManager sharedManager] triggerDataForKey:_triggerKey][@"apps"];
+        appVC.selectedBundleIds = ([apps isKindOfClass:[NSArray class]] && apps.count) ? apps : @[ [_triggerKey substringFromIndex:prefix.length] ];
+        appVC.onAppsSelected = ^(NSArray<NSString *> *names, NSArray<NSString *> *bundleIds) {
+            // The key follows the first app; the actions go with the trigger
             RCConfigManager *config = [RCConfigManager sharedManager];
-            if (![self.triggerKey isEqualToString:newKey]) {
-                // Migrate
-                NSDictionary *oldData = [config triggerDataForKey:self.triggerKey];
-                NSArray *actions = oldData[@"actions"] ?: @[];
-                
-                NSDictionary *newData = @{
-                    @"name": friendlyName,
-                    @"enabled": @YES,
-                    @"actions": actions
-                };
-                [config updateTrigger:newKey withData:newData];
-                [config removeTrigger:self.triggerKey];
-                
-                // Update our own key for the current view if needed, 
-                // but we are popping/reloading so it's better to just go back.
-            } else {
-                NSMutableDictionary *mutableData = [[config triggerDataForKey:newKey] mutableCopy];
-                mutableData[@"name"] = friendlyName;
-                [config updateTrigger:newKey withData:mutableData];
-            }
-            [self.navigationController popViewControllerAnimated:YES];
+            NSString *newKey = [config saveAppTriggerWithPrefix:prefix names:names bundleIds:bundleIds replacing:self.triggerKey];
+            // This screen moves to the new key with the trigger. Left on the old one, its next
+            // reload of the actions would read it and bring it back as an empty, disabled trigger.
+            self.triggerKey = newKey;
+            self.title = [config displayNameForTrigger:newKey];
+            self.actions = [[config actionsForTrigger:newKey] mutableCopy];
+            [self.tableView reloadData];
+            [self updateWrappedTitle];
+            // The picker closes itself once this returns (popping here too went back a screen too far)
         };
         vc = appVC;
     } else if ([_triggerKey hasPrefix:@"nfc_"]) {
@@ -632,8 +1397,10 @@ static id g_actionClipboard = nil;
         if ([action isEqualToString:@"__SHORTCUT_PICKER__"]) {
             // Present Shortcut Picker
             RCShortcutPickerViewController *vc = [[RCShortcutPickerViewController alloc] init];
+            vc.showsSilentOption = YES;
+            __weak RCShortcutPickerViewController *weakPicker = vc;
             vc.onShortcutSelected = ^(NSString *shortcutName) {
-                [self.actions addObject:[NSString stringWithFormat:@"shortcut:%@", shortcutName]];
+                [self.actions addObject:[RCConfigManager shortcutActionWithName:shortcutName silent:weakPicker.runSilently input:nil]];
                 [self saveActions];
                 [self.tableView reloadData];
                 // Dismiss picker
@@ -733,6 +1500,14 @@ static id g_actionClipboard = nil;
                 [self presentViewController:alert animated:YES completion:nil];
             });
 
+        } else if ([action isEqualToString:@"__STOP_TRIGGER__"]) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                [self pickTriggerToStop:^(NSString *key) {
+                    [self.actions addObject:[@"stop trigger " stringByAppendingString:key]];
+                    [self saveActions];
+                    [self.tableView reloadData];
+                }];
+            });
         } else if ([action isEqualToString:@"__DELAY__"]) {
             // Show alert for delay
             UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Add Delay" 
@@ -806,48 +1581,16 @@ static id g_actionClipboard = nil;
                 [self presentViewController:nav animated:YES completion:nil];
             });
         } else if ([action isEqualToString:@"__TOAST__"]) {
-            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Toast" 
-                message:@"Enter toast title, subtitle and SFSymbol name" 
-                preferredStyle:UIAlertControllerStyleAlert];
-                
-            [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-                textField.placeholder = @"Title (required)";
-            }];
-            [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-                textField.placeholder = @"Subtitle (optional)";
-            }];
-            [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-                textField.placeholder = @"SFSymbol name (optional, e.g. info.circle)";
-            }];
-            
-            [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-            [alert addAction:[UIAlertAction actionWithTitle:@"Add" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull alertAction) {
-                NSString *title = alert.textFields[0].text;
-                NSString *subtitle = alert.textFields[1].text;
-                NSString *icon = alert.textFields[2].text;
-                
-                if (title.length > 0) {
-                    NSString *escTitle = [title stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
-                    NSString *escSub = [subtitle stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
-                    NSString *escIcon = [icon stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
-                    
-                    NSString *cmd;
-                    if (escIcon.length > 0) {
-                        cmd = [NSString stringWithFormat:@"toast \"%@\" \"%@\" \"%@\"", escTitle, escSub ?: @"", escIcon];
-                    } else if (escSub.length > 0) {
-                        cmd = [NSString stringWithFormat:@"toast \"%@\" \"%@\"", escTitle, escSub];
-                    } else {
-                        cmd = [NSString stringWithFormat:@"toast \"%@\"", escTitle];
-                    }
-                    
-                    [self.actions addObject:cmd];
-                    [self saveActions];
-                    [self.tableView reloadData];
-                }
-            }]];
-            
+            // New toast: same editor as edits, pushed once the picker is gone
+            __weak typeof(self) weakSelf = self;
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                [self presentViewController:alert animated:YES completion:nil];
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                if (!strongSelf) return;
+                [strongSelf pushToastEditorWithTitle:@"" message:@"" icon:@"" isNew:YES onSave:^(NSString *cmd) {
+                    [strongSelf.actions addObject:cmd];
+                    [strongSelf saveActions];
+                    [strongSelf.tableView reloadData];
+                }];
             });
         } else {
             [self.actions addObject:action];
@@ -1121,6 +1864,16 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             @"placeholder": @"Device name"
         },
         @{
+            @"key": @"carplay",
+            @"title": @"CarPlay",
+            @"icon": @"car.fill",
+            @"section": @"Connectivity",
+            @"values": @[
+                @{ @"value": @"CONNECTED", @"title": @"Connected" },
+                @{ @"value": @"NOT_CONNECTED", @"title": @"Not Connected" }
+            ]
+        },
+        @{
             @"key": @"cellular",
             @"title": @"Cellular Data",
             @"icon": @"antenna.radiowaves.left.and.right",
@@ -1159,6 +1912,13 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
                 @{ @"value": @"ON", @"title": @"On" },
                 @{ @"value": @"OFF", @"title": @"Off" }
             ]
+        },
+        @{
+            // Values: Off, Any Focus, the Focus modes (the condition picker lists them)
+            @"key": @"focus",
+            @"title": @"Focus",
+            @"icon": @"moon.circle",
+            @"section": @"Sound"
         },
         @{
             @"key": @"lpm",
@@ -1558,7 +2318,11 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     if (existingIndex != NSNotFound && existingIndex >= 0 && existingIndex < (NSInteger)self.actions.count && [self.actions[existingIndex] isKindOfClass:[NSDictionary class]]) {
         existing = self.actions[existingIndex];
     }
-    RCConditionPickerViewController *picker = [[RCConditionPickerViewController alloc] initWithConditions:[self ifConditionDefinitions] title:title existing:existing];
+    NSArray *conditions = [self ifConditionDefinitions];
+    if (![RCConfigManager supportsFocus]) {
+        conditions = [conditions filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"key != 'focus'"]];
+    }
+    RCConditionPickerViewController *picker = [[RCConditionPickerViewController alloc] initWithConditions:conditions title:title existing:existing];
     __weak typeof(self) weakSelf = self;
     NSString *actionType = type ?: @"if";
     picker.onValueSelected = ^(NSDictionary *condition, NSDictionary *value) {
@@ -2041,6 +2805,12 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:inputVC];
         [self presentViewController:nav animated:YES completion:nil];
 
+    } else if ([currentAction hasPrefix:@"stop trigger "]) {
+        [self pickTriggerToStop:^(NSString *key) {
+            self.actions[indexPath.row] = [@"stop trigger " stringByAppendingString:key];
+            [self saveActions];
+            [self.tableView reloadData];
+        }];
     } else if ([currentAction hasPrefix:@"delay "]) {
         // Edit Delay
         NSString *currentDelay = [currentAction substringFromIndex:6];
@@ -2066,16 +2836,36 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 
         [self presentViewController:alert animated:YES completion:nil];
     } else if ([currentAction hasPrefix:@"shortcut:"]) {
-        // Edit Shortcut
-        RCShortcutPickerViewController *shortcutPicker = [[RCShortcutPickerViewController alloc] init];
-        shortcutPicker.onShortcutSelected = ^(NSString *name) {
-            self.actions[indexPath.row] = [NSString stringWithFormat:@"shortcut:%@", name];
+        // Change the shortcut, or whether it runs silently (keeping its input)
+        BOOL silent = NO;
+        NSString *input = nil;
+        NSString *shortcutName = [RCConfigManager shortcutNameForAction:currentAction silent:&silent input:&input];
+        UIAlertController *sheet = [UIAlertController alertControllerWithTitle:shortcutName message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+        [sheet addAction:[UIAlertAction actionWithTitle:@"Change Shortcut" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+            RCShortcutPickerViewController *shortcutPicker = [[RCShortcutPickerViewController alloc] init];
+            shortcutPicker.showsSilentOption = YES;
+            shortcutPicker.runSilently = silent;
+            __weak RCShortcutPickerViewController *weakPicker = shortcutPicker;
+            shortcutPicker.onShortcutSelected = ^(NSString *name) {
+                self.actions[indexPath.row] = [RCConfigManager shortcutActionWithName:name silent:weakPicker.runSilently input:input];
+                [self saveActions];
+                [self.tableView reloadData];
+            };
+            UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:shortcutPicker];
+            [self presentViewController:nav animated:YES completion:nil];
+        }]];
+        UIAlertAction *silentAction = [UIAlertAction actionWithTitle:@"Run Silently" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+            self.actions[indexPath.row] = [RCConfigManager shortcutActionWithName:shortcutName silent:!silent input:input];
             [self saveActions];
             [self.tableView reloadData];
-        };
-        
-        UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:shortcutPicker];
-        [self presentViewController:nav animated:YES completion:nil];
+        }];
+        @try { [silentAction setValue:@(silent) forKey:@"checked"]; } @catch (NSException *e) {} // the tick
+        [sheet addAction:silentAction];
+        [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+        UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
+        sheet.popoverPresentationController.sourceView = cell ?: self.view;
+        sheet.popoverPresentationController.sourceRect = cell ? cell.bounds : self.view.bounds;
+        [self presentViewController:sheet animated:YES completion:nil];
     } else if ([currentAction hasPrefix:@"uiopen "]) {
         // Edit App
         RCAppPickerViewController *appPicker = [[RCAppPickerViewController alloc] init];
@@ -2087,6 +2877,13 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         
         UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:appPicker];
         [self presentViewController:nav animated:YES completion:nil];
+    } else if ([[currentAction lowercaseString] isEqualToString:@"kill current"] ||
+               [[currentAction lowercaseString] isEqualToString:@"kill front"] ||
+               [[currentAction lowercaseString] isEqualToString:@"kill foreground"] ||
+               [[currentAction lowercaseString] isEqualToString:@"kill current app"] ||
+               [[currentAction lowercaseString] isEqualToString:@"kill front app"]) {
+        // Kill Current App targets the focused app at run time: nothing to edit
+        return;
     } else if ([currentAction hasPrefix:@"kill "]) {
         // Edit Kill App
         RCAppPickerViewController *appPicker = [[RCAppPickerViewController alloc] init];
@@ -2104,6 +2901,8 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         [self editBluetoothConnectAtIndex:indexPath.row isDisconnect:NO];
     } else if ([currentAction hasPrefix:@"bt disconnect "] || [currentAction hasPrefix:@"bluetooth disconnect "] || [currentAction hasPrefix:@"bt-disconnect "]) {
         [self editBluetoothConnectAtIndex:indexPath.row isDisconnect:YES];
+    } else if ([currentAction hasPrefix:@"focus on "] || [currentAction hasPrefix:@"focus toggle "] || [currentAction isEqualToString:@"focus off"]) {
+        [self editFocusAtIndex:indexPath.row];
     } else if ([currentAction hasPrefix:@"km "] || [currentAction isEqualToString:@"km"]) {
         NSString *macroName = @"";
         NSString *paramVal = @"";
@@ -2165,6 +2964,24 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         }
         [self presentViewController:sheet animated:YES completion:nil];
         return;
+    } else if ([currentAction isEqualToString:@"unlock"] || [currentAction hasPrefix:@"unlock "]) {
+        [self promptEditUnlockActionAtIndex:indexPath.row];
+        return;
+    } else if ([currentAction isEqualToString:@"lock-toggle"] || [currentAction isEqualToString:@"lock toggle"] || [currentAction hasPrefix:@"lock-toggle "] || [currentAction hasPrefix:@"lock toggle "]) {
+        [self promptEditLockToggleActionAtIndex:indexPath.row];
+        return;
+    } else if ([currentAction hasPrefix:@"toast "] || [currentAction isEqualToString:@"toast"]) {
+        // Edit Toast: same editor as creation
+        NSString *toastTitle = nil, *toastSub = nil, *toastIcon = nil;
+        rc_parse_toast_cmd(currentAction, &toastTitle, &toastSub, &toastIcon);
+        __weak typeof(self) weakSelf = self;
+        [self pushToastEditorWithTitle:toastTitle message:toastSub icon:toastIcon isNew:NO onSave:^(NSString *cmd) {
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) return;
+            strongSelf.actions[indexPath.row] = cmd;
+            [strongSelf saveActions];
+            [strongSelf.tableView reloadData];
+        }];
     } else {
         // Generic edit for other commands - show alert with current command
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Edit Action"
@@ -2189,6 +3006,159 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 
         [self presentViewController:alert animated:YES completion:nil];
     }
+}
+
+// The one toast editor. New toasts and edits both come through here,
+// so they always look and save the same way.
+- (void)pushToastEditorWithTitle:(NSString *)title
+                        message:(NSString *)message
+                           icon:(NSString *)icon
+                          isNew:(BOOL)isNew
+                         onSave:(void (^)(NSString *cmd))onSave {
+    RCToastEditorViewController *editor = [[RCToastEditorViewController alloc] initWithToastTitle:title
+                                                                                         message:message
+                                                                                            icon:icon
+                                                                                           isNew:isNew];
+    editor.onSave = ^(NSString *t, NSString *m, NSString *i) {
+        if (onSave) onSave(rc_build_toast_command(t, m, i));
+    };
+    [self.navigationController pushViewController:editor animated:YES];
+}
+
+- (void)promptEditUnlockActionAtIndex:(NSInteger)index {
+    if (index < 0 || index >= self.actions.count) return;
+    id item = self.actions[index];
+    NSString *cmdStr = [item isKindOfClass:[NSDictionary class]] ? ((NSDictionary *)item)[@"command"] : item;
+    BOOL hasPasscode = [cmdStr hasPrefix:@"unlock "] && cmdStr.length > 7;
+    
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Edit Unlock Action"
+                                                                   message:@"Enter a passcode to unlock automatically, or choose 'Wake Screen Only' to present the passcode screen.\n\nNote: Configured passcodes are stored in plain text in trigger settings (rc_triggers.plist)."
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    
+    [alert addTextFieldWithConfigurationHandler:^(UITextField * _Nonnull textField) {
+        textField.placeholder = hasPasscode ? @"New Passcode (or leave blank to keep)" : @"Passcode (optional)";
+        textField.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
+        textField.secureTextEntry = YES;
+    }];
+    
+    __weak typeof(self) weakSelf = self;
+    
+    UIAlertAction *saveAction = [UIAlertAction actionWithTitle:@"Save Passcode" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        UITextField *tf = alert.textFields.firstObject;
+        NSString *pin = [tf.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        NSString *finalCmd;
+        if (pin.length > 0) {
+            finalCmd = [NSString stringWithFormat:@"unlock %@", pin];
+        } else if (hasPasscode) {
+            finalCmd = cmdStr;
+        } else {
+            finalCmd = @"unlock";
+        }
+        
+        if ([strongSelf.actions[index] isKindOfClass:[NSDictionary class]]) {
+            NSMutableDictionary *d = [strongSelf.actions[index] mutableCopy];
+            d[@"command"] = finalCmd;
+            strongSelf.actions[index] = d;
+        } else {
+            strongSelf.actions[index] = finalCmd;
+        }
+        [strongSelf saveActions];
+        [strongSelf.tableView reloadData];
+    }];
+    
+    UIAlertAction *wakeOnly = [UIAlertAction actionWithTitle:@"Wake Screen Only" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        NSString *finalCmd = @"unlock";
+        if ([strongSelf.actions[index] isKindOfClass:[NSDictionary class]]) {
+            NSMutableDictionary *d = [strongSelf.actions[index] mutableCopy];
+            d[@"command"] = finalCmd;
+            strongSelf.actions[index] = d;
+        } else {
+            strongSelf.actions[index] = finalCmd;
+        }
+        [strongSelf saveActions];
+        [strongSelf.tableView reloadData];
+    }];
+    
+    UIAlertAction *cancel = [UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil];
+    
+    [alert addAction:wakeOnly];
+    [alert addAction:saveAction];
+    [alert addAction:cancel];
+    alert.preferredAction = saveAction;
+    
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)promptEditLockToggleActionAtIndex:(NSInteger)index {
+    if (index < 0 || index >= self.actions.count) return;
+    id item = self.actions[index];
+    NSString *cmdStr = [item isKindOfClass:[NSDictionary class]] ? ((NSDictionary *)item)[@"command"] : item;
+    BOOL hasPasscode = ([cmdStr hasPrefix:@"lock-toggle "] && cmdStr.length > 12) || ([cmdStr hasPrefix:@"lock toggle "] && cmdStr.length > 12);
+    
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Edit Lock Toggle Action"
+                                                                   message:@"Enter a passcode to unlock automatically when locked, or choose 'No Passcode' to toggle without passcode entry.\n\nNote: Configured passcodes are stored in plain text in trigger settings (rc_triggers.plist)."
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    
+    [alert addTextFieldWithConfigurationHandler:^(UITextField * _Nonnull textField) {
+        textField.placeholder = hasPasscode ? @"New Passcode (or leave blank to keep)" : @"Passcode (optional)";
+        textField.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
+        textField.secureTextEntry = YES;
+    }];
+    
+    __weak typeof(self) weakSelf = self;
+    
+    UIAlertAction *saveAction = [UIAlertAction actionWithTitle:@"Save Passcode" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        UITextField *tf = alert.textFields.firstObject;
+        NSString *pin = [tf.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        NSString *finalCmd;
+        if (pin.length > 0) {
+            finalCmd = [NSString stringWithFormat:@"lock-toggle %@", pin];
+        } else if (hasPasscode) {
+            finalCmd = cmdStr;
+        } else {
+            finalCmd = @"lock-toggle";
+        }
+        
+        if ([strongSelf.actions[index] isKindOfClass:[NSDictionary class]]) {
+            NSMutableDictionary *d = [strongSelf.actions[index] mutableCopy];
+            d[@"command"] = finalCmd;
+            strongSelf.actions[index] = d;
+        } else {
+            strongSelf.actions[index] = finalCmd;
+        }
+        [strongSelf saveActions];
+        [strongSelf.tableView reloadData];
+    }];
+    
+    UIAlertAction *noPasscode = [UIAlertAction actionWithTitle:@"No Passcode" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        NSString *finalCmd = @"lock-toggle";
+        if ([strongSelf.actions[index] isKindOfClass:[NSDictionary class]]) {
+            NSMutableDictionary *d = [strongSelf.actions[index] mutableCopy];
+            d[@"command"] = finalCmd;
+            strongSelf.actions[index] = d;
+        } else {
+            strongSelf.actions[index] = finalCmd;
+        }
+        [strongSelf saveActions];
+        [strongSelf.tableView reloadData];
+    }];
+    
+    UIAlertAction *cancel = [UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil];
+    
+    [alert addAction:noPasscode];
+    [alert addAction:saveAction];
+    [alert addAction:cancel];
+    alert.preferredAction = saveAction;
+    
+    [self presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)promptEditKMParameterAtIndex:(NSInteger)index {
@@ -2233,6 +3203,31 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 
 - (void)dismissModalPicker {
     [self dismissViewControllerAnimated:YES completion:nil];
+}
+
+// Opens the Focus modes over the editor with the action's Focus ticked; choosing one asks Turn
+// On or Toggle again, choosing Off makes it "focus off"
+- (void)editFocusAtIndex:(NSInteger)index {
+    if (index < 0 || index >= (NSInteger)self.actions.count || ![self.actions[index] isKindOfClass:[NSString class]]) return;
+    NSString *action = self.actions[index];
+    BOOL toggle = [action hasPrefix:@"focus toggle "];
+    NSString *current = [action hasPrefix:@"focus on "] ? [action substringFromIndex:9] : toggle ? [action substringFromIndex:13] : @"";
+
+    RCFocusPickerViewController *picker = [[RCFocusPickerViewController alloc] initWithTitle:@"Set Focus"
+                                                                                  fixedRows:@[ @{ @"name": @"Off", @"value": @"", @"icon": @"moon.zzz" } ]];
+    picker.currentValue = current;
+    picker.buildsCommand = YES;
+    __weak typeof(self) weakSelf = self;
+    picker.onSelected = ^(NSDictionary *row) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf || index >= (NSInteger)strongSelf.actions.count) return;
+        strongSelf.actions[index] = row[@"command"];
+        [strongSelf saveActions];
+        [strongSelf.tableView reloadData];
+        [strongSelf dismissViewControllerAnimated:YES completion:nil];
+    };
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:picker];
+    [self presentViewController:nav animated:YES completion:nil];
 }
 
 - (void)editAirPlayConnectAtIndex:(NSInteger)index {
@@ -2410,11 +3405,54 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     return _actions.count;
 }
 
+// A banner above the sequence when the trigger restarts or ignores a new trigger while running,
+// so it's seen however long the sequence is
+- (NSString *)runModeBannerText {
+    NSString *mode = [self runMode];
+    if ([mode isEqualToString:@"restart"]) return @"If triggered again while running, this sequence will start over.";
+    if ([mode isEqualToString:@"single"]) return @"If triggered again while running, the new trigger will be ignored.";
+    return nil;
+}
+
+- (CGFloat)runModeBannerHeightForWidth:(CGFloat)width {
+    NSString *text = [self runModeBannerText];
+    if (!text) return 0;
+    CGFloat textWidth = width - self.tableView.layoutMargins.left - self.tableView.layoutMargins.right - 56; // margins, icon, padding
+    CGRect bounds = [text boundingRectWithSize:CGSizeMake(textWidth, CGFLOAT_MAX) options:NSStringDrawingUsesLineFragmentOrigin
+                                    attributes:@{ NSFontAttributeName: [UIFont systemFontOfSize:13] } context:nil];
+    return MAX(40, ceil(bounds.size.height) + 20);
+}
+
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
     if (_actions.count == 0) return nil;
     
-    UIView *headerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, tableView.bounds.size.width, 40)];
-    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(20, 15, tableView.bounds.size.width - 40, 20)];
+    CGFloat width = tableView.bounds.size.width;
+    CGFloat bannerHeight = [self runModeBannerHeightForWidth:width];
+    CGFloat top = bannerHeight > 0 ? bannerHeight + 12 : 0;
+    UIView *headerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, 40 + top)];
+    if (bannerHeight > 0) {
+        // Lined up with the action cards (the table's margins), and kept so as the header is resized
+        CGFloat left = tableView.layoutMargins.left, right = tableView.layoutMargins.right;
+        UIView *banner = [[UIView alloc] initWithFrame:CGRectMake(left, 10, width - left - right, bannerHeight)];
+        banner.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+        banner.backgroundColor = [UIColor tertiarySystemFillColor];
+        banner.layer.cornerRadius = 10;
+        BOOL restart = [[self runMode] isEqualToString:@"restart"];
+        UIImageView *icon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:restart ? @"arrow.counterclockwise" : @"nosign"]];
+        icon.tintColor = [UIColor secondaryLabelColor];
+        icon.contentMode = UIViewContentModeCenter;
+        icon.frame = CGRectMake(12, 0, 22, bannerHeight);
+        [banner addSubview:icon];
+        UILabel *text = [[UILabel alloc] initWithFrame:CGRectMake(44, 0, banner.bounds.size.width - 56, bannerHeight)];
+        text.text = [self runModeBannerText];
+        text.font = [UIFont systemFontOfSize:13];
+        text.textColor = [UIColor secondaryLabelColor];
+        text.numberOfLines = 0;
+        text.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+        [banner addSubview:text];
+        [headerView addSubview:banner];
+    }
+    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(20, 15 + top, width - 40, 20)];
     label.text = @"ACTION SEQUENCE";
     label.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
     label.textColor = [UIColor secondaryLabelColor];
@@ -2423,7 +3461,9 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section {
-    return _actions.count > 0 ? 40.0f : 0;
+    if (_actions.count == 0) return 0;
+    CGFloat bannerHeight = [self runModeBannerHeightForWidth:tableView.bounds.size.width];
+    return 40.0f + (bannerHeight > 0 ? bannerHeight + 12 : 0);
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
@@ -2445,6 +3485,10 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     cell.indentationWidth = 14.0f;
     cell.indentationLevel = indentationLevel;
 
+    BOOL wrapLongNames = [[NSUserDefaults standardUserDefaults] boolForKey:@"RCWrapLongNamesEnabled"];
+    cell.textLabel.numberOfLines = wrapLongNames ? 0 : 1;
+    cell.detailTextLabel.numberOfLines = wrapLongNames ? 0 : 1;
+
     cell.textLabel.adjustsFontSizeToFitWidth = YES;
     cell.textLabel.minimumScaleFactor = 0.80f;
     cell.detailTextLabel.adjustsFontSizeToFitWidth = YES;
@@ -2454,7 +3498,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         cell.textLabel.text = cleanName;
         cell.textLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightMedium];
         // If / Else If rows can be long ("If Bluetooth Device Connected is …"): wrap to a second line
-        cell.textLabel.numberOfLines = 2;
+        cell.textLabel.numberOfLines = wrapLongNames ? 0 : 1;
         cell.textLabel.lineBreakMode = NSLineBreakByTruncatingTail;
         BOOL isControl = [self isEndIfActionItem:actionItem] || [self isElseActionItem:actionItem];
         cell.textLabel.textColor = isControl ? [UIColor secondaryLabelColor] : [UIColor labelColor];
@@ -2475,7 +3519,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     }
 
     NSString *action = [actionItem isKindOfClass:[NSDictionary class]] ? ((NSDictionary *)actionItem)[@"command"] : (NSString *)actionItem;
-    cell.textLabel.numberOfLines = 1; // a reused If row may have set 2
+    cell.textLabel.numberOfLines = wrapLongNames ? 0 : 1;
     NSDictionary *toggleInfo = [[RCConfigManager sharedManager] toggleInfoForCommand:action];
 
     // Logic to separate "Type" from "Value"
@@ -2504,6 +3548,11 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         if (paramAttrStr) {
             cell.textLabel.attributedText = paramAttrStr;
             subtitle = nil;
+            if ([action hasPrefix:@"shortcut:"]) {
+                BOOL silent = NO;
+                [RCConfigManager shortcutNameForAction:action silent:&silent input:NULL];
+                if (silent) subtitle = @"Silent";
+            }
         } else {
             if ([action hasPrefix:@"exec "]) {
                 cell.textLabel.text = [action substringFromIndex:5];
@@ -2560,7 +3609,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         // Use monospace for code-like things
         if ([action hasPrefix:@"exec "] || [action hasPrefix:@"root "] || [action hasPrefix:@"Lua "] || [action hasPrefix:@"lua "]) {
             cell.textLabel.font = [UIFont monospacedSystemFontOfSize:15 weight:UIFontWeightRegular];
-            cell.textLabel.numberOfLines = 1;
+            cell.textLabel.numberOfLines = wrapLongNames ? 0 : 1;
             cell.textLabel.lineBreakMode = NSLineBreakByTruncatingTail;
             
             cell.detailTextLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightRegular];
@@ -2568,13 +3617,13 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         } else {
              cell.detailTextLabel.font = [UIFont systemFontOfSize:15];
              cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
-             cell.textLabel.numberOfLines = 1; // the subtitle takes the second line
+             cell.textLabel.numberOfLines = wrapLongNames ? 0 : 1;
         }
     } else {
         cell.detailTextLabel.text = nil;
         // No subtitle: long names (shortcuts, apps, entities, toast text) wrap to a
         // second line rather than being cut off
-        cell.textLabel.numberOfLines = 2;
+        cell.textLabel.numberOfLines = wrapLongNames ? 0 : 1;
         cell.textLabel.lineBreakMode = NSLineBreakByTruncatingTail;
     }
 

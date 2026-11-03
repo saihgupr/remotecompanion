@@ -908,6 +908,91 @@
     }
     .search-input::placeholder { color: #636366; }
 
+    /* ── Category filter pills (matches iOS RCCategoryBar) ── */
+    .category-bar-wrap {
+      position: sticky;
+      top: calc(44px + env(safe-area-inset-top, 0px));
+      z-index: 9;
+      background: #000;
+      padding: 4px 0 8px;
+    }
+    .category-bar {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding: 4px 16px;
+      scrollbar-width: none;
+      -webkit-overflow-scrolling: touch;
+    }
+    .category-bar::-webkit-scrollbar { display: none; }
+    .cat-chip {
+      flex-shrink: 0;
+      border: none;
+      border-radius: 17px;
+      padding: 7px 14px;
+      font-size: 15px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      background: rgba(255,255,255,0.12);
+      color: #fff;
+      transition: background 0.15s, color 0.15s, transform 0.1s;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .cat-chip:active { transform: scale(0.96); }
+    .cat-chip.active { background: #fff; color: #000; }
+
+    /* ── Picker dialog category pills (same component, dialog sizing) ── */
+    .picker-category-bar {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding: 2px 2px 10px;
+      scrollbar-width: none;
+      -webkit-overflow-scrolling: touch;
+      flex-shrink: 0;
+    }
+    .picker-category-bar::-webkit-scrollbar { display: none; }
+    .picker-category-bar .cat-chip { font-size: 13px; padding: 6px 12px; }
+
+    /* ── Condition picker option rows (mirror iOS indented options) ── */
+    .cond-option-row { padding-left: 60px !important; }
+    .cond-option-row .picker-row-text.blue { color: #0a84ff; }
+    .cond-option-row .picker-row-text.dim { color: #636366; }
+    .cond-check { font-size: 16px; color: #0a84ff; flex-shrink: 0; margin-left: 8px; }
+
+    /* ── Dialog pickers iOS inset-grouped colors ── */
+    #cond-picker-content, #picker-content { background: transparent; }
+    #cond-picker-content .picker-section-header, #picker-content .picker-section-header {
+      background: transparent;
+      position: static;
+      font-size: 13px;
+      font-weight: 500;
+      letter-spacing: 0.05em;
+      color: #8e8e93;
+      padding: 0 18px;
+      margin: 20px 0 6px;
+    }
+    #cond-picker-content .picker-section-header:first-child, #picker-content .picker-section-header:first-child { margin-top: 6px; }
+    .dialog-card {
+      margin: 0 2px 8px;
+      background: #1c1c1e;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 0.5px solid rgba(255,255,255,0.08);
+    }
+    #cond-picker-content .picker-row, #picker-content .picker-row { border-bottom: none; background: transparent; min-height: 52px; position: relative; }
+    #cond-picker-content .picker-row + .picker-row::after, #picker-content .picker-row + .picker-row::after {
+      content: ''; position: absolute; left: 60px; right: 0; top: 0; height: 0.5px;
+      background: rgba(255,255,255,0.12);
+    }
+    .dialog-row-icon {
+      width: 30px; display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; margin-right: 14px; color: #8e8e93;
+    }
+    .dialog-row-icon i { font-size: 22px; }
+
     /* ── Picker action rows ── */
     .picker-section-header {
       font-size: 13px; font-weight: 500; letter-spacing: 0.05em;
@@ -1241,6 +1326,17 @@
     .settings-btn { display: flex; align-items: center; }
     a { color: inherit; text-decoration: none; }
 
+    /* Wrap Long Names (Advanced > Options) — WebUI display preference */
+    body.rc-wrap-names .row-title,
+    body.rc-wrap-names .row-subtitle,
+    body.rc-wrap-names .action-row-text,
+    body.rc-wrap-names .picker-row-text,
+    body.rc-wrap-names .app-picker-name {
+      white-space: normal;
+      overflow: visible;
+      text-overflow: clip;
+    }
+
     /* Day of week pill toggles */
     .day-pill {
       flex: 1; display: flex; flex-direction: column;
@@ -1254,19 +1350,126 @@
       background: #3a3a3c; transition: background 0.15s, color 0.15s;
     }
     .day-pill input:checked + span { background: #007aff; color: #fff; }
-    /* Toast preset chips & custom dialog toggles */
-    .toast-preset-chip {
-      background: rgba(255,255,255,0.1);
-      border-radius: 12px;
-      padding: 4px 10px;
-      font-size: 12px;
-      color: #fff;
-      cursor: pointer;
-      user-select: none;
-      transition: background 0.15s ease, transform 0.1s ease;
+
+    /* ── Toast action dialog (iOS inset-grouped, mirrors condition picker) ── */
+    .toast-dialog {
+      width: 92%; max-width: 420px;
+      max-height: min(640px, calc(100vh - 48px));
+      display: flex; flex-direction: column;
     }
-    .toast-preset-chip:hover { background: rgba(255,255,255,0.2); }
-    .toast-preset-chip:active { transform: scale(0.95); }
+    .toast-dialog .dialog-msg { padding: 0 24px 6px; }
+    .toast-dialog .dialog-btns { flex-shrink: 0; }
+    .toast-dialog-body {
+      flex: 1; min-height: 0;
+      padding: 0 14px 14px;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .toast-section-header {
+      font-size: 13px; font-weight: 500;
+      letter-spacing: 0.05em; text-transform: uppercase;
+      color: #8e8e93;
+      padding: 0 18px; margin: 20px 0 6px;
+    }
+    .toast-section-header:first-child { margin-top: 8px; }
+
+    /* 52px rows with a fixed 30px icon rail; dividers inset to the text */
+    .toast-row {
+      position: relative;
+      display: flex; align-items: center;
+      min-height: 52px; padding: 0 16px;
+      cursor: text;
+      transition: background 0.15s ease;
+    }
+    .toast-row + .toast-row::after {
+      content: ''; position: absolute; top: 0; left: 60px; right: 0;
+      height: 0.5px; background: rgba(255,255,255,0.12);
+    }
+    .toast-row:focus-within { background: rgba(255,255,255,0.03); }
+    .toast-row .dialog-row-icon { transition: color 0.18s ease; }
+    .toast-row:focus-within .dialog-row-icon { color: #0a84ff; }
+    .toast-row-label {
+      flex: 0 0 auto; margin-right: 10px;
+      font-size: 17px; color: #fff; letter-spacing: -0.01em;
+      white-space: nowrap;
+    }
+    .toast-row-hint {
+      flex: 0 0 auto; margin-right: 10px;
+      font-size: 13px; color: #636366;
+      white-space: nowrap;
+    }
+    .toast-row-input {
+      flex: 1; min-width: 0;
+      margin: 0; padding: 0; border: none; outline: none; background: none;
+      font-family: inherit; font-size: 17px; color: #fff;
+      text-align: right;
+      caret-color: #0a84ff;
+      -webkit-appearance: none; appearance: none;
+    }
+    .toast-row-input::placeholder { color: #636366; }
+    .toast-row-input::-webkit-outer-spin-button,
+    .toast-row-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+    /* Quiet icon suggestion tiles — always all visible, sized to the card */
+    .toast-icon-strip {
+      display: flex; gap: 6px; align-items: center;
+      padding: 2px 16px 4px;
+    }
+    .toast-icon-tile {
+      flex: 1 1 0; min-width: 0;
+      aspect-ratio: 1 / 1;
+      display: flex; align-items: center; justify-content: center;
+      padding: 0;
+      background: #1c1c1e;
+      border: 0.5px solid rgba(255,255,255,0.08);
+      border-radius: 11px;
+      color: #d1d1d6;
+      cursor: pointer;
+      -webkit-appearance: none; appearance: none;
+      -webkit-tap-highlight-color: transparent;
+      transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+    }
+    .toast-icon-tile i { font-size: 19px; }
+    .toast-icon-tile:hover { background: #26262a; color: #fff; }
+    .toast-icon-tile:active {
+      transform: scale(0.94);
+      background: rgba(10,132,255,0.16);
+      border-color: rgba(10,132,255,0.4);
+      color: #0a84ff;
+    }
+
+    /* Preview reads as a quiet card, not a floating mock */
+    .toast-preview-card {
+      display: flex; align-items: center; justify-content: center;
+      padding: 14px;
+    }
+    .toast-preview-chip {
+      display: flex; align-items: center; gap: 10px;
+      max-width: 100%;
+      padding: 9px 16px;
+      background: #2c2c2e;
+      border: 0.5px solid rgba(255,255,255,0.08);
+      border-radius: 16px;
+    }
+    .toast-preview-icon { display: flex; flex-shrink: 0; color: #8e8e93; }
+    .toast-preview-icon i { font-size: 20px; }
+    .toast-preview-text {
+      display: flex; flex-direction: column; align-items: flex-start;
+      min-width: 0; line-height: 1.25;
+    }
+    .toast-preview-title {
+      max-width: 100%;
+      font-size: 15px; font-weight: 600; color: #fff;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .toast-preview-subtitle {
+      max-width: 100%;
+      font-size: 13px; color: #8e8e93;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    @media (max-width: 380px) {
+      .toast-row-hint { display: none; }
+    }
 
     .toggle-switch {
       position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0;
@@ -1511,10 +1714,11 @@
 <div class="page-content">
   <div id="conn-banner">⚠ Unable to connect to device</div>
   <h1 class="large-title" id="main-large-title">RemoteCompanion</h1>
+  <div class="category-bar-wrap"><div class="category-bar" id="category-bar"></div></div>
   <div id="triggers-root"></div>
   <div class="page-footer">
     <strong>RemoteCompanion</strong>
-    <span class="app-version-display">v3.5.1</span>
+    <span class="app-version-display">v4.0.0</span>
   </div>
 </div>
 
@@ -1577,10 +1781,29 @@
         <i class="f7-icons" style="font-size:16px;color:#8e8e93;flex-shrink:0">search</i>
         <input class="app-picker-search" type="text" placeholder="Search actions…" id="action-search" autocorrect="off" autocapitalize="none" spellcheck="false" oninput="renderPickerSections()">
       </div>
+      <div class="picker-category-bar" id="picker-category-bar"></div>
       <div class="app-picker-list" id="picker-content" style="max-height: 48vh; max-height: 48dvh; overflow-y: auto;"></div>
     </div>
     <div class="dialog-btns">
       <button onclick="closePickerPanel()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ CONDITION PICKER DIALOG ═════════════════════════════════════════════ -->
+<div class="dialog-backdrop" id="cond-picker-dialog-backdrop" onclick="_condPickerBackdropClick(event)">
+  <div class="dialog-box app-launch-dialog" style="max-width: 480px; width: 90%;">
+    <div class="dialog-title">Select Condition</div>
+    <div class="dialog-msg" style="text-align:center;padding:0 16px 6px">Choose a condition, then pick its value.</div>
+    <div style="padding:0 14px 10px; display:flex; flex-direction:column; flex:1; min-height:0;">
+      <div class="app-picker-search-wrap">
+        <i class="f7-icons" style="font-size:16px;color:#8e8e93;flex-shrink:0">search</i>
+        <input class="app-picker-search" type="text" placeholder="Search Conditions" id="cond-picker-search" autocorrect="off" autocapitalize="none" spellcheck="false" oninput="renderCondPicker()">
+      </div>
+      <div class="app-picker-list" id="cond-picker-content" style="max-height: 48vh; max-height: 48dvh; overflow-y: auto;"></div>
+    </div>
+    <div class="dialog-btns">
+      <button onclick="closeCondPicker()">Cancel</button>
     </div>
   </div>
 </div>
@@ -1602,38 +1825,70 @@
         </div>
       </div>
       <div class="settings-row">
-        <span class="settings-label">NFC Scanning</span>
-        <div class="settings-btn">
-          <input type="checkbox" class="ios-toggle" id="setting-nfc" onchange="config.nfcEnabled=this.checked;saveConfig()">
-        </div>
-      </div>
-      <div class="settings-row">
         <span class="settings-label">Web UI</span>
         <div class="settings-btn">
           <input type="checkbox" class="ios-toggle" id="setting-webui" onchange="config.webUIEnabled=this.checked;saveConfig()">
         </div>
       </div>
-      <div class="settings-row" style="cursor:pointer" onclick="openBannersPanel()">
-        <span class="settings-label">Banners</span>
-        <div class="settings-btn" style="color:#8e8e93;display:flex;align-items:center;gap:6px">
-          <span id="setting-banners-count">Off</span><i class="f7-icons" style="font-size:14px;color:#48484a">chevron_right</i>
-        </div>
-      </div>
-      <div class="settings-row">
-        <span class="settings-label">Logging</span>
-        <div class="settings-btn">
-          <select id="setting-loglevel" onchange="config.logLevel=this.value;saveConfig()" style="appearance:none;-webkit-appearance:none;background:none;border:none;color:#8e8e93;font-size:17px;font-family:inherit;text-align:right;outline:none;cursor:pointer">
-            <option value="off">Off</option>
-            <option value="minimal">Minimal</option>
-            <option value="full">Full</option>
-          </select>
-        </div>
-      </div>
-
     </div>
 
     <div class="action-list-header">Integrations</div>
     <div class="action-list-card">
+      <div class="action-list-row" onclick="openIntegrationsPanel()">
+        <div class="action-row-icon icon-indigo"><i class="f7-icons">globe</i></div>
+        <div class="action-row-text" style="flex:1">Integrations<br><span id="setting-integrations-status" style="font-size:13px;color:#8e8e93;font-weight:400">Disabled</span></div>
+        <i class="f7-icons row-chevron" style="color:#8e8e93; font-size:14px;">chevron_right</i>
+      </div>
+    </div>
+
+    <div class="action-list-header">Advanced Settings</div>
+    <div class="action-list-card">
+      <div class="action-list-row" onclick="openAdvancedPanel()">
+        <div class="action-row-icon icon-purple"><i class="f7-icons">gearshape_2_fill</i></div>
+        <div class="action-row-text">Advanced Settings</div>
+        <i class="f7-icons row-chevron" style="color:#8e8e93; font-size:14px;">chevron_right</i>
+      </div>
+    </div>
+
+    <div class="action-list-header">Diagnostics</div>
+    <div class="action-list-card">
+      <div class="action-list-row" onclick="openSysInfoPanel()">
+        <div class="action-row-icon icon-blue"><i class="f7-icons">info_circle</i></div>
+        <div class="action-row-text">Device Diagnostics & Health</div>
+        <i class="f7-icons row-chevron" style="color:#8e8e93; font-size:14px;">chevron_right</i>
+      </div>
+    </div>
+    <div style="color:#8e8e93;font-size:13px;margin:8px 32px 0">System info, battery, storage, and logs for this device.</div>
+
+    <div class="action-list-header">Backup</div>
+    <div class="action-list-card">
+      <div class="action-list-row" onclick="exportConfig()">
+        <div class="action-row-icon icon-blue"><i class="f7-icons">square_arrow_up</i></div>
+        <div class="action-row-text">Export Configuration</div>
+      </div>
+      <div class="action-list-row" onclick="importConfig()">
+        <div class="action-row-icon icon-green"><i class="f7-icons">square_arrow_down</i></div>
+        <div class="action-row-text">Import Configuration</div>
+      </div>
+    </div>
+    <div style="color:#8e8e93;font-size:13px;margin:8px 16px 0">Export your configuration to share or backup. Import to restore.</div>
+    <input type="file" id="import-file-input" accept=".json" style="display:none" onchange="handleImportFile(this)">
+
+  </div>
+</div>
+
+<!-- ══ INTEGRATIONS PANEL (Settings > Integrations) ═══════════════════════ -->
+<div class="rc-panel" id="integrations-panel">
+  <div class="panel-navbar">
+    <button class="panel-back" onclick="closeIntegrationsPanel()">
+      <i class="f7-icons">chevron_left</i> Settings
+    </button>
+    <div class="panel-title">Integrations</div>
+    <div style="width:80px"></div>
+  </div>
+  <div class="panel-content">
+    <div class="action-list-header" style="margin-top:28px">External Services</div>
+    <div class="action-list-card" style="margin-bottom:12px">
       <div class="settings-row">
         <span class="settings-label">Home Assistant</span>
         <div class="settings-btn">
@@ -1657,8 +1912,10 @@
           <span id="ha-test-status" style="font-size: 13px; color: #8e8e93; margin-left: 12px;"></span>
         </div>
       </div>
+    </div>
 
-      <div class="settings-row" style="border-top: 1px solid rgba(255,255,255,0.08);">
+    <div class="action-list-card" style="margin-bottom:12px">
+      <div class="settings-row">
         <span class="settings-label">Keyboard Maestro</span>
         <div class="settings-btn">
           <input type="checkbox" class="ios-toggle" id="setting-km" onchange="onKMToggleChange(this.checked)">
@@ -1689,8 +1946,10 @@
           <span id="km-test-status" style="font-size: 13px; color: #8e8e93; margin-left: 12px;"></span>
         </div>
       </div>
+    </div>
 
-      <div class="settings-row" style="border-top: 1px solid rgba(255,255,255,0.08);">
+    <div class="action-list-card" style="margin-bottom:12px">
+      <div class="settings-row">
         <span class="settings-label">MQTT</span>
         <div class="settings-btn">
           <input type="checkbox" class="ios-toggle" id="setting-mqtt" onchange="onMQTTToggleChange(this.checked)">
@@ -1740,29 +1999,108 @@
         </div>
       </div>
     </div>
+    <div style="color:#8e8e93;font-size:13px;margin:8px 16px 0">Configure external service integrations to trigger actions and control third-party automations.</div>
+  </div>
+</div>
 
-    <div class="action-list-header">Backup</div>
+<!-- ══ ADVANCED PANEL (Settings > Advanced Settings) ══════════════════════ -->
+<div class="rc-panel" id="advanced-panel">
+  <div class="panel-navbar">
+    <button class="panel-back" onclick="closeAdvancedPanel()">
+      <i class="f7-icons">chevron_left</i> Settings
+    </button>
+    <div class="panel-title">Advanced Settings</div>
+    <div style="width:80px"></div>
+  </div>
+  <div class="panel-content">
+    <div class="action-list-header" style="margin-top:28px">Banners</div>
     <div class="action-list-card">
-      <div class="action-list-row" onclick="exportConfig()">
-        <div class="action-row-icon icon-blue"><i class="f7-icons">square_arrow_up</i></div>
-        <div class="action-row-text">Export Configuration</div>
-      </div>
-      <div class="action-list-row" onclick="importConfig()">
-        <div class="action-row-icon icon-green"><i class="f7-icons">square_arrow_down</i></div>
-        <div class="action-row-text">Import Configuration</div>
-      </div>
-    </div>
-
-    <div class="action-list-header">Diagnostics</div>
-    <div class="action-list-card">
-      <div class="action-list-row" onclick="openSysInfoPanel()">
-        <div class="action-row-icon icon-blue"><i class="f7-icons">info_circle</i></div>
-        <div class="action-row-text">Device Diagnostics & Health</div>
+      <div class="action-list-row" onclick="openBannersPanel()">
+        <div class="action-row-icon icon-purple"><i class="f7-icons">bell_fill</i></div>
+        <div class="action-row-text" style="flex:1">Banners<br><span id="setting-banners-count" style="font-size:13px;color:#8e8e93;font-weight:400">Off</span></div>
         <i class="f7-icons row-chevron" style="color:#8e8e93; font-size:14px;">chevron_right</i>
       </div>
     </div>
-    <input type="file" id="import-file-input" accept=".json" style="display:none" onchange="handleImportFile(this)">
-
+    <div style="color:#8e8e93;font-size:13px;margin:8px 32px 0">Actions that show a banner when a trigger runs them.</div>
+    <div class="action-list-header">NFC</div>
+    <div class="action-list-card">
+      <div class="settings-row">
+        <span class="settings-label">NFC Scanning</span>
+        <div class="settings-btn">
+          <input type="checkbox" class="ios-toggle" id="setting-nfc" onchange="onNFCEnabledChange(this.checked)">
+        </div>
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">Experimental NFC</span>
+        <div class="settings-btn">
+          <input type="checkbox" class="ios-toggle" id="setting-nfc-bg" onchange="onExperimentalNFCChange(this.checked)">
+        </div>
+      </div>
+      <div class="action-list-row" onclick="showNFCScreenOffSheet()">
+        <div class="action-row-text" style="flex:1">NFC With Screen Off<br><span id="setting-nfc-screenoff" style="font-size:13px;color:#8e8e93;font-weight:400">Off</span></div>
+        <i class="f7-icons row-chevron" style="color:#8e8e93; font-size:14px;">chevron_right</i>
+      </div>
+    </div>
+    <div style="color:#8e8e93;font-size:13px;margin:8px 32px 0" id="nfc-footer">NFC scanning options.</div>
+    <div class="action-list-header">Options</div>
+    <div class="action-list-card">
+      <div class="settings-row">
+        <span class="settings-label">Wrap Long Names</span>
+        <div class="settings-btn">
+          <input type="checkbox" class="ios-toggle" id="setting-wrap-names" onchange="onWrapLongNamesChange(this.checked)">
+        </div>
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">Logging</span>
+        <div class="settings-btn">
+          <select id="setting-loglevel" onchange="config.logLevel=this.value;saveConfig()" style="appearance:none;-webkit-appearance:none;background:none;border:none;color:#8e8e93;font-size:17px;font-family:inherit;text-align:right;outline:none;cursor:pointer">
+            <option value="off">Off</option>
+            <option value="minimal">Minimal</option>
+            <option value="full">Full</option>
+          </select>
+        </div>
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">Lock Scrolling During Gestures</span>
+        <div class="settings-btn">
+          <input type="checkbox" class="ios-toggle" id="setting-freeze-lists" onchange="config.freezeListsDuringGestures=this.checked;saveConfig()">
+        </div>
+      </div>
+    </div>
+    <div class="action-list-header">Buttons</div>
+    <div class="action-list-card">
+      <div class="settings-row">
+        <span class="settings-label">Volume Sequence</span>
+        <div class="settings-btn">
+          <select id="setting-volume-seq" onchange="config.volumeSequenceWindow=parseFloat(this.value);saveConfig()" style="appearance:none;-webkit-appearance:none;background:none;border:none;color:#8e8e93;font-size:17px;font-family:inherit;text-align:right;outline:none;cursor:pointer"></select>
+        </div>
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">Power Clicks</span>
+        <div class="settings-btn">
+          <select id="setting-power-click" onchange="config.powerClickWindow=parseFloat(this.value);saveConfig()" style="appearance:none;-webkit-appearance:none;background:none;border:none;color:#8e8e93;font-size:17px;font-family:inherit;text-align:right;outline:none;cursor:pointer"></select>
+        </div>
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">Home Clicks</span>
+        <div class="settings-btn">
+          <select id="setting-home-click" onchange="config.homeClickWindow=parseFloat(this.value);saveConfig()" style="appearance:none;-webkit-appearance:none;background:none;border:none;color:#8e8e93;font-size:17px;font-family:inherit;text-align:right;outline:none;cursor:pointer"></select>
+        </div>
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">Volume Hold</span>
+        <div class="settings-btn">
+          <select id="setting-volume-hold" onchange="config.volumeHoldTime=parseFloat(this.value);saveConfig()" style="appearance:none;-webkit-appearance:none;background:none;border:none;color:#8e8e93;font-size:17px;font-family:inherit;text-align:right;outline:none;cursor:pointer"></select>
+        </div>
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">Power Hold</span>
+        <div class="settings-btn">
+          <select id="setting-power-hold" onchange="config.powerHoldTime=parseFloat(this.value);saveConfig()" style="appearance:none;-webkit-appearance:none;background:none;border:none;color:#8e8e93;font-size:17px;font-family:inherit;text-align:right;outline:none;cursor:pointer"></select>
+        </div>
+      </div>
+    </div>
+    <div style="color:#8e8e93;font-size:13px;margin:8px 16px 0">How long a press waits for the next one before it counts. A shorter time responds sooner and needs quicker presses.</div>
   </div>
 </div>
 
@@ -1774,7 +2112,7 @@
 <!-- ══ STICKY FOOTER (Settings only) ══════════════════════════════════════ -->
 <div class="page-footer fixed" id="footer-settings-fixed">
   <strong>RemoteCompanion</strong>
-  <span class="app-version-display">v3.3.0</span>
+  <span class="app-version-display">v4.0.0</span>
 </div>
 
 <!-- ══ CONTEXT MENU ═══════════════════════════════════════════════════════ -->
@@ -1892,8 +2230,8 @@
 <!-- ══ APP LAUNCH TRIGGER DIALOG ═════════════════════════════════════════ -->
 <div class="dialog-backdrop" id="app-launch-dialog-backdrop">
   <div class="dialog-box app-launch-dialog" style="max-width: 460px; width: 90%;">
-    <div class="dialog-title">New App Launch Trigger</div>
-    <div class="dialog-msg" style="text-align:center;padding:0 16px 6px">Fires when an app is opened on the device.</div>
+    <div class="dialog-title" id="app-launch-dialog-title">New App Launch Trigger</div>
+    <div class="dialog-msg" id="app-launch-dialog-msg" style="text-align:center;padding:0 16px 6px">Fires when an app is opened on the device.</div>
     <div style="padding:0 14px 10px">
       <div class="app-picker-search-wrap">
         <i class="f7-icons" style="font-size:16px;color:#8e8e93;flex-shrink:0">search</i>
@@ -1905,6 +2243,7 @@
     </div>
     <div class="dialog-btns">
       <button onclick="closeAppLaunchDialog()">Cancel</button>
+      <button id="app-picker-done" class="primary" style="display:none" onclick="finishAppPicker()">Done</button>
     </div>
   </div>
 </div>
@@ -2007,42 +2346,62 @@
 
 <!-- ══ TOAST ACTION DIALOG ═════════════════════════════════════════════ -->
 <div class="dialog-backdrop" id="toast-dialog-backdrop">
-  <div class="dialog-box" style="max-width: 440px; width: 90%;">
+  <div class="dialog-box toast-dialog">
     <div class="dialog-title" id="toast-dialog-title">Toast Notification</div>
-    <div class="dialog-msg" style="padding-bottom: 8px;">Configure HUD toast alert displayed on device:</div>
-    <div style="padding:0 14px 12px; display:flex; flex-direction:column; gap:10px;">
-      <input class="dialog-input" id="toast-title-input" type="text" placeholder="Title (e.g. Silent Vibrate)" autocorrect="off" autocapitalize="words" spellcheck="false" style="margin:0; width:100%" oninput="updateToastPreview()">
-      <input class="dialog-input" id="toast-subtitle-input" type="text" placeholder="Subtitle (optional, e.g. ON)" autocorrect="off" autocapitalize="none" spellcheck="false" style="margin:0; width:100%" oninput="updateToastPreview()">
-      <input class="dialog-input" id="toast-icon-input" type="text" placeholder="SF Symbol Icon (optional, e.g. bell.fill)" autocorrect="off" autocapitalize="none" spellcheck="false" style="margin:0; width:100%" oninput="updateToastPreview()">
-      
-      <!-- Preset Icon Selector Chips -->
-      <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top: 2px;" id="toast-icon-presets">
-        <span class="toast-preset-chip" onclick="setToastIconPreset('bell.fill')">🔔 bell</span>
-        <span class="toast-preset-chip" onclick="setToastIconPreset('bell.slash.fill')">🔕 bell.slash</span>
-        <span class="toast-preset-chip" onclick="setToastIconPreset('checkmark.circle.fill')">✅ checkmark</span>
-        <span class="toast-preset-chip" onclick="setToastIconPreset('xmark.circle.fill')">❌ xmark</span>
-        <span class="toast-preset-chip" onclick="setToastIconPreset('star.fill')">⭐ star</span>
-        <span class="toast-preset-chip" onclick="setToastIconPreset('speaker.wave.3.fill')">🔊 speaker</span>
-        <span class="toast-preset-chip" onclick="setToastIconPreset('camera.fill')">📷 camera</span>
+    <div class="dialog-msg">Shows a small alert on the device.</div>
+
+    <div class="toast-dialog-body">
+      <div class="toast-section-header">Content</div>
+      <div class="dialog-card">
+        <label class="toast-row">
+          <span class="dialog-row-icon" aria-hidden="true"><i class="f7-icons">textformat</i></span>
+          <span class="toast-row-label">Title</span>
+          <input class="toast-row-input" id="toast-title-input" type="text" placeholder="Silent Vibrate" autocorrect="off" autocapitalize="words" spellcheck="false" oninput="updateToastPreview()">
+        </label>
+        <label class="toast-row">
+          <span class="dialog-row-icon" aria-hidden="true"><i class="f7-icons">text_bubble</i></span>
+          <span class="toast-row-label">Message</span>
+          <span class="toast-row-hint" aria-hidden="true">Optional</span>
+          <input class="toast-row-input" id="toast-subtitle-input" type="text" placeholder="ON" autocorrect="off" autocapitalize="none" spellcheck="false" oninput="updateToastPreview()">
+        </label>
+        <label class="toast-row">
+          <span class="dialog-row-icon" aria-hidden="true"><i class="f7-icons">square_grid_2x2</i></span>
+          <span class="toast-row-label">Icon</span>
+          <span class="toast-row-hint" aria-hidden="true">Optional</span>
+          <input class="toast-row-input" id="toast-icon-input" type="text" placeholder="bell.fill" autocorrect="off" autocapitalize="none" spellcheck="false" oninput="updateToastPreview()">
+        </label>
       </div>
 
-      <!-- Live Toast Preview Box -->
-      <div style="background: rgba(255,255,255,0.08); border-radius: 12px; padding: 12px; display: flex; align-items: center; justify-content: center; margin-top: 4px;">
-        <div id="toast-live-preview" style="background: #1c1c1e; border: 1px solid rgba(255,255,255,0.15); border-radius: 20px; padding: 8px 16px; display: flex; align-items: center; gap: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); max-width: 100%;">
-          <i class="f7-icons" id="toast-preview-icon" style="font-size: 20px; color: #0a84ff;">text_bubble</i>
-          <div style="display:flex; flex-direction:column; text-align:left;">
-            <span id="toast-preview-title" style="font-size: 14px; font-weight: 600; color: #fff;">Toast Title</span>
-            <span id="toast-preview-subtitle" style="font-size: 12px; color: #8e8e93;">Subtitle</span>
+      <div class="toast-section-header">Suggestions</div>
+      <div class="toast-icon-strip" id="toast-icon-presets">
+        <button type="button" class="toast-icon-tile" title="Bell" aria-label="Bell" onclick="setToastIconPreset('bell.fill')"><i class="f7-icons" aria-hidden="true">bell_fill</i></button>
+        <button type="button" class="toast-icon-tile" title="Muted" aria-label="Muted" onclick="setToastIconPreset('bell.slash.fill')"><i class="f7-icons" aria-hidden="true">bell_slash_fill</i></button>
+        <button type="button" class="toast-icon-tile" title="Check" aria-label="Check" onclick="setToastIconPreset('checkmark.circle.fill')"><i class="f7-icons" aria-hidden="true">checkmark_circle_fill</i></button>
+        <button type="button" class="toast-icon-tile" title="Dismiss" aria-label="Dismiss" onclick="setToastIconPreset('xmark.circle.fill')"><i class="f7-icons" aria-hidden="true">xmark_circle_fill</i></button>
+        <button type="button" class="toast-icon-tile" title="Star" aria-label="Star" onclick="setToastIconPreset('star.fill')"><i class="f7-icons" aria-hidden="true">star_fill</i></button>
+        <button type="button" class="toast-icon-tile" title="Volume" aria-label="Volume" onclick="setToastIconPreset('speaker.wave.3.fill')"><i class="f7-icons" aria-hidden="true">speaker_3</i></button>
+        <button type="button" class="toast-icon-tile" title="Camera" aria-label="Camera" onclick="setToastIconPreset('camera.fill')"><i class="f7-icons" aria-hidden="true">camera_fill</i></button>
+      </div>
+
+      <div class="toast-section-header">Preview</div>
+      <div class="dialog-card toast-preview-card">
+        <div class="toast-preview-chip" id="toast-live-preview">
+          <span class="toast-preview-icon"><i class="f7-icons" id="toast-preview-icon">text_bubble</i></span>
+          <div class="toast-preview-text">
+            <span class="toast-preview-title" id="toast-preview-title">Toast Title</span>
+            <span class="toast-preview-subtitle" id="toast-preview-subtitle">Subtitle</span>
           </div>
         </div>
       </div>
     </div>
+
     <div class="dialog-btns">
-      <button onclick="closeToastDialog()" style="color:#ff3b30;">Cancel</button>
-      <button onclick="toastDialogOk()" style="font-weight:600;">Save</button>
+      <button onclick="closeToastDialog()">Cancel</button>
+      <button onclick="toastDialogOk()">Save</button>
     </div>
   </div>
 </div>
+
 
 <!-- ══ BANNERS PANEL (Settings > Banners) ═══════════════════════════════════ -->
 <div class="rc-panel" id="banners-panel">
@@ -2173,7 +2532,7 @@
           <div class="sys-card">
             <div class="sys-row">
               <div class="sys-row-left">
-                <div class="sys-row-icon icon-indigo"><i class="f7-icons">laptopcomputer</i></div>
+                <div class="sys-row-icon icon-indigo"><i class="f7-icons">info_circle</i></div>
                 <span class="sys-row-label">Hostname</span>
               </div>
               <div class="sys-row-right">
@@ -2443,6 +2802,10 @@ let hasLoadedData = false;
 let currentKey = null;
 let dialogCallback = null;
 let editMode = false;
+let g_selectedCategoryId = null; // null = All (mirrors iOS RCCategoryBar selectedIndex -1)
+try {
+  g_selectedCategoryId = localStorage.getItem('rc_selected_category') || null;
+} catch (e) {}
 let cachedApps = [];
 try {
   const saved = localStorage.getItem('rc_cached_apps');
@@ -2478,15 +2841,18 @@ const TRIGGER_SECTIONS = [
   { title: 'Screen Gestures',        id: 'statusbar', keys: ['trigger_statusbar_left_hold','trigger_statusbar_center_hold','trigger_statusbar_right_hold','trigger_statusbar_swipe_left','trigger_statusbar_swipe_right','trigger_statusbar_double_tap'] },
   { title: 'Edge Gestures',          id: 'edge',      keys: ['trigger_edge_left_swipe_up','trigger_edge_left_swipe_down','trigger_edge_right_swipe_up','trigger_edge_right_swipe_down'] },
   { title: 'Bottom Bar Gestures',    id: 'bottombar', keys: ['trigger_bottombar_swipe_left','trigger_bottombar_swipe_right','trigger_bottom_swipe_up_left','trigger_bottom_swipe_up_center','trigger_bottom_swipe_up_right'] },
-  { title: 'Home Button',            id: 'home',      keys: ['trigger_home_double_click','trigger_home_triple_click','trigger_home_quadruple_click','touchid_tap','touchid_hold'] },
+  { title: 'Home Button',            id: 'home',      keys: ['trigger_home_double_click','trigger_home_triple_click','trigger_home_quadruple_click','trigger_home_hold','trigger_home_power','touchid_tap','touchid_hold'] },
   { title: 'Ringer Switch',          id: 'ringer',    keys: ['trigger_ringer_mute','trigger_ringer_unmute','trigger_ringer_toggle'] },
-  { title: 'Device Status',          id: 'status',    keys: [], prefix: 'trigger_device_', prefix2: 'trigger_media_', deletable: true },
+  { title: 'Apple Watch',            id: 'watch',     keys: ['trigger_watch_ping','trigger_watch_ping_hold'] },
+  { title: 'Device State',           id: 'status',    keys: [], prefix: 'trigger_device_', prefix2: 'trigger_media_', deletable: true },
   { title: 'Motion Gestures',        id: 'motion',    keys: ['shake'] },
   { title: 'NFC Tags',               id: 'nfc',       keys: [], dynamic: true, prefix: 'nfc_',        deletable: true },
   { title: 'WiFi Network Triggers',  id: 'wifi',      keys: [], dynamic: true, prefix: 'wifi_',       deletable: true },
   { title: 'Bluetooth Device Triggers', id: 'bt',     keys: [], dynamic: true, prefix: 'bt_',         deletable: true },
-  { title: 'Notification Triggers',  id: 'notif',     keys: [], dynamic: true, prefix: 'notif_',      deletable: true },
+  { title: 'Audio Output Triggers',   id: 'output',  keys: [], dynamic: true, prefix: 'output_',     deletable: true },
+  { title: 'Notification Triggers',  id: 'notif',     keys: [], dynamic: true, prefix: 'notif_', prefix2: 'notify_', deletable: true },
   { title: 'App Launch Triggers',    id: 'app',       keys: [], dynamic: true, prefix: 'app_launch_', deletable: true },
+  { title: 'App Exit Triggers',      id: 'appexit',   keys: [], dynamic: true, prefix: 'app_exit_',   deletable: true },
   { title: 'Scheduled Triggers',     id: 'sched',     keys: [], dynamic: true, prefix: 'sched_',      deletable: true },
   { title: 'MQTT Subscription Triggers', id: 'mqtt', keys: [], dynamic: true, prefix: 'mqtt_sub_', prefix2: 'mqtt_', deletable: true },
 ];
@@ -2502,15 +2868,18 @@ const TRIGGER_NAMES = {
   trigger_statusbar_right_hold:'Status Bar Right Hold', trigger_statusbar_swipe_left:'Status Bar Swipe Left',
   trigger_statusbar_swipe_right:'Status Bar Swipe Right', trigger_statusbar_double_tap:'Status Bar Double Tap',
   trigger_home_double_click:'Home (Double Click)', trigger_home_triple_click:'Home (Triple Click)',
+  trigger_home_hold:'Home (Hold)', trigger_home_power:'Home + Power',
   trigger_home_quadruple_click:'Home (Quadruple Click)',
   touchid_tap:'Touch ID Tap', touchid_hold:'Touch ID Hold (Rest Finger)',
   trigger_edge_left_swipe_up:'Left Edge Swipe Up', trigger_edge_left_swipe_down:'Left Edge Swipe Down',
   trigger_edge_right_swipe_up:'Right Edge Swipe Up', trigger_edge_right_swipe_down:'Right Edge Swipe Down',
   trigger_ringer_mute:'Ringer Muted', trigger_ringer_unmute:'Ringer Unmuted', trigger_ringer_toggle:'Ringer Toggled',
+  trigger_watch_ping:'Ping iPhone', trigger_watch_ping_hold:'Ping iPhone (Hold)',
   trigger_bottombar_swipe_left:'Bottom Bar Swipe Left', trigger_bottombar_swipe_right:'Bottom Bar Swipe Right',
   trigger_bottom_swipe_up_left:'Bottom Swipe Up (Left)', trigger_bottom_swipe_up_center:'Bottom Swipe Up (Center)', trigger_bottom_swipe_up_right:'Bottom Swipe Up (Right)',
   trigger_device_lock: 'Device Locked', trigger_device_unlock: 'Device Unlocked',
   trigger_power_connect: 'Power Connected', trigger_power_disconnect: 'Power Disconnected',
+  trigger_carplay_connect: 'CarPlay Connected', trigger_carplay_disconnect: 'CarPlay Disconnected',
   trigger_media_play: 'Media Playing', trigger_media_pause: 'Media Paused', trigger_media_track_change: 'Media Track Changed',
 };
 
@@ -2535,6 +2904,8 @@ const TRIGGER_ICONS = {
   trigger_statusbar_double_tap:  { icon:'hand_draw',         cls:'icon-gray' },
   trigger_home_double_click:   { icon:'house_fill',      cls:'icon-blue' },
   trigger_home_triple_click:   { icon:'house_fill',      cls:'icon-blue' },
+  trigger_home_hold:           { icon:'house_fill',      cls:'icon-blue' },
+  trigger_home_power:          { icon:'camera_viewfinder', cls:'icon-blue' },
   trigger_home_quadruple_click:{ icon:'house_fill',      cls:'icon-blue' },
   touchid_tap:  { icon:'viewfinder',                     cls:'icon-pink' },
   touchid_hold: { icon:'viewfinder',                     cls:'icon-pink' },
@@ -2550,10 +2921,14 @@ const TRIGGER_ICONS = {
   trigger_ringer_mute:   { icon:'bell_slash_fill', cls:'icon-red' },
   trigger_ringer_unmute: { icon:'bell_fill',       cls:'icon-green' },
   trigger_ringer_toggle: { icon:'bell_badge_fill', cls:'icon-orange' },
+  trigger_watch_ping:      { icon:'dot_radiowaves_left_right', cls:'icon-blue' },
+  trigger_watch_ping_hold: { icon:'dot_radiowaves_left_right', cls:'icon-blue' },
   trigger_device_lock:   { icon:'lock_fill',       cls:'icon-red' },
   trigger_device_unlock: { icon:'lock_open_fill',  cls:'icon-green' },
   trigger_power_connect:    { icon:'bolt_fill',       cls:'icon-green' },
   trigger_power_disconnect: { icon:'bolt_slash_fill', cls:'icon-orange' },
+  trigger_carplay_connect:    { icon:'car_fill',      cls:'icon-green' },
+  trigger_carplay_disconnect: { icon:'car_fill',      cls:'icon-orange' },
   trigger_media_play:   { icon:'play_fill',        cls:'icon-blue' },
   trigger_media_pause:  { icon:'pause_fill',       cls:'icon-orange' },
   trigger_media_track_change: { icon:'forward_fill', cls:'icon-purple' },
@@ -2565,10 +2940,13 @@ function iconForKey(key) {
   if (key.startsWith('wifi_connect_')) return { icon:'wifi', cls:'icon-green' };
   if (key.startsWith('wifi_disconnect_')) return { icon:'wifi_slash', cls:'icon-orange' };
   if (key.startsWith('wifi_'))       return { icon:'wifi',                          cls:'icon-blue' };
+  if (key.startsWith('output_set_')) return { icon:'airplayaudio', cls:'icon-green' };
+  if (key.startsWith('output_')) return { icon:'airplayaudio', cls:'icon-indigo' };
   if (key.startsWith('bt_connect_')) return { icon:'bolt_horizontal_fill', cls:'icon-green' };
   if (key.startsWith('bt_disconnect_')) return { icon:'bolt_horizontal', cls:'icon-orange' };
   if (key.startsWith('bt_'))         return { icon:'bolt_horizontal_fill',          cls:'icon-indigo' };
   if (key.startsWith('app_launch_')) return { icon:'app_badge_fill',                cls:'icon-pink' };
+  if (key.startsWith('app_exit_')) return { icon:'app_badge_fill',                cls:'icon-pink' };
   if (key.startsWith('notif_') || key.startsWith('notify_'))      return { icon:'bell_circle_fill',              cls:'icon-red' };
   if (key.startsWith('sched_'))      return { icon:'clock_fill',                    cls:'icon-orange' };
   if (key.startsWith('mqtt_sub_') || key.startsWith('mqtt_')) return { icon:'antenna_radiowaves_left_right', cls:'icon-blue' };
@@ -2583,10 +2961,13 @@ function nameForKey(key) {
   if (key.startsWith('wifi_connect_')) return `WiFi Connect: ${key.slice(13)}`;
   if (key.startsWith('wifi_disconnect_')) return `WiFi Disconnect: ${key.slice(16)}`;
   if (key.startsWith('wifi_'))       return `WiFi: ${key.slice(5)}`;
+  if (key.startsWith('output_set_')) return `Output Set: ${key.slice(11)}`;
+  if (key.startsWith('output_unset_')) return `Output Unset: ${key.slice(13)}`;
   if (key.startsWith('bt_connect_')) return `BT Connect: ${key.slice(11)}`;
   if (key.startsWith('bt_disconnect_')) return `BT Disconnect: ${key.slice(14)}`;
   if (key.startsWith('bt_'))         return `BT: ${key.slice(3)}`;
   if (key.startsWith('app_launch_')) return `Launch: ${key.slice(11)}`;
+  if (key.startsWith('app_exit_')) return `Exit: ${key.slice(9)}`;
   if (key.startsWith('notif_') || key.startsWith('notify_')) {
     if (key.startsWith('notify_')) return `Notif: ${key.slice(7)}`;
     return `Notif: ${key.slice(6)}`;
@@ -2602,6 +2983,7 @@ const CMD_NAMES = {
   'volume up':'Volume Up','volume down':'Volume Down',
   'queuealbum':'Queue Current Album','queue album':'Queue Current Album','queueartist':'Queue Artist (Shuffle)','queue artist':'Queue Artist (Shuffle)','shuffleall':'Shuffle All Songs','shuffle all songs':'Shuffle All Songs','deletesong':'Delete Currently Playing Song','delete song':'Delete Currently Playing Song','delete current song':'Delete Currently Playing Song',
   'flashlight':'Flashlight Toggle','flashlight on':'Flashlight On','flashlight off':'Flashlight Off','flashlight toggle':'Flashlight Toggle',
+  'button triggers pause 15':'Button Triggers Pause 15 Minutes','button triggers pause 60':'Button Triggers Pause 1 Hour','button triggers pause':'Button Triggers Pause Until Resumed','button triggers resume':'Button Triggers Resume',
   'appearance dark':'Appearance Dark','appearance light':'Appearance Light','appearance toggle':'Appearance Toggle',
   'rotate lock':'Rotate Lock','rotate unlock':'Rotate Unlock','rotate toggle':'Rotate Toggle',
   'location on':'Location Services On','location off':'Location Services Off','location toggle':'Location Services Toggle',
@@ -2621,12 +3003,15 @@ const CMD_NAMES = {
   'camera shutter':'Camera Shutter / Snap','camera snap':'Camera Shutter / Snap',
   'camera record':'Camera Record Toggle','camera record toggle':'Camera Record Toggle',
   'sneakycam photo':'SneakyCam Photo','sneakycam takephoto':'SneakyCam Photo','sneakycam video':'SneakyCam Video','sneakycam startstopvideo':'SneakyCam Video','sneakycam record':'SneakyCam Video',
-  'lock':'Lock Device','unlock':'Unlock Device',
+  'lock':'Lock Device','unlock':'Unlock Device','lock-toggle':'Lock Toggle','lock toggle':'Lock Toggle',
   'dnd on':'Do Not Disturb On','dnd off':'Do Not Disturb Off','dnd toggle':'Do Not Disturb Toggle',
+  'focus off':'Focus Off',
   'audiomix on':'AudioMix On','audiomix off':'AudioMix Off','audiomix toggle':'AudioMix Toggle',
   'audiohandoff enabled on':'AudioHandoff: Automatic Switching','audiohandoff enabled off':'AudioHandoff: Automatic Switching','audiohandoff enabled toggle':'AudioHandoff: Automatic Switching','audiohandoff auto on':'AudioHandoff: Automatic Switching','audiohandoff auto off':'AudioHandoff: Automatic Switching','audiohandoff auto toggle':'AudioHandoff: Automatic Switching',
-  'respring':'Respring','safemode':'Safe Mode','safe-mode':'Safe Mode','siri':'Activate Siri','home':'Home Button','switcher':'App Switcher',
+  'respring':'Respring','safemode':'Safe Mode','safe-mode':'Safe Mode','siri':'Activate Siri','accessibility shortcut':'Accessibility Shortcut','home':'Home Button','switcher':'App Switcher',
   'previous app':'Previous App',
+  'kill current':'Kill Current App', 'kill front':'Kill Current App', 'kill foreground':'Kill Current App',
+  'kill current app':'Kill Current App', 'kill front app':'Kill Current App',
   'open control center':'Control Center',
   'ldrestart':'Soft Reboot','userspace-reboot':'Userspace Reboot','uicache':'Refresh Icon Cache',
   'low power on':'Low Power On','low power off':'Low Power Off','low power toggle':'Low Power Toggle',
@@ -2642,6 +3027,40 @@ const CMD_NAMES = {
   'trigger_bottom_swipe_up_center':'Bottom Swipe Up (Center)',
   'trigger_bottom_swipe_up_right':'Bottom Swipe Up (Right)',
 };
+
+
+// A "shortcut:" action: the name (quoted when it needs to be), then -i (run silently, without the
+// Shortcuts progress on screen), then -p and text input. The same format the tweak reads.
+function parseShortcutAction(cmd) {
+  let args = cmd.replace(/^shortcut:/i, '').trim();
+  if (args.startsWith('-r ')) args = args.slice(3).trim();
+  let name = args, rest = '';
+  if (args.startsWith('"')) {
+    const end = args.indexOf('"', 1);
+    if (end > 0) { name = args.slice(1, end); rest = args.slice(end + 1).trim(); }
+  } else {
+    const p = args.indexOf(' -p ');
+    if (p >= 0) { name = args.slice(0, p); rest = args.slice(p + 1); }
+    if (name.endsWith(' -i')) { name = name.slice(0, -3); rest = ('-i ' + rest).trim(); }
+    name = name.trim();
+  }
+  const silent = rest === '-i' || rest.startsWith('-i ');
+  if (silent) rest = rest.slice(2).trim();
+  let input = null;
+  if (rest.startsWith('-p ')) {
+    input = rest.slice(3).trim();
+    if (input.length >= 2 && input.startsWith('"') && input.endsWith('"')) input = input.slice(1, -1);
+  }
+  return { name, silent, input };
+}
+
+function buildShortcutAction(name, silent, input) {
+  const quote = name.startsWith('"') || name.startsWith('-r ') || name.endsWith(' -i') || name.includes(' -p ');
+  let action = quote ? `shortcut:"${name}"` : `shortcut:${name}`;
+  if (silent) action += ' -i';
+  if (input) action += ` -p ${input}`;
+  return action;
+}
 
 function nameForCmd(cmd) {
   if (!cmd) return 'Unknown';
@@ -2696,15 +3115,27 @@ function nameForCmd(cmd) {
   if (lowCmd.startsWith('root '))         return `[root] ${cmd.slice(5)}`;
   if (lowCmd.startsWith('bt connect '))   return `Connect ${cmd.slice(11)}`;
   if (lowCmd.startsWith('bt disconnect ')) return `Disconnect ${cmd.slice(14)}`;
+  if (lowCmd.startsWith('focus on '))     return `Turn On ${cmd.slice(9)}`;
+  if (lowCmd.startsWith('focus toggle ')) return `Toggle ${cmd.slice(13)}`;
   if (lowCmd.startsWith('airplay connect ')) return `AirPlay Connect ${cmd.slice(16)}`;
+  if (lowCmd.startsWith('unlock '))       return 'Unlock Device (Passcode)';
+  if (lowCmd.startsWith('lock-toggle ') || lowCmd.startsWith('lock toggle ')) return 'Lock Toggle (Passcode)';
+  if (lowCmd === 'lock-toggle' || lowCmd === 'lock toggle') return 'Lock Toggle';
   if (lowCmd.startsWith('set-vol '))      return `Set Volume ${cmd.slice(8)}%`;
   if (lowCmd.startsWith('ringer volume ')) return `Set Ringer Volume ${cmd.slice(14)}%`;
   if (lowCmd.startsWith('brightness '))   return `Set Brightness ${cmd.slice(11)}%`;
-  if (lowCmd.startsWith('shortcut:'))     return `Shortcut: ${cmd.slice(9)}`;
+  if (lowCmd.startsWith('shortcut:')) {
+    const sc = parseShortcutAction(cmd);
+    return `Shortcut: ${sc.name}${sc.silent ? ' (Silent)' : ''}`;
+  }
   if (lowCmd.startsWith('uiopen ')) {
     const bundleId = cmd.slice(7).trim().toLowerCase();
     const app = cachedApps.find(a => (a.bundleId || '').toLowerCase() === bundleId);
     return `Open ${app ? app.name : cmd.slice(7).trim()}`;
+  }
+  if (lowCmd === 'kill current' || lowCmd === 'kill front' || lowCmd === 'kill foreground' ||
+      lowCmd === 'kill current app' || lowCmd === 'kill front app') {
+    return 'Kill Current App';
   }
   if (lowCmd.startsWith('kill ')) {
     const bundleId = cmd.slice(5).trim().toLowerCase();
@@ -2828,16 +3259,17 @@ function iconForCmd(cmd) {
     'volume up':'speaker_3_fill','volume down':'speaker_1_fill',
     'queuealbum':'music_note_list','queue album':'music_note_list','queueartist':'music_mic','queue artist':'music_mic','shuffleall':'shuffle','shuffle all songs':'shuffle','deletesong':'trash','delete song':'trash','delete current song':'trash',
     'flashlight':'bolt_fill','flashlight on':'bolt_fill','flashlight off':'bolt_slash_fill','flashlight toggle':'bolt_fill',
+    'button triggers pause 15':'pause_circle','button triggers pause 60':'pause_circle','button triggers pause':'pause_circle','button triggers resume':'play_circle',
     'appearance dark':'moon_fill','appearance light':'sun_max_fill','appearance toggle':'circle_lefthalf_fill',
     'location on':'location_fill','location off':'location_slash','location toggle':'location_fill',
     'wifi on':'wifi','wifi off':'wifi_slash','wifi toggle':'wifi',
     'bluetooth on':'bolt_horizontal_fill','bluetooth off':'bolt_horizontal','bluetooth toggle':'bolt_horizontal_fill',
     'airplane on':'airplane','airplane off':'airplane','airplane toggle':'airplane',
-    'lock':'lock_fill','unlock':'lock_open_fill',
+    'lock':'lock_fill','unlock':'lock_open_fill','lock-toggle':'lock_fill','lock toggle':'lock_fill',
     'dnd on':'moon_fill','dnd off':'moon','dnd toggle':'moon_circle_fill',
     'audiomix on':'equalizer','audiomix off':'equalizer','audiomix toggle':'equalizer',
     'audiohandoff enabled on':'headphones','audiohandoff enabled off':'headphones','audiohandoff enabled toggle':'headphones','audiohandoff auto on':'headphones','audiohandoff auto off':'headphones','audiohandoff auto toggle':'headphones',
-    'respring':'arrow_2_circlepath','safemode':'shield_slash_fill','safe-mode':'shield_slash_fill','siri':'mic_fill','home':'house_fill',
+    'respring':'arrow_2_circlepath','safemode':'shield_slash_fill','safe-mode':'shield_slash_fill','siri':'mic_fill','accessibility shortcut':'person_crop_circle','home':'house_fill',
     'open control center':'gear',
     'low power on':'battery_25','low power off':'battery_100',
     'autolock toggle':'timer','autolock 30s':'timer','autolock 1m':'timer','autolock 2m':'timer','autolock 3m':'timer','autolock 4m':'timer','autolock 5m':'timer','autolock never':'timer',
@@ -2874,7 +3306,10 @@ function iconForCmd(cmd) {
   if (lowCmd.startsWith('lua:'))          return { icon:'doc_text_fill',         cls:'icon-purple' };
   if (lowCmd.startsWith('delay '))        return { icon:'hourglass',           cls:'icon-orange' };
   if (lowCmd.startsWith('bt connect '))   return { icon:'link',            cls:'icon-indigo' };
+  if (lowCmd.startsWith('focus '))        return { icon:'moon_circle_fill', cls:'icon-indigo' };
   if (lowCmd.startsWith('airplay connect ')) return { icon:'airplayvideo',     cls:'icon-blue' };
+  if (lowCmd.startsWith('unlock '))          return { icon:'lock_open_fill',    cls:'icon-dark' };
+  if (lowCmd.startsWith('lock-toggle ') || lowCmd.startsWith('lock toggle ') || lowCmd === 'lock-toggle' || lowCmd === 'lock toggle') return { icon:'lock_fill', cls:'icon-dark' };
   if (lowCmd.startsWith('set-vol '))      return { icon:'slider_horizontal_3',  cls:'icon-blue' };
   if (lowCmd.startsWith('ringer volume ')) return { icon:'bell_fill',       cls:'icon-blue' };
   if (lowCmd.startsWith('brightness '))   return { icon:'sun_max_fill',    cls:'icon-yellow' };
@@ -2927,11 +3362,13 @@ const ACTION_SECTIONS = [
   { title:'Apps & Navigation', actions:[
     { name:'Open App…',         cmd:'__OPEN_APP__',  icon:'square_grid_2x2_fill', needs_input:true },
     { name:'Kill App…',         cmd:'__KILL_APP__',  icon:'xmark_circle_fill', needs_input:true },
+    { name:'Kill Current App',  cmd:'kill current',  icon:'xmark_circle_fill' },
     { name:'Home Button',       cmd:'home',          icon:'house_fill' },
     { name:'App Switcher',      cmd:'switcher',      icon:'square_stack_3d_up_fill' },
     { name:'Previous App',      cmd:'previous app',  icon:'arrow_uturn_backward' },
     { name:'Control Center',    cmd:'open control center',icon:'gear' },
     { name:'Activate Siri',     cmd:'siri',          icon:'mic_fill' },
+    { name:'Accessibility Shortcut', cmd:'accessibility shortcut', icon:'person_crop_circle' },
   ]},
   { title:'Device Controls', actions:[
     { name:'Appearance',        cmd:'appearance toggle', icon:'circle_lefthalf_fill', is_toggle:true },
@@ -2939,9 +3376,12 @@ const ACTION_SECTIONS = [
     { name:'Flashlight',        cmd:'flashlight toggle', icon:'bolt_fill', is_toggle:true },
     { name:'Flashlight Intensity…', cmd:'__SET_FLASHLIGHT__', icon:'dial_fill', needs_input:true },
     { name:'Rotation Lock',     cmd:'rotate toggle',     icon:'lock_rotation', is_toggle:true },
+    { name:'Button Triggers',   cmd:'button triggers pause 15', icon:'pause_circle', is_toggle:true },
     { name:'Lock Device',       cmd:'lock',          icon:'lock_fill' },
     { name:'Unlock Device',     cmd:'unlock',        icon:'lock_open_fill' },
+    { name:'Lock Toggle',       cmd:'lock-toggle',   icon:'lock_fill', is_toggle:true },
     { name:'Do Not Disturb',    cmd:'dnd toggle',    icon:'moon_circle_fill', is_toggle:true },
+    { name:'Set Focus…',        cmd:'__FOCUS__',     icon:'moon_circle_fill', needs_input:true },
     { name:'Low Power Mode',    cmd:'low power toggle',icon:'battery_25', is_toggle:true },
     { name:'Auto-Lock',         cmd:'autolock toggle', icon:'timer', is_toggle:true },
   ]},
@@ -2987,34 +3427,37 @@ const ACTION_SECTIONS = [
 ];
 
 const CONDITION_DEFS = [
-  { key:'time_between', title:'Time of Day (Between)', customTime:true },
-  { key:'day_of_week', title:'Day of the Week', values:[{value:'WEEKDAYS',title:'Weekdays'},{value:'WEEKENDS',title:'Weekends'},{value:'MON',title:'Monday'},{value:'TUE',title:'Tuesday'},{value:'WED',title:'Wednesday'},{value:'THU',title:'Thursday'},{value:'FRI',title:'Friday'},{value:'SAT',title:'Saturday'},{value:'SUN',title:'Sunday'}] },
-  { key:'lock',       title:'Lock Status',  values:[{value:'LOCKED',title:'Locked'},{value:'UNLOCKED',title:'Unlocked'}] },
-  { key:'autolock',   title:'Auto-Lock',    values:[{value:'30S',title:'30 Seconds'},{value:'1M',title:'1 Minute'},{value:'2M',title:'2 Minutes'},{value:'3M',title:'3 Minutes'},{value:'4M',title:'4 Minutes'},{value:'5M',title:'5 Minutes'},{value:'NEVER',title:'Never'}] },
-  { key:'player',     title:'Player',       values:[{value:'PLAYING',title:'Playing'},{value:'PAUSED',title:'Paused'},{value:'STOPPED',title:'Stopped'}] },
-  { key:'wifi',       title:'Wi-Fi',        values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
-  { key:'bluetooth',  title:'Bluetooth',    values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
-  { key:'location',   title:'Location Services', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
-  { key:'airplane',   title:'Airplane Mode',values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
-  { key:'silent_vibration', title:'Silent Vibration', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
-  { key:'ring_vibration',   title:'Ring Vibration',   values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
-  { key:'haptics',    title:'Haptics', values:[{value:'ALWAYS',title:'Always Play'},{value:'SILENT_ONLY',title:'Play in Silent Mode'},{value:'RING_ONLY',title:"Don't Play in Silent Mode"},{value:'NEVER',title:'Never Play'}] },
-  { key:'orientation',title:'Orientation',  values:[{value:'PORTRAIT',title:'Portrait'},{value:'LANDSCAPE',title:'Landscape'}] },
-  { key:'wifi_network', title:'Wi-Fi Network is', values:null, freeText:true },
-  { key:'bt_device', title:'Bluetooth Device Connected', values:null, freeText:true },
-  { key:'cellular',   title:'Cellular Data', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
-  { key:'dnd',        title:'Do Not Disturb', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
-  { key:'lpm',        title:'Low Power Mode', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
-  { key:'ringer',     title:'Ringer Switch', values:[{value:'SILENT',title:'Silent'},{value:'RING',title:'Ring'}] },
-  { key:'rotation_lock', title:'Rotation Lock', values:[{value:'LOCKED',title:'Locked'},{value:'UNLOCKED',title:'Unlocked'}] },
-  { key:'appearance', title:'Appearance', values:[{value:'DARK',title:'Dark'},{value:'LIGHT',title:'Light'}] },
-  { key:'flashlight', title:'Flashlight', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
-  { key:'screenrecord', title:'Screen Recording', values:[{value:'ACTIVE',title:'Recording'},{value:'INACTIVE',title:'Not Recording'}] },
-  { key:'charging',   title:'Charging', values:[{value:'CHARGING',title:'Charging'},{value:'NOT_CHARGING',title:'Not Charging'}] },
-  { key:'battery',    title:'Battery Level', threshold:true },
-  { key:'volume',     title:'Volume Level', threshold:true },
-  { key:'screen',     title:'Screen', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
-  { key:'front_app',   title:'Front App is', values:null, freeText:true },
+  { key:'time_between', title:'Time of Day (Between)', icon:'clock_fill', section:'Time', customTime:true },
+  { key:'day_of_week', title:'Day of the Week', icon:'calendar', section:'Time', values:[{value:'WEEKDAYS',title:'Weekdays'},{value:'WEEKENDS',title:'Weekends'},{value:'MON',title:'Monday'},{value:'TUE',title:'Tuesday'},{value:'WED',title:'Wednesday'},{value:'THU',title:'Thursday'},{value:'FRI',title:'Friday'},{value:'SAT',title:'Saturday'},{value:'SUN',title:'Sunday'}] },
+  { key:'lock',       title:'Lock Status',  icon:'lock_fill', section:'Device', values:[{value:'LOCKED',title:'Locked'},{value:'UNLOCKED',title:'Unlocked'}] },
+  { key:'autolock',   title:'Auto-Lock',    icon:'timer', section:'Device', values:[{value:'30S',title:'30 Seconds'},{value:'1M',title:'1 Minute'},{value:'2M',title:'2 Minutes'},{value:'3M',title:'3 Minutes'},{value:'4M',title:'4 Minutes'},{value:'5M',title:'5 Minutes'},{value:'NEVER',title:'Never'}] },
+  { key:'orientation',title:'Orientation',  icon:'rotate_right', section:'Device', values:[{value:'PORTRAIT',title:'Portrait'},{value:'LANDSCAPE',title:'Landscape'}] },
+  { key:'rotation_lock', title:'Rotation Lock', icon:'lock_rotation', section:'Device', values:[{value:'LOCKED',title:'Locked'},{value:'UNLOCKED',title:'Unlocked'}] },
+  { key:'appearance', title:'Appearance', icon:'circle_lefthalf_fill', section:'Device', values:[{value:'DARK',title:'Dark'},{value:'LIGHT',title:'Light'}] },
+  { key:'flashlight', title:'Flashlight', icon:'flashlight_on_fill', section:'Device', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
+  { key:'screenrecord', title:'Screen Recording', icon:'record_circle_fill', section:'Device', values:[{value:'ACTIVE',title:'Recording'},{value:'INACTIVE',title:'Not Recording'}] },
+  { key:'front_app',   title:'Front Application', icon:'square_grid_2x2_fill', section:'Device' },
+  { key:'proximity', title:'Proximity Sensor', icon:'ear', section:'Device', values:[{value:'NEAR',title:'Near'},{value:'FAR',title:'Far'}] },
+  { key:'screen',     title:'Screen', icon:'iphone', section:'Device', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
+  { key:'lpm',        title:'Low Power Mode', icon:'battery_25', section:'Power', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
+  { key:'charging',   title:'Charging', icon:'bolt_fill', section:'Power', values:[{value:'CHARGING',title:'Charging'},{value:'NOT_CHARGING',title:'Not Charging'}] },
+  { key:'battery',    title:'Battery Level', icon:'battery_100', section:'Power', threshold:true },
+  { key:'player',     title:'Player Status',       icon:'play_fill', section:'Sound', values:[{value:'PLAYING',title:'Playing'},{value:'PAUSED',title:'Paused'},{value:'STOPPED',title:'Stopped'}] },
+  { key:'dnd',        title:'Do Not Disturb', icon:'moon_fill', section:'Sound', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
+  { key:'focus',      title:'Focus', icon:'moon_circle_fill', section:'Sound' },
+  { key:'ringer',     title:'Ringer Switch', icon:'bell_fill', section:'Sound', values:[{value:'SILENT',title:'Silent'},{value:'RING',title:'Ring'}] },
+  { key:'silent_vibration', title:'Silent Vibration', icon:'bell_slash', section:'Sound', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
+  { key:'ring_vibration',   title:'Ring Vibration',   icon:'bell', section:'Sound', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
+  { key:'haptics',    title:'Haptics', icon:'waveform_path_ecg', section:'Sound', values:[{value:'ALWAYS',title:'Always Play'},{value:'SILENT_ONLY',title:'Play in Silent Mode'},{value:'RING_ONLY',title:"Don't Play in Silent Mode"},{value:'NEVER',title:'Never Play'}] },
+  { key:'volume',     title:'Volume Level', icon:'speaker_wave_2_fill', section:'Sound', threshold:true },
+  { key:'wifi',       title:'Wi-Fi',        icon:'wifi', section:'Connectivity', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
+  { key:'wifi_network', title:'Wi-Fi Network', icon:'wifi', section:'Connectivity', freeText:true, hint:'Network name:' },
+  { key:'bluetooth',  title:'Bluetooth',    icon:'bolt_horizontal_fill', section:'Connectivity', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
+  { key:'bt_device', title:'Bluetooth Device Connected', icon:'headphones', section:'Connectivity', freeText:true, hint:'Device name:' },
+  { key:'carplay',    title:'CarPlay', icon:'car_fill', section:'Connectivity', values:[{value:'CONNECTED',title:'Connected'},{value:'NOT_CONNECTED',title:'Not Connected'}] },
+  { key:'cellular',   title:'Cellular Data', icon:'antenna_radiowaves_left_right', section:'Connectivity', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
+  { key:'location',   title:'Location Services', icon:'location_fill', section:'Connectivity', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
+  { key:'airplane',   title:'Airplane Mode', icon:'airplane', section:'Connectivity', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
 ];
 
 let serverCapabilities = { snapper: false, sneakycam: false, audiostream: false, audiohandoff: false };
@@ -3141,27 +3584,85 @@ function triggerData(key) {
   return config.triggers[key];
 }
 
+// ── Category filter pills (mirrors iOS RCCategoryBar + selectedCategoryTitle) ──
+function shortChipTitle(title) {
+  return title.endsWith(' Triggers') ? title.slice(0, -9) : title;
+}
+
+function sectionMatches(sec, key) {
+  if (sec.prefix && key.startsWith(sec.prefix)) return true;
+  if (sec.prefix2 && key.startsWith(sec.prefix2)) return true;
+  return false;
+}
+
+// Sections that currently have something to show (same visibility rules as iOS)
+function computeVisibleSections() {
+  const allKeys = Object.keys(config.triggers);
+  const favs = config.favoriteTriggers || [];
+  const out = [];
+  TRIGGER_SECTIONS.forEach(sec => {
+    let keys;
+    if (sec.id === 'status') {
+      keys = allKeys.filter(k => ['trigger_device_','trigger_media_','trigger_power_','trigger_carplay_'].some(p => k.startsWith(p)));
+    } else if (sec.id === 'favorites') {
+      keys = favs.filter(k => config.triggers[k]);
+    } else if (sec.dynamic) {
+      keys = allKeys.filter(k => sectionMatches(sec, k));
+    } else {
+      keys = (sec.keys || []).slice();
+    }
+    if (sec.id !== 'favorites') keys = keys.filter(k => !favs.includes(k));
+    if (sec.dynamic && keys.length === 0) return;
+    if (sec.id === 'home' && typeof serverCapabilities !== 'undefined' && serverCapabilities.home_button === false) return;
+    if (sec.id === 'favorites' && keys.length === 0) return;
+    out.push({ sec, keys });
+  });
+  return out;
+}
+
+function renderCategoryBar(visible) {
+  const bar = document.getElementById('category-bar');
+  if (!bar) return;
+  // A selected section that went away (e.g. last NFC tag deleted) falls back to All
+  if (g_selectedCategoryId && !visible.some(v => v.sec.id === g_selectedCategoryId)) {
+    g_selectedCategoryId = null;
+    try { localStorage.removeItem('rc_selected_category'); } catch (e) {}
+  }
+  bar.innerHTML = '';
+  const mkChip = (label, id) => {
+    const btn = document.createElement('button');
+    btn.className = 'cat-chip' + ((id === g_selectedCategoryId) ? ' active' : '');
+    btn.textContent = label;
+    btn.addEventListener('click', () => selectCategory(id, btn));
+    bar.appendChild(btn);
+    return btn;
+  };
+  mkChip('All', null);
+  visible.forEach(v => mkChip(shortChipTitle(v.sec.title), v.sec.id));
+  const active = bar.querySelector('.cat-chip.active');
+  if (active) active.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
+}
+
+function selectCategory(id, btnEl) {
+  g_selectedCategoryId = id;
+  try {
+    if (id) localStorage.setItem('rc_selected_category', id);
+    else localStorage.removeItem('rc_selected_category');
+  } catch (e) {}
+  renderAll();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
 // ── Render main list ──────────────────────────────────────────────────────────
 function renderAll() {
   const root = document.getElementById('triggers-root');
   root.innerHTML = '';
 
-  const allKeys = Object.keys(config.triggers);
-  TRIGGER_SECTIONS.forEach(sec => {
-    if (sec.id === 'status') {
-      sec.keys = allKeys.filter(k => k.startsWith('trigger_device_') || k.startsWith('trigger_media_'));
-    } else if (sec.dynamic) {
-      sec.keys = allKeys.filter(k => k.startsWith(sec.prefix));
-    }
-    if (sec.id === 'favorites') sec.keys = (config.favoriteTriggers || []).filter(k => config.triggers[k]);
-  });
+  const visible = computeVisibleSections();
+  renderCategoryBar(visible);
 
-  TRIGGER_SECTIONS.forEach(sec => {
-    const favs = config.favoriteTriggers || [];
-    let keys = sec.keys;
-    if (sec.id !== 'favorites') keys = keys.filter(k => !favs.includes(k));
-    if (sec.dynamic && keys.length === 0) return;
-    if (sec.id === 'favorites' && keys.length === 0) return;
+  visible.forEach(({ sec, keys }) => {
+    if (g_selectedCategoryId && sec.id !== g_selectedCategoryId) return;
 
     // Section header
     const hdr = document.createElement('div');
@@ -3485,7 +3986,7 @@ function openActionsPanel(key) {
   const isNotif = key.startsWith('notif_') || key.startsWith('notify_');
   const isWiFi = key.startsWith('wifi_');
   const isBT = key.startsWith('bt_');
-  const isApp = key.startsWith('app_launch_');
+  const isApp = key.startsWith('app_launch_') || key.startsWith('app_exit_');
   
   if (isSched || isNotif || isWiFi || isBT || isApp) {
     editBtn.style.display = 'flex';
@@ -3503,7 +4004,7 @@ function onEditTriggerSettings() {
   const isNotif = currentKey.startsWith('notif_') || currentKey.startsWith('notify_');
   const isWiFi = currentKey.startsWith('wifi_');
   const isBT = currentKey.startsWith('bt_');
-  const isApp = currentKey.startsWith('app_launch_');
+  const isApp = currentKey.startsWith('app_launch_') || currentKey.startsWith('app_exit_');
   
   if (isSched) promptSchedTrigger(currentKey);
   else if (isNotif) promptNotifTrigger(currentKey);
@@ -3514,13 +4015,19 @@ function onEditTriggerSettings() {
 function promptAppEdit(key) {
   const data = config.triggers[key];
   if (!data) return;
-  const bid = key.replace('app_launch_', '');
-  showDialog('Edit App Trigger', `Bundle ID: ${bid}\n\nDisplay Name:`, data.name, 'Save', val => {
-    if (!val) return;
-    data.name = val;
-    saveConfig(); renderAll();
-    openActionsPanel(key);
-  });
+  const bid = key.replace(/^app_(launch|exit)_/, '');
+  const kind = key.startsWith('app_exit_') ? 'exit' : 'launch';
+  showSheet('Edit App Trigger', [
+    { label: 'Apps', action: () => promptAppLaunchPicker(null, kind, (data.apps && data.apps.length) ? data.apps : [bid], key) },
+    { label: 'Name', action: () => {
+      showDialog('Edit App Trigger', 'Display Name:', data.name, 'Save', val => {
+        if (!val) return;
+        data.name = val;
+        saveConfig(); renderAll();
+        openActionsPanel(key);
+      });
+    } },
+  ]);
 }
 
 function closeActionsPanel() {
@@ -3789,6 +4296,7 @@ function parseToggleCmd(cmd) {
     { key:'bluetooth', name:'Bluetooth', icon:'bolt_horizontal_fill', prefixes:['bluetooth ','bt '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'] },
     { key:'location', name:'Location Services', icon:'location_fill', prefixes:['location ','locationservices ','location services ','gps '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'] },
     { key:'flashlight', name:'Flashlight', icon:'bolt_fill', prefixes:['flashlight ','flash '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'] },
+    { key:'buttontriggers', name:'Button Triggers', icon:'pause_circle', prefixes:['button triggers '], suffixes:['pause 15','pause 60','pause','resume'], displaySuffixes:['Pause 15 Minutes','Pause 1 Hour','Pause Until Resumed','Resume'] },
     { key:'appearance', name:'Appearance', icon:'circle_lefthalf_fill', prefixes:['appearance '], suffixes:['dark','light','toggle'], displaySuffixes:['Dark','Light','Toggle'] },
     { key:'audiomix', name:'AudioMix', icon:'equalizer', prefixes:['audiomix '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'], exactMatches: { 'audiomix':'toggle' } },
     { key:'audiohandoff_enabled', name:'AudioHandoff: Automatic Switching', icon:'headphones', prefixes:['audiohandoff enabled ','audiohandoff auto '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'], exactMatches: { 'audiohandoff enabled':'toggle','audiohandoff auto':'toggle' } },
@@ -4159,32 +4667,59 @@ let g_currentWebUIUrl = '';
 
 function copyWebUIUrl() {
   if (!g_currentWebUIUrl) return;
-  navigator.clipboard.writeText(g_currentWebUIUrl).then(() => {
-    showToast('Web UI URL copied to clipboard');
-  }).catch(() => {
-    showToast(g_currentWebUIUrl);
-  });
+  const done = () => showToast('Web UI URL copied to clipboard');
+  const fallback = () => {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = g_currentWebUIUrl;
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      ta.style.top = '-9999px';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      if (document.execCommand('copy')) done();
+      else showToast(g_currentWebUIUrl);
+      document.body.removeChild(ta);
+    } catch (e) {
+      showToast(g_currentWebUIUrl);
+    }
+  };
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(g_currentWebUIUrl).then(done).catch(fallback);
+  } else {
+    fallback();
+  }
 }
 
 function triggerRespringAction() {
   showConfirm('Restart SpringBoard?', 'Are you sure you want to respring your iOS device?', () => {
-    fetch('/api/command?cmd=respring').then(() => {
+    fetch('/api/command?cmd=respring').then(r => {
+      if (!r.ok) throw new Error('respring ' + r.status);
       showToast('Respringing SpringBoard…');
+    }).catch(() => {
+      showToast('Failed to respring');
     });
   });
 }
 
 function triggerSafeModeAction() {
   showConfirm('Enter Safe Mode?', 'Are you sure you want to put your iOS device into Safe Mode (restart SpringBoard with tweaks disabled)?', () => {
-    fetch('/api/command?cmd=safemode').then(() => {
+    fetch('/api/command?cmd=safemode').then(r => {
+      if (!r.ok) throw new Error('safemode ' + r.status);
       showToast('Entering Safe Mode…');
+    }).catch(() => {
+      showToast('Failed to enter Safe Mode');
     });
   });
 }
 
 function clearTweakLogFile() {
   showConfirm('Clear Log File?', 'Truncate /tmp/remotecommand.log on disk?', () => {
-    fetch('/api/sysaction/clearlog').then(r => r.json()).then(() => {
+    fetch('/api/sysaction/clearlog').then(r => {
+      if (!r.ok) throw new Error('clearlog ' + r.status);
+      return r.json();
+    }).then(() => {
       showToast('🧹 Tweak log file cleared');
       fetchSysInfo();
     }).catch(() => {
@@ -4194,7 +4729,11 @@ function clearTweakLogFile() {
 }
 
 function triggerActionApi(actionName, successMsg) {
-  fetch(`/api/sysaction/${actionName}`).then(r => r.json()).then(data => {
+  fetch(`/api/sysaction/${actionName}`).then(r => {
+    if (!r.ok) throw new Error(actionName + ' ' + r.status);
+    return r.json();
+  }).then(data => {
+    if (data && data.ok === false) throw new Error(actionName + ' rejected');
     showToast(successMsg || 'Action executed successfully');
   }).catch(() => {
     showToast('Failed to execute action');
@@ -4553,13 +5092,7 @@ function editAction(idx) {
   if (typeof act === 'object') {
     const type = (act.type||'').toLowerCase();
     if (type === 'if' || type === 'else_if') {
-      const condKey = act.conditionKey || act.conditionName;
-      if (condKey === 'time_between' || (act.conditionTitle||'').toLowerCase().includes('time')) {
-        const def = CONDITION_DEFS.find(d => d.key === 'time_between') || { key: 'time_between', title: 'Time of Day (Between)', customTime: true };
-        showTimeConditionDialog(def, idx);
-      } else {
-        promptIfCondition(idx);
-      }
+      openCondPicker(idx);
     }
     else if (type === 'repeat') {
       showDialog('Edit Repeat Count', 'Times to loop:', String(act.count||1), 'Save', val => {
@@ -4581,9 +5114,10 @@ function editAction(idx) {
     } else if (low.startsWith('exec ') || low.startsWith('root ')) {
       promptTerminalModal(act, idx);
     } else if (low.startsWith('shortcut:')) {
-      showDialog('Edit Shortcut', 'Name:', act.slice(9), 'Save', val => {
+      const sc = parseShortcutAction(act);
+      showDialog('Edit Shortcut', 'Name:', sc.name, 'Save', val => {
         if (!val) return;
-        actions[idx] = `shortcut:${val}`;
+        actions[idx] = buildShortcutAction(val, sc.silent, sc.input); // keeps -i and -p
         saveConfig(); renderActionList();
       });
     } else if (low.startsWith('uiopen ')) {
@@ -4592,6 +5126,9 @@ function editAction(idx) {
         actions[idx] = `uiopen ${val}`;
         saveConfig(); renderActionList();
       });
+    } else if (low === 'kill current' || low === 'kill front' || low === 'kill foreground' ||
+               low === 'kill current app' || low === 'kill front app') {
+      return; // Kill Current App targets the focused app at run time: nothing to edit
     } else if (low.startsWith('kill ')) {
       showDialog('Edit Kill App', 'Bundle ID:', act.slice(5), 'Save', val => {
         if (!val) return;
@@ -4622,6 +5159,20 @@ function editAction(idx) {
         actions[idx] = `brightness ${val}`;
         saveConfig(); renderActionList();
       }, true);
+    } else if (low === 'unlock' || low.startsWith('unlock ')) {
+      const currentPin = low.startsWith('unlock ') ? act.slice(7).trim() : '';
+      promptUnlockDialog(currentPin, val => {
+        actions[idx] = val;
+        saveConfig();
+        renderActionList();
+      });
+    } else if (low === 'lock-toggle' || low === 'lock toggle' || low.startsWith('lock-toggle ') || low.startsWith('lock toggle ')) {
+      const currentPin = (low.startsWith('lock-toggle ') || low.startsWith('lock toggle ')) ? act.slice(12).trim() : '';
+      promptLockToggleDialog(currentPin, val => {
+        actions[idx] = val;
+        saveConfig();
+        renderActionList();
+      });
     } else if (low.startsWith('km ') || low === 'km') {
       editKMAction(idx);
     }
@@ -4735,8 +5286,38 @@ function removeKMParameter(idx) {
 }
 
 // ── Action picker dialog ───────────────────────────────────────────────────────
+let g_pickerCategory = null; // null = All (mirrors iOS RCActionPickerViewController selectedCategory)
+
+function renderPickerCategoryBar() {
+  const bar = document.getElementById('picker-category-bar');
+  if (!bar) return;
+  bar.innerHTML = '';
+  const mkChip = (label, title) => {
+    const btn = document.createElement('button');
+    btn.className = 'cat-chip' + ((title === g_pickerCategory) ? ' active' : '');
+    btn.textContent = label;
+    btn.addEventListener('click', () => selectPickerCategory(title, btn));
+    bar.appendChild(btn);
+  };
+  mkChip('All', null);
+  ACTION_SECTIONS.forEach(sec => mkChip(sec.title, sec.title));
+}
+
+function selectPickerCategory(title, btnEl) {
+  g_pickerCategory = title;
+  document.querySelectorAll('#picker-category-bar .cat-chip').forEach(el => {
+    el.classList.toggle('active', el === btnEl);
+  });
+  renderPickerSections();
+  const list = document.getElementById('picker-content');
+  if (list) list.scrollTop = 0;
+  if (btnEl && btnEl.scrollIntoView) btnEl.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
+}
+
 function showActionPickerPanel() {
   document.getElementById('action-search').value = '';
+  g_pickerCategory = null; // fresh open starts at All, like a new iOS picker VC
+  renderPickerCategoryBar();
   renderPickerSections();
   document.getElementById('picker-dialog-backdrop').classList.add('visible');
   setTimeout(() => document.getElementById('action-search').focus(), 100);
@@ -4771,7 +5352,11 @@ function renderPickerSections() {
   const container = document.getElementById('picker-content');
   container.innerHTML = '';
 
-  ACTION_SECTIONS.forEach(sec => {
+  const sections = g_pickerCategory
+    ? ACTION_SECTIONS.filter(sec => sec.title === g_pickerCategory)
+    : ACTION_SECTIONS;
+
+  sections.forEach(sec => {
     const actions = sec.actions.filter(a => pickerActionAvailable(sec, a));
     const filtered = query
       ? actions.filter(a => a.name.toLowerCase().includes(query) || (a.cmd && a.cmd.toLowerCase().includes(query)))
@@ -4784,12 +5369,13 @@ function renderPickerSections() {
     container.appendChild(hdr);
 
     const card = document.createElement('div');
-    card.className = 'list-card';
+    card.className = 'dialog-card';
+    container.appendChild(card);
     filtered.forEach(act => {
       const row = document.createElement('div');
       row.className = 'picker-row';
       row.innerHTML = `
-        <div class="picker-row-icon icon-dark">
+        <div class="dialog-row-icon">
           <i class="f7-icons">${act.icon}</i>
         </div>
         <div class="picker-row-text">${escHtml(act.name)}</div>
@@ -4798,7 +5384,6 @@ function renderPickerSections() {
       row.onclick = () => selectPickerAction(act);
       card.appendChild(row);
     });
-    container.appendChild(card);
   });
 }
 
@@ -4818,9 +5403,7 @@ function selectPickerAction(act) {
       if (val) addActionToCurrent(`delay ${val}`);
     }, true);
   } else if (c === '__TOAST__') {
-    showDialog('Add HUD Toast', 'Message text:', '', 'Add', val => {
-      if (val) addActionToCurrent(`toast ${val}`);
-    });
+    promptToastModal('', null);
   } else if (c === '__CUSTOM__') {
     showDialog('Terminal Command', 'Shell command to execute:', '', 'Add', val => {
       if (val) addActionToCurrent(`exec ${val}`);
@@ -4845,6 +5428,16 @@ function selectPickerAction(act) {
     showDialog('Connect Bluetooth', 'Device name or MAC address:', '', 'Add', val => {
       if (val) addActionToCurrent(`bt connect ${val}`);
     });
+  } else if (c === '__FOCUS__') {
+    showDialog('Set Focus', 'Focus name, or Off:', '', 'Next', val => {
+      const name = (val || '').trim();
+      if (!name) return;
+      if (name.toLowerCase() === 'off') { addActionToCurrent('focus off'); return; }
+      showSheet(name, [
+        { label: 'Turn On', action() { addActionToCurrent(`focus on ${name}`); } },
+        { label: 'Toggle', action() { addActionToCurrent(`focus toggle ${name}`); } },
+      ]);
+    });
   } else if (c === '__BT_DISCONNECT__') {
     showDialog('Disconnect Bluetooth', 'Device name or MAC address:', '', 'Add', val => {
       if (val) addActionToCurrent(`bt disconnect ${val}`);
@@ -4854,7 +5447,7 @@ function selectPickerAction(act) {
       if (val) addActionToCurrent(`airplay connect ${val}`);
     });
   } else if (c === '__IF_CONDITION__') {
-    promptIfCondition();
+    openCondPicker(null);
   } else if (c === '__SET_FLASHLIGHT__') {
     showDialog('Flashlight Intensity', 'Brightness percentage (1-100):', '100', 'Add', val => {
       if (val) addActionToCurrent(`flashlight ${val}`);
@@ -4893,6 +5486,14 @@ function selectPickerAction(act) {
     openKMDialog();
   } else if (c === '__MQTT_PUBLISH__') {
     promptMQTTActionPicker();
+  } else if (c === 'unlock') {
+    promptUnlockDialog('', val => {
+      addActionToCurrent(val);
+    });
+  } else if (c === 'lock-toggle') {
+    promptLockToggleDialog('', val => {
+      addActionToCurrent(val);
+    });
   } else {
     addActionToCurrent(c);
   }
@@ -4992,45 +5593,289 @@ function saveTimeCondDialog() {
   closeTimeCondDialog();
 }
 
-function promptIfCondition(editIdx = null) {
-  const options = CONDITION_DEFS.map(d => ({
-    label: d.title,
-    action() {
-      if (d.customTime) {
-        showTimeConditionDialog(d, editIdx);
-      } else if (d.threshold) {
-        // Above / below a percentage: stored as "ABOVE 50" / "BELOW 20"
-        showSheet(`If ${d.title} is…`, ['Above', 'Below'].map(word => ({
-          label: word,
-          action() {
-            showDialog(`${d.title} ${word.toLowerCase()}`, 'Percentage (0-100):', '50', 'Save', val => {
-              const n = Math.max(0, Math.min(100, parseInt(val, 10) || 0));
-              finishIfCondition(d, `${word.toUpperCase()} ${n}`, `${word.toLowerCase()} ${n}%`, editIdx);
-            });
-          }
-        })));
-      } else if (d.freeText) {
-        showDialog(d.title, 'Enter value:', '', 'Next', val => {
-          if (val) promptIfConditionValue(d, val, editIdx);
-        });
-      } else {
-        promptIfConditionValue(d, null, editIdx);
-      }
-    }
-  }));
-  showSheet('Select Condition Target', options);
+// ── Condition picker (mirrors iOS RCConditionPickerViewController: grouped, ──
+// searchable sections; tapping a condition expands its options inline beneath it)
+const COND_SECTION_ORDER = ['Time', 'Device', 'Power', 'Sound', 'Connectivity', 'Other'];
+const COND_DAY_CODES = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
+const COND_DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+let condPickerEditIdx = null;
+let condPickerExpandedKey = null;
+let condPickerTicked = []; // day codes, Monday first
+let condPickerBtDevices = null;
+let condPickerBtLoading = false;
+
+function condPickerExisting() {
+  if (condPickerEditIdx === null) return null;
+  const actions = triggerData(currentKey).actions || [];
+  const act = actions[condPickerEditIdx];
+  return (act && typeof act === 'object') ? act : null;
 }
 
-function promptIfConditionValue(def, customValue, editIdx) {
-  if (def.values) {
-    const options = def.values.map(v => ({
-      label: v.title,
-      action() { finishIfCondition(def, v.value, v.title, editIdx); }
-    }));
-    showSheet(`If ${def.title} is…`, options);
-  } else {
-    finishIfCondition(def, customValue, customValue, editIdx);
+function condPickerExistingKey() {
+  const ex = condPickerExisting();
+  return ex ? (ex.conditionKey || ex.conditionName || null) : null;
+}
+
+function tickDaysFromCondValue(value) {
+  condPickerTicked = [];
+  let v = String(value || '').toUpperCase();
+  if (v === 'WEEKDAYS') v = 'MON,TUE,WED,THU,FRI';
+  else if (v === 'WEEKENDS') v = 'SAT,SUN';
+  const parts = v.split(',');
+  COND_DAY_CODES.forEach(c => { if (parts.includes(c) && !condPickerTicked.includes(c)) condPickerTicked.push(c); });
+}
+
+// The ticked days as a value + label, same rules as iOS daysValue
+function condDaysValue() {
+  const codes = COND_DAY_CODES.filter(c => condPickerTicked.includes(c));
+  const shorts = codes.map(c => c.charAt(0) + c.slice(1).toLowerCase());
+  let title = shorts.join(', ');
+  const joined = codes.join(',');
+  if (codes.length === 7) title = 'Every Day';
+  else if (joined === 'MON,TUE,WED,THU,FRI') title = 'Weekdays';
+  else if (joined === 'SAT,SUN') title = 'Weekends';
+  return { value: joined, title };
+}
+
+function openCondPicker(editIdx = null) {
+  condPickerEditIdx = editIdx;
+  const exKey = condPickerExistingKey();
+  condPickerExpandedKey = (exKey && CONDITION_DEFS.some(d => d.key === exKey)) ? exKey : null;
+  condPickerTicked = [];
+  if (condPickerExpandedKey === 'day_of_week') {
+    const ex = condPickerExisting();
+    tickDaysFromCondValue(ex ? (ex.expectedValue || ex.expected || '') : '');
   }
+  document.getElementById('cond-picker-search').value = '';
+  condPickerBtDevices = null;
+  condPickerBtLoading = false;
+  renderCondPicker();
+  document.getElementById('cond-picker-dialog-backdrop').classList.add('visible');
+  if (condPickerExpandedKey === 'bt_device') loadCondBtDevices();
+  setTimeout(() => {
+    const el = document.querySelector('#cond-picker-content [data-cond-key="' + condPickerExpandedKey + '"]');
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
+  }, 60);
+}
+
+function closeCondPicker() {
+  document.getElementById('cond-picker-dialog-backdrop').classList.remove('visible');
+}
+
+function _condPickerBackdropClick(e) {
+  if (e.target === document.getElementById('cond-picker-dialog-backdrop')) closeCondPicker();
+}
+
+function loadCondBtDevices() {
+  if (condPickerBtDevices || condPickerBtLoading) return;
+  condPickerBtLoading = true;
+  fetch('/api/bt-devices').then(r => r.json()).then(devices => {
+    condPickerBtDevices = (devices || []).map(d => d.name || d.address).filter(Boolean);
+  }).catch(() => { condPickerBtDevices = []; }).finally(() => {
+    condPickerBtLoading = false;
+    if (condPickerExpandedKey === 'bt_device') renderCondPicker();
+  });
+}
+
+function selectCond(key) {
+  if (condPickerExpandedKey === key) {
+    condPickerExpandedKey = null; // collapse it
+  } else {
+    condPickerExpandedKey = key;
+    if (key === 'day_of_week' && condPickerExistingKey() !== 'day_of_week') condPickerTicked = [];
+    if (key === 'bt_device') loadCondBtDevices();
+  }
+  renderCondPicker();
+  setTimeout(() => {
+    const el = document.querySelector('#cond-picker-content [data-cond-key="' + key + '"]');
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+  }, 30);
+}
+
+function toggleCondDay(code) {
+  const i = condPickerTicked.indexOf(code);
+  if (i >= 0) condPickerTicked.splice(i, 1); else condPickerTicked.push(code);
+  renderCondPicker();
+}
+
+function finishCondDays(def) {
+  if (condPickerTicked.length === 0) return;
+  const v = condDaysValue();
+  const editIdx = condPickerEditIdx;
+  closeCondPicker();
+  finishIfCondition(def, v.value, v.title, editIdx);
+}
+
+function finishCondValue(def, value, title) {
+  const editIdx = condPickerEditIdx;
+  closeCondPicker();
+  finishIfCondition(def, value, title, editIdx);
+}
+
+function promptCondThreshold(def, direction) {
+  const ex = condPickerExisting();
+  let current = '50';
+  if (ex && (ex.conditionKey || ex.conditionName) === def.key) {
+    const raw = String(ex.expectedValue || ex.expected || '');
+    if (raw.toUpperCase().startsWith(direction.toUpperCase())) {
+      const n = raw.slice(direction.length).trim();
+      if (n) current = n;
+    }
+  }
+  const editIdx = condPickerEditIdx;
+  closeCondPicker();
+  showDialog(`${def.title} ${direction.toLowerCase()}`, 'Percentage (0-100):', current, 'Save', val => {
+    const n = Math.max(0, Math.min(100, parseInt(val, 10) || 0));
+    finishIfCondition(def, `${direction.toUpperCase()} ${n}`, `${direction.toLowerCase()} ${n}%`, editIdx);
+  });
+}
+
+function promptCondText(def) {
+  const ex = condPickerExisting();
+  const same = ex && (ex.conditionKey || ex.conditionName) === def.key;
+  const editIdx = condPickerEditIdx;
+  closeCondPicker();
+  showDialog(def.title, def.hint || def.placeholder || 'Enter value:', same ? String(ex.expectedValue || ex.expected || '') : '', 'Next', val => {
+    val = (val || '').trim();
+    if (!val) return;
+    finishIfCondition(def, val, val, editIdx);
+  });
+}
+
+function condOptionRow(text, textCls, rightHtml, onTap) {
+  const row = document.createElement('div');
+  row.className = 'picker-row cond-option-row';
+  row.innerHTML = `<div class="picker-row-text${textCls ? ' ' + textCls : ''}">${escHtml(text)}</div>${rightHtml || ''}`;
+  if (onTap) row.onclick = onTap;
+  else row.style.cursor = 'default';
+  return row;
+}
+
+function condValueRow(d, v, exKey, exValue) {
+  const checked = exKey === d.key && String(v.value).toUpperCase() === String(exValue).toUpperCase();
+  return condOptionRow(v.title, '', checked ? '<i class="f7-icons cond-check">checkmark</i>' : '', () => finishCondValue(d, v.value, v.title));
+}
+
+function condNowSuffix(d, exKey, exTitle) {
+  return (exKey === d.key && exTitle) ? ` (now: ${exTitle})` : '';
+}
+
+function condOptionsFor(d, exKey, exValue, exTitle) {
+  const rows = [];
+  if (d.key === 'day_of_week') {
+    COND_DAY_CODES.forEach((code, i) => {
+      const on = condPickerTicked.includes(code);
+      rows.push(condOptionRow(COND_DAY_NAMES[i], '', on ? '<i class="f7-icons cond-check">checkmark</i>' : '', () => toggleCondDay(code)));
+    });
+    if (condPickerTicked.length > 0) {
+      rows.push(condOptionRow(`Done — ${condDaysValue().title}`, 'blue', '', () => finishCondDays(d)));
+    } else {
+      rows.push(condOptionRow('Tick at least one day', 'dim', '', null));
+    }
+    return rows;
+  }
+  if (d.threshold) {
+    ['Above', 'Below'].forEach(dir => {
+      let label = `${dir}…`;
+      if (exKey === d.key && String(exValue).toUpperCase().startsWith(dir.toUpperCase())) label += ` (now: ${exTitle})`;
+      rows.push(condOptionRow(label, 'blue', '', () => promptCondThreshold(d, dir)));
+    });
+    return rows;
+  }
+  if (d.key === 'bt_device') {
+    if (!condPickerBtDevices) {
+      rows.push(condOptionRow('Loading devices…', 'dim', '', null));
+    } else {
+      condPickerBtDevices.forEach(name => {
+        const checked = exKey === d.key && String(exValue).toUpperCase() === String(name).toUpperCase();
+        rows.push(condOptionRow(name, '', checked ? '<i class="f7-icons cond-check">checkmark</i>' : '', () => finishCondValue(d, name, name)));
+      });
+    }
+    rows.push(condOptionRow(`Other Name…${condNowSuffix(d, exKey, exTitle)}`, 'blue', '', () => promptCondText(d)));
+    return rows;
+  }
+  if (d.key === 'focus') {
+    rows.push(condValueRow(d, { value: 'OFF', title: 'Off' }, exKey, exValue));
+    rows.push(condValueRow(d, { value: 'ON', title: 'Any Focus' }, exKey, exValue));
+    rows.push(condOptionRow('Other Name…', 'blue', '', () => promptCondText({ key: d.key, title: d.title, hint: 'Focus name, Off, or On for any Focus:' })));
+    return rows;
+  }
+  if (d.key === 'time_between') {
+    rows.push(condOptionRow(`Set Time Range…${condNowSuffix(d, exKey, exTitle)}`, 'blue', '', () => {
+      const editIdx = condPickerEditIdx;
+      closeCondPicker();
+      showTimeConditionDialog(d, editIdx);
+    }));
+    return rows;
+  }
+  if (d.key === 'front_app') {
+    rows.push(condOptionRow(`Choose App…${condNowSuffix(d, exKey, exTitle)}`, 'blue', '', () => {
+      promptAppLaunchPicker(bid => {
+        if (!bid) return;
+        const app = (cachedApps || []).find(a => a.bundleId === bid);
+        const editIdx = condPickerEditIdx;
+        closeCondPicker();
+        finishIfCondition(d, bid, (app && app.name) || bid, editIdx);
+      }, 'launch', null, null, 'Choose App');
+    }));
+    return rows;
+  }
+  if (Array.isArray(d.values) && d.values.length) {
+    d.values.forEach(v => rows.push(condValueRow(d, v, exKey, exValue)));
+    return rows;
+  }
+  rows.push(condOptionRow(`Enter Name…${condNowSuffix(d, exKey, exTitle)}`, 'blue', '', () => promptCondText(d)));
+  return rows;
+}
+
+function renderCondPicker() {
+  const q = (document.getElementById('cond-picker-search').value || '').toLowerCase().trim();
+  const container = document.getElementById('cond-picker-content');
+  container.innerHTML = '';
+  const exKey = condPickerExistingKey();
+  const ex = condPickerExisting();
+  const exValue = ex ? String(ex.expectedValue || ex.expected || '') : '';
+  const exTitle = ex ? String(ex.expectedTitle || ex.expectedLabel || ex.expectedValue || '') : '';
+
+  const matches = d => !q || d.title.toLowerCase().includes(q);
+  const groups = [];
+  if (q) {
+    const all = CONDITION_DEFS.filter(matches);
+    if (all.length) groups.push({ title: 'Search Results', defs: all });
+  } else {
+    COND_SECTION_ORDER.forEach(s => {
+      const defs = CONDITION_DEFS.filter(d => (d.section || 'Other') === s);
+      if (defs.length) groups.push({ title: s, defs });
+    });
+  }
+
+  groups.forEach(g => {
+    const hdr = document.createElement('div');
+    hdr.className = 'picker-section-header';
+    hdr.textContent = g.title;
+    container.appendChild(hdr);
+
+    const card = document.createElement('div');
+    card.className = 'dialog-card';
+    container.appendChild(card);
+
+    g.defs.forEach(d => {
+      const row = document.createElement('div');
+      row.className = 'picker-row';
+      row.dataset.condKey = d.key;
+      const expanded = d.key === condPickerExpandedKey;
+      row.innerHTML = `
+        <div class="dialog-row-icon">
+          <i class="f7-icons">${d.icon || 'question_circle'}</i>
+        </div>
+        <div class="picker-row-text">${escHtml(d.title)}</div>
+        <i class="f7-icons picker-row-chevron">${expanded ? 'chevron_up' : 'chevron_down'}</i>
+      `;
+      row.onclick = () => selectCond(d.key);
+      card.appendChild(row);
+      if (expanded) condOptionsFor(d, exKey, exValue, exTitle).forEach(r => card.appendChild(r));
+    });
+  });
 }
 
 function finishIfCondition(def, value, valueTitle, editIdx) {
@@ -5157,6 +6002,8 @@ function openSettings() {
   document.getElementById('setting-webui').checked  = !!config.webUIEnabled;
   document.getElementById('setting-loglevel').value = ['off','minimal','full'].includes(config.logLevel) ? config.logLevel : 'minimal';
   updateBannersCount();
+  updateIntegrationsStatus();
+  populateTimingSelects();
 
   const haToggle = document.getElementById('setting-ha');
   if (haToggle) {
@@ -5199,6 +6046,7 @@ function onHAToggleChange(enabled) {
   saveConfig();
   const wrapper = document.getElementById('ha-credentials-wrapper');
   if (wrapper) wrapper.style.display = enabled ? 'block' : 'none';
+  updateIntegrationsStatus();
   renderPickerSections();
 }
 
@@ -5207,6 +6055,7 @@ function onKMToggleChange(enabled) {
   saveConfig();
   const wrapper = document.getElementById('km-credentials-wrapper');
   if (wrapper) wrapper.style.display = enabled ? 'block' : 'none';
+  updateIntegrationsStatus();
   renderPickerSections();
 }
 
@@ -5215,7 +6064,188 @@ function onMQTTToggleChange(enabled) {
   saveConfig();
   const wrapper = document.getElementById('mqtt-credentials-wrapper');
   if (wrapper) wrapper.style.display = enabled ? 'block' : 'none';
+  updateIntegrationsStatus();
   renderPickerSections();
+}
+
+function updateIntegrationsStatus() {
+  const el = document.getElementById('setting-integrations-status');
+  if (!el) return;
+  const names = [];
+  if (config.haEnabled) names.push('Home Assistant');
+  if (config.kmEnabled) names.push('Keyboard Maestro');
+  if (config.mqttEnabled) names.push('MQTT');
+  el.textContent = names.length ? names.join(' • ') : 'Disabled';
+}
+
+function openAdvancedPanel() {
+  document.getElementById('setting-nfc').checked = !!config.nfcEnabled;
+  document.getElementById('setting-loglevel').value = ['off','minimal','full'].includes(config.logLevel) ? config.logLevel : 'minimal';
+  const freezeEl = document.getElementById('setting-freeze-lists');
+  if (freezeEl) freezeEl.checked = (config.freezeListsDuringGestures == null) ? true : !!config.freezeListsDuringGestures;
+  const wrapEl = document.getElementById('setting-wrap-names');
+  if (wrapEl) wrapEl.checked = isWrapLongNamesEnabled();
+  syncExperimentalNFCUI();
+  updateNFCScreenOffLabel();
+  updateNFCFooter();
+  updateBannersCount();
+  populateTimingSelects();
+  document.getElementById('advanced-panel').classList.add('active');
+}
+
+// ── Advanced > NFC (parity with iOS RCAdvancedSettingsViewController) ────────
+const RC_NFC_SCREENOFF_DEFAULT = 120.0;
+const RC_NFC_SCREENOFF_CHOICES = [
+  { seconds: 0,   name: 'Off' },
+  { seconds: 30,  name: '30 Seconds' },
+  { seconds: 60,  name: '1 Minute' },
+  { seconds: 120, name: '2 Minutes' },
+  { seconds: 300, name: '5 Minutes' },
+  { seconds: 600, name: '10 Minutes' },
+  { seconds: 1800, name: '30 Minutes' }
+];
+
+function nfcScreenOffSeconds() {
+  const v = parseFloat(config.nfcScreenOffSeconds);
+  return isNaN(v) ? RC_NFC_SCREENOFF_DEFAULT : v;
+}
+
+function nfcScreenOffName(seconds) {
+  if (!(seconds > 0)) return 'Off';
+  if (seconds < 60) return seconds + ' s';
+  const mins = Math.round(seconds / 60);
+  return mins === 1 ? '1 min' : mins + ' min';
+}
+
+function updateNFCScreenOffLabel() {
+  const el = document.getElementById('setting-nfc-screenoff');
+  if (el) el.textContent = nfcScreenOffName(nfcScreenOffSeconds());
+}
+
+function updateNFCFooter() {
+  const el = document.getElementById('nfc-footer');
+  if (!el) return;
+  if (config.nfcBackgroundReading) {
+    el.textContent = 'Enabling Experimental NFC gives control of the NFC sensor back to iOS. This is so that express cards, tags, and passes still work as intended. iOS has an internal NFC cooldown of about 3 seconds. For cards and keys to work while the phone is locked, keep NFC With Screen Off set to Off.';
+  } else {
+    el.textContent = 'NFC scanning options.';
+  }
+}
+
+function syncExperimentalNFCUI() {
+  const bgEl = document.getElementById('setting-nfc-bg');
+  if (bgEl) {
+    bgEl.checked = !!config.nfcBackgroundReading;
+    bgEl.disabled = !config.nfcEnabled;
+    bgEl.style.opacity = bgEl.disabled ? '0.4' : '1';
+  }
+}
+
+function onNFCEnabledChange(enabled) {
+  config.nfcEnabled = enabled;
+  saveConfig();
+  syncExperimentalNFCUI();
+}
+
+function onExperimentalNFCChange(enabled) {
+  config.nfcBackgroundReading = enabled;
+  if (enabled && nfcScreenOffSeconds() > 0) {
+    config.nfcScreenOffSeconds = 0;
+    showConfirm('Experimental NFC',
+      'Enabling Experimental NFC gives control of the NFC sensor back to iOS. This is so that express cards, tags, and passes still work as intended. iOS has an internal NFC cooldown of about 3 seconds. For cards and keys to work while the phone is locked, keep NFC With Screen Off set to Off.',
+      null, 'OK');
+  }
+  saveConfig();
+  syncExperimentalNFCUI();
+  updateNFCScreenOffLabel();
+  updateNFCFooter();
+}
+
+function showNFCScreenOffSheet() {
+  const current = nfcScreenOffSeconds();
+  const buttons = RC_NFC_SCREENOFF_CHOICES.map(c => {
+    const isCur = Math.abs(c.seconds - current) < 1.0;
+    const isDef = Math.abs(c.seconds - RC_NFC_SCREENOFF_DEFAULT) < 1.0;
+    return { label: c.name + (isDef ? ' (Default)' : '') + (isCur ? ' ✓' : ''), action: () => applyNFCScreenOff(c.seconds, c.name) };
+  });
+  buttons.push({ label: 'Cancel', action: () => {} });
+  showSheet('NFC With Screen Off', buttons);
+}
+
+function applyNFCScreenOff(seconds, name) {
+  if (seconds <= RC_NFC_SCREENOFF_DEFAULT) {
+    config.nfcScreenOffSeconds = seconds;
+    saveConfig();
+    updateNFCScreenOffLabel();
+    return;
+  }
+  showConfirm('Longer Scan Window',
+    'The NFC reader stays in use while the screen is off. That costs battery (about 3% an hour on an iPhone 8) and warms the phone, and the system may switch the reader off for a few minutes. A longer window only helps when tags are tapped long after the screen goes dark.',
+    () => {
+      config.nfcScreenOffSeconds = seconds;
+      saveConfig();
+      updateNFCScreenOffLabel();
+    }, 'Use ' + name);
+}
+
+// ── Advanced > Options: Wrap Long Names (WebUI-local display pref) ──────────
+function isWrapLongNamesEnabled() {
+  try { return localStorage.getItem('rc_wrap_long_names') === '1'; } catch(e) { return false; }
+}
+
+function applyWrapLongNames() {
+  document.body.classList.toggle('rc-wrap-names', isWrapLongNamesEnabled());
+}
+
+function onWrapLongNamesChange(enabled) {
+  try { localStorage.setItem('rc_wrap_long_names', enabled ? '1' : '0'); } catch(e) {}
+  applyWrapLongNames();
+}
+
+function openIntegrationsPanel() {
+  document.getElementById('integrations-panel').classList.add('active');
+}
+
+function closeIntegrationsPanel() {
+  document.getElementById('integrations-panel').classList.remove('active');
+  updateIntegrationsStatus();
+}
+
+function closeAdvancedPanel() {
+  document.getElementById('advanced-panel').classList.remove('active');
+}
+
+const RC_TIMING_OPTIONS = {
+  'setting-volume-seq': { key: 'volumeSequenceWindow', values: [0.20,0.25,0.30,0.38,0.45,0.55,0.65], def: 0.38 },
+  'setting-power-click': { key: 'powerClickWindow', values: [0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.50,0.60,0.70], def: 0.40 },
+  'setting-home-click': { key: 'homeClickWindow', values: [0.25,0.30,0.35,0.45,0.55,0.65], def: 0.35 },
+  'setting-volume-hold': { key: 'volumeHoldTime', values: [0.20,0.25,0.30,0.35,0.45,0.55,0.70], def: 0.35 },
+  'setting-power-hold': { key: 'powerHoldTime', values: [0.30,0.40,0.50,0.60,0.75], def: 0.50 }
+};
+
+function populateTimingSelects() {
+  Object.keys(RC_TIMING_OPTIONS).forEach(id => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    const opt = RC_TIMING_OPTIONS[id];
+    const current = (config[opt.key] != null) ? parseFloat(config[opt.key]) : opt.def;
+    sel.innerHTML = '';
+    opt.values.forEach(v => {
+      const o = document.createElement('option');
+      o.value = String(v);
+      o.textContent = v.toFixed(2) + ' s' + (Math.abs(v - opt.def) < 0.005 ? ' (Default)' : '');
+      if (Math.abs(v - current) < 0.005) o.selected = true;
+      sel.appendChild(o);
+    });
+    // If current value is custom (not in list), preserve it
+    if (!opt.values.some(v => Math.abs(v - current) < 0.005)) {
+      const o = document.createElement('option');
+      o.value = String(current);
+      o.textContent = current.toFixed(2) + ' s';
+      o.selected = true;
+      sel.appendChild(o);
+    }
+  });
 }
 
 function toggleKMPasswordVisibility() {
@@ -5881,6 +6911,7 @@ const BANNER_PLACEHOLDERS = {
   '__BT_CONNECT__': ['bt connect ', 'bluetooth connect '],
   '__BT_DISCONNECT__': ['bt disconnect ', 'bluetooth disconnect '],
   '__AIRPLAY_CONNECT__': ['airplay connect '],
+  '__FOCUS__': ['focus on ', 'focus toggle ', 'focus off'],
   '__OPEN_APP__': ['uiopen '],
   '__KILL_APP__': ['kill '],
   '__HA_PICKER__': ['ha '],
@@ -6045,7 +7076,25 @@ function handleImportFile(input) {
 }
 
 // ── App Launch Trigger Setup ──────────────────────────────────────────────────
-async function promptAppLaunchPicker(callback) {
+let appPickerKind = 'launch';
+// Creating or editing a trigger ticks one or more apps; an action that needs a single app
+// (a callback) still picks one
+let appPickerMulti = false;
+let appPickerChosen = [];        // bundle ids, in the order ticked
+let appPickerReplacingKey = null;
+async function promptAppLaunchPicker(callback, kind, preselected, replacingKey, titleOverride) {
+  appPickerKind = kind === 'exit' ? 'exit' : 'launch';
+  appPickerMulti = !callback;
+  appPickerChosen = (preselected || []).slice();
+  appPickerReplacingKey = replacingKey || null;
+  document.getElementById('app-launch-dialog-title').textContent = titleOverride || (appPickerKind === 'exit' ? 'App Exit Trigger' : 'App Launch Trigger');
+  document.getElementById('app-launch-dialog-msg').textContent = titleOverride
+    ? 'Pick the app this condition matches.'
+    : (appPickerMulti
+    ? (appPickerKind === 'exit' ? 'Fires when any selected app is switched away from.' : 'Fires when any selected app is opened.')
+    : (appPickerKind === 'exit' ? 'Fires when an app is switched away from.' : 'Fires when an app is opened on the device.'));
+  document.getElementById('app-picker-done').style.display = appPickerMulti ? '' : 'none';
+  document.getElementById('app-picker-done').disabled = appPickerChosen.length === 0;
   const listEl = document.getElementById('app-picker-list');
   const loadingEl = document.getElementById('app-picker-loading');
   document.getElementById('app-picker-search').value = '';
@@ -6094,11 +7143,30 @@ function renderAppPickerItems(apps) {
         <div class="app-picker-name">${escHtml(app.name)}</div>
         <div class="app-picker-bid">${escHtml(app.bundleId)}</div>
       </div>
-      <i class="f7-icons" style="font-size:16px;color:#3a3a3c">chevron_right</i>
+      <i class="f7-icons app-picker-mark" style="font-size:16px;color:#3a3a3c">chevron_right</i>
     `;
+    row.dataset.bundle = app.bundleId;
     row.onclick = () => selectAppFromPicker(app);
     listEl.appendChild(row);
   });
+  markChosenApps();
+}
+
+// Ticked apps show a check mark instead of the arrow
+function markChosenApps() {
+  document.querySelectorAll('#app-picker-list .app-picker-row[data-bundle]').forEach(r => {
+    const mark = r.querySelector('.app-picker-mark');
+    if (!mark) return;
+    if (appPickerMulti) {
+      const on = appPickerChosen.includes(r.dataset.bundle);
+      mark.textContent = on ? 'checkmark_alt' : '';
+      mark.style.color = on ? '#0a84ff' : '#3a3a3c';
+    } else {
+      mark.textContent = 'chevron_right';
+      mark.style.color = '#3a3a3c';
+    }
+  });
+  document.getElementById('app-picker-done').disabled = appPickerMulti && appPickerChosen.length === 0;
 }
 
 function filterAppPickerList() {
@@ -6111,13 +7179,28 @@ function filterAppPickerList() {
 }
 
 function selectAppFromPicker(app) {
+  if (appPickerMulti) {
+    const i = appPickerChosen.indexOf(app.bundleId);
+    if (i >= 0) appPickerChosen.splice(i, 1); else appPickerChosen.push(app.bundleId);
+    markChosenApps();
+    return;
+  }
   closeAppLaunchDialog();
   if (dialogCallback) {
     dialogCallback(app.bundleId);
     dialogCallback = null;
     return;
   }
-  createAppLaunchTrigger(app.name, app.bundleId);
+}
+
+// Done, with one or more apps ticked
+function finishAppPicker() {
+  if (!appPickerMulti || appPickerChosen.length === 0) return;
+  const ids = appPickerChosen.slice();
+  const names = ids.map(id => { const a = cachedApps.find(x => x.bundleId === id); return a ? a.name : id; });
+  const replacing = appPickerReplacingKey;
+  closeAppLaunchDialog();
+  saveAppTrigger(appPickerKind, names, ids, replacing);
 }
 
 function closeAppLaunchDialog() {
@@ -6125,14 +7208,47 @@ function closeAppLaunchDialog() {
   dialogCallback = null;
 }
 
-function createAppLaunchTrigger(name, bundleId) {
-  const key = `app_launch_${bundleId}`;
-  if (!config.triggers[key]) {
-    config.triggers[key] = { enabled: true, actions: [], name: `Launch: ${name}` };
-    saveConfig();
-  }
+// Saves an App Launch / App Exit trigger for these apps. Its key is the first app's; two or
+// more apps are kept in an "apps" list. The actions of the trigger it replaces, or of one that
+// already exists for the first app, are kept.
+function saveAppTrigger(kind, names, ids, replacingKey) {
+  const exit = kind === 'exit';
+  const prefix = exit ? 'app_exit_' : 'app_launch_';
+  const key = prefix + ids[0];
+  const previous = config.triggers[replacingKey || key] || {};
+  const data = {
+    enabled: previous.enabled !== undefined ? previous.enabled : true,
+    actions: previous.actions || [],
+    // The name says which apps: "Launch: Safari, Notes"
+    name: `${exit ? 'Exit' : 'Launch'}: ${names.join(', ')}`
+  };
+  if (ids.length > 1) data.apps = ids;
+  config.triggers[key] = data;
+  if (replacingKey && replacingKey !== key) delete config.triggers[replacingKey];
+  saveConfig();
   renderAll();
   openActionsPanel(key);
+}
+
+// ── Audio Output Trigger Setup ──────────────────────────────────────────────
+function promptAudioOutputTrigger() {
+  showSheet('Audio Output', [
+    { label: 'Set as Output', action: () => promptAudioOutputName('set') },
+    { label: 'Unset as Output', action: () => promptAudioOutputName('unset') },
+  ]);
+}
+function promptAudioOutputName(mode) {
+  showDialog('Audio Output', 'Device name:', '', 'Add', val => {
+    val = (val || '').trim();
+    if (!val) return;
+    const key = `output_${mode}_${val}`;
+    if (!config.triggers[key]) {
+      config.triggers[key] = { enabled: true, actions: [], name: `Output ${mode === 'set' ? 'Set' : 'Unset'}: ${val}` };
+      saveConfig();
+    }
+    renderAll();
+    openActionsPanel(key);
+  });
 }
 
 // ── Add Trigger Sheet System ──────────────────────────────────────────────────
@@ -6140,8 +7256,10 @@ function showAddTriggerSheet() {
   showSheet('Add New Trigger', [
     { label: 'WiFi Network Trigger', action: () => promptComplexTrigger('wifi') },
     { label: 'Bluetooth Device Trigger', action: () => promptComplexTrigger('bt') },
+    { label: 'Audio Output Trigger', action: () => promptAudioOutputTrigger() },
     { label: 'Notification Trigger', action: () => promptNotifTrigger() },
     { label: 'App Launch Trigger', action: () => promptAppLaunchPicker() },
+    { label: 'App Exit Trigger', action: () => promptAppLaunchPicker(null, 'exit') },
     { label: 'Scheduled Trigger', action: () => promptSchedTrigger() },
     { label: 'MQTT Topic Trigger', action: () => promptMqttTrigger() },
     { label: 'NFC Tag Trigger', action: () => promptNfcTrigger() },
@@ -6462,12 +7580,29 @@ function closeSheet() {
 }
 
 // ── Generic Dialog System ──────────────────────────────────────────────────────
-function showDialog(title, msg, defaultVal, okLabel, callback, isNumber = false, showRecordBtn = false) {
+// Confirm dialog without a text field. Reuses #dialog-backdrop; Cancel dismisses,
+// OK runs onOk. Restores the input row next time showDialog is used.
+function showConfirm(title, msg, onOk, okLabel) {
+  document.getElementById('dialog-title').textContent = title;
+  document.getElementById('dialog-msg').textContent = msg;
+  document.getElementById('dialog-input').style.display = 'none';
+  document.getElementById('dialog-autocomplete').style.display = 'none';
+  document.getElementById('dialog-record').style.display = 'none';
+  document.getElementById('dialog-ok').textContent = okLabel || 'OK';
+  dialogCallback = () => { if (onOk) onOk(); };
+  const box = document.querySelector('#dialog-backdrop .dialog-box');
+  if (box) box.classList.remove('wide');
+  document.getElementById('dialog-backdrop').classList.add('visible');
+}
+
+function showDialog(title, msg, defaultVal, okLabel, callback, isNumber = false, showRecordBtn = false, isPassword = false) {
   document.getElementById('dialog-title').textContent = title;
   document.getElementById('dialog-msg').textContent   = msg;
   const input = document.getElementById('dialog-input');
+  input.style.display = '';
   input.value = defaultVal || '';
-  input.type  = isNumber ? 'number' : 'text';
+  input.type  = isPassword ? 'password' : (isNumber ? 'number' : 'text');
+  input.placeholder = isPassword ? 'Passcode (optional)' : '';
   document.getElementById('dialog-ok').textContent = okLabel || 'OK';
   
   const recBtn = document.getElementById('dialog-record');
@@ -6484,7 +7619,7 @@ function showDialog(title, msg, defaultVal, okLabel, callback, isNumber = false,
 
   // Set modal width based on content type
   const box = document.querySelector('#dialog-backdrop .dialog-box');
-  if (isNumber || showRecordBtn) box.classList.remove('wide');
+  if (isNumber || showRecordBtn || isPassword) box.classList.remove('wide');
   else box.classList.add('wide');
   
   document.getElementById('dialog-backdrop').classList.add('visible');
@@ -6500,7 +7635,44 @@ function showDialog(title, msg, defaultVal, okLabel, callback, isNumber = false,
 
 function closeDialog() {
   document.getElementById('dialog-backdrop').classList.remove('visible');
+  const input = document.getElementById('dialog-input');
+  if (input) {
+    input.type = 'text';
+    input.placeholder = '';
+  }
   dialogCallback = null;
+}
+
+function promptUnlockDialog(initialPasscode = '', callback) {
+  showDialog(
+    'Unlock Device',
+    'Enter your device passcode to automatically unlock, or leave empty to wake screen only:',
+    initialPasscode,
+    'Save',
+    val => {
+      const pin = (val || '').trim();
+      callback(pin ? `unlock ${pin}` : 'unlock');
+    },
+    false,
+    false,
+    true
+  );
+}
+
+function promptLockToggleDialog(initialPasscode = '', callback) {
+  showDialog(
+    'Lock Toggle',
+    'Enter your device passcode to automatically unlock when locked, or leave empty to toggle without passcode:',
+    initialPasscode,
+    'Save',
+    val => {
+      const pin = (val || '').trim();
+      callback(pin ? `lock-toggle ${pin}` : 'lock-toggle');
+    },
+    false,
+    false,
+    true
+  );
 }
 
 function _dialogBackdropClick(e) {
@@ -6577,7 +7749,7 @@ function showToast(msg) {
 }
 
 // ── Init ─────────────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', loadData);
+document.addEventListener('DOMContentLoaded', () => { applyWrapLongNames(); loadData(); });
 </script>
 </body>
 </html>

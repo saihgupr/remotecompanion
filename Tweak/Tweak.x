@@ -1,3 +1,4 @@
+#include <poll.h>
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <netinet/in.h>
@@ -15,6 +16,7 @@
 #import "RCShortcutsHelper.h"
 #import <sys/wait.h>
 #import <sys/utsname.h>
+#import <sys/sysctl.h>
 #import <objc/runtime.h>
 #import <dlfcn.h>
 #import <os/lock.h>
@@ -25,6 +27,8 @@
 #import <mach/mach_host.h>
 #import <GraphicsServices/GraphicsServices.h>
 #import "native_curl.h"
+#import "RCTestKit.h"
+#import "RCToastPill.h"
 #import <CoreFoundation/CoreFoundation.h>
 #import <CoreLocation/CoreLocation.h>
 #import <objc/message.h>
@@ -287,6 +291,16 @@ extern Boolean MRMediaRemoteSendCommandToApp(MRMediaRemoteCommand command, NSDic
 @property (nonatomic, assign) BOOL isLeftEdge;
 @property (nonatomic, assign) BOOL isRightEdge;
 @property (nonatomic, assign) BOOL hasTriggered;
+@end
+
+// Bottom-up system recognizer (issue #81 follow-up). Unlike the sendEvent
+// sniffing below, a real system-gesture-manager recognizer makes iOS cancel
+// the foreground app's touch on recognition — the same reason edge swipes
+// hold the list still. It only observes: firing stays in the sendEvent path
+// so trigger behavior is unchanged.
+@interface SRBottomUpGestureRecognizer : UIGestureRecognizer
+@property (nonatomic, copy) NSString *zoneTriggerKey;
+@property (nonatomic, assign) CGPoint startPoint;
 @end
 
 
@@ -832,7 +846,17 @@ static void toggle_location_services(BOOL state) {
     });
 }
 
+static BOOL rc_focus_supported(void);
+static NSString *rc_focus_active_identifier(BOOL *known);
+
 static BOOL get_dnd_state() {
+    // iOS 15+: Do Not Disturb is one Focus among others - on only while it's the active one
+    // (another Focus turned on from Control Center read as Do Not Disturb)
+    if (rc_focus_supported()) {
+        BOOL known = NO;
+        NSString *active = rc_focus_active_identifier(&known);
+        if (known) return [active isEqualToString:@"com.apple.donotdisturb.mode.default"];
+    }
     Class ServiceClass = objc_getClass("DNDModeAssertionService");
     if (ServiceClass) {
         id service = [ServiceClass serviceForClientIdentifier:@"com.apple.donotdisturb.control-center.module"];
@@ -841,6 +865,171 @@ static BOOL get_dnd_state() {
         return (assertion != nil);
     }
     return NO;
+}
+
+#pragma mark - Focus (iOS 15+)
+
+// A Focus is a Do Not Disturb mode with its own identifier. One is turned on the way Control
+// Center does it (a mode assertion for that mode), and DNDStateService says which one is
+// active, whatever turned it on (Control Center, a schedule, an automation).
+static NSString *rc_normalized_name(NSString *name);
+static NSString *const kRCFocusClient = @"com.apple.donotdisturb.control-center.module";
+
+static BOOL rc_focus_supported(void) {
+    return objc_getClass("DNDModeConfigurationService") && objc_getClass("DNDStateService") && objc_getClass("DNDModeAssertionService");
+}
+
+// Calls a method whose only argument is an NSError ** (e.g. availableModesReturningError:)
+static id rc_focus_call(id target, NSString *selectorName, NSError **error) {
+    SEL sel = NSSelectorFromString(selectorName);
+    if (![target respondsToSelector:sel]) return nil;
+    return ((id (*)(id, SEL, NSError **))objc_msgSend)(target, sel, error);
+}
+
+static id rc_focus_value(id object, NSString *selectorName) {
+    SEL sel = NSSelectorFromString(selectorName);
+    return [object respondsToSelector:sel] ? ((id (*)(id, SEL))objc_msgSend)(object, sel) : nil;
+}
+
+// The Focus modes set up on the phone: @{ name, identifier, symbol }, in Settings' order
+static NSArray<NSDictionary *> *rc_focus_modes(NSError **error) {
+    if (!rc_focus_supported()) return @[];
+    id service = [objc_getClass("DNDModeConfigurationService") serviceForClientIdentifier:kRCFocusClient];
+    id modes = rc_focus_call(service, @"availableModesReturningError:", error);
+    if (!modes) {
+        // Older releases: the configurations, keyed by mode identifier
+        id configurations = rc_focus_call(service, @"modeConfigurationsReturningError:", error);
+        if ([configurations isKindOfClass:[NSDictionary class]]) {
+            NSMutableArray *list = [NSMutableArray array];
+            for (id configuration in [configurations allValues]) {
+                id mode = rc_focus_value(configuration, @"mode");
+                if (mode) [list addObject:mode];
+            }
+            modes = list;
+        }
+    }
+    if ([modes isKindOfClass:[NSSet class]]) modes = [modes allObjects];
+    if ([modes isKindOfClass:[NSDictionary class]]) modes = [modes allValues];
+    if (![modes isKindOfClass:[NSArray class]]) return @[];
+
+    NSMutableArray *result = [NSMutableArray array];
+    for (id mode in modes) {
+        NSString *name = rc_focus_value(mode, @"name");
+        NSString *identifier = rc_focus_value(mode, @"modeIdentifier");
+        if (![name isKindOfClass:[NSString class]] || ![identifier isKindOfClass:[NSString class]] || name.length == 0) continue;
+        NSString *symbol = rc_focus_value(mode, @"symbolImageName");
+        [result addObject:@{ @"name": name, @"identifier": identifier, @"symbol": [symbol isKindOfClass:[NSString class]] ? symbol : @"" }];
+    }
+    return result;
+}
+
+static NSDictionary *rc_focus_mode_named(NSString *name, NSError **error) {
+    NSString *wanted = rc_normalized_name([name stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
+    for (NSDictionary *mode in rc_focus_modes(error)) {
+        if ([rc_normalized_name(mode[@"name"]) isEqualToString:wanted]) return mode;
+    }
+    return nil;
+}
+
+// The state while a Focus is on, or nil when none is. *known is NO when it can't be read.
+static id rc_focus_active_state(BOOL *known) {
+    if (known) *known = NO;
+    if (!rc_focus_supported()) return nil;
+    id service = [objc_getClass("DNDStateService") serviceForClientIdentifier:kRCFocusClient];
+    NSError *error = nil;
+    id state = rc_focus_call(service, @"queryCurrentStateWithError:", &error);
+    if (!state) return nil;
+    if (known) *known = YES;
+    SEL isActive = NSSelectorFromString(@"isActive");
+    if ([state respondsToSelector:isActive] && !((BOOL (*)(id, SEL))objc_msgSend)(state, isActive)) return nil;
+    return state;
+}
+
+static NSString *rc_focus_state_identifier(id state) {
+    NSString *identifier = rc_focus_value(state, @"activeModeIdentifier");
+    if (![identifier isKindOfClass:[NSString class]]) {
+        NSArray *identifiers = rc_focus_value(state, @"activeModeIdentifiers");
+        identifier = [identifiers isKindOfClass:[NSArray class]] ? identifiers.firstObject : nil;
+    }
+    return [identifier isKindOfClass:[NSString class]] ? identifier : nil;
+}
+
+// The active Focus's mode identifier, or nil when none is on
+static NSString *rc_focus_active_identifier(BOOL *known) {
+    return rc_focus_state_identifier(rc_focus_active_state(known));
+}
+
+// The active Focus's name, or nil when none is on. *known is NO when the state can't be read.
+static NSString *rc_focus_active_name(BOOL *known) {
+    id state = rc_focus_active_state(known);
+    if (!state) return nil;
+    NSString *identifier = rc_focus_state_identifier(state);
+    NSString *name = rc_focus_value(rc_focus_value(rc_focus_value(state, @"activeModeConfiguration"), @"mode"), @"name");
+    if ([name isKindOfClass:[NSString class]] && name.length) return name;
+    for (NSDictionary *mode in rc_focus_modes(nil)) {
+        if ([mode[@"identifier"] isEqualToString:identifier]) return mode[@"name"];
+    }
+    return identifier.length ? identifier : @"Focus";
+}
+
+// Turns a Focus on (replacing the one RemoteCompanion or Control Center turned on), or turns
+// those off with mode nil. One turned on by a schedule or an automation stays on.
+static BOOL rc_focus_set(NSDictionary *mode, NSError **error) {
+    id service = [objc_getClass("DNDModeAssertionService") serviceForClientIdentifier:kRCFocusClient];
+    NSError *invalidateError = nil;
+    [service invalidateAllActiveModeAssertionsWithError:&invalidateError];
+    if (!mode) {
+        if (invalidateError && error) *error = invalidateError;
+        return invalidateError == nil;
+    }
+    id details = [objc_getClass("DNDModeAssertionDetails") detailsWithIdentifier:@"com.apple.control-center.manual-toggle"
+                                                                 modeIdentifier:mode[@"identifier"]
+                                                                       lifetime:nil];
+    return [service takeModeAssertionWithDetails:details error:error] != nil;
+}
+
+static NSString *rc_focus_command(NSString *args) {
+    if (!rc_focus_supported()) return @"Focus requires iOS 15 or later\n";
+    NSString *trimmed = [args stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    NSRange space = [trimmed rangeOfString:@" "];
+    NSString *verb = (space.location == NSNotFound ? trimmed : [trimmed substringToIndex:space.location]).lowercaseString;
+    NSString *name = space.location == NSNotFound ? @"" : [[trimmed substringFromIndex:space.location + 1] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    NSError *error = nil;
+
+    if ([verb isEqualToString:@"list"]) {
+        // One per line: the name, then its SF Symbol after a tab
+        NSMutableString *out = [NSMutableString string];
+        for (NSDictionary *mode in rc_focus_modes(&error)) [out appendFormat:@"%@\t%@\n", mode[@"name"], mode[@"symbol"]];
+        if (out.length == 0) return error ? [NSString stringWithFormat:@"Error: %@\n", error.localizedDescription] : @"No Focus modes found\n";
+        return out;
+    }
+    if ([verb isEqualToString:@"status"]) {
+        BOOL known = NO;
+        NSString *active = rc_focus_active_name(&known);
+        if (!known) return @"Error: Focus state unavailable\n";
+        return [NSString stringWithFormat:@"%@\n", active ?: @"Off"];
+    }
+    if ([verb isEqualToString:@"off"]) {
+        if (!rc_focus_set(nil, &error)) return [NSString stringWithFormat:@"Error: %@\n", error.localizedDescription ?: @"Focus not turned off"];
+        BOOL known = NO;
+        NSString *still = rc_focus_active_name(&known);
+        if (still) return [NSString stringWithFormat:@"%@ is still on: a schedule or an automation turned it on\n", still];
+        return @"Focus Off\n";
+    }
+    if ([verb isEqualToString:@"on"] || [verb isEqualToString:@"toggle"]) {
+        if (name.length == 0) return @"Usage: focus on|toggle <name>\n";
+        NSDictionary *mode = rc_focus_mode_named(name, &error);
+        if (!mode) return [NSString stringWithFormat:@"Error: No Focus named '%@'\n", name];
+        if ([verb isEqualToString:@"toggle"]) {
+            NSString *active = rc_focus_active_name(NULL);
+            if (active && [rc_normalized_name(active) isEqualToString:rc_normalized_name(mode[@"name"])]) {
+                return rc_focus_command(@"off");
+            }
+        }
+        if (!rc_focus_set(mode, &error)) return [NSString stringWithFormat:@"Error: %@\n", error.localizedDescription ?: @"Focus not turned on"];
+        return [NSString stringWithFormat:@"%@ On\n", mode[@"name"]];
+    }
+    return @"Usage: focus list|status|off|on <name>|toggle <name>\n";
 }
 
 typedef struct __CTServerConnection *CTServerConnectionRef;
@@ -931,7 +1120,10 @@ static NSArray<NSString *> *rc_parse_quoted_arguments(NSString *argString) {
     return arguments;
 }
 
-static void rc_show_hud_toast(NSString *title, NSString *subtitle, NSString *iconSymbol) {
+// hold: how long it stays before sliding away. passThrough: touches go through it to
+// whatever is underneath (the test kit's prompts, which sit over the status bar while the
+// status-bar gestures are being tested).
+static void rc_show_hud_toast_ex(NSString *title, NSString *subtitle, NSString *iconSymbol, NSTimeInterval hold, BOOL passThrough) {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (g_rcHUDWindow) {
             [g_rcHUDWindow.layer removeAllAnimations];
@@ -942,44 +1134,19 @@ static void rc_show_hud_toast(NSString *title, NSString *subtitle, NSString *ico
         CGRect screenBounds = [UIScreen mainScreen].bounds;
         CGFloat screenWidth = screenBounds.size.width;
         
-        // Define fonts matching native iOS 15 Ringer HUD
-        UIFont *titleFont = [UIFont systemFontOfSize:13.0 weight:UIFontWeightMedium];
-        UIFont *subtitleFont = [UIFont systemFontOfSize:12.0 weight:UIFontWeightRegular];
-        
-        // Measure text to determine dynamic width
-        CGFloat maxTextWidth = 0;
-        if (title) {
-            CGSize titleSize = [title sizeWithAttributes:@{NSFontAttributeName: titleFont}];
-            maxTextWidth = titleSize.width;
-        }
-        if (subtitle) {
-            CGSize subSize = [subtitle sizeWithAttributes:@{NSFontAttributeName: subtitleFont}];
-            if (subSize.width > maxTextWidth) {
-                maxTextWidth = subSize.width;
-            }
-        }
-        
-        // Check if icon exists and is a valid symbol image
-        BOOL hasIcon = NO;
-        if (iconSymbol && ![iconSymbol isEqualToString:@""] && ![iconSymbol isEqualToString:@"none"]) {
-            if ([UIImage systemImageNamed:iconSymbol]) {
-                hasIcon = YES;
-            }
-        }
-        
-        CGFloat leftPadding = 16.0;
-        CGFloat iconWidth = hasIcon ? 20.0 : 0.0;
-        CGFloat iconGap = hasIcon ? 10.0 : 0.0;
-        CGFloat leftMargin = leftPadding + iconWidth + iconGap;
-        
-        CGFloat pillWidth = maxTextWidth + 2 * leftMargin;
-        // Enforce native-looking bounds (min 140, max screenWidth - 32)
-        pillWidth = MAX(140.0, MIN(pillWidth, screenWidth - 32.0));
-        
-        // Determine height based on whether we have a subtitle
-        BOOL hasSubtitle = (subtitle && ![subtitle isEqualToString:@""]);
-        CGFloat pillHeight = hasSubtitle ? 50.0 : 40.0;
-        
+        // The pill's size comes from the shared RCToastPillView, so the
+        // on-device toast and the app's editor preview always agree.
+        CGFloat maxPillWidth = [RCToastPillView maxPillWidthForScreenWidth:screenWidth];
+        // A prompt's instruction wraps instead of being cut off, clear of the icon
+        BOOL wrapSubtitle = (passThrough && subtitle && ![subtitle isEqualToString:@""]);
+        CGSize pillSize = [RCToastPillView sizeForTitle:title
+                                               message:subtitle
+                                              iconName:iconSymbol
+                                          wrapsMessage:wrapSubtitle
+                                              maxWidth:maxPillWidth];
+        CGFloat pillWidth = pillSize.width;
+        CGFloat pillHeight = pillSize.height;
+
         CGFloat pillX = (screenWidth - pillWidth) / 2.0;
         CGFloat startY = -pillHeight - 20.0;
         
@@ -1013,6 +1180,7 @@ static void rc_show_hud_toast(NSString *title, NSString *subtitle, NSString *ico
         CGFloat targetY = (!landscape && topInset > 24.0) ? topInset : 12.0;
 
         UIWindow *hudWindow = hudScene ? [[UIWindow alloc] initWithWindowScene:hudScene] : [[UIWindow alloc] init];
+        hudWindow.userInteractionEnabled = !passThrough;
         hudWindow.frame = CGRectMake(pillX, startY, pillWidth, pillHeight);
         g_rcHUDWindow = hudWindow;
         hudWindow.windowLevel = UIWindowLevelAlert + 3000.0;
@@ -1024,70 +1192,15 @@ static void rc_show_hud_toast(NSString *title, NSString *subtitle, NSString *ico
         rootVC.view.backgroundColor = [UIColor clearColor];
         hudWindow.rootViewController = rootVC;
         
-        BOOL isDarkMode = YES;
-        if (@available(iOS 12.0, *)) {
-            if ([UIScreen mainScreen].traitCollection.userInterfaceStyle == UIUserInterfaceStyleLight) {
-                isDarkMode = NO;
-            }
-        }
-        
-        UIBlurEffectStyle blurStyle = isDarkMode ? UIBlurEffectStyleSystemMaterialDark : UIBlurEffectStyleSystemMaterialLight;
-        UIColor *titleColor = isDarkMode ? [UIColor whiteColor] : [UIColor colorWithWhite:0.0 alpha:0.8];
-        UIColor *subColor = isDarkMode ? [UIColor colorWithWhite:1.0 alpha:0.6] : [UIColor colorWithWhite:0.0 alpha:0.48];
-        UIColor *iconColor = isDarkMode ? [UIColor whiteColor] : [UIColor colorWithWhite:0.0 alpha:0.7];
-        
-        // Blur background (matching native ringer HUD pill - no border)
-        UIBlurEffect *blurEffect = [UIBlurEffect effectWithStyle:blurStyle];
-        UIVisualEffectView *blurView = [[UIVisualEffectView alloc] initWithEffect:blurEffect];
-        blurView.frame = CGRectMake(0, 0, pillWidth, pillHeight);
-        blurView.layer.cornerRadius = pillHeight / 2.0;
-        blurView.layer.masksToBounds = YES;
-        [rootVC.view addSubview:blurView];
-        
-        if (hasIcon) {
-            UIImage *iconImage = nil;
-            if (@available(iOS 13.0, *)) {
-                UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:16.0 weight:UIImageSymbolWeightMedium];
-                iconImage = [UIImage systemImageNamed:iconSymbol withConfiguration:config];
-            } else {
-                iconImage = [UIImage systemImageNamed:iconSymbol];
-            }
-            
-            if (iconImage) {
-                UIImageView *iconView = [[UIImageView alloc] initWithImage:iconImage];
-                iconView.tintColor = iconColor;
-                iconView.contentMode = UIViewContentModeScaleAspectFit;
-                iconView.frame = CGRectMake(leftPadding, (pillHeight - 20) / 2.0, 20, 20);
-                [rootVC.view addSubview:iconView];
-            }
-        }
-        
-        // Text alignment: Center relative to the entire bubble
-        NSTextAlignment alignment = NSTextAlignmentCenter;
-        
-        if (hasSubtitle) {
-            UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 8.0, pillWidth, 18.0)];
-            titleLabel.text = title;
-            titleLabel.textColor = titleColor;
-            titleLabel.font = titleFont;
-            titleLabel.textAlignment = alignment;
-            [rootVC.view addSubview:titleLabel];
-            
-            UILabel *subLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 26.0, pillWidth, 16.0)];
-            subLabel.text = subtitle;
-            subLabel.textColor = subColor;
-            subLabel.font = subtitleFont;
-            subLabel.textAlignment = alignment;
-            [rootVC.view addSubview:subLabel];
-        } else {
-            UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, pillWidth, pillHeight)];
-            titleLabel.text = title;
-            titleLabel.textColor = titleColor;
-            titleLabel.font = titleFont;
-            titleLabel.textAlignment = alignment;
-            [rootVC.view addSubview:titleLabel];
-        }
-        
+        // One shared pill: background, icon, fonts, colors and layout all live
+        // in RCToastPillView, which the editor preview uses too.
+        RCToastPillView *pillView = [[RCToastPillView alloc] initWithTitle:title
+                                                                   message:subtitle
+                                                                  iconName:iconSymbol];
+        pillView.wrapsMessage = wrapSubtitle;
+        pillView.frame = CGRectMake(0, 0, pillWidth, pillHeight);
+        [rootVC.view addSubview:pillView];
+
         hudWindow.hidden = NO;
         
         [UIView animateWithDuration:0.5
@@ -1104,7 +1217,7 @@ static void rc_show_hud_toast(NSString *title, NSString *subtitle, NSString *ico
                                  return;
                              }
                              [UIView animateWithDuration:0.4
-                                                   delay:2.0
+                                                   delay:hold
                                                  options:UIViewAnimationOptionCurveEaseInOut
                                               animations:^{
                                                   hudWindow.frame = CGRectMake(pillX, startY, pillWidth, pillHeight);
@@ -1117,6 +1230,35 @@ static void rc_show_hud_toast(NSString *title, NSString *subtitle, NSString *ico
                                               }];
                          }];
     });
+}
+
+static void rc_show_hud_toast(NSString *title, NSString *subtitle, NSString *iconSymbol) {
+    rc_show_hud_toast_ex(title, subtitle, iconSymbol, 2.0, NO);
+}
+
+// Slides the current toast away
+static void rc_hide_hud_toast(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIWindow *hudWindow = g_rcHUDWindow;
+        if (!hudWindow) return;
+        g_rcHUDWindow = nil;
+        [hudWindow.layer removeAllAnimations];
+        CGRect frame = hudWindow.frame;
+        [UIView animateWithDuration:0.3 animations:^{
+            hudWindow.frame = CGRectMake(frame.origin.x, -frame.size.height - 20.0, frame.size.width, frame.size.height);
+        } completion:^(BOOL finished) {
+            hudWindow.hidden = YES;
+        }];
+    });
+}
+
+// Test kit (RCTestKit.x): prompts that stay up for `hold` seconds and let touches through
+void RCShowPrompt(NSString *title, NSString *subtitle, NSString *iconSymbol, NSTimeInterval hold) {
+    rc_show_hud_toast_ex(title, subtitle, iconSymbol, hold, YES);
+}
+
+void RCHidePrompt(void) {
+    rc_hide_hud_toast();
 }
 
 // Settings > Banners switches for actions that show a banner of their own (defined below)
@@ -1542,7 +1684,148 @@ static void send_notification(NSString *title, NSString *message, BOOL urgent) {
 #define kConfigChangedNotification "com.pizzaman.rc.configchanged"
 
 static NSDictionary *g_triggerConfig = nil;
+
+// Pausing button triggers: the hardware button, Touch ID, ringer and screen gesture triggers step
+// aside, as if the master toggle were off; event triggers (NFC tags, Wi-Fi, Bluetooth, schedules,
+// notifications, apps, ...) still run.
+// - Another tweak that needs the buttons to itself for a while (an alarm that only a tag stops, for
+//   one) sets the state of kRCPauseTriggersNotification to 1, and back to 0 when it's done. A pause
+//   left on for 4 hours (the tweak that set it went away) ends by itself.
+// - The "button triggers pause [minutes]" command (Button Triggers action) pauses them until
+//   "button triggers resume", or for that many minutes. Its end time (seconds since 1970, UINT64_MAX
+//   for until resumed) is the state of kRCPauseButtonsUntilNotification, which the app reads too.
+#define kRCPauseTriggersNotification "com.pizzaman.rc.pause_triggers"
+#define kRCPauseButtonsUntilNotification "com.pizzaman.rc.pause_buttons_until"
+static NSDate *g_triggersPausedSince = nil;
+
+static int RC_PauseToken(const char *name) {
+    int token = -1;
+    if (notify_register_check(name, &token) != NOTIFY_STATUS_OK) return -1;
+    return token;
+}
+
+// Paused by another tweak
+static BOOL RC_TriggersPausedByTweak(void) {
+    static int token = -1;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        token = RC_PauseToken(kRCPauseTriggersNotification);
+        int logToken;
+        notify_register_dispatch(kRCPauseTriggersNotification, &logToken, dispatch_get_main_queue(), ^(int t) {
+            uint64_t now = 0;
+            notify_get_state(t, &now);
+            SRLogMin(@"[Pause] Button triggers %@ by another tweak", now ? @"paused" : @"resumed");
+            notify_post(kConfigChangedNotification); // gestures and button settings follow the pause
+        });
+    });
+    uint64_t state = 0;
+    if (token == -1 || notify_get_state(token, &state) != NOTIFY_STATUS_OK) return NO;
+    @synchronized ([NSDate class]) {
+        if (!state) { g_triggersPausedSince = nil; return NO; }
+        if (!g_triggersPausedSince) g_triggersPausedSince = [NSDate date];
+        if (-[g_triggersPausedSince timeIntervalSinceNow] > 4 * 3600) return NO;
+        return YES;
+    }
+}
+
+// End of a pause from the Button Triggers action (seconds since 1970; UINT64_MAX until resumed),
+// or 0 when there's none
+static uint64_t RC_ButtonPauseUntil(void) {
+    static int token = -1;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ token = RC_PauseToken(kRCPauseButtonsUntilNotification); });
+    uint64_t until = 0;
+    if (token == -1 || notify_get_state(token, &until) != NOTIFY_STATUS_OK) return 0;
+    if (until != UINT64_MAX && until <= (uint64_t)[[NSDate date] timeIntervalSince1970]) return 0;
+    return until;
+}
+
+static void RC_SetButtonPauseUntil(uint64_t until) {
+    static int token = -1;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ token = RC_PauseToken(kRCPauseButtonsUntilNotification); });
+    if (token == -1) return;
+    notify_set_state(token, until);
+    notify_post(kRCPauseButtonsUntilNotification);
+    // Gestures and button settings follow the pause, now and when a timed one ends
+    notify_post(kConfigChangedNotification);
+    if (until && until != UINT64_MAX) {
+        double delay = (double)until - [[NSDate date] timeIntervalSince1970] + 0.5;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(MAX(delay, 0) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            uint64_t current = 0;
+            if (notify_get_state(token, &current) != NOTIFY_STATUS_OK || current != until) return;
+            SRLogMin(@"[Pause] Button triggers resumed (time's up)");
+            notify_post(kConfigChangedNotification);
+        });
+    }
+}
+
+static BOOL RC_TriggersPaused(void) {
+    return RC_TriggersPausedByTweak() || RC_ButtonPauseUntil() != 0;
+}
+
+// The triggers a pause stops: the hardware buttons, Touch ID, the ringer switch and screen gestures
+static BOOL RC_IsButtonTrigger(NSString *key) {
+    if ([key isEqualToString:@"shake"]) return YES;
+    for (NSString *prefix in @[@"volume_", @"power_", @"touchid_", @"trigger_home_", @"trigger_ringer_",
+                               @"trigger_statusbar_", @"trigger_edge_", @"trigger_bottombar_", @"trigger_bottom_swipe_"]) {
+        if ([key hasPrefix:prefix]) return YES;
+    }
+    return NO;
+}
+
+// The master toggle as the button handling sees it: off while button triggers are paused, so it
+// steps aside
+static BOOL RC_MasterEnabled(void) {
+    return [g_triggerConfig[@"masterEnabled"] boolValue] && !RC_TriggersPaused();
+}
+
+// "button triggers pause [minutes]" / "button triggers resume" / "button triggers" (state)
+static NSString *RC_ButtonTriggersCommand(NSString *what) {
+    NSArray *words = [what componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    NSString *verb = words.count ? words[0] : @"";
+    if ([verb isEqualToString:@"pause"]) {
+        double minutes = words.count > 1 ? [words[1] doubleValue] : 0;
+        uint64_t until = minutes > 0 ? (uint64_t)([[NSDate date] timeIntervalSince1970] + minutes * 60) : UINT64_MAX;
+        RC_SetButtonPauseUntil(until);
+        SRLogMin(@"[Pause] Button triggers paused%@", minutes > 0 ? [NSString stringWithFormat:@" for %g min", minutes] : @" until resumed");
+    } else if ([verb isEqualToString:@"resume"]) {
+        RC_SetButtonPauseUntil(0);
+        SRLogMin(@"[Pause] Button triggers resumed");
+    } else if (verb.length) {
+        return @"Usage: button triggers pause [minutes] | resume\n";
+    }
+    uint64_t until = RC_ButtonPauseUntil();
+    if (until == UINT64_MAX) return @"Button triggers paused until resumed\n";
+    if (until) return [NSString stringWithFormat:@"Button triggers paused for %.0f more min\n", ceil((until - [[NSDate date] timeIntervalSince1970]) / 60.0)];
+    if (RC_TriggersPausedByTweak()) return @"Button triggers paused by another tweak\n";
+    return @"Button triggers active\n";
+}
 static NSString *g_resolvedConfigPath = nil;
+
+// g_triggerConfig is read on many threads (main, the web server, HID callbacks) without a lock.
+// Replacing it frees the old dictionary, so a reader that had just picked it up would use freed
+// memory (crashed SpringBoard on iOS 14 when the web UI saved the config). Replacements are
+// serialized by this lock, and the old dictionary is kept alive a while for those readers.
+static NSObject *rc_trigger_config_lock(void) {
+    static NSObject *lock;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ lock = [NSObject new]; });
+    return lock;
+}
+
+static void rc_set_trigger_config(NSDictionary *config) {
+    NSDictionary *old;
+    @synchronized (rc_trigger_config_lock()) {
+        old = g_triggerConfig;
+        g_triggerConfig = config;
+    }
+    if (old) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(10 * NSEC_PER_SEC)), dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+            (void)old;
+        });
+    }
+}
 
 // Button timings, from the config (Settings > Button Timing), in seconds. Read each time, so a
 // change applies at once.
@@ -1602,6 +1885,18 @@ static NSString *find_config_path() {
 
 static NSArray *g_blacklist = nil;
 static NSTimeInterval g_lastBlacklistLoad = 0;
+
+// Bypass for the bottom-swipe Control Center suppression when the open comes from an RC
+// action itself. handle_command runs async (RCExecuteTrigger dispatches to a background
+// queue), so a short timestamp window is used instead of a plain BOOL around the call.
+// See https://github.com/saihgupr/remotecompanion/issues/57
+static NSTimeInterval g_rcIntentionalCCOpenUntil = 0;
+static inline BOOL rc_cc_intentional_open_active(void) {
+    return [[NSDate date] timeIntervalSince1970] < g_rcIntentionalCCOpenUntil;
+}
+static inline void rc_mark_intentional_cc_open(void) {
+    g_rcIntentionalCCOpenUntil = [[NSDate date] timeIntervalSince1970] + 1.5;
+}
 
 static void load_blacklist() {
     NSString *path = @"/var/mobile/Library/Preferences/com.saihgupr.remotecompanion.blacklist.plist";
@@ -1722,6 +2017,8 @@ static NSString *get_human_name_for_trigger(NSString *key, NSDictionary *trigger
             @"trigger_home_triple_click": @"Home Button (Triple Click)",
             @"trigger_home_quadruple_click": @"Home Button (Quadruple Click)",
             @"trigger_home_double_click": @"Home Button (Double Click)",
+            @"trigger_home_hold": @"Home Button (Hold)",
+            @"trigger_home_power": @"Home + Power",
             @"touchid_hold": @"Touch ID Hold (Rest Finger)",
             @"touchid_tap": @"Touch ID Single Tap",
             @"trigger_edge_left_swipe_up": @"Left Edge Swipe Up",
@@ -1731,6 +2028,8 @@ static NSString *get_human_name_for_trigger(NSString *key, NSDictionary *trigger
             @"trigger_ringer_mute": @"Ringer Muted",
             @"trigger_ringer_unmute": @"Ringer Unmuted",
             @"trigger_ringer_toggle": @"Ringer Toggled",
+            @"trigger_watch_ping": @"Ping iPhone",
+            @"trigger_watch_ping_hold": @"Ping iPhone (Hold)",
             @"trigger_bottombar_swipe_left": @"Bottom Bar Swipe Left",
             @"trigger_bottombar_swipe_right": @"Bottom Bar Swipe Right",
             @"trigger_bottom_swipe_up_left": @"Bottom Swipe Up (Left)",
@@ -1749,11 +2048,17 @@ static NSString *get_human_name_for_trigger(NSString *key, NSDictionary *trigger
     if ([key hasPrefix:@"bt_connect_"]) return [NSString stringWithFormat:@"Bluetooth Connected: %@", [key substringFromIndex:11]];
     if ([key hasPrefix:@"bt_disconnect_"]) return [NSString stringWithFormat:@"Bluetooth Disconnected: %@", [key substringFromIndex:14]];
     if ([key hasPrefix:@"app_launch_"]) return [NSString stringWithFormat:@"App Launched: %@", [key substringFromIndex:11]];
+    if ([key hasPrefix:@"app_exit_"]) return [NSString stringWithFormat:@"App Exited: %@", [key substringFromIndex:9]];
+    if ([key hasPrefix:@"output_set_"]) return [NSString stringWithFormat:@"Audio Output Set: %@", [key substringFromIndex:11]];
+    if ([key hasPrefix:@"output_unset_"]) return [NSString stringWithFormat:@"Audio Output Unset: %@", [key substringFromIndex:13]];
     if ([key hasPrefix:@"notif_"] || [key hasPrefix:@"notify_"]) return @"Notification Trigger";
     if ([key hasPrefix:@"sched_"]) return @"Scheduled Automation";
     
     return key;
 }
+
+static void RC_RefreshAXTriplePress(void);
+static BOOL RC_RunAccessibilityShortcut(void);
 
 static void load_trigger_config() {
     @autoreleasepool {
@@ -1768,27 +2073,34 @@ static void load_trigger_config() {
             static struct timespec loadedTime;
             static off_t loadedSize = -1;
             static ino_t loadedInode;
-            struct stat st;
-            BOOL haveStat = stat([path fileSystemRepresentation], &st) == 0;
-            if (haveStat && g_triggerConfig && [path isEqualToString:loadedPath] && st.st_ino == loadedInode && st.st_size == loadedSize &&
-                st.st_mtimespec.tv_sec == loadedTime.tv_sec && st.st_mtimespec.tv_nsec == loadedTime.tv_nsec) {
-                return;
-            }
-            NSDictionary *newConfig = [NSDictionary dictionaryWithContentsOfFile:path];
-            if (newConfig) {
-                // Thread-safe update: replace the pointer
-                g_triggerConfig = newConfig;
-                g_resolvedConfigPath = path;
-                g_rcLogLevel = rc_log_level_from_config(newConfig);
-                if (haveStat) {
-                    loadedPath = path;
-                    loadedTime = st.st_mtimespec;
-                    loadedSize = st.st_size;
-                    loadedInode = st.st_ino;
+            NSDictionary *newConfig;
+            // Called on several threads: one checks and reloads at a time
+            @synchronized (rc_trigger_config_lock()) {
+                struct stat st;
+                BOOL haveStat = stat([path fileSystemRepresentation], &st) == 0;
+                if (haveStat && g_triggerConfig && [path isEqualToString:loadedPath] && st.st_ino == loadedInode && st.st_size == loadedSize &&
+                    st.st_mtimespec.tv_sec == loadedTime.tv_sec && st.st_mtimespec.tv_nsec == loadedTime.tv_nsec) {
+                    return;
                 }
+                newConfig = [NSDictionary dictionaryWithContentsOfFile:path];
+                if (newConfig) {
+                    rc_set_trigger_config(newConfig);
+                    if (![g_resolvedConfigPath isEqualToString:path]) g_resolvedConfigPath = path;
+                    g_rcLogLevel = rc_log_level_from_config(newConfig);
+                    if (haveStat) {
+                        if (![loadedPath isEqualToString:path]) loadedPath = path;
+                        loadedTime = st.st_mtimespec;
+                        loadedSize = st.st_size;
+                        loadedInode = st.st_ino;
+                    }
+                }
+            }
+            if (newConfig) {
                 SRLogMin(@"Loaded trigger config from %@: triggers=%lu",
                       path,
-                      (unsigned long)[g_triggerConfig[@"triggers"] count]);
+                      (unsigned long)[newConfig[@"triggers"] count]);
+                // A triple press binding may have changed: tell iOS whether its own shortcut is on
+                dispatch_async(dispatch_get_main_queue(), ^{ RC_RefreshAXTriplePress(); });
             } else {
                 SRLogMin(@"Failed to parse config at %@", path);
             }
@@ -1809,11 +2121,53 @@ static float get_flash_brightness() {
 
 // Forward declarations for gesture management functions
 static BOOL should_register_edge_gestures();
+static BOOL should_register_bottom_up_gestures();
 static void register_edge_gestures();
 static void update_edge_gestures();
 static void start_schedule_timer();
 static void start_mqtt_subscriber();
 static void stop_mqtt_subscriber();
+
+void RCNFCConfigChanged(void);
+
+// Watch Ping triggers: Ping iPhone on a paired Apple Watch, tap or press and hold (see RCWatchPing.m,
+// loaded into companionfindlocallyd). The armed state tells it which ping has actions, so the phone
+// skips the sound and flash for that one; without actions, or with the trigger's keepDefault set,
+// Ping iPhone works as usual.
+#define kRCWatchPingArmed "com.pizzaman.rc.watch_ping_armed"
+#define kRCWatchPing      "com.pizzaman.rc.watch_ping"
+void RCExecuteTrigger(NSString *triggerKey);
+
+static BOOL rc_watch_ping_quiets(NSString *key) {
+    if (!RC_MasterEnabled()) return NO;
+    NSDictionary *triggers = g_triggerConfig[@"triggers"];
+    NSDictionary *trigger = [triggers isKindOfClass:[NSDictionary class]] ? triggers[key] : nil;
+    if (![trigger isKindOfClass:[NSDictionary class]] || ![trigger[@"enabled"] boolValue]) return NO;
+    if ([trigger[@"keepDefault"] boolValue]) return NO; // keepDefault (Keep Default Action): the phone pings as usual
+    NSArray *actions = trigger[@"actions"];
+    return [actions isKindOfClass:[NSArray class]] && actions.count > 0;
+}
+
+static void RCWatchPingConfigChanged(void) {
+    static int token = NOTIFY_TOKEN_INVALID;
+    if (token == NOTIFY_TOKEN_INVALID && notify_register_check(kRCWatchPingArmed, &token) != NOTIFY_STATUS_OK) return;
+    uint64_t armed = (rc_watch_ping_quiets(@"trigger_watch_ping") ? 1 : 0) |
+                     (rc_watch_ping_quiets(@"trigger_watch_ping_hold") ? 2 : 0);
+    notify_set_state(token, armed);
+}
+
+static void rc_watch_ping_received(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
+    static int token = NOTIFY_TOKEN_INVALID;
+    if (token == NOTIFY_TOKEN_INVALID && notify_register_check(kRCWatchPing, &token) != NOTIFY_STATUS_OK) return;
+    uint64_t kind = 0;
+    notify_get_state(token, &kind);
+    NSString *key = kind == 2 ? @"trigger_watch_ping_hold" : @"trigger_watch_ping";
+    dispatch_async(dispatch_get_main_queue(), ^{
+        SRLog(@"[WatchPing] %@ from the Apple Watch", kind == 2 ? @"Press and hold" : @"Tap");
+        RCExecuteTrigger(key);
+    });
+}
+NSString *RCNFCScannerCommand(NSString *what);
 
 static void config_changed_callback(CFNotificationCenterRef center, void *observer,
                                     CFStringRef name, const void *object, CFDictionaryRef userInfo) {
@@ -1828,6 +2182,8 @@ static void config_changed_callback(CFNotificationCenterRef center, void *observ
             update_simulation_observers();
             SRLog(@"Simulation observers updated. Updating edge gestures...");
             update_edge_gestures(); 
+            RCNFCConfigChanged();
+            RCWatchPingConfigChanged();
             SRLog(@"Edge gestures updated. Checking schedule timer...");
             start_schedule_timer();
             SRLog(@"Checking MQTT subscriber...");
@@ -1840,10 +2196,12 @@ static void config_changed_callback(CFNotificationCenterRef center, void *observ
 }
 
 static void save_trigger_config() {
-    if (!g_triggerConfig) return;
+    NSDictionary *config;
+    @synchronized (rc_trigger_config_lock()) { config = g_triggerConfig; }
+    if (!config) return;
     NSString *sharedPath = @"/var/mobile/Documents/rc_triggers.plist";
     NSError *error = nil;
-    NSData *data = [NSPropertyListSerialization dataWithPropertyList:g_triggerConfig
+    NSData *data = [NSPropertyListSerialization dataWithPropertyList:config
                                                               format:NSPropertyListXMLFormat_v1_0
                                                              options:0
                                                                error:&error];
@@ -1895,6 +2253,47 @@ static void save_trigger_config() {
 #define kSimulateNotificationPrefix "com.pizzaman.rc.simulate."
 
 // Forward declaration
+// A shortcut action's arguments (after "shortcut:"): the name, quoted when it needs to be, then
+// -i to run it silently (no Shortcuts progress on screen, as SpringCuts' -i) and -p and the input
+// (the rest). Returns the name.
+static NSString *rc_parse_shortcut_args(NSString *args, NSString **input, BOOL *silent) {
+    NSCharacterSet *spaces = [NSCharacterSet whitespaceCharacterSet];
+    args = [args stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if ([args hasPrefix:@"-r "]) args = [[args substringFromIndex:3] stringByTrimmingCharactersInSet:spaces]; // springcuts' "run"
+    NSString *name = args, *rest = @"";
+    if ([args hasPrefix:@"\""]) {
+        NSRange endQuote = args.length > 1 ? [args rangeOfString:@"\"" options:0 range:NSMakeRange(1, args.length - 1)] : NSMakeRange(NSNotFound, 0);
+        if (endQuote.location != NSNotFound) {
+            name = [args substringWithRange:NSMakeRange(1, endQuote.location - 1)];
+            rest = [[args substringFromIndex:endQuote.location + 1] stringByTrimmingCharactersInSet:spaces];
+        }
+    } else {
+        NSRange p = [args rangeOfString:@" -p "];
+        if (p.location != NSNotFound) {
+            name = [args substringToIndex:p.location];
+            rest = [args substringFromIndex:p.location + 1];
+        }
+        if ([name hasSuffix:@" -i"]) {
+            name = [name substringToIndex:name.length - 3];
+            rest = [@"-i " stringByAppendingString:rest];
+        }
+        name = [name stringByTrimmingCharactersInSet:spaces];
+    }
+    BOOL isSilent = NO;
+    if ([rest isEqualToString:@"-i"] || [rest hasPrefix:@"-i "]) {
+        isSilent = YES;
+        rest = [[rest substringFromIndex:2] stringByTrimmingCharactersInSet:spaces];
+    }
+    NSString *text = nil;
+    if ([rest hasPrefix:@"-p "]) {
+        text = [[rest substringFromIndex:3] stringByTrimmingCharactersInSet:spaces];
+        if ([text hasPrefix:@"\""] && [text hasSuffix:@"\""] && text.length >= 2) text = [text substringWithRange:NSMakeRange(1, text.length - 2)];
+    }
+    if (input) *input = text;
+    if (silent) *silent = isSilent;
+    return name;
+}
+
 static NSString *handle_command(NSString *cmd);
 static void RC_PressPowerAfterRelease(void);
 
@@ -2109,6 +2508,8 @@ static NSString *rc_normalized_name(NSString *name) {
     return n;
 }
 
+static BOOL rc_carplay_connected(void);
+
 // If conditions answered by reading the state directly rather than through a status
 // command. Sets *handled for the keys it knows. expected is already uppercased.
 static BOOL rc_condition_direct_match(NSString *key, NSString *expected, BOOL *handled) {
@@ -2120,6 +2521,8 @@ static BOOL rc_condition_direct_match(NSString *key, NSString *expected, BOOL *h
     } else if ([key isEqualToString:@"flashlight"]) {
         AVCaptureDevice *device = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
         actual = (device.torchMode == AVCaptureTorchModeOn) ? @"ON" : @"OFF";
+    } else if ([key isEqualToString:@"carplay"]) {
+        actual = rc_carplay_connected() ? @"CONNECTED" : @"NOT_CONNECTED";
     } else if ([key isEqualToString:@"charging"]) {
         UIDevice *device = [UIDevice currentDevice];
         device.batteryMonitoringEnabled = YES;
@@ -2147,6 +2550,14 @@ static BOOL rc_condition_direct_match(NSString *key, NSString *expected, BOOL *h
             if ([d isEqualToString:today]) return YES;
         }
         return NO;
+    } else if ([key isEqualToString:@"focus"]) {
+        // OFF: none on; ON: any; otherwise that Focus by name (case-insensitive)
+        BOOL known = NO;
+        NSString *active = rc_focus_active_name(&known);
+        if (!known) return NO;
+        if ([expected isEqualToString:@"OFF"]) return active == nil;
+        if ([expected isEqualToString:@"ON"]) return active != nil;
+        return active && [rc_normalized_name(active) isEqualToString:rc_normalized_name(expected)];
     } else if ([key isEqualToString:@"bt_device"]) {
         // A connected device with this name (case-insensitive)
         dlopen("/System/Library/PrivateFrameworks/BluetoothManager.framework/BluetoothManager", RTLD_NOW);
@@ -2508,8 +2919,19 @@ static void rc_maybe_show_action_banner(NSString *action) {
     NSString *subtitle = nil;
     NSString *original = [action stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     if ([cmd hasPrefix:@"uiopen "]) subtitle = rc_banner_app_name([original substringFromIndex:7]);
+    else if ([cmd isEqualToString:@"kill current"] || [cmd isEqualToString:@"kill front"] ||
+             [cmd isEqualToString:@"kill foreground"] || [cmd isEqualToString:@"kill current app"] ||
+             [cmd isEqualToString:@"kill front app"]) {
+        __block NSString *frontBid = nil;
+        void (^frontBlk)(void) = ^{
+            frontBid = [[(SpringBoard *)[UIApplication sharedApplication] _accessibilityFrontMostApplication] bundleIdentifier];
+        };
+        if ([NSThread isMainThread]) frontBlk();
+        else dispatch_sync(dispatch_get_main_queue(), frontBlk);
+        if (frontBid.length) subtitle = rc_banner_app_name(frontBid);
+    }
     else if ([cmd hasPrefix:@"kill "]) subtitle = rc_banner_app_name([original substringFromIndex:5]);
-    else if ([cmd hasPrefix:@"shortcut:"]) subtitle = [[original substringFromIndex:9] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    else if ([cmd hasPrefix:@"shortcut:"]) subtitle = rc_parse_shortcut_args([original substringFromIndex:9], NULL, NULL);
     else if ([cmd hasPrefix:@"set-vol "] || [cmd hasPrefix:@"ringer volume "] || [cmd hasPrefix:@"brightness "]) {
         // All take 0-100
         float level = [[cmd substringFromIndex:[cmd rangeOfString:@" " options:NSBackwardsSearch].location + 1] floatValue];
@@ -2535,11 +2957,105 @@ static void rc_maybe_show_action_banner(NSString *action) {
     rc_show_hud_toast(title, subtitle, icon);
 }
 
+// Who can reach the Web UI's server, the webUIAccess setting: "any" (the default), "networks" (only
+// while this iPhone is on one of the webUINetworks Wi-Fi networks), or "local" (only this iPhone,
+// such as its own Safari). This iPhone itself always can.
+static BOOL rc_web_client_is_local(const struct sockaddr_storage *addr) {
+    if (addr->ss_family == AF_INET) return (ntohl(((const struct sockaddr_in *)addr)->sin_addr.s_addr) >> 24) == 127;
+    if (addr->ss_family == AF_INET6) {
+        const struct in6_addr *a = &((const struct sockaddr_in6 *)addr)->sin6_addr;
+        if (IN6_IS_ADDR_LOOPBACK(a)) return YES;
+        if (IN6_IS_ADDR_V4MAPPED(a)) return a->s6_addr[12] == 127;
+    }
+    return NO;
+}
+
+static NSString *rc_current_wifi_name(void) {
+    __block id name = nil;
+    void (^read)(void) = ^{ name = [[objc_getClass("SBWiFiManager") sharedInstance] currentNetworkName]; };
+    if ([NSThread isMainThread]) read();
+    else dispatch_sync(dispatch_get_main_queue(), read);
+    return [name isKindOfClass:[NSString class]] && [name length] ? name : nil;
+}
+
+static NSString *rc_web_access(void) {
+    NSString *access = g_triggerConfig[@"webUIAccess"];
+    return [access isKindOfClass:[NSString class]] && ([access isEqualToString:@"networks"] || [access isEqualToString:@"local"]) ? access : @"any";
+}
+
+static BOOL rc_web_client_allowed(const struct sockaddr_storage *addr) {
+    if (rc_web_client_is_local(addr)) return YES;
+    NSString *access = rc_web_access();
+    if ([access isEqualToString:@"any"]) return YES;
+    if ([access isEqualToString:@"local"]) return NO;
+    NSArray *networks = g_triggerConfig[@"webUINetworks"];
+    NSString *wifi = rc_current_wifi_name();
+    return wifi && [networks isKindOfClass:[NSArray class]] && [networks containsObject:wifi];
+}
+
+// A trigger's runs. Each firing runs the actions on a thread of its own; a run carries its
+// trigger's generation and stops (before its next step, or out of a wait) once that changes - when
+// the trigger is fired again in Restart mode, or stopped by a "stop trigger" action.
+static NSMutableDictionary<NSString *, NSNumber *> *g_runGeneration;
+static NSMutableDictionary<NSString *, NSNumber *> *g_runCount;
+static NSMutableDictionary<NSString *, NSHashTable *> *g_runWaits; // dispatch semaphores of the runs' waits
+
+static NSObject *rc_run_lock(void) {
+    static NSObject *lock;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        lock = [NSObject new];
+        g_runGeneration = [NSMutableDictionary dictionary];
+        g_runCount = [NSMutableDictionary dictionary];
+        g_runWaits = [NSMutableDictionary dictionary];
+    });
+    return lock;
+}
+
+// Whether the run on this thread has been stopped
+static BOOL rc_run_stopped(void) {
+    NSMutableDictionary *thread = [NSThread currentThread].threadDictionary;
+    NSString *key = thread[@"rcRunKey"];
+    if (!key) return NO;
+    @synchronized (rc_run_lock()) {
+        return ![g_runGeneration[key] isEqual:thread[@"rcRunGeneration"]];
+    }
+}
+
+// Stops every run of the trigger that's going; returns how many there were
+static NSUInteger rc_stop_trigger_runs(NSString *key) {
+    @synchronized (rc_run_lock()) {
+        NSUInteger running = g_runCount[key].unsignedIntegerValue;
+        g_runGeneration[key] = @(g_runGeneration[key].unsignedLongLongValue + 1);
+        for (dispatch_semaphore_t wait in g_runWaits[key].allObjects) dispatch_semaphore_signal(wait);
+        return running;
+    }
+}
+
+// Waits on the wall clock (on time even if the phone sleeps), cut short when the run is stopped.
+// Returns NO when it was.
+static BOOL rc_run_wait(double seconds) {
+    NSMutableDictionary *thread = [NSThread currentThread].threadDictionary;
+    dispatch_semaphore_t wait = thread[@"rcRunWait"];
+    if (!wait) {
+        usleep((useconds_t)(seconds * 1000000));
+        return YES;
+    }
+    if (rc_run_stopped()) return NO;
+    dispatch_semaphore_wait(wait, dispatch_walltime(NULL, (int64_t)(seconds * NSEC_PER_SEC)));
+    return !rc_run_stopped();
+}
+
 static void rc_execute_action_sequence(NSArray *actions, NSString *triggerKey, BOOL simulationMode) {
     if (![actions isKindOfClass:[NSArray class]] || actions.count == 0) return;
     
     for (NSInteger idx = 0; idx < (NSInteger)actions.count; idx++) {
         id actionItem = actions[idx];
+
+        if (rc_run_stopped()) {
+            SRLogMin(@"[%@] Stopped - the rest of its actions were skipped", triggerKey);
+            break;
+        }
 
         if (rc_is_action_item_disabled(actionItem)) {
             SRLog(@"[%@] Skipping disabled action: %@", triggerKey, actionItem);
@@ -2549,6 +3065,7 @@ static void rc_execute_action_sequence(NSArray *actions, NSString *triggerKey, B
         if ([actionItem isKindOfClass:[NSString class]]) {
             NSString *action = (NSString *)actionItem;
             SRLogMin(@"[%@] -> %@", triggerKey, action);
+            RCTKEvent(@"action", @{ @"trigger": triggerKey ?: @"", @"command": action });
             handle_command(action);
             rc_maybe_show_action_banner(action);
             usleep(simulationMode ? 50000 : 10000);
@@ -2566,6 +3083,7 @@ static void rc_execute_action_sequence(NSArray *actions, NSString *triggerKey, B
         if ([type isEqualToString:@"if"]) {
             BOOL shouldRunBlock = rc_evaluate_if_condition(dictAction);
             SRLogMin(@"[%@] If %@ == %@ -> %@", triggerKey, dictAction[@"conditionKey"], dictAction[@"expectedValue"], shouldRunBlock ? @"TRUE" : @"FALSE");
+            RCTKEvent(@"condition", @{ @"key": [dictAction[@"conditionKey"] description] ?: @"", @"expected": [dictAction[@"expectedValue"] description] ?: @"", @"result": @(shouldRunBlock) });
             
             if (shouldRunBlock) {
                 // TRUE branch: just continue to next item. 
@@ -2589,6 +3107,7 @@ static void rc_execute_action_sequence(NSArray *actions, NSString *triggerKey, B
                             NSDictionary *elseIfDict = (NSDictionary *)item;
                             BOOL elseIfVal = rc_evaluate_if_condition(elseIfDict);
                             SRLogMin(@"[%@] Else If %@ == %@ -> %@", triggerKey, elseIfDict[@"conditionKey"], elseIfDict[@"expectedValue"], elseIfVal ? @"TRUE" : @"FALSE");
+                            RCTKEvent(@"condition", @{ @"key": [elseIfDict[@"conditionKey"] description] ?: @"", @"expected": [elseIfDict[@"expectedValue"] description] ?: @"", @"result": @(elseIfVal), @"elseIf": @YES });
                             if (elseIfVal) {
                                 idx = skipIdx;
                                 foundNextBranch = YES;
@@ -2713,7 +3232,43 @@ static void register_simulation_observers() {
 }
 
 // Execute all actions for a trigger
+// Test kit access (RCTestKit.x)
+NSString *RCHandleCommand(NSString *cmd) {
+    return handle_command(cmd);
+}
+
+// The test kit reads and saves the config on the main thread, where the reload a save posts
+// runs, so a read right after a save sees it (rc_set_trigger_config makes the swap itself safe
+// on any thread).
+static void RCOnMainThreadSync(dispatch_block_t block) {
+    if ([NSThread isMainThread]) block();
+    else dispatch_sync(dispatch_get_main_queue(), block);
+}
+
+NSDictionary *RCCopyTriggerConfig(void) {
+    __block NSDictionary *config = nil;
+    RCOnMainThreadSync(^{
+        load_trigger_config();
+        config = [g_triggerConfig copy];
+    });
+    return config;
+}
+
+void RCSetTriggerConfig(NSDictionary *config) {
+    RCOnMainThreadSync(^{
+        rc_set_trigger_config([config copy]);
+        save_trigger_config();
+    });
+}
+
+BOOL RCEvaluateIfCondition(NSDictionary *ifAction) {
+    return rc_evaluate_if_condition(ifAction);
+}
+
 void RCExecuteTrigger(NSString *triggerKey) {
+    RCTKEvent(@"trigger", @{ @"key": triggerKey ?: @"" });
+    if (RCTKCaptureTrigger(triggerKey)) return;
+
     // Check for foreground exclusions (Safety/Blacklist)
     if (RC_IsForegroundAppExcluded()) {
         SRLog(@"Triggers SUPPRESSED for frontmost application (Excluded/Blacklisted)");
@@ -2729,9 +3284,13 @@ void RCExecuteTrigger(NSString *triggerKey) {
         }
     }
     
-    // Check master toggle
+    // Check master toggle, and whether button triggers are paused (see RC_TriggersPaused)
     if (![g_triggerConfig[@"masterEnabled"] boolValue]) {
         SRLog(@"Master toggle is OFF, skipping trigger '%@'", triggerKey);
+        return;
+    }
+    if (RC_IsButtonTrigger(triggerKey) && RC_TriggersPaused()) {
+        SRLog(@"Button triggers are paused, skipping trigger '%@'", triggerKey);
         return;
     }
     
@@ -2759,10 +3318,44 @@ void RCExecuteTrigger(NSString *triggerKey) {
     }
     
     SRLogMin(@"TRIGGER FIRED: '%@' -> Executing %lu actions", triggerKey, (unsigned long)actions.count);
+    RCTKEvent(@"trigger.fired", @{ @"key": triggerKey, @"actions": @(actions.count) });
     
     // Execute on background queue to allow for delays and blocking operations
+    // Fired again while a run is going: "parallel" (the default) runs alongside, "restart" stops the
+    // run that's going and starts over, "single" skips this firing
+    NSString *mode = [trigger[@"mode"] isKindOfClass:[NSString class]] ? trigger[@"mode"] : @"parallel";
+    NSNumber *generation;
+    @synchronized (rc_run_lock()) {
+        NSUInteger running = g_runCount[triggerKey].unsignedIntegerValue;
+        if (running && [mode isEqualToString:@"single"]) {
+            SRLogMin(@"[%@] Still running - this firing is skipped", triggerKey);
+            return;
+        }
+        if (running && [mode isEqualToString:@"restart"]) {
+            rc_stop_trigger_runs(triggerKey);
+            SRLogMin(@"[%@] Restarting: the run that was going stops", triggerKey);
+        }
+        generation = g_runGeneration[triggerKey] ?: @0;
+        g_runGeneration[triggerKey] = generation;
+        g_runCount[triggerKey] = @(running + 1);
+    }
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NSMutableDictionary *thread = [NSThread currentThread].threadDictionary;
+        dispatch_semaphore_t wait = dispatch_semaphore_create(0);
+        @synchronized (rc_run_lock()) {
+            if (!g_runWaits[triggerKey]) g_runWaits[triggerKey] = [NSHashTable weakObjectsHashTable];
+            [g_runWaits[triggerKey] addObject:wait];
+        }
+        thread[@"rcRunKey"] = triggerKey;
+        thread[@"rcRunGeneration"] = generation;
+        thread[@"rcRunWait"] = wait;
         rc_execute_action_sequence(actions, triggerKey, NO);
+        [thread removeObjectsForKeys:@[@"rcRunKey", @"rcRunGeneration", @"rcRunWait"]];
+        @synchronized (rc_run_lock()) {
+            [g_runWaits[triggerKey] removeObject:wait];
+            NSUInteger left = g_runCount[triggerKey].unsignedIntegerValue;
+            g_runCount[triggerKey] = @(left ? left - 1 : 0);
+        }
     });
 }
 
@@ -3217,6 +3810,28 @@ BOOL RCIsNFCEnabled() {
     return [g_triggerConfig[@"nfcEnabled"] boolValue];
 }
 
+// iPhone XS and later read NFC tags in the background on their own (iPhone11,x and up)
+static BOOL RCNFCBackgroundReadingSupported(void) {
+    static int supported = -1;
+    if (supported < 0) {
+        char model[64] = {0};
+        size_t size = sizeof(model);
+        int major = 0;
+        if (sysctlbyname("hw.machine", model, &size, NULL, 0) == 0 && strncmp(model, "iPhone", 6) == 0) major = atoi(model + 6);
+        supported = major >= 11;
+    }
+    return supported;
+}
+
+// Experimental NFC (Settings): iOS's own reader reads tags while the screen is on, the scan runs only
+// with the screen off. Needs NFC Scanning on and an iPhone XS or later.
+BOOL RCNFCBackgroundReading() {
+    if (!g_triggerConfig) {
+        load_trigger_config();
+    }
+    return RCNFCBackgroundReadingSupported() && RCIsNFCEnabled() && [g_triggerConfig[@"nfcBackgroundReading"] boolValue];
+}
+
 // Seconds the NFC scan keeps going after the screen turns off (Settings > NFC With Screen Off)
 NSTimeInterval RCNFCScreenOffWindow() {
     if (!g_triggerConfig) {
@@ -3265,6 +3880,36 @@ static void handle_bluetooth_transition(NSNotification *notification, BOOL conne
     // App now saves trigger keys by name not address!
     NSString *triggerKey = [NSString stringWithFormat:@"%@_%@", connected ? @"bt_connect" : @"bt_disconnect", name];
     RCExecuteTrigger(triggerKey);
+}
+
+static NSString *g_lastAudioOutput = nil;
+static MPAVRoutingController *g_outputRoutingController = nil;
+static void rc_check_audio_output(BOOL silent) {
+    if (!g_outputRoutingController) g_outputRoutingController = [[objc_getClass("MPAVRoutingController") alloc] init];
+    [g_outputRoutingController fetchAvailableRoutesWithCompletionHandler:^(NSArray<MPAVRoute *> *routes) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            MPAVRoute *picked = nil;
+            for (MPAVRoute *route in routes) {
+                if (!route.picked) continue;
+                if (!picked || (picked.isDeviceRoute && !route.isDeviceRoute)) picked = route;
+            }
+            NSString *current = picked.routeName.length ? picked.routeName : nil;
+            if (picked && [picked.routeUID isEqualToString:@"Speaker"]) current = @"iPhone";
+            NSString *previous = g_lastAudioOutput;
+            if ([current isEqualToString:previous]) return;
+            g_lastAudioOutput = [current copy];
+            if (silent) return;
+            if (previous.length) RCExecuteTrigger([@"output_unset_" stringByAppendingString:previous]);
+            if (current.length) RCExecuteTrigger([@"output_set_" stringByAppendingString:current]);
+        });
+    }];
+}
+static void rc_schedule_audio_output_check(void) {
+    static NSInteger generation = 0;
+    NSInteger mine = ++generation;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.7 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (mine == generation) rc_check_audio_output(NO);
+    });
 }
 
 static void handle_wifi_notification(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
@@ -3433,6 +4078,74 @@ static void handle_power_state_notification(CFNotificationCenterRef center, void
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         handle_power_state_transition(is_device_power_connected(), @"Darwin Notification");
     });
+}
+
+// CarPlay: CarKit's session status (private, not loaded in SpringBoard by default) tells
+// its observers when a CarPlay session connects or disconnects, and has a currentSession
+// while one is connected. Same calls on iOS 14 and 17.
+@interface RCCarPlayObserver : NSObject
+@end
+
+static id g_carPlayStatus = nil;
+static RCCarPlayObserver *g_carPlayObserver = nil;
+static BOOL g_carPlayConnected = NO;
+static BOOL g_carPlayReady = NO;
+
+static BOOL rc_carplay_connected(void) {
+    return [g_carPlayStatus respondsToSelector:@selector(currentSession)] && [g_carPlayStatus performSelector:@selector(currentSession)] != nil;
+}
+
+static void rc_carplay_state_changed(BOOL connected, NSString *source) {
+    if (connected == g_carPlayConnected) return;
+    g_carPlayConnected = connected;
+    // Until the first session update has landed, a session that was already connected
+    // (e.g. after a respring) isn't a new connection
+    if (!g_carPlayReady) return;
+    SRLog(@"🚗 [RCSystem] Transition detected (%@): CARPLAY %@.", source, connected ? @"CONNECTED" : @"DISCONNECTED");
+    RCExecuteTrigger(connected ? @"trigger_carplay_connect" : @"trigger_carplay_disconnect");
+}
+
+@implementation RCCarPlayObserver
+- (void)sessionDidConnect:(id)session {
+    dispatch_async(dispatch_get_main_queue(), ^{ rc_carplay_state_changed(YES, @"sessionDidConnect"); });
+}
+- (void)sessionDidDisconnect:(id)session {
+    dispatch_async(dispatch_get_main_queue(), ^{ rc_carplay_state_changed(NO, @"sessionDidDisconnect"); });
+}
+@end
+
+static void rc_carplay_start_observing(void) {
+    dlopen("/System/Library/PrivateFrameworks/CarKit.framework/CarKit", RTLD_NOW);
+    Class statusClass = objc_getClass("CARSessionStatus");
+    if (!statusClass) {
+        SRLog(@"🚗 [RCSystem] CarKit's CARSessionStatus not found - no CarPlay triggers");
+        return;
+    }
+    g_carPlayStatus = [[statusClass alloc] init];
+    g_carPlayObserver = [RCCarPlayObserver new];
+    if ([g_carPlayStatus respondsToSelector:@selector(addSessionObserver:)]) {
+        [g_carPlayStatus performSelector:@selector(addSessionObserver:) withObject:g_carPlayObserver];
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        g_carPlayConnected = rc_carplay_connected();
+        g_carPlayReady = YES;
+        SRLog(@"🚗 [RCSystem] CarPlay state initialized to: %@", g_carPlayConnected ? @"CONNECTED" : @"DISCONNECTED");
+    });
+}
+
+// Whether this phone has a Home button: SpringBoard's lock button knows the Home button
+// type (2 = none, on Face ID phones)
+static BOOL rc_has_home_button(void) {
+    static long type = -1;
+    if (type == -1) {
+        rc_dispatch_sync_main_safe(^{
+            id app = [UIApplication sharedApplication];
+            SEL lockSel = NSSelectorFromString(@"lockHardwareButton"), typeSel = NSSelectorFromString(@"homeButtonType");
+            id lockButton = [app respondsToSelector:lockSel] ? ((id (*)(id, SEL))objc_msgSend)(app, lockSel) : nil;
+            if ([lockButton respondsToSelector:typeSel]) type = ((long (*)(id, SEL))objc_msgSend)(lockButton, typeSel);
+        });
+    }
+    return type != 2;
 }
 
 // Biometric / Touch ID / Lock State Globals
@@ -3621,6 +4334,7 @@ static void register_system_event_observers() {
     // Initialize initial lock state & power state
     initialize_lock_state();
     initialize_power_state();
+    rc_carplay_start_observing();
 
     // Power State: Cocoa Touch observers
     [nc addObserverForName:UIDeviceBatteryStateDidChangeNotification 
@@ -3690,6 +4404,12 @@ static void register_system_event_observers() {
                                     NULL,
                                     CFNotificationSuspensionBehaviorDeliverImmediately);
 
+    // Watch Ping triggers (see RCWatchPingConfigChanged)
+    CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL, rc_watch_ping_received,
+                                    CFSTR(kRCWatchPing), NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
+    if (!g_triggerConfig) load_trigger_config();
+    RCWatchPingConfigChanged();
+
     // Media State changes (Darwin Notifications)
     CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), 
                                     NULL, 
@@ -3717,12 +4437,22 @@ static void register_system_event_observers() {
         handle_media_state_change();
     });
 
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        rc_check_audio_output(YES);
+    });
+    for (NSString *name in @[@"AVOutputContextOutputDevicesDidChangeNotification", @"AVOutputContextOutputDeviceDidChangeNotification", @"kMRAVOutputContextOutputDevicesDidChangeNotification", @"kMRAVOutputContextOutputDeviceDidChangeNotification", @"kMRAVOutputContextDidChangeNotification", @"kMRMediaRemoteRouteStatusDidChangeNotification", @"kMRMediaRemotePickableRoutesDidChangeNotification"]) {
+        [nc addObserverForName:name object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
+            rc_schedule_audio_output_check();
+        }];
+    }
+
     // Bluetooth: Track connection/disconnection
     [nc addObserverForName:@"BluetoothDeviceConnectSuccessNotification" 
                     object:nil 
                      queue:[NSOperationQueue mainQueue] 
                 usingBlock:^(NSNotification *note) {
         handle_bluetooth_transition(note, YES);
+        rc_schedule_audio_output_check();
     }];
     
     [nc addObserverForName:@"BluetoothDeviceDisconnectSuccessNotification" 
@@ -3730,9 +4460,10 @@ static void register_system_event_observers() {
                      queue:[NSOperationQueue mainQueue] 
                 usingBlock:^(NSNotification *note) {
         handle_bluetooth_transition(note, NO);
+        rc_schedule_audio_output_check();
     }];
 
-    SRLog(@"[RCTweak] WiFi, Bluetooth and Media observers registered.");
+    SRLog(@"[RCTweak] WiFi, Bluetooth, Media and Audio output observers registered.");
 }
 
 // ============ LUA INTERPRETER ============
@@ -4159,6 +4890,21 @@ static void rc_spawn_root_iohid(NSString *subcommand, NSArray *args) {
     free(argv);
 }
 
+// Set (on this thread) by RCTouchEventSystemGesture for its copy of a touch addressed to
+// SpringBoard's system gesture window instead of the window under the finger: that copy goes
+// only to SpringBoard's own queue, marked as a possible system gesture
+static __thread uint32_t g_rcTouchContextOverride = 0;
+
+// Extra event mask bits a real finger's touch carries when it lands on the bottom edge of a phone
+// without a Home button: with them UIKit marks the touch as a bottom-edge touch (UITouch
+// _edgeType 4), so iOS's home bar gesture can see it. Set by the test kit (RCTouchSetBottomEdge)
+// around its scripted bottom bar swipes.
+static uint32_t g_rcTouchEdgeMask = 0;
+
+void RCTouchSetBottomEdge(BOOL on) {
+    g_rcTouchEdgeMask = on ? 0x1040040 : 0;
+}
+
 static void perform_digitizer_touch(double x, double y, BOOL down) {
     if (!_IOHIDEventCreateDigitizerEvent || !_IOHIDEventCreateDigitizerFingerEvent ||
         !_IOHIDEventAppendEvent || !_IOHIDEventSystemClientCreate || !_IOHIDEventSystemClientDispatchEvent) {
@@ -4194,8 +4940,9 @@ static void perform_digitizer_touch(double x, double y, BOOL down) {
     SRLog(@"[Touch] Simulated touch: raw(%.1f, %.1f) screen(%.1f, %.1f) scale=%.1f -> normalized(%.4f, %.4f) down=%d",
           x, y, screenWidth, screenHeight, scale, rx, ry, down);
 
-    uint32_t contextID = rc_resolve_target_context(x, y);
-    BOOL targetIsLocal = rc_is_springboard_context(contextID);
+    uint32_t contextID = g_rcTouchContextOverride ?: rc_resolve_target_context(x, y);
+    BOOL targetIsLocal = g_rcTouchContextOverride || rc_is_springboard_context(contextID);
+    BOOL systemGestureCopy = g_rcTouchContextOverride != 0;
 
     uint32_t transducerType = 3;
     uint32_t parentIndex = 0;
@@ -4205,13 +4952,13 @@ static void perform_digitizer_touch(double x, double y, BOOL down) {
     uint64_t ts = mach_absolute_time();
     uint32_t fingerIndex = 1;
     uint32_t fingerIdentity = 2;
-    uint32_t fingerEventMask = 0x3; // kIOHIDDigitizerEventRange | kIOHIDDigitizerEventTouch
+    uint32_t fingerEventMask = 0x3 | (down ? g_rcTouchEdgeMask : 0); // kIOHIDDigitizerEventRange | kIOHIDDigitizerEventTouch
     double pressure = down ? 1.0 : 0.0;
     uint32_t handEventMask = 35;
     uint32_t handEventTouch = down ? 1 : 0;
 
     // Path 1: System-wide global event
-    IOHIDEventRef parentGlobal = _IOHIDEventCreateDigitizerEvent(
+    IOHIDEventRef parentGlobal = systemGestureCopy ? NULL : _IOHIDEventCreateDigitizerEvent(
         kCFAllocatorDefault, ts,
         transducerType, parentIndex, parentIdentity, parentEventMask, parentButtonMask,
         0.0, 0.0, 0.0, 0.0, 0.0,
@@ -4273,10 +5020,12 @@ static void perform_digitizer_touch(double x, double y, BOOL down) {
             0, 0, 0);
 
         if (parentLocal) {
+            // The system gesture window takes the location in pixels; other windows, in points
+            double lx = systemGestureCopy ? x * scale : x, ly = systemGestureCopy ? y * scale : y;
             IOHIDEventRef fingerLocal = _IOHIDEventCreateDigitizerFingerEvent(
                 kCFAllocatorDefault, ts,
                 fingerIndex, fingerIdentity, fingerEventMask,
-                x, y, 0.0, pressure, 0.0,
+                lx, ly, 0.0, pressure, 0.0,
                 (boolean_t)down, (boolean_t)down, 0);
 
             if (fingerLocal) {
@@ -4304,7 +5053,7 @@ static void perform_digitizer_touch(double x, double y, BOOL down) {
                 _IOHIDEventSetSenderID(parentLocal, 0xDEFACEDBEEFFECE5ULL);
             }
 
-            BKSHIDEventSetDigitizerInfo(parentLocal, contextID, false, false, NULL, 0, 0);
+            BKSHIDEventSetDigitizerInfo(parentLocal, contextID, systemGestureCopy, false, NULL, 0, 0);
 
             rc_dispatch_sync_main_safe(^{
                 [[UIApplication sharedApplication] _enqueueHIDEvent:parentLocal];
@@ -4315,6 +5064,34 @@ static void perform_digitizer_touch(double x, double y, BOOL down) {
     }
     
     SRLog(@"[Touch] Dispatched touch event (down=%d) to contextID=%u (frontApp: %@) at (%.1f, %.1f)", down, contextID, loggedBundleID, x, y);
+}
+
+// The test kit's scripted gestures: one finger event at (x, y) in points - a move is another
+// down=YES at a new spot - through the same path as tap / hold / swipe. Off the main thread.
+void RCTouchEvent(double x, double y, BOOL down) {
+    rc_load_touch_symbols();
+    perform_digitizer_touch(x, y, down);
+}
+
+// A touch delivered the way iOS delivers a real finger: twice - to SpringBoard's system gesture
+// window (_UISystemGestureWindow, where the system gesture manager's recognizers, the
+// screen-edge triggers among them, watch) and to the window under the finger.
+void RCTouchEventSystemGesture(double x, double y, BOOL down) {
+    rc_load_touch_symbols();
+    __block uint32_t gestureContext = 0;
+    rc_dispatch_sync_main_safe(^{
+        id manager = [%c(SBSystemGestureManager) mainDisplayManager];
+        SEL windowSel = NSSelectorFromString(@"windowForSystemGestures");
+        id window = [manager respondsToSelector:windowSel] ? ((id (*)(id, SEL))objc_msgSend)(manager, windowSel) : nil;
+        SEL contextSel = NSSelectorFromString(@"_contextId");
+        if ([window respondsToSelector:contextSel]) gestureContext = ((uint32_t (*)(id, SEL))objc_msgSend)(window, contextSel);
+    });
+    if (gestureContext) {
+        g_rcTouchContextOverride = gestureContext;
+        perform_digitizer_touch(x, y, down);
+        g_rcTouchContextOverride = 0;
+    }
+    perform_digitizer_touch(x, y, down);
 }
 
 // Simulate a tap at absolute pixel coordinates (x, y).
@@ -5395,6 +6172,57 @@ static NSString *evaluate_lua_code(NSString *code) {
     return output;
 }
 
+// Test kit (RCTestKit.x): runs Lua and returns what it printed and returned - the
+// lua_eval command discards both. Lua states are separate, but print's buffer is shared,
+// so runs are serialized.
+static NSMutableString *g_rctkLuaOutput;
+
+static int rctk_lua_print(lua_State *L) {
+    int n = lua_gettop(L);
+    for (int i = 1; i <= n; i++) {
+        size_t len = 0;
+        const char *s = luaL_tolstring(L, i, &len);
+        if (i > 1) [g_rctkLuaOutput appendString:@"\t"];
+        [g_rctkLuaOutput appendString:[[NSString alloc] initWithBytes:s length:len encoding:NSUTF8StringEncoding] ?: @""];
+        lua_pop(L, 1);
+    }
+    [g_rctkLuaOutput appendString:@"\n"];
+    return 0;
+}
+
+NSDictionary *RCEvaluateLuaCapturing(NSString *code) {
+    static NSObject *lock;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ lock = [NSObject new]; });
+    @synchronized (lock) {
+        lua_State *L = setup_lua_environment();
+        if (!L) return @{ @"error": @"Could not create Lua state" };
+        g_rctkLuaOutput = [NSMutableString string];
+        lua_pushcfunction(L, rctk_lua_print);
+        lua_setglobal(L, "print");
+        NSMutableArray *returns = [NSMutableArray array];
+        NSString *error = nil;
+        int base = lua_gettop(L);
+        if (luaL_loadstring(L, code.UTF8String) == LUA_OK && lua_pcall(L, 0, LUA_MULTRET, 0) == LUA_OK) {
+            for (int i = base + 1; i <= lua_gettop(L); i++) {
+                size_t len = 0;
+                const char *s = luaL_tolstring(L, i, &len);
+                [returns addObject:[[NSString alloc] initWithBytes:s length:len encoding:NSUTF8StringEncoding] ?: @""];
+                lua_pop(L, 1);
+            }
+        } else {
+            const char *message = lua_tostring(L, -1);
+            error = message ? @(message) : @"unknown error";
+        }
+        lua_close(L);
+        NSString *output = [g_rctkLuaOutput copy];
+        g_rctkLuaOutput = nil;
+        NSMutableDictionary *result = [@{ @"output": output ?: @"", @"returns": returns } mutableCopy];
+        if (error) result[@"error"] = error;
+        return result;
+    }
+}
+
 // The installed apps as @{name, bundleId}, sorted by name (the web UI's app picker)
 static NSArray<NSDictionary *> *RCInstalledAppList(void) {
     void *lsHandle = dlopen("/System/Library/Frameworks/CoreServices.framework/CoreServices", RTLD_NOW);
@@ -6362,7 +7190,103 @@ static void rc_ensure_shortcuts_runner(void) {
     }
 }
 
-static void rc_execute_shortcut(NSString *shortcutName, NSString *inputArg) {
+// Running a shortcut through RCShortcutsHelper in siriactionsd (see RCShortcutsHelper.m): it
+// answers each request once it has started the shortcut, or found none by that name, and again
+// when the shortcut ends. Replies arrive on the main thread.
+static NSMutableDictionary<NSString *, NSMutableDictionary *> *g_shortcutRequests; // id -> name, semaphore, state
+
+static void rc_observe_shortcut_replies(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        g_shortcutRequests = [NSMutableDictionary dictionary];
+        // Delivered through the run loop of the thread that registers
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            NSNotificationCenter *center = [objc_getClass("NSDistributedNotificationCenter") defaultCenter];
+            [center addObserverForName:kRCShortcutsRunReply object:nil queue:nil usingBlock:^(NSNotification *note) {
+                NSDictionary *info = note.userInfo;
+                NSString *requestID = info[@"id"], *state = info[@"state"], *error = info[@"error"];
+                if (![requestID isKindOfClass:[NSString class]] || ![state isKindOfClass:[NSString class]]) return;
+                NSMutableDictionary *request;
+                @synchronized (g_shortcutRequests) { request = g_shortcutRequests[requestID]; }
+                if (!request) return; // another RemoteCompanion's, or answered after the wait
+                NSString *name = request[@"name"];
+                if ([state isEqualToString:@"list"]) {
+                    // A list request: nothing to log
+                } else if ([state isEqualToString:@"started"]) SRLog(@"[Shortcut] '%@' started", name);
+                else if ([state isEqualToString:@"finished"]) SRLog(@"[Shortcut] '%@' finished", name);
+                else if ([state isEqualToString:@"missing"]) SRLogMin(@"[Shortcut] No shortcut named '%@'", name);
+                else if ([state isEqualToString:@"unsupported"]) SRLog(@"[Shortcut] The helper can't run '%@' on this iOS version (%@)", name, error ?: @"");
+                else SRLogMin(@"[Shortcut] '%@' %@%@%@", name, state, error ? @": " : @"", error ?: @"");
+                if (!request[@"reply"]) {
+                    request[@"reply"] = info;
+                    dispatch_semaphore_signal(request[@"semaphore"]);
+                }
+                if (![state isEqualToString:@"started"]) {
+                    @synchronized (g_shortcutRequests) { [g_shortcutRequests removeObjectForKey:requestID]; }
+                }
+            }];
+        });
+    });
+}
+
+// Sends a request to the helper and returns its first answer, or nil if none came within 2 s.
+// Not on the main thread.
+static NSDictionary *rc_ask_shortcuts_helper(NSDictionary *info, NSString *name) {
+    id center = [objc_getClass("NSDistributedNotificationCenter") defaultCenter];
+    if (!center) return nil;
+    rc_observe_shortcut_replies();
+    rc_ensure_shortcuts_runner();
+
+    NSString *requestID = [NSUUID UUID].UUIDString;
+    dispatch_semaphore_t answered = dispatch_semaphore_create(0);
+    NSMutableDictionary *request = [@{ @"name": name, @"semaphore": answered } mutableCopy];
+    @synchronized (g_shortcutRequests) { g_shortcutRequests[requestID] = request; }
+
+    NSMutableDictionary *message = [info mutableCopy];
+    message[@"id"] = requestID;
+    ((void (*)(id, SEL, id, id, id, BOOL))objc_msgSend)(center, @selector(postNotificationName:object:userInfo:deliverImmediately:),
+        kRCShortcutsRunRequest, nil, message, YES);
+
+    if (dispatch_semaphore_wait(answered, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC))) == 0) return request[@"reply"];
+    @synchronized (g_shortcutRequests) { [g_shortcutRequests removeObjectForKey:requestID]; }
+    return nil;
+}
+
+// YES once the helper has taken the shortcut (started it, or found none by that name); NO when it
+// didn't answer or can't run it on this iOS version, so it can be run another way. Not on the main thread.
+static BOOL rc_run_shortcut_with_helper(NSString *name, NSString *input, BOOL silent) {
+    NSMutableDictionary *info = [@{ @"name": name } mutableCopy];
+    if (input.length) info[@"input"] = input;
+    if (silent) info[@"silent"] = @YES;
+    NSDictionary *reply = rc_ask_shortcuts_helper(info, name);
+    if (!reply) SRLogMin(@"[Shortcut] The helper in siriactionsd didn't answer for '%@' - trying other ways", name);
+    return reply && ![reply[@"state"] isEqualToString:@"unsupported"];
+}
+
+// The shortcut names, one per line, or nil when the helper can't give them. Not on the main thread.
+static NSString *rc_list_shortcuts_with_helper(void) {
+    NSDictionary *reply = rc_ask_shortcuts_helper(@{ @"action": @"list" }, @"(list)");
+    NSArray *names = reply[@"names"];
+    if (![reply[@"state"] isEqualToString:@"list"] || ![names isKindOfClass:[NSArray class]]) return nil;
+    return [names componentsJoinedByString:@"\n"];
+}
+
+// Whether this springcuts has -i (invisible runs): newer versions do, 1.2 (iOS 14) doesn't, and an
+// option it doesn't know stops it from running the shortcut
+static BOOL rc_springcuts_has_invisible(NSString *path) {
+    static NSString *checkedPath;
+    static BOOL has;
+    @synchronized ([NSFileManager class]) {
+        if (![checkedPath isEqualToString:path]) {
+            NSData *binary = [NSData dataWithContentsOfFile:path options:NSDataReadingMappedIfSafe error:NULL];
+            has = binary && [binary rangeOfData:[@"-i: when running a shortcut" dataUsingEncoding:NSUTF8StringEncoding] options:0 range:NSMakeRange(0, binary.length)].location != NSNotFound;
+            checkedPath = path;
+        }
+        return has;
+    }
+}
+
+static void rc_execute_shortcut(NSString *shortcutName, NSString *inputArg, BOOL silent) {
     if (!shortcutName || shortcutName.length == 0) return;
     
     NSString *cleanName = [shortcutName stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
@@ -6370,10 +7294,13 @@ static void rc_execute_shortcut(NSString *shortcutName, NSString *inputArg) {
         cleanName = [cleanName substringWithRange:NSMakeRange(1, cleanName.length - 2)];
     }
     
-    SRLog(@"[Shortcut] Attempting execution for: '%@'", cleanName);
+    SRLog(@"[Shortcut] Attempting execution for: '%@'%@", cleanName, silent ? @" (silently)" : @"");
     
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         @try {
+            // 0. RemoteCompanion's own runner in siriactionsd (no SpringCuts needed)
+            if (rc_run_shortcut_with_helper(cleanName, inputArg, silent)) return;
+
             // 1. Try Native VoiceShortcutClient / WorkflowKit execution (iOS 15 / 16 / 17)
             dlopen("/System/Library/PrivateFrameworks/VoiceShortcutClient.framework/VoiceShortcutClient", RTLD_NOW);
             dlopen("/System/Library/PrivateFrameworks/WorkflowKit.framework/WorkflowKit", RTLD_NOW);
@@ -6464,6 +7391,7 @@ static void rc_execute_shortcut(NSString *shortcutName, NSString *inputArg) {
                     [args addObject:@"-p"];
                     [args addObject:inputArg];
                 }
+                if (silent && rc_springcuts_has_invisible(springcutsPath)) [args addObject:@"-i"];
                 
                 char **argv = (char **)malloc((args.count + 1) * sizeof(char *));
                 for (NSUInteger i = 0; i < args.count; i++) {
@@ -6949,6 +7877,13 @@ static NSString *rc_handle_autolock(NSString *arg) {
     return [NSString stringWithFormat:@"Auto-Lock: %@\n", rc_autolock_label(target)];
 }
 
+// Set while the UNIX socket's handler runs a command: it came from this phone (the app, rc),
+// not the network (the web server's /api/command also calls handle_command)
+static __thread BOOL g_rcCommandFromLocalSocket = NO;
+BOOL RCCommandFromLocalSocket(void) {
+    return g_rcCommandFromLocalSocket;
+}
+
 static NSString *handle_command(NSString *cmd) {
     if (!cmd || ![cmd isKindOfClass:[NSString class]]) {
         SRLogMin(@"ERROR: handle_command received nil or invalid command string");
@@ -6956,7 +7891,18 @@ static NSString *handle_command(NSString *cmd) {
     }
     NSString *cleanCmd = [cmd stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     if (cleanCmd.length == 0) return @"Error: Empty command\n";
-    SRLog(@"Received command: %@", cleanCmd);
+    // The test kit's passcode never reaches the log (see RCTestKit.x)
+    if ([cleanCmd hasPrefix:@"testkit passcode/set"]) {
+        SRLog(@"Received command: testkit passcode/set (redacted)");
+        return RCTKHandleCommand([cleanCmd substringFromIndex:7]);
+    }
+    if ([cleanCmd hasPrefix:@"unlock "]) {
+        SRLog(@"Received command: unlock ****");
+    } else if ([cleanCmd hasPrefix:@"lock-toggle "] || [cleanCmd hasPrefix:@"lock toggle "]) {
+        SRLog(@"Received command: lock-toggle ****");
+    } else {
+        SRLog(@"Received command: %@", cleanCmd);
+    }
     
     if ([cleanCmd isEqualToString:@"ha"] || [cleanCmd hasPrefix:@"ha "]) {
         NSString *subArgs = [cleanCmd isEqualToString:@"ha"] ? @"" : [cleanCmd substringFromIndex:3];
@@ -6974,17 +7920,23 @@ static NSString *handle_command(NSString *cmd) {
     }
     
     // Debug hex dump of command
-    NSMutableString *hex = [NSMutableString string];
-    const char *utf = [cleanCmd UTF8String];
-    for (size_t i = 0; i < strlen(utf); i++) {
-        [hex appendFormat:@"%02X ", (unsigned char)utf[i]];
+    if ([cleanCmd hasPrefix:@"unlock "] || [cleanCmd hasPrefix:@"lock-toggle "] || [cleanCmd hasPrefix:@"lock toggle "]) {
+        SRLog(@"Command HEX: (redacted)");
+    } else {
+        NSMutableString *hex = [NSMutableString string];
+        const char *utf = [cleanCmd UTF8String];
+        for (size_t i = 0; i < strlen(utf); i++) {
+            [hex appendFormat:@"%02X ", (unsigned char)utf[i]];
+        }
+        SRLog(@"Command HEX: %@", hex);
     }
-    SRLog(@"Command HEX: %@", hex);
     
     // Log file retrieval command
     if ([cleanCmd isEqualToString:@"log"]) {
         SRLog(@"Log request");
         return nil;
+    } else if ([cleanCmd isEqualToString:@"testkit"] || [cleanCmd hasPrefix:@"testkit "]) {
+        return RCTKHandleCommand([cleanCmd substringFromIndex:7]);
     } else if ([[cleanCmd lowercaseString] hasPrefix:@"autolock "] || [[cleanCmd lowercaseString] hasPrefix:@"auto-lock "]) {
         return rc_handle_autolock([cleanCmd substringFromIndex:[cleanCmd rangeOfString:@" "].location + 1]);
     } else if ([cleanCmd isEqualToString:@"proximity"] || [cleanCmd hasPrefix:@"proximity "]) {
@@ -7239,6 +8191,17 @@ static NSString *handle_command(NSString *cmd) {
     } else if ([cleanCmd isEqualToString:@"prev"]) {
         MRMediaRemoteSendCommand(kMRPreviousTrack, nil);
         return @"Previous track\n";
+    } else if ([cleanCmd isEqualToString:@"button triggers"] || [cleanCmd hasPrefix:@"button triggers "]) {
+        NSString *what = [cleanCmd isEqualToString:@"button triggers"] ? @"" : [[cleanCmd substringFromIndex:16] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        return RC_ButtonTriggersCommand(what);
+    } else if ([cleanCmd isEqualToString:@"nfc scanner"] || [cleanCmd hasPrefix:@"nfc scanner "]) {
+        // nfc scanner pause|resume|toggle: pauses only the NFC scan (with Experimental NFC, iOS still
+        // reads tags while the screen is on); no argument reports the state
+        NSString *what = [cleanCmd isEqualToString:@"nfc scanner"] ? @"" : [[cleanCmd substringFromIndex:12] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        __block NSString *state;
+        if ([NSThread isMainThread]) state = RCNFCScannerCommand(what);
+        else dispatch_sync(dispatch_get_main_queue(), ^{ state = RCNFCScannerCommand(what); });
+        return [NSString stringWithFormat:@"NFC scanner %@\n", state];
     } else if ([cleanCmd isEqualToString:@"flashlight"] || [cleanCmd isEqualToString:@"torch"] || [cleanCmd isEqualToString:@"flashlight toggle"]) {
         SRLog(@"Toggling flashlight");
         AVCaptureDevice *device = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
@@ -7334,6 +8297,11 @@ static NSString *handle_command(NSString *cmd) {
         
         send_notification(title, body, urgent);
         return @"OK\n";
+    } else if ([cleanCmd isEqualToString:@"shortcuts list"]) {
+        // The app's shortcut picker; an empty answer makes it try SpringCuts. Not answered on the
+        // main thread, where the helper's replies arrive.
+        NSString *names = [NSThread isMainThread] ? nil : rc_list_shortcuts_with_helper();
+        return names ? [names stringByAppendingString:@"\n"] : @""; // "\n" alone: there are none
     } else if ([cleanCmd hasPrefix:@"shortcut:"] || [cleanCmd hasPrefix:@"shortcut "] || [cleanCmd hasPrefix:@"springcut "] || [cleanCmd hasPrefix:@"shortcut-direct "] || [cleanCmd hasPrefix:@"sd "]) {
         NSString *argsString = nil;
         if ([cleanCmd hasPrefix:@"shortcut:"]) {
@@ -7348,34 +8316,11 @@ static NSString *handle_command(NSString *cmd) {
             argsString = [[cleanCmd substringFromIndex:3] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         }
         
-        NSString *shortcutName = argsString;
         NSString *inputParam = nil;
+        BOOL silent = NO;
+        NSString *shortcutName = rc_parse_shortcut_args(argsString, &inputParam, &silent);
         
-        // Parse name and optional -p parameter
-        if ([argsString hasPrefix:@"\""]) {
-            NSRange endQuote = [argsString rangeOfString:@"\"" options:0 range:NSMakeRange(1, argsString.length - 1)];
-            if (endQuote.location != NSNotFound) {
-                shortcutName = [argsString substringWithRange:NSMakeRange(1, endQuote.location - 1)];
-                NSString *remaining = [[argsString substringFromIndex:endQuote.location + 1] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-                if ([remaining hasPrefix:@"-p "]) {
-                    inputParam = [[remaining substringFromIndex:3] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-                    if ([inputParam hasPrefix:@"\""] && [inputParam hasSuffix:@"\""] && inputParam.length >= 2) {
-                        inputParam = [inputParam substringWithRange:NSMakeRange(1, inputParam.length - 2)];
-                    }
-                }
-            }
-        } else {
-            NSRange pRange = [argsString rangeOfString:@" -p "];
-            if (pRange.location != NSNotFound) {
-                shortcutName = [[argsString substringToIndex:pRange.location] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-                inputParam = [[argsString substringFromIndex:pRange.location + 4] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-                if ([inputParam hasPrefix:@"\""] && [inputParam hasSuffix:@"\""] && inputParam.length >= 2) {
-                    inputParam = [inputParam substringWithRange:NSMakeRange(1, inputParam.length - 2)];
-                }
-            }
-        }
-        
-        rc_execute_shortcut(shortcutName, inputParam);
+        rc_execute_shortcut(shortcutName, inputParam, silent);
         return [NSString stringWithFormat:@"Triggered shortcut: %@\n", shortcutName];
     } else if ([cleanCmd hasPrefix:@"anc "] || [cleanCmd isEqualToString:@"anc"]) {
         // ANC control - triggers Sonitus hooks
@@ -7471,6 +8416,11 @@ static NSString *handle_command(NSString *cmd) {
         }
     } else if ([cleanCmd isEqualToString:@"siri"]) {
         return handle_command(@"button siri");
+    } else if ([cleanCmd isEqualToString:@"accessibility shortcut"]) {
+        __block BOOL ran = NO;
+        if ([NSThread isMainThread]) ran = RC_RunAccessibilityShortcut();
+        else dispatch_sync(dispatch_get_main_queue(), ^{ ran = RC_RunAccessibilityShortcut(); });
+        return ran ? @"Accessibility Shortcut triggered\n" : @"No Accessibility Shortcut set\n";
     } else if ([cleanCmd isEqualToString:@"open control center"] ||
                [cleanCmd isEqualToString:@"control center"] ||
                [cleanCmd isEqualToString:@"open-control-center"] ||
@@ -7496,10 +8446,12 @@ static NSString *handle_command(NSString *cmd) {
                     [controller dismissAnimated:YES];
                     opened = YES;
                 } else {
+                    rc_mark_intentional_cc_open();
                     [controller presentAnimated:YES];
                     opened = YES;
                 }
             } else if (controller && [controller respondsToSelector:@selector(_presentControlCenterGestureBeganWithReason:)]) {
+                 rc_mark_intentional_cc_open();
                  [controller performSelector:@selector(_presentControlCenterGestureBeganWithReason:) withObject:@"RemoteCompanion"];
                  opened = YES;
             }
@@ -7593,18 +8545,6 @@ static NSString *handle_command(NSString *cmd) {
         }
         SRLog(@"App Switcher toggle final success: %d", success);
         return success ? @"Switcher toggled\n" : @"Failed to toggle switcher\n";
-    } else if ([cleanCmd hasPrefix:@"unlock "]) {
-        NSString *passcode = [[cleanCmd substringFromIndex:7] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        dispatch_async(dispatch_get_main_queue(), ^{
-            SBLockScreenManager *manager = [objc_getClass("SBLockScreenManager") sharedInstance];
-            if (manager && [manager isUILocked]) {
-                simulate_home_press(); // Wake device
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                    [manager attemptUnlockWithPasscode:passcode];
-                });
-            }
-        });
-        return [NSString stringWithFormat:@"Attempting unlock with passcode: %@\n", passcode];
     } else if ([cleanCmd hasPrefix:@"debug-class "]) {
         NSString *className = [[cleanCmd substringFromIndex:12] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
         SRLog(@"Debugging class: %@", className);
@@ -7721,12 +8661,17 @@ static NSString *handle_command(NSString *cmd) {
     } else if ([cleanCmd isEqualToString:@"unlock"] || [cleanCmd hasPrefix:@"unlock "]) {
         // Unlock phone: Only if currently locked!
         
-        NSString *pin = @"2569";
+        NSString *pin = nil;
         if ([cleanCmd hasPrefix:@"unlock "]) {
             pin = [[cleanCmd substringFromIndex:7] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            if (pin.length == 0) pin = nil;
         }
         
-        SRLog(@"[SmartUnlock] Unlock command received for PIN: %@", pin);
+        if (pin) {
+            SRLog(@"[SmartUnlock] Unlock command received (with passcode)");
+        } else {
+            SRLog(@"[SmartUnlock] Unlock command received (wake / UI unlock)");
+        }
         
         dispatch_async(dispatch_get_main_queue(), ^{
             Class SBLockScreenManagerClass = objc_getClass("SBLockScreenManager");
@@ -7775,17 +8720,28 @@ static NSString *handle_command(NSString *cmd) {
                     return;
                 }
                 
-                // Try the direct unlock method
-                if ([manager respondsToSelector:@selector(attemptUnlockWithPasscode:)]) {
-                    SRLog(@"[SmartUnlock] Calling attemptUnlockWithPasscode...");
-                    BOOL success = [manager attemptUnlockWithPasscode:pin];
-                    SRLog(@"[SmartUnlock] attemptUnlockWithPasscode returned: %d", success);
-                } else if ([manager respondsToSelector:@selector(unlockUIFromSource:withOptions:)]) {
-                    SRLog(@"[SmartUnlock] Falling back to unlockUIFromSource...");
-                    [manager unlockUIFromSource:0 withOptions:nil];
-                    SRLog(@"[SmartUnlock] unlockUIFromSource called");
+                if (pin.length > 0) {
+                    BOOL success = NO;
+                    SEL selFinishUI = NSSelectorFromString(@"_attemptUnlockWithPasscode:finishUIUnlock:");
+                    if ([manager respondsToSelector:selFinishUI]) {
+                        SRLog(@"[SmartUnlock] Calling _attemptUnlockWithPasscode:finishUIUnlock:...");
+                        success = ((BOOL (*)(id, SEL, id, BOOL))objc_msgSend)(manager, selFinishUI, pin, YES);
+                    } else if ([manager respondsToSelector:@selector(attemptUnlockWithPasscode:)]) {
+                        SRLog(@"[SmartUnlock] Calling attemptUnlockWithPasscode...");
+                        success = [manager attemptUnlockWithPasscode:pin];
+                    }
+                    SRLog(@"[SmartUnlock] Passcode unlock attempt returned: %d", success);
+                    if (!success && [manager respondsToSelector:@selector(unlockUIFromSource:withOptions:)]) {
+                        [manager unlockUIFromSource:0 withOptions:nil];
+                    }
                 } else {
-                    SRLogMin(@"[SmartUnlock] ERROR: No supported unlock method found on manager!");
+                    if ([manager respondsToSelector:@selector(unlockUIFromSource:withOptions:)]) {
+                        SRLog(@"[SmartUnlock] Calling unlockUIFromSource...");
+                        [manager unlockUIFromSource:0 withOptions:nil];
+                        SRLog(@"[SmartUnlock] unlockUIFromSource called");
+                    } else {
+                        SRLog(@"[SmartUnlock] Screen awakened, waiting for user passcode entry");
+                    }
                 }
             });
         });
@@ -7811,8 +8767,17 @@ static NSString *handle_command(NSString *cmd) {
             SRLog(@"Invalid key usage: %@", usageStr);
         }
 
-    } else if ([cleanCmd isEqualToString:@"lock-toggle"] || [cleanCmd isEqualToString:@"lock toggle"]) {
+    } else if ([cleanCmd isEqualToString:@"lock-toggle"] || [cleanCmd isEqualToString:@"lock toggle"] ||
+               [cleanCmd hasPrefix:@"lock-toggle "] || [cleanCmd hasPrefix:@"lock toggle "]) {
         // Toggle Lock State
+        NSString *pin = nil;
+        if ([cleanCmd hasPrefix:@"lock-toggle "]) {
+            pin = [[cleanCmd substringFromIndex:12] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        } else if ([cleanCmd hasPrefix:@"lock toggle "]) {
+            pin = [[cleanCmd substringFromIndex:12] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        }
+        if (pin.length == 0) pin = nil;
+
         dispatch_async(dispatch_get_main_queue(), ^{
             Class SBLockScreenManagerClass = objc_getClass("SBLockScreenManager");
             SBLockScreenManager *manager = nil;
@@ -7821,14 +8786,15 @@ static NSString *handle_command(NSString *cmd) {
             }
             BOOL isLocked = NO;
             if (manager && [manager respondsToSelector:@selector(isUILocked)]) {
-                isLocked = [manager isUILocked];
+                isLocked = rc_device_locked(manager);
             }
             
             SRLog(@"[LockToggle] Current State: %@", isLocked ? @"Locked" : @"Unlocked");
             
             if (isLocked) {
+                 NSString *unlockCmd = (pin.length > 0) ? [NSString stringWithFormat:@"unlock %@", pin] : @"unlock";
                  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-                     handle_command(@"unlock");
+                     handle_command(unlockCmd);
                  });
             } else {
                  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
@@ -7876,9 +8842,9 @@ static NSString *handle_command(NSString *cmd) {
                  
                  // 2. Wait 0.5s then Unlock AND Open URL
                  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                     if (manager && [manager respondsToSelector:@selector(attemptUnlockWithPasscode:)]) {
-                          SRLog(@"[SmartURL] Attempting unlock with default PIN...");
-                          [manager attemptUnlockWithPasscode:@"2569"];
+                     if (manager && [manager respondsToSelector:@selector(unlockUIFromSource:withOptions:)]) {
+                          SRLog(@"[SmartURL] Attempting UI unlock...");
+                          [manager unlockUIFromSource:0 withOptions:nil];
                      }
                      
                      // 3. Wait another short moment for unlock animation/transition to finish
@@ -7985,8 +8951,8 @@ static NSString *handle_command(NSString *cmd) {
                 inject_hid_event(kHIDPage_Consumer, kHIDUsage_Csmr_Power, 0, 0);
                 
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                    if ([manager respondsToSelector:@selector(attemptUnlockWithPasscode:)]) {
-                        [manager attemptUnlockWithPasscode:@"2569"];
+                    if (manager && [manager respondsToSelector:@selector(unlockUIFromSource:withOptions:)]) {
+                        [manager unlockUIFromSource:0 withOptions:nil];
                     }
                     
                     launchSpotify();
@@ -8127,13 +9093,16 @@ static NSString *handle_command(NSString *cmd) {
             rc_show_hud_toast(@"Playlist Queued", [NSString stringWithFormat:@"Shuffling '%@'", playlistName], @"music.note.list");
             return [NSString stringWithFormat:@"Play playlist '%@' command sent to AudioReceiver\n", playlistName];
         }
+    } else if ([cleanCmd hasPrefix:@"focus "] || [cleanCmd isEqualToString:@"focus"]) {
+        return rc_focus_command([cleanCmd substringFromIndex:MIN((NSUInteger)6, cleanCmd.length)]);
     } else if ([cleanCmd hasPrefix:@"dnd "]) {
         NSString *subCmd = [[cleanCmd substringFromIndex:4] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         if ([subCmd isEqualToString:@"on"]) {
             toggle_dnd(YES);
             return @"DND Enabled\n";
         } else if ([subCmd isEqualToString:@"off"]) {
-            toggle_dnd(NO);
+            // Only Do Not Disturb: another Focus stays on ("focus off" turns that off)
+            if (!rc_focus_supported() || get_dnd_state()) toggle_dnd(NO);
             return @"DND Disabled\n";
         } else if ([subCmd isEqualToString:@"status"]) {
             BOOL current = get_dnd_state();
@@ -8511,6 +9480,28 @@ static NSString *handle_command(NSString *cmd) {
         }
         
         return rc_open_camera_unified(mode, device, zoom, hasFlash ? 1 : 0, autoShutter);
+    } else if ([cleanCmd isEqualToString:@"nav"] || [cleanCmd hasPrefix:@"nav "] || [cleanCmd hasPrefix:@"app nav "]) {
+        NSString *dest = @"";
+        if ([cleanCmd hasPrefix:@"nav "]) dest = [cleanCmd substringFromIndex:4];
+        else if ([cleanCmd hasPrefix:@"app nav "]) dest = [cleanCmd substringFromIndex:8];
+        dest = [dest stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (dest.length == 0) dest = @"home";
+
+        // Unlock device first if locked
+        Class SBLockScreenManagerClass = objc_getClass("SBLockScreenManager");
+        SBLockScreenManager *manager = (SBLockScreenManagerClass) ? [SBLockScreenManagerClass sharedInstance] : nil;
+        if (manager && [manager respondsToSelector:@selector(isUILocked)] && [manager isUILocked]) {
+            handle_command(@"unlock");
+        }
+
+        NSString *urlString = [dest containsString:@"://"] ? dest : [NSString stringWithFormat:@"remotecompanion://%@", dest];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NSURL *url = [NSURL URLWithString:urlString];
+            if (url) {
+                [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
+            }
+        });
+        return [NSString stringWithFormat:@"Navigating to %@\n", dest];
     } else if ([cleanCmd hasPrefix:@"uiopen "]) {
         NSString *bundleId = [[cleanCmd substringFromIndex:7] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         NSLog(@"[RemoteCommand] UIOPEN Bundle ID: %@", bundleId);
@@ -8520,11 +9511,11 @@ static NSString *handle_command(NSString *cmd) {
         });
         return [NSString stringWithFormat:@"Opened %@", bundleId];
     } else if ([cleanCmd hasPrefix:@"open "]) {
-        // Open app by name or Bundle ID
+        // Open app by name, Bundle ID, or URL scheme
         NSString *appName = [[cleanCmd substringFromIndex:5] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         
         // If it looks like a Bundle ID (contains dot), use FBSOpenApplicationService (faster)
-        if ([appName containsString:@"."]) {
+        if ([appName containsString:@"."] && ![appName containsString:@"://"]) {
              NSLog(@"[RemoteCommand] Opening Bundle ID via FBS: %@", appName);
              dispatch_async(dispatch_get_main_queue(), ^{
                  FBSOpenApplicationService *service = [FBSOpenApplicationService serviceWithDefaultShellEndpoint];
@@ -8536,8 +9527,9 @@ static NSString *handle_command(NSString *cmd) {
         NSString *lowerName = [appName lowercaseString];
         NSString *urlString = nil;
         
-        // Common app URL schemes
-        if ([lowerName isEqualToString:@"spotify"]) urlString = @"spotify://";
+        if ([appName containsString:@"://"]) {
+            urlString = appName;
+        } else if ([lowerName isEqualToString:@"spotify"]) urlString = @"spotify://";
         else if ([lowerName isEqualToString:@"music"]) urlString = @"music://";
         else if ([lowerName isEqualToString:@"youtube"]) urlString = @"youtube://";
         else if ([lowerName isEqualToString:@"safari"]) urlString = @"x-web-search://";
@@ -8563,6 +9555,7 @@ static NSString *handle_command(NSString *cmd) {
                 [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
             }
         });
+        return [NSString stringWithFormat:@"Opened %@\n", appName];
     } else if ([cleanCmd isEqualToString:@"bluetooth-on"] || [cleanCmd isEqualToString:@"bt-on"] || [cleanCmd isEqualToString:@"bluetooth on"] || [cleanCmd isEqualToString:@"bt on"]) {
         void *btHandle = dlopen("/System/Library/PrivateFrameworks/BluetoothManager.framework/BluetoothManager", RTLD_NOW);
         if (btHandle) {
@@ -8877,6 +9870,8 @@ static NSString *handle_command(NSString *cmd) {
         }
         BOOL ring = get_system_vibration(NO), silent = get_system_vibration(YES);
         return [NSString stringWithFormat:@"Haptics: %@\n", ring ? (silent ? @"ALWAYS" : @"RING_ONLY") : (silent ? @"SILENT_ONLY" : @"NEVER")];
+    } else if ([cleanCmd isEqualToString:@"carplay"] || [cleanCmd isEqualToString:@"carplay status"]) {
+        return rc_carplay_connected() ? @"CarPlay: CONNECTED\n" : @"CarPlay: NOT_CONNECTED\n";
     } else if ([cleanCmd isEqualToString:@"ringer"] || [cleanCmd hasPrefix:@"ringer "]) {
         NSString *sub = cleanCmd.length > 7 ? [cleanCmd substringFromIndex:7] : @"status";
         // Ringtone & alerts volume, separate from the media volume (set-vol)
@@ -8974,6 +9969,23 @@ static NSString *handle_command(NSString *cmd) {
             return [NSString stringWithFormat:@"Flashlight %@\n", [device torchMode] == AVCaptureTorchModeOn ? @"ON" : @"OFF"];
         }
         return @"Error: Flashlight not found\n";
+    } else if ([cleanCmd isEqualToString:@"kill current"] || [cleanCmd isEqualToString:@"kill front"] ||
+               [cleanCmd isEqualToString:@"kill foreground"] || [cleanCmd isEqualToString:@"kill current app"] ||
+               [cleanCmd isEqualToString:@"kill front app"]) {
+        __block NSString *frontBundleID = nil;
+        void (^frontBlock)(void) = ^{
+            SBApplication *frontApp = [(SpringBoard *)[UIApplication sharedApplication] _accessibilityFrontMostApplication];
+            frontBundleID = [frontApp bundleIdentifier];
+        };
+        if ([NSThread isMainThread]) frontBlock();
+        else dispatch_sync(dispatch_get_main_queue(), frontBlock);
+        if (!frontBundleID.length || [frontBundleID isEqualToString:@"com.apple.springboard"]) {
+            return @"No app to kill (Home Screen)\n";
+        }
+        SRLog(@"Killing front app: %@", frontBundleID);
+        // Reason 5 = Quit via App Switcher (clean kill)
+        BKSTerminateApplicationForReasonAndReportWithDescription(frontBundleID, 5, false, nil);
+        return [NSString stringWithFormat:@"Killed %@\n", frontBundleID];
     } else if ([cleanCmd hasPrefix:@"kill "]) {
         NSString *arg = [[cleanCmd substringFromIndex:5] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         NSString *bundleID = resolve_bundle_id(arg);
@@ -9088,12 +10100,17 @@ static NSString *handle_command(NSString *cmd) {
             arg = [[cleanCmd substringFromIndex:8] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         }
         return rc_handle_snapper(arg);
+    } else if ([cleanCmd hasPrefix:@"stop trigger "]) {
+        NSString *key = [[cleanCmd substringFromIndex:13] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        NSUInteger running = rc_stop_trigger_runs(key);
+        SRLogMin(@"[Stop] '%@': %lu run(s) stopped", key, (unsigned long)running);
+        return [NSString stringWithFormat:@"Stopped %lu run(s) of %@\n", (unsigned long)running, key];
     } else if ([cleanCmd hasPrefix:@"delay "]) {
         NSString *delayStr = [cleanCmd substringFromIndex:6];
         float seconds = [delayStr floatValue];
         if (seconds > 0) {
             SRLog(@"Delaying for %.2f seconds...", seconds);
-            usleep((useconds_t)(seconds * 1000000));
+            if (!rc_run_wait(seconds)) return @"Delay cut short: the run was stopped\n";
         }
         return [NSString stringWithFormat:@"Delayed for %.2f seconds\n", seconds];
     } else if ([cleanCmd hasPrefix:@"root "] || [cleanCmd hasPrefix:@"sudo "]) {
@@ -9398,19 +10415,30 @@ static NSString *handle_command(NSString *cmd) {
         
         if ([sub isEqualToString:@"on"] || [sub isEqualToString:@"enable"]) {
             mConfig[@"webUIEnabled"] = @YES;
-            g_triggerConfig = [mConfig copy];
+            rc_set_trigger_config([mConfig copy]);
             save_trigger_config();
             return @"Web UI Enabled\n";
         } else if ([sub isEqualToString:@"off"] || [sub isEqualToString:@"disable"]) {
             mConfig[@"webUIEnabled"] = @NO;
-            g_triggerConfig = [mConfig copy];
+            rc_set_trigger_config([mConfig copy]);
             save_trigger_config();
             return @"Web UI Disabled\n";
         } else if ([sub isEqualToString:@"status"]) {
             BOOL enabled = [mConfig[@"webUIEnabled"] boolValue];
-            return [NSString stringWithFormat:@"Web UI is %@\n", enabled ? @"ENABLED" : @"DISABLED"];
+            return [NSString stringWithFormat:@"Web UI is %@ (access: %@)\n", enabled ? @"ENABLED" : @"DISABLED", rc_web_access()];
+        } else if ([sub isEqualToString:@"access any"] || [sub isEqualToString:@"access networks"] || [sub isEqualToString:@"access local"]) {
+            // Who can reach it: any network, only the trusted Wi-Fi networks, or only this iPhone
+            NSString *access = [sub substringFromIndex:7];
+            if ([access isEqualToString:@"any"]) [mConfig removeObjectForKey:@"webUIAccess"];
+            else mConfig[@"webUIAccess"] = access;
+            rc_set_trigger_config([mConfig copy]);
+            save_trigger_config();
+            return [NSString stringWithFormat:@"Web UI access: %@\n", access];
+        } else if ([sub isEqualToString:@"wifi"]) {
+            // The Wi-Fi network this iPhone is on, for adding it as a trusted network
+            return [NSString stringWithFormat:@"%@\n", rc_current_wifi_name() ?: @""];
         }
-        return @"Usage: rc webui <on|off|status>\n";
+        return @"Usage: rc webui <on|off|status|access any|access networks|access local|wifi>\n";
     } else if ([cleanCmd isEqualToString:@"respring"]) {
         SRLog(@"Triggering Respring");
         
@@ -9879,6 +10907,14 @@ static void start_web_server() {
                 setsockopt(new_socket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
                 setsockopt(new_socket, SOL_SOCKET, SO_SNDTIMEO, (const char*)&tv, sizeof tv);
 
+                // Not from a network the Web UI is allowed on: every request is turned away
+                if (!rc_web_client_allowed(&client_addr)) {
+                    static const char refused[] = "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nContent-Length: 39\r\nConnection: close\r\n\r\nWeb UI is not available on this network";
+                    write(new_socket, refused, sizeof(refused) - 1);
+                    close(new_socket);
+                    return;
+                }
+
                 char buffer[16384] = {0};
                 ssize_t valread = read(new_socket, buffer, 16384 - 1);
                 if (valread > 0) {
@@ -9978,7 +11014,7 @@ static void start_web_server() {
                                             NSError *err;
                                             id jsonObj = [NSJSONSerialization JSONObjectWithData:bodyData options:NSJSONReadingMutableContainers error:&err];
                                             if (jsonObj && [jsonObj isKindOfClass:[NSDictionary class]]) {
-                                                g_triggerConfig = [jsonObj mutableCopy];
+                                                rc_set_trigger_config([jsonObj copy]);
                                                 save_trigger_config();
                                                 responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: 12\r\n\r\n{\"ok\": true}", cors];
                                             } else {
@@ -10009,7 +11045,8 @@ static void start_web_server() {
                                         @"snapper": @(is_snapper_installed()),
                                         @"audiohandoff": @(is_audiohandoff_installed()),
                                         @"audiostream": @(is_audiostream_installed()),
-                                        @"audiostream_running": @(is_audiostreamerd_running())
+                                        @"audiostream_running": @(is_audiostreamerd_running()),
+                                        @"home_button": @(rc_has_home_button())
                                     };
                                     NSData *jsonData = [NSJSONSerialization dataWithJSONObject:caps options:0 error:nil];
                                     NSString *jsonStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
@@ -10507,16 +11544,21 @@ static void start_web_server() {
                                 NSArray *commandList = @[
                                     // System Controls
                                     @{@"command": @"lock", @"desc": @"System: Lock the device screen"},
-                                    @{@"command": @"unlock <passcode>", @"desc": @"Security: Unlock device screen (INSECURE: Passcode sent in plain text!)"},
+                                    @{@"command": @"unlock [passcode]", @"desc": @"Security: Unlock device with optional passcode, or wake and show lockscreen"},
+                                    @{@"command": @"lock-toggle [passcode]", @"desc": @"System: Toggle device lock/unlock with optional passcode"},
                                     @{@"command": @"home", @"desc": @"System: Simulate a Home Button press"},
                                     @{@"command": @"screenshot", @"desc": @"System: Take a screenshot"},
+                                    @{@"command": @"stop trigger <key>", @"desc": @"Automation: Stop a trigger's actions that are still running (in a wait)"},
                                     @{@"command": @"screenrecord [toggle|start|stop]", @"desc": @"System: Control system screen recording"},
                                     @{@"command": @"snapper [open|freeze|instant|close]", @"desc": @"Integrations: Control Snapper 2 / Snapper 3"},
                                     @{@"command": @"camera video [zoom] [flash]", @"desc": @"Camera: Open Camera in Video mode (e.g. 2x, 2x flash)"},
                                     @{@"command": @"open control center", @"desc": @"System: Open Control Center"},
                                     @{@"command": @"app switcher", @"desc": @"System: Open App Switcher"},
+                                    @{@"command": @"accessibility shortcut", @"desc": @"System: Run the Accessibility Shortcut"},
                                     @{@"command": @"open <bundleId>", @"desc": @"System: Launch an application by bundle identifier"},
+                                    @{@"command": @"nav <panel>", @"desc": @"Companion: Open app panel (triggers, settings, ha, km, mqtt, add)"},
                                     @{@"command": @"kill <bundleId>", @"desc": @"System: Force-close an application"},
+                                    @{@"command": @"kill current", @"desc": @"System: Force-close the currently focused app"},
                                     @{@"command": @"respring", @"desc": @"System: Restart SpringBoard"},
                                     @{@"command": @"safemode", @"desc": @"System: Enter Safe Mode (restart SpringBoard with tweaks disabled)"},
                                     @{@"command": @"ldrestart", @"desc": @"System: Soft-reboot the device"},
@@ -10538,6 +11580,8 @@ static void start_web_server() {
                                     @{@"command": @"location on/off/toggle/status", @"desc": @"Toggles: Location Services (GPS)"},
                                     @{@"command": @"airplane on/off", @"desc": @"Toggles: Airplane Mode power"},
                                     @{@"command": @"dnd on/off", @"desc": @"Toggles: Do Not Disturb Mode"},
+                                    @{@"command": @"focus on/toggle <name>, focus off", @"desc": @"Focus: turns a Focus on or off (iOS 15+)"},
+                                    @{@"command": @"focus status/list", @"desc": @"Focus: the active Focus, or the Focus modes"},
                                     @{@"command": @"audiomix on/off", @"desc": @"Toggles: AudioMix simultaneous playback"},
                                     @{@"command": @"low power on/off", @"desc": @"Toggles: Low Power Mode"},
                                     @{@"command": @"mute", @"desc": @"Toggles: System mute/silent mode"},
@@ -10554,6 +11598,13 @@ static void start_web_server() {
                                 // Remove backslash escaping for forward slashes
                                 jsonStr = [jsonStr stringByReplacingOccurrencesOfString:@"\\/" withString:@"/"];
                                 responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)[jsonStr lengthOfBytesUsingEncoding:NSUTF8StringEncoding], jsonStr];
+                            } else if ([path hasPrefix:@"/api/testkit/"]) {
+                                load_trigger_config();
+                                if (![g_triggerConfig[@"webUIEnabled"] boolValue]) {
+                                    responseString = [NSString stringWithFormat:@"HTTP/1.1 403 Forbidden\r\n%@Content-Length: 17\r\n\r\nWeb UI is disabled", cors];
+                                } else {
+                                    responseString = RCTKHandleHTTP(new_socket, buffer, (long)valread, method, path, cors);
+                                }
                             } else if ([path hasPrefix:@"/api/command"]) {
                                 load_trigger_config();
                                 if (![g_triggerConfig[@"webUIEnabled"] boolValue]) {
@@ -10622,7 +11673,15 @@ static void start_web_server() {
                                         dispatch_async(dispatch_get_main_queue(), ^{
                                             handle_command(command);
                                         });
-                                        NSDictionary *resp = @{@"ok": @YES, @"command": command, @"status": @"Acknowledged"};
+                                        NSString *safeCommand = command;
+                                        if ([command hasPrefix:@"unlock "]) {
+                                            safeCommand = @"unlock ****";
+                                        } else if ([command hasPrefix:@"lock-toggle "] || [command hasPrefix:@"lock toggle "]) {
+                                            safeCommand = @"lock-toggle ****";
+                                        } else if ([command hasPrefix:@"testkit passcode/set"]) {
+                                            safeCommand = @"testkit passcode/set (redacted)";
+                                        }
+                                        NSDictionary *resp = @{@"ok": @YES, @"command": safeCommand, @"status": @"Acknowledged"};
                                         NSData *respData = [NSJSONSerialization dataWithJSONObject:resp options:0 error:nil];
                                         NSString *jsonStr = [[NSString alloc] initWithData:respData encoding:NSUTF8StringEncoding];
                                         responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)respData.length, jsonStr];
@@ -10725,12 +11784,29 @@ static void start_server() {
                 setsockopt(new_socket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
                 setsockopt(new_socket, SOL_SOCKET, SO_SNDTIMEO, (const char*)&tv, sizeof tv);
 
-                char local_buffer[1024] = {0};
-                ssize_t valread = read(new_socket, local_buffer, 1024);
+                // A command longer than one read (a long variable value) arrives in pieces. When the
+                // first read fills the buffer, keep reading while more comes within 100 ms (at most
+                // 256 KB); a short command is still read in one go, with no wait.
+                NSMutableData *received = [NSMutableData data];
+                char local_buffer[4096];
+                ssize_t chunk = read(new_socket, local_buffer, sizeof(local_buffer));
+                if (chunk > 0) [received appendBytes:local_buffer length:chunk];
+                if (chunk == (ssize_t)sizeof(local_buffer)) {
+                    while (received.length < 256 * 1024) {
+                        struct pollfd pfd = { .fd = new_socket, .events = POLLIN, .revents = 0 };
+                        if (poll(&pfd, 1, 100) <= 0) break;
+                        chunk = read(new_socket, local_buffer, sizeof(local_buffer));
+                        if (chunk <= 0) break;
+                        [received appendBytes:local_buffer length:chunk];
+                    }
+                }
+                ssize_t valread = (ssize_t)received.length;
                 if (valread > 0) {
-                    NSString *cmd = [[NSString alloc] initWithBytes:local_buffer length:valread encoding:NSUTF8StringEncoding];
+                    NSString *cmd = [[NSString alloc] initWithData:received encoding:NSUTF8StringEncoding];
                     // UNIX Sockets are inherently local, no need to check IP or tcpEnabled config
+                    g_rcCommandFromLocalSocket = YES;
                     NSString *response = handle_command(cmd);
+                    g_rcCommandFromLocalSocket = NO;
                     if (response) {
                         write(new_socket, [response UTF8String], [response lengthOfBytesUsingEncoding:NSUTF8StringEncoding]);
                     }
@@ -10878,6 +11954,10 @@ static NSTimeInterval g_lastPowerVolComboFireTime = 0;
 // performDoublePressActions hooks use it to recognize that press's native
 // callbacks, which arrive after it was already handled.
 static BOOL g_powerPressIsCombo = NO;
+// Power Long Press fired for the current press. iOS can still take a hold this short for a
+// single press and fire singlePress: after the release, which slept the phone (iPhone 8,
+// iOS 14). Reset by each real power press-down.
+static BOOL g_powerPressWasLongPress = NO;
 // How many times iOS's own sleep gesture (-[SBLockHardwareButton singlePress:]) fired
 // during the current deferred click sequence. iOS doesn't fire it for a press that was
 // part of one of its chords or gestures - and those differ by device: without a Home
@@ -10911,6 +11991,21 @@ static BOOL g_powerPressIsHomeChord = NO;
 static BOOL g_homePowerChordOpen = NO;          // both have been down together, not both up yet
 static NSTimeInterval g_homePowerChordTime = 0;
 static NSTimeInterval g_lastIOSScreenshotTime = 0; // iOS recognized its own screenshot gesture
+// The open chord ran the Home + Power trigger, which takes the screenshot over (no Keep Default Action)
+static volatile BOOL g_homePowerChordClaimed = NO;
+
+// Whether a trigger has actions, and whether it keeps iOS's default action (Keep Default Action).
+// Reads the loaded config only, so it's safe on the HID listener's thread.
+static BOOL RC_HomeTriggerArmed(NSString *key, BOOL *keepsDefault) {
+    NSDictionary *config = g_triggerConfig;
+    if (![config[@"masterEnabled"] boolValue]) return NO;
+    id trigger = config[@"triggers"][key];
+    if (![trigger isKindOfClass:[NSDictionary class]] || ![trigger[@"enabled"] boolValue]) return NO;
+    id actions = trigger[@"actions"];
+    if (![actions isKindOfClass:[NSArray class]] || [actions count] == 0) return NO;
+    if (keepsDefault) *keepsDefault = [trigger[@"keepDefault"] boolValue];
+    return YES;
+}
 
 static void RC_NoteHomePowerChord(void) {
     g_powerPressIsHomeChord = YES;
@@ -10918,6 +12013,24 @@ static void RC_NoteHomePowerChord(void) {
     g_homePowerChordOpen = YES;
     g_homePowerChordTime = [[NSDate date] timeIntervalSince1970];
     SRLog(@"[HID] Home + Power together");
+
+    // Home + Power trigger: runs as soon as both are down, instead of the screenshot
+    BOOL keep = NO;
+    if (RC_HomeTriggerArmed(@"trigger_home_power", &keep) && !RC_IsForegroundAppExcluded()) {
+        g_homePowerChordClaimed = !keep;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            SRLog(@"[Home] Home + Power trigger%@", keep ? @" (keeping the screenshot)" : @" - no screenshot");
+            trigger_haptic();
+            RCExecuteTrigger(@"trigger_home_power");
+        });
+    }
+}
+
+// iOS's screenshot for a Home + Power chord the trigger took over
+static BOOL RC_HomePowerScreenshotSkipped(void) {
+    if (!g_homePowerChordClaimed) return NO;
+    SRLog(@"[Screenshot] Home + Power trigger ran - skipping iOS's screenshot");
+    return YES;
 }
 
 // Both released: give iOS a moment to take its screenshot, then take it if it didn't
@@ -10926,8 +12039,12 @@ static void RC_FinishHomePowerChord(void) {
     g_homePowerChordOpen = NO;
     NSTimeInterval chordTime = g_homePowerChordTime;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.7 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        // The trigger took the chord over: no screenshot from the tweak either
+        BOOL claimed = g_homePowerChordClaimed;
+        g_homePowerChordClaimed = NO;
+        if (claimed) return;
         load_trigger_config();
-        if (![g_triggerConfig[@"masterEnabled"] boolValue] || RC_IsForegroundAppExcluded()) return;
+        if (!RC_MasterEnabled() || RC_IsForegroundAppExcluded()) return;
         if (g_lastIOSScreenshotTime >= chordTime - 0.1) return;
         SRLog(@"[Screenshot] Home + Power: iOS took no screenshot - taking one");
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{ handle_command(@"screenshot"); });
@@ -10973,10 +12090,27 @@ static BOOL RC_VolumePressWasPowerCombo(NSTimeInterval pressTime) {
 // are both swallowed in the singlePress: hook. An earlier version toggled it on
 // every volume press, whose state reset broke the native volume ramp; this only
 // toggles on power presses.
+static BOOL RC_TriggerIsActionable(NSString *key);
+
+// Keep Default Action (a trigger's ... menu, off by default): the trigger runs its actions and iOS
+// still does what the press normally does (Siri, the Accessibility Shortcut, a screenshot, Wallet,
+// the App Switcher)
+static BOOL RC_TriggerKeepsDefault(NSString *key) {
+    id trigger = g_triggerConfig[@"triggers"][key];
+    return [trigger isKindOfClass:[NSDictionary class]] && [trigger[@"keepDefault"] boolValue];
+}
+
+// Whether the trigger takes the press over from iOS: it has actions and Keep Default Action is off
+static BOOL RC_TriggerBlocksDefault(NSString *key) {
+    return RC_TriggerIsActionable(key) && !RC_TriggerKeepsDefault(key);
+}
+
 static __weak UIGestureRecognizer *g_screenshotGestureRecognizer = nil;
 static BOOL g_screenshotRecognizerSuppressed = NO;
 
 static void RC_SetScreenshotRecognizerSuppressed(BOOL suppress) {
+    // Power + Volume Up with Keep Default Action: iOS takes its screenshot as well
+    if (suppress && RC_TriggerKeepsDefault(@"power_volume_up")) return;
     if (suppress == g_screenshotRecognizerSuppressed) return;
     UIGestureRecognizer *recognizer = g_screenshotGestureRecognizer;
     if (!recognizer) {
@@ -11050,7 +12184,7 @@ static CFAbsoluteTime g_powerSequenceWokeAt = 0; // when that wake happened: an 
 // going to replace them with anything.
 static BOOL RC_TriggerIsActionable(NSString *key) {
     load_trigger_config();
-    if (![g_triggerConfig[@"masterEnabled"] boolValue]) return NO;
+    if (!RC_MasterEnabled()) return NO;
     id trigger = g_triggerConfig[@"triggers"][key];
     if (![trigger isKindOfClass:[NSDictionary class]]) return NO;
     if (![trigger[@"enabled"] boolValue]) return NO;
@@ -11062,7 +12196,7 @@ static BOOL RC_TriggerIsActionable(NSString *key) {
 // (Without this, a user with no power triggers would eat a 0.4s lock delay.)
 static BOOL RC_PowerMultiClickEnabled(void) {
     load_trigger_config();
-    if (![g_triggerConfig[@"masterEnabled"] boolValue]) return NO;
+    if (!RC_MasterEnabled()) return NO;
     NSDictionary *t = g_triggerConfig[@"triggers"];
     return [t[@"power_double_tap"][@"enabled"] boolValue] ||
            [t[@"power_triple_click"][@"enabled"] boolValue] ||
@@ -11075,7 +12209,7 @@ static BOOL RC_PowerMultiClickEnabled(void) {
 // and should reach Wallet immediately, same as always.
 static BOOL RC_HigherPowerMultiClickArmed(void) {
     load_trigger_config();
-    if (![g_triggerConfig[@"masterEnabled"] boolValue]) return NO;
+    if (!RC_MasterEnabled()) return NO;
     NSDictionary *t = g_triggerConfig[@"triggers"];
     return [t[@"power_triple_click"][@"enabled"] boolValue] ||
            [t[@"power_quadruple_click"][@"enabled"] boolValue];
@@ -11171,6 +12305,7 @@ static void RC_ReplayPowerTimeline(NSArray<NSNumber *> *downs, NSArray<NSNumber 
     if (!downs.count) return;
     dispatch_async(dispatch_get_main_queue(), ^{
         SRLog(@"[Power] ▶️ Replaying %lu system power press(es) (HID injection, original timing)", (unsigned long)downs.count);
+        RCTKEvent(@"replay.inject", nil);
         NSUInteger generation = ++g_replayGeneration;
         g_powerIsReplaying = YES;
         g_replayPressCount = downs.count;
@@ -11418,7 +12553,7 @@ static BOOL iPadIsSwappedBySystem() {
 
 static BOOL should_swap_in_hooks() {
     load_trigger_config();
-    if (![g_triggerConfig[@"masterEnabled"] boolValue]) return NO;
+    if (!RC_MasterEnabled()) return NO;
     if (![g_triggerConfig[@"fixedVolumeButtons"] boolValue]) return NO;
     
     return iPadIsSwappedBySystem();
@@ -11426,7 +12561,7 @@ static BOOL should_swap_in_hooks() {
 
 static BOOL should_swap_in_hid_listener() {
     load_trigger_config();
-    if (![g_triggerConfig[@"masterEnabled"] boolValue]) return NO;
+    if (!RC_MasterEnabled()) return NO;
     if ([g_triggerConfig[@"fixedVolumeButtons"] boolValue]) {
         return NO;
     }
@@ -12049,8 +13184,9 @@ static NSTimer *g_homeClickTimer = nil;
 // iOS's own Home double press action (the App Switcher), held back until the click count is
 // known (see RC_HoldHomeSwitcher): if a trigger takes the clicks it replaces the App Switcher,
 // otherwise the App Switcher opens late. (The triple press action, the Accessibility Shortcut, is
-// left alone: it can be turned off in Settings.)
+// taken over by Home Triple Click: see RC_AXTriplePressTakenOver.)
 static BOOL g_homeDoubleActionHeld = NO, g_homeActionReplaying = NO;
+static volatile BOOL g_homeHoldFired = NO; // Home Hold ran for the press that's down (not a click)
 static __weak id g_homeActionsTarget = nil;
 
 // Whether an Accessibility Shortcut is set (Settings > Accessibility > Accessibility Shortcut):
@@ -12063,6 +13199,69 @@ static BOOL RC_AccessibilityShortcutSet(void) {
     return set;
 }
 
+// Whether the side button's triple press is iOS's own (an Accessibility Shortcut on a phone with no
+// Home button; on one with a Home button the shortcut is a Home triple press instead)
+static BOOL RC_SideButtonHasAccessibilityShortcut(void) {
+    static long type = -1;
+    if (type == -1) {
+        id app = [UIApplication sharedApplication];
+        SEL lockButtonSel = NSSelectorFromString(@"lockHardwareButton"), typeSel = NSSelectorFromString(@"homeButtonType");
+        id lockButton = [app respondsToSelector:lockButtonSel] ? ((id (*)(id, SEL))objc_msgSend)(app, lockButtonSel) : nil;
+        if ([lockButton respondsToSelector:typeSel]) type = ((long (*)(id, SEL))objc_msgSend)(lockButton, typeSel);
+    }
+    return type == 2 && RC_AccessibilityShortcutSet(); // 2: no Home button
+}
+
+// The Accessibility Shortcut runs on a triple press of the side button, or of the Home button on
+// a phone with one. Binding that triple press in RC (Power Triple Click / Home Triple Click) takes
+// it over: iOS then treats the shortcut as off for that button, so it no longer waits for a third
+// press or runs the shortcut, and the "accessibility shortcut" action runs it on any trigger.
+static NSHashTable *g_axInteractions = nil; // iOS's SBAccessibilityHardwareButtonInteraction objects; main thread
+static BOOL g_axShortcutBypass = NO;        // set while the action runs iOS's shortcut
+
+static id RC_AXGet(id obj, NSString *name) {
+    SEL sel = NSSelectorFromString(name);
+    return [obj respondsToSelector:sel] ? ((id (*)(id, SEL))objc_msgSend)(obj, sel) : nil;
+}
+
+// Whether a triple press binding takes over the button this interaction belongs to
+static BOOL RC_AXTriplePressTakenOver(id interaction) {
+    id sideButton = RC_AXGet(RC_AXGet([UIApplication sharedApplication], @"lockHardwareButton"), @"buttonActions");
+    BOOL side = sideButton && RC_AXGet(sideButton, @"accessibilityButtonInteraction") == interaction;
+    return RC_TriggerBlocksDefault(side ? @"power_triple_click" : @"trigger_home_triple_click");
+}
+
+// Has iOS read the press settings again (as it does when the shortcut is changed in Settings)
+// once either triple press binding changes. Main thread.
+static void RC_RefreshAXTriplePress(void) {
+    static int last = -1;
+    int state = (RC_TriggerBlocksDefault(@"power_triple_click") ? 1 : 0) | (RC_TriggerBlocksDefault(@"trigger_home_triple_click") ? 2 : 0);
+    if (state == last) return;
+    last = state;
+    SEL publish = NSSelectorFromString(@"publishUpdatedParameters:");
+    for (id interaction in g_axInteractions.allObjects) {
+        id params = RC_AXGet(interaction, @"hardwareButtonGestureParameters");
+        if (!params || ![interaction respondsToSelector:publish]) continue;
+        ((void (*)(id, SEL, id))objc_msgSend)(interaction, publish, params);
+        SRLog(@"[AXShortcut] Press settings updated: %@", params);
+    }
+}
+
+// Runs iOS's Accessibility Shortcut, as a triple press would. Main thread.
+static BOOL RC_RunAccessibilityShortcut(void) {
+    SEL supports = NSSelectorFromString(@"_supportsTripleClick"), consume = NSSelectorFromString(@"consumeTriplePressUp");
+    BOOL ran = NO;
+    g_axShortcutBypass = YES;
+    for (id interaction in g_axInteractions.allObjects) {
+        if (![interaction respondsToSelector:supports] || ![interaction respondsToSelector:consume]) continue;
+        if (!((BOOL (*)(id, SEL))objc_msgSend)(interaction, supports)) continue;
+        ran = ((BOOL (*)(id, SEL))objc_msgSend)(interaction, consume);
+        break;
+    }
+    g_axShortcutBypass = NO;
+    return ran;
+}
+
 // Whether to hold the App Switcher: for Home Double Click always (it replaces the App Switcher);
 // for Triple or Quadruple Click only when iOS doesn't wait itself, so the App Switcher doesn't open
 // partway through those clicks. With a shortcut set iOS already waits, and holding as well doubled
@@ -12071,7 +13270,8 @@ static BOOL RC_HoldHomeSwitcher(void) {
     if (RC_IsForegroundAppExcluded()) return NO;
     if (RC_TriggerIsActionable(@"trigger_home_double_click")) return YES;
     if (!RC_TriggerIsActionable(@"trigger_home_triple_click") && !RC_TriggerIsActionable(@"trigger_home_quadruple_click")) return NO;
-    return !RC_AccessibilityShortcutSet();
+    // Home Triple Click takes the shortcut over, so iOS no longer waits
+    return !RC_AccessibilityShortcutSet() || RC_TriggerBlocksDefault(@"trigger_home_triple_click");
 }
 
 // The end of a click sequence: drops the held App Switcher if a trigger fired or the clicks went
@@ -12080,10 +13280,12 @@ static BOOL RC_HoldHomeSwitcher(void) {
 // Main thread.
 static void RC_FinishHomeActions(int count, BOOL fired) {
     id target = g_homeActionsTarget;
-    BOOL replay = !fired && count <= 2 && g_homeDoubleActionHeld;
+    // Home Double Click with Keep Default Action: the App Switcher opens after its actions
+    BOOL keep = fired && count == 2 && RC_TriggerKeepsDefault(@"trigger_home_double_click");
+    BOOL replay = (!fired || keep) && count <= 2 && g_homeDoubleActionHeld;
     g_homeDoubleActionHeld = NO;
     if (!target || !replay) return;
-    SRLog(@"[Home] No trigger for %d clicks - opening iOS's App Switcher", count);
+    SRLog(@"[Home] %@ - opening iOS's App Switcher", keep ? @"Home Double Click keeps the default action" : [NSString stringWithFormat:@"No trigger for %d clicks", count]);
     g_homeActionReplaying = YES;
     [target performDoublePressDownActions];
     g_homeActionReplaying = NO;
@@ -12098,6 +13300,11 @@ static IOHIDEventSystemClientRef g_hidClient = NULL;
 static void RC_CheckAndFire();
 
 static void RC_ProcessHomeClick() {
+    if (g_homeHoldFired) {
+        g_homeHoldFired = NO;
+        SRLog(@"[HID] Home released after Home Hold - not a click");
+        return;
+    }
     if (RC_IsForegroundAppExcluded()) return;
     g_homeClickCount++;
     SRLog(@"[HID] 🔵 CLICK DETECTED (Up)! Count: %d", g_homeClickCount);
@@ -12117,7 +13324,7 @@ static void RC_CheckAndFire() {
     
     // 2. Load Config
     load_trigger_config();
-    BOOL masterEnabled = [g_triggerConfig[@"masterEnabled"] boolValue];
+    BOOL masterEnabled = RC_MasterEnabled();
     BOOL quadEnabled = masterEnabled && [g_triggerConfig[@"triggers"][@"trigger_home_quadruple_click"][@"enabled"] boolValue];
 
     // 3. IMMEDIATE FIRE CHECK (Quadruple)
@@ -12189,7 +13396,7 @@ static void RC_CheckAndFirePower() {
     }
     
     load_trigger_config();
-    BOOL masterEnabled = [g_triggerConfig[@"masterEnabled"] boolValue];
+    BOOL masterEnabled = RC_MasterEnabled();
     BOOL quadEnabled = masterEnabled && [g_triggerConfig[@"triggers"][@"power_quadruple_click"][@"enabled"] boolValue];
     
     // 3. IMMEDIATE FIRE CHECK (Quadruple)
@@ -12210,8 +13417,11 @@ static void RC_CheckAndFirePower() {
     // first press waits 0.3 s, and the second one ends the sequence at once.
     // The window is Settings > Power Clicks (0.4 s by default); with only Double-Tap bound the
     // first press waits three quarters of it (0.3 s by default)
+    // An Accessibility Shortcut on the side button is a triple press too: with one set, the third
+    // click is waited for as if a Triple Click were bound, or every Accessibility Shortcut also fired
+    // Double-Tap on its second click
     NSTimeInterval timeout = RC_PowerClickWindow();
-    if (!RC_HigherPowerMultiClickArmed()) {
+    if (!RC_HigherPowerMultiClickArmed() && !RC_SideButtonHasAccessibilityShortcut()) {
         timeout = (g_powerClickCount >= 2) ? 0.02 : timeout * 0.75;
     }
     
@@ -12235,6 +13445,7 @@ static void RC_CheckAndFirePower() {
         BOOL sequenceWoke = g_powerSequenceWoke;
         g_powerSequenceWoke = NO;
         SRLog(@"POWER SEQUENCE ENDED. Final count: %d", count);
+        RCTKEvent(@"power.sequence", @{ @"count": @(count), @"iosSinglePresses": @(g_nativeSinglePressCount) });
 
         NSString *triggerKey = nil;
 
@@ -12262,7 +13473,9 @@ static void RC_CheckAndFirePower() {
         BOOL walletReplayed = NO;
         if (g_walletDoublePressDeferred) {
             g_walletDoublePressDeferred = NO;
-            if (!higherClaimed) {
+            BOOL doubleTapClaimed = claimed && count == 2 && RC_TriggerBlocksDefault(@"power_double_tap");
+            if (doubleTapClaimed) SRLog(@"[Power] Double-Tap claimed the double-press - not opening Wallet");
+            if (!higherClaimed && !doubleTapClaimed) {
                 RC_ReplayWalletDoublePress();
                 walletReplayed = YES;
             }
@@ -12295,13 +13508,16 @@ static void RC_CheckAndFirePower() {
                     NSUInteger presses = MIN(g_nativeSinglePressCount, (NSUInteger)count);
                     if (presses == 0) {
                         SRLog(@"[Power] iOS treated none of the %d press(es) as presses of their own (a chord or gesture) - not replaying", count);
+                        RCTKEvent(@"power.notReplayed", @{ @"count": @(count) });
                         return;
                     }
                     SRLog(@"[Power] iOS treated %lu of %d presses as presses of their own - replaying those", (unsigned long)presses, count);
+                    RCTKEvent(@"power.replaying", @{ @"presses": @(presses), @"count": @(count) });
                     RC_GivePressesBack(presses);
                 });
                 return;
             }
+            RCTKEvent(@"power.replaying", @{ @"presses": @(count), @"count": @(count) });
             RC_GivePressesBack(count);
         }
     }];
@@ -12318,9 +13534,17 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
         int level = IOHIDEventGetIntegerValue(event, (14 << 16) | 1);
         SRLog(@"[HID Proximity] Event type 14 detected! detection=%d, level=%d", detection, level);
         g_latestHIDProximityState = (detection != 0) ? 1 : 0;
+        RCTKNoteProximity(detection != 0);
     }
     
     if (type == 29) { // Biometric Event (Finger on sensor)
+        // The event's first fields (event type, level, ...), to tell a finger landing from a
+        // lift or a finished scan
+        if (RCTKJournalOn()) {
+            NSMutableArray *fields = [NSMutableArray array];
+            for (int field = 0; field < 6; field++) [fields addObject:@(IOHIDEventGetIntegerValue(event, (29 << 16) | field))];
+            RCTKEvent(@"hid.biometric", @{ @"fields": fields });
+        }
         // Toggle Logic for "Hold" (Fire by itself after 1.0s)
         // Assumption: Sensor sends event on DOWN ... (Silence) ... and UP.
         
@@ -12328,7 +13552,7 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
 
         dispatch_async(dispatch_get_main_queue(), ^{
             load_trigger_config();
-            BOOL enabled = [g_triggerConfig[@"masterEnabled"] boolValue] && 
+            BOOL enabled = RC_MasterEnabled() && 
                 ([g_triggerConfig[@"triggers"][@"touchid_hold"][@"enabled"] boolValue] || 
                  [g_triggerConfig[@"triggers"][@"touchid_tap"][@"enabled"] boolValue]);
             if (!enabled) return;
@@ -12462,6 +13686,7 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
         
         // Home Button (Page 0x0C, Usage 0x40)
         if (usagePage == kHIDPage_Consumer && usage == kHIDUsage_Csmr_Menu) {
+            RCTKEvent(@"hid.home", @{ @"down": @((BOOL)(down != 0)) });
             NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
             g_homeHeldOnHID = !!down;
             if (down) g_lastHomeDownAt = CFAbsoluteTimeGetCurrent();
@@ -12512,6 +13737,7 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
             if (g_powerIsReplaying) {
                 SRLog(@"[HID] (replay) Power %@ seen on the HID bus", down ? @"DOWN" : @"UP");
                 if (down) g_replayDownsSeen++;
+                RCTKEvent(@"hid.power", @{ @"down": @((BOOL)(down != 0)), @"replay": @YES });
                 return;
             }
             NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
@@ -12552,6 +13778,7 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
                     g_lastPowerDownAt = CFAbsoluteTimeGetCurrent();
                     lastPowerDownTime = now;
                     SRLog(@"[HID] ⚡️ Power DOWN");
+                    RCTKEvent(@"hid.power", @{ @"down": @YES });
                     
                     // SUPPRESS TOUCH ID HOLD (on Power Wake/Press):
                     // If user is pressing power, they might be waking to unlock.
@@ -12601,6 +13828,7 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
                 }
             } else { // UP
                 g_powerReleasedWithVolumeHeld = g_volDownHeldOnHID || g_volUpHeldOnHID;
+                RCTKEvent(@"hid.power", @{ @"down": @NO });
                 // Power is up, so the screenshot gesture can no longer fire.
                 dispatch_async(dispatch_get_main_queue(), ^{
                     RC_SetScreenshotRecognizerSuppressed(NO);
@@ -12666,6 +13894,7 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
             if (down && g_powerIsDown) g_volPressedDuringPower = YES;
             if (mappedUsage == kHIDUsage_Csmr_VolumeDecrement) g_volDownHeldOnHID = !!down;
             if (mappedUsage == kHIDUsage_Csmr_VolumeIncrement) g_volUpHeldOnHID = !!down;
+            RCTKEvent(@"hid.volume", @{ @"button": mappedUsage == kHIDUsage_Csmr_VolumeIncrement ? @"up" : @"down", @"down": @((BOOL)(down != 0)) });
             
             // Check for Power + Volume combination. The volume hooks
             // (volumeIncreasePressDownWithModifiers: / volumeDecreasePressDownWithModifiers:)
@@ -12797,6 +14026,27 @@ static void setup_background_hid_listener() {
 }
 %end
 
+// Accessibility Shortcut: see RC_AXTriplePressTakenOver
+%hook SBAccessibilityHardwareButtonInteraction
+- (id)initWithButtonType:(unsigned long)type {
+    id interaction = %orig;
+    if (interaction) {
+        if (!g_axInteractions) g_axInteractions = [NSHashTable weakObjectsHashTable];
+        [g_axInteractions addObject:interaction];
+    }
+    return interaction;
+}
+- (BOOL)_supportsTripleClick {
+    BOOL supports = %orig;
+    if (supports && !g_axShortcutBypass && RC_AXTriplePressTakenOver(self)) return NO;
+    return supports;
+}
+- (BOOL)consumeTriplePressUp {
+    if (!g_axShortcutBypass && RC_AXTriplePressTakenOver(self)) return NO;
+    return %orig;
+}
+%end
+
 %hook SBLockHardwareButtonActions
 
 - (void)performInitialButtonDownActions {
@@ -12822,6 +14072,7 @@ static void setup_background_hid_listener() {
     if (g_powerDownsAwaitingUp < 1) g_powerDownsAwaitingUp = 1; // the HID listener normally armed it already
     g_replaySinglePressesAllowed = 0; // a new real press; any unclaimed replay slot is stale
     g_powerPressIsCombo = NO;
+    g_powerPressWasLongPress = NO;
     g_powerReleasedWithVolumeHeld = NO;
     if (g_powerClickCount == 0) { // a new click sequence
         g_nativeSinglePressCount = 0;
@@ -12865,9 +14116,12 @@ static void setup_background_hid_listener() {
     }
 
     load_trigger_config();
-    BOOL masterEnabled = [g_triggerConfig[@"masterEnabled"] boolValue];
+    BOOL masterEnabled = RC_MasterEnabled();
+    // With Keep Default Action the press is left to iOS; the trigger runs when iOS starts Siri
+    // (performLongPressActions)
     BOOL longPressEnabled = masterEnabled && 
-                   [g_triggerConfig[@"triggers"][@"power_long_press"][@"enabled"] boolValue];
+                   [g_triggerConfig[@"triggers"][@"power_long_press"][@"enabled"] boolValue] &&
+                   !RC_TriggerKeepsDefault(@"power_long_press");
 
     SRLog(@"Power Button DOWN (Actions) - enabled=%d", longPressEnabled);
 
@@ -12880,6 +14134,7 @@ static void setup_background_hid_listener() {
                     return;
                 }
                 g_lockButtonTriggered = YES;
+                g_powerPressWasLongPress = YES;
                 trigger_haptic();
                 RCExecuteTrigger(@"power_long_press");
                 SRLog(@"Power Long Press Fired (Stage 1)!");
@@ -12912,7 +14167,7 @@ static void setup_background_hid_listener() {
     // A press on a sleeping screen with Power Long Press bound is held back, so that holding
     // it fires the trigger without waking the phone. A tap wakes it on release.
     g_powerWakeHeld = NO;
-    if (!(g_powerClickTimer != nil && g_powerClickCount > 0) && !RC_ScreenIsOn() && RC_TriggerIsActionable(@"power_long_press")) {
+    if (!(g_powerClickTimer != nil && g_powerClickCount > 0) && !RC_ScreenIsOn() && RC_TriggerBlocksDefault(@"power_long_press")) {
         g_powerWakeHeld = YES;
         g_powerDeferActive = YES;
         SRLog(@"Holding system power DOWN on a sleeping screen (Power Long Press bound)");
@@ -12960,6 +14215,7 @@ static void setup_background_hid_listener() {
             g_replaySinglePressesAllowed++;
             if (g_replayUpsHandled >= g_replayPressCount) g_powerIsReplaying = NO;
             SRLog(@"[Power] Replay: injected release %lu of %lu reached performButtonUpPreActions", (unsigned long)g_replayUpsHandled, (unsigned long)g_replayPressCount);
+            RCTKEvent(@"replay.complete", nil);
             %orig;
             return;
         }
@@ -13062,6 +14318,7 @@ static void setup_background_hid_listener() {
     // listener entirely - the count and the %orig decision can no longer disagree.
     if (g_powerDeferActive) {
         g_powerClickCount++;
+        RCTKEvent(@"power.click", @{ @"count": @(g_powerClickCount) });
         SRLog(@"⚡️ POWER CLICK (hook). Count: %d - deferring system UP", g_powerClickCount);
         g_powerSuppressPostUp = YES;
         RC_CheckAndFirePower();
@@ -13097,6 +14354,7 @@ static void setup_background_hid_listener() {
 
 - (void)performLongPressActions {
     SRLog(@"performLongPressActions called - g_lockButtonTriggered=%d, force=%d", g_lockButtonTriggered, g_forceSystemLongPress);
+    RCTKEvent(@"ios.longPress", nil);
     
     if (g_forceSystemLongPress) {
         SRLog(@"Allowing System Power Off (Stage 2)");
@@ -13106,9 +14364,18 @@ static void setup_background_hid_listener() {
     }
 
     load_trigger_config();
-    BOOL masterEnabled = [g_triggerConfig[@"masterEnabled"] boolValue];
+    BOOL masterEnabled = RC_MasterEnabled();
     BOOL longPressEnabled = masterEnabled && 
                    [g_triggerConfig[@"triggers"][@"power_long_press"][@"enabled"] boolValue];
+
+    // Keep Default Action: the actions run and iOS goes on to Siri
+    if (longPressEnabled && RC_TriggerKeepsDefault(@"power_long_press") && !g_lockButtonTriggered) {
+        SRLog(@"Power Long Press Fired, keeping the default action (Siri)");
+        trigger_haptic();
+        RCExecuteTrigger(@"power_long_press");
+        %orig;
+        return;
+    }
 
     if (longPressEnabled) {
         if (!g_lockButtonTriggered) {
@@ -13117,6 +14384,7 @@ static void setup_background_hid_listener() {
                 g_lockButtonTimer = nil;
             }
             g_lockButtonTriggered = YES;
+            g_powerPressWasLongPress = YES;
             trigger_haptic();
             RCExecuteTrigger(@"power_long_press");
             SRLog(@"Power Long Press Fired (via performLongPressActions)!");
@@ -13154,6 +14422,7 @@ static void setup_background_hid_listener() {
     }
 
     SRLog(@"performDoublePressActions called (System)");
+    RCTKEvent(@"ios.doublePress", nil);
     // We handle double press manually in performButtonUpPreActions to support Triple/Quad clicks.
     // So we do NOT fire "power_double_tap" here to avoid duplicates - our manual
     // counter fires it independently if configured.
@@ -13180,8 +14449,10 @@ static void setup_background_hid_listener() {
     // Keyed on the count actually running rather than the screen being on:
     // a double-click from screen-off wakes it with the first press, and the
     // old check then deferred a double that no count would ever resolve.
-    if (!excluded && g_powerClickTimer && RC_HigherPowerMultiClickArmed()) {
-        SRLog(@"Deferring native double-press (Wallet) - triple/quad armed");
+    // Double-Tap with actions also holds it back, and drops it (RC_CheckAndFirePower) unless Keep
+    // Default Action is on
+    if (!excluded && g_powerClickTimer && (RC_HigherPowerMultiClickArmed() || RC_TriggerBlocksDefault(@"power_double_tap"))) {
+        SRLog(@"Deferring native double-press (Wallet) - triple/quad armed or Double-Tap bound");
         g_walletDoublePressDeferred = YES;
         return;
     }
@@ -13215,6 +14486,21 @@ static BOOL RC_HomeSinglePressIsPartOfHeldClicks(void) {
     %orig;
 }
 
+// Home Hold: where iOS starts Siri. With actions, they run instead (or as well, with Keep Default
+// Action); the release of this press isn't counted as a Home click.
+- (void)performLongPressActions {
+    BOOL keep = NO;
+    if (!g_homeActionReplaying && RC_HomeTriggerArmed(@"trigger_home_hold", &keep) && !RC_IsForegroundAppExcluded()) {
+        SRLog(@"[Home] Home Hold%@", keep ? @", keeping the default action (Siri)" : @" - no Siri");
+        g_homeHoldFired = YES;
+        trigger_haptic();
+        RCExecuteTrigger(@"trigger_home_hold");
+        if (keep) %orig;
+        return;
+    }
+    %orig;
+}
+
 - (void)performDoublePressDownActions {
     if (!g_homeActionReplaying && RC_HoldHomeSwitcher()) {
         SRLog(@"[Home] iOS's App Switcher held until the click count is known");
@@ -13228,6 +14514,7 @@ static BOOL RC_HomeSinglePressIsPartOfHeldClicks(void) {
 
 %hook SBHomeHardwareButton
 - (void)screenshotRecognizerDidRecognize:(id)recognizer {
+    if (RC_HomePowerScreenshotSkipped()) return;
     g_lastIOSScreenshotTime = [[NSDate date] timeIntervalSince1970];
     %orig;
 }
@@ -13235,6 +14522,7 @@ static BOOL RC_HomeSinglePressIsPartOfHeldClicks(void) {
 
 %hook SBCombinationHardwareButton
 - (void)screenshotGesture:(id)gesture {
+    if (RC_HomePowerScreenshotSkipped()) return;
     g_lastIOSScreenshotTime = [[NSDate date] timeIntervalSince1970];
     %orig;
 }
@@ -13260,6 +14548,7 @@ static BOOL RC_HomeSinglePressIsPartOfHeldClicks(void) {
     if (g_replaySinglePressesAllowed > 0) {
         g_replaySinglePressesAllowed--;
         SRLog(@"[Power] Native singlePress: fired for a replayed press");
+        RCTKEvent(@"ios.singlePress", @{ @"press": @"replayed" });
         %orig;
         return;
     }
@@ -13267,7 +14556,7 @@ static BOOL RC_HomeSinglePressIsPartOfHeldClicks(void) {
     // counted for a replay (see g_powerPressIsHomeChord)
     if (g_powerPressIsHomeChord && !RC_IsForegroundAppExcluded()) {
         load_trigger_config();
-        if ([g_triggerConfig[@"masterEnabled"] boolValue]) {
+        if (RC_MasterEnabled()) {
             SRLog(@"Suppressing native singlePress: - Power was pressed with Home (the screenshot chord), so it doesn't sleep");
             return;
         }
@@ -13276,6 +14565,13 @@ static BOOL RC_HomeSinglePressIsPartOfHeldClicks(void) {
     // this one waits on) also frees it to fire sooner during the combo.
     if (g_powerPressIsCombo && !RC_IsForegroundAppExcluded()) {
         SRLog(@"Suppressing native singlePress: - a Power + Volume combo consumed this press");
+        RCTKEvent(@"ios.singlePress", @{ @"press": @"combo" });
+        return;
+    }
+    // Power Long Press consumed this press, so its release doesn't sleep the phone
+    if (g_powerPressWasLongPress && !RC_IsForegroundAppExcluded()) {
+        SRLog(@"Suppressing native singlePress: - Power Long Press consumed this press");
+        RCTKEvent(@"ios.singlePress", @{ @"press": @"longPress" });
         return;
     }
     // A Volume button still held when this press was released: it never sleeps the phone (see
@@ -13285,8 +14581,9 @@ static BOOL RC_HomeSinglePressIsPartOfHeldClicks(void) {
     // everything while the master switch is off, are left to iOS.
     if (g_powerReleasedWithVolumeHeld && RC_ScreenIsOn() && !RC_IsForegroundAppExcluded()) {
         load_trigger_config();
-        if ([g_triggerConfig[@"masterEnabled"] boolValue]) {
+        if (RC_MasterEnabled()) {
             SRLog(@"Suppressing native singlePress: - a Volume button was still held at its release, so it doesn't sleep");
+            RCTKEvent(@"ios.singlePress", @{ @"press": @"volumeDownHeld" });
             return;
         }
     }
@@ -13298,6 +14595,7 @@ static BOOL RC_HomeSinglePressIsPartOfHeldClicks(void) {
     // off, excluded app) pass through untouched.
     if (g_powerDeferActive && !RC_IsForegroundAppExcluded()) {
         g_nativeSinglePressCount++;
+        RCTKEvent(@"ios.singlePress", @{ @"press": @"heldBack", @"count": @(g_nativeSinglePressCount) });
         // The press's sequence already ended and was waiting on this
         if (g_replayAwaitingSequenceCount && g_nativeSinglePressCount >= g_replayAwaitingSequenceCount) {
             NSUInteger presses = g_replayAwaitingSequenceCount;
@@ -13310,13 +14608,14 @@ static BOOL RC_HomeSinglePressIsPartOfHeldClicks(void) {
         return;
     }
     SRLog(@"[Power] Native singlePress: fired");
+    RCTKEvent(@"ios.singlePress", @{ @"press": @"passed" });
     %orig;
 }
 
 - (void)doublePress:(id)arg1 {
     SRLog(@"SBLockHardwareButton doublePress: called");
     load_trigger_config();
-    BOOL enabled = [g_triggerConfig[@"masterEnabled"] boolValue] &&
+    BOOL enabled = RC_MasterEnabled() &&
                    [g_triggerConfig[@"triggers"][@"power_double_tap"][@"enabled"] boolValue];
     if (enabled) {
         // We already handled it in Actions (hopefully), or we handle it here if Actions wasn't called
@@ -13389,59 +14688,352 @@ static NSTimeInterval g_lastStatusBarDoubleTapTime = 0;
 // Bottom Bar Extended State
 static NSTimeInterval g_lastBottomSwipeTriggerTime = 0;
 
+// ============ GESTURE SCROLL SUPPRESSION (issue #81) ============
+// While a status-bar swipe or bottom swipe-up is being executed, the
+// underlying list (SpringBoard home pages, Notification Center, cover
+// sheet, or a foreground app's table) would otherwise scroll with the
+// finger. SquidGesture avoids this by holding its recognizers on every
+// window; here we freeze SpringBoard's own scroll views once directional
+// intent is confirmed AND the matching trigger is actionable, broadcast a
+// Darwin notification so UIKit-injected app processes can freeze theirs,
+// and restore everything on touch end/cancel.
+static NSHashTable *g_rcFrozenScrollViews = nil;
+static NSHashTable *g_rcFrozenGestureRecognizers = nil;
+static NSHashTable *g_rcFrozenInteractionWindows = nil;
+static BOOL g_rcGestureScrollFrozen = NO;
+static unsigned g_rcFreezeGen = 0;
+
+static void RC_UnfreezeGestureScrolling(void);
+
+// Snapshot of list positions at touch-down, restored on release so drift that
+// happened before the freeze engaged is reverted and the list ends where the
+// finger found it. Weak keys: dead views vanish on their own. The generation
+// guards against restoring a stale snapshot when touches overlap.
+static NSMapTable *g_rcBeganOffsets = nil;
+static unsigned g_rcBeganGen = 0;
+static unsigned g_rcFreezeBeganGen = 0;
+
+static BOOL RC_GestureScrollSuppressionWanted(void) {
+    // On unless the user opts out via Advanced Settings (default on).
+    if ([g_triggerConfig[@"freezeListsDuringGestures"] isEqual:@NO]) return NO;
+    static NSString * const keys[] = {
+        @"trigger_statusbar_swipe_left", @"trigger_statusbar_swipe_right",
+        @"trigger_statusbar_left_hold", @"trigger_statusbar_center_hold",
+        @"trigger_statusbar_right_hold", @"trigger_statusbar_double_tap",
+        @"trigger_bottombar_swipe_left", @"trigger_bottombar_swipe_right",
+        @"trigger_bottom_swipe_up_left", @"trigger_bottom_swipe_up_center",
+        @"trigger_bottom_swipe_up_right",
+        @"trigger_edge_left_swipe_up", @"trigger_edge_left_swipe_down",
+        @"trigger_edge_right_swipe_up", @"trigger_edge_right_swipe_down"
+    };
+    for (unsigned i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+        if (RC_TriggerIsActionable(keys[i])) return YES;
+    }
+    return NO;
+}
+
+static void RC_CollectScrollViewsInView(UIView *view, NSMutableArray *out) {
+    if ([view isKindOfClass:[UIScrollView class]]) [out addObject:(UIScrollView *)view];
+    for (UIView *sub in view.subviews) RC_CollectScrollViewsInView(sub, out);
+}
+
+// A touch that began on a row or button highlights it on touch-down, then
+// the freeze cuts delivery mid-touch, so the view never sees the touch-up
+// that would unhighlight it (stuck light state). Only the transient
+// highlighted flag is cleared here, never selected.
+static void RC_ClearStuckHighlightsInView(UIView *view) {
+    if ([view isKindOfClass:[UITableView class]]) {
+        for (UITableViewCell *cell in [(UITableView *)view visibleCells]) cell.highlighted = NO;
+    } else if ([view isKindOfClass:[UICollectionView class]]) {
+        for (UICollectionViewCell *cell in [(UICollectionView *)view visibleCells]) cell.highlighted = NO;
+    } else if ([view isKindOfClass:[UIControl class]]) {
+        [(UIControl *)view setHighlighted:NO];
+    }
+    for (UIView *sub in view.subviews) RC_ClearStuckHighlightsInView(sub);
+}
+
+// Snapshots every scroll view's position at touch-down and tells app
+// processes to do the same. Posted for every bar/edge touch-down (cheap walk,
+// no visual effect); the snapshot is only ever used if a freeze engages for
+// that same touch (generation match at release).
+static void RC_SnapshotGestureOffsets(void) {
+    if (!g_rcBeganOffsets) g_rcBeganOffsets = [NSMapTable weakToStrongObjectsMapTable];
+    [g_rcBeganOffsets removeAllObjects];
+    @try {
+        for (UIWindow *w in [UIApplication sharedApplication].windows) {
+            NSMutableArray *found = [NSMutableArray array];
+            RC_CollectScrollViewsInView(w, found);
+            for (UIScrollView *sv in found) {
+                [g_rcBeganOffsets setObject:[NSValue valueWithCGPoint:sv.contentOffset] forKey:sv];
+            }
+        }
+    } @catch (__unused NSException *e) { }
+    g_rcBeganGen++;
+    notify_post("com.saihgupr.remotecompanion.gesture-touch-began");
+}
+
+static void RC_FreezeGestureScrolling(void) {
+    if (g_rcGestureScrollFrozen) return;
+    if (!RC_GestureScrollSuppressionWanted()) return;
+    void (^work)(void) = ^{
+        if (g_rcGestureScrollFrozen) return;
+        g_rcGestureScrollFrozen = YES;
+        g_rcFreezeBeganGen = g_rcBeganGen;
+        SRLogMin(@"[RCG] Freeze engaged");
+        if (!g_rcFrozenScrollViews) g_rcFrozenScrollViews = [NSHashTable weakObjectsHashTable];
+        if (!g_rcFrozenGestureRecognizers) g_rcFrozenGestureRecognizers = [NSHashTable weakObjectsHashTable];
+        if (!g_rcFrozenInteractionWindows) g_rcFrozenInteractionWindows = [NSHashTable weakObjectsHashTable];
+        @try {
+            NSArray *windows = [UIApplication sharedApplication].windows;
+            for (UIWindow *w in windows) {
+                NSMutableArray *found = [NSMutableArray array];
+                RC_CollectScrollViewsInView(w, found);
+                for (UIScrollView *sv in found) {
+                    if (sv.scrollEnabled) {
+                        [g_rcFrozenScrollViews addObject:sv];
+                        sv.scrollEnabled = NO;
+                    }
+                    // Row swipe actions (e.g. table cell actions) are driven
+                    // by the scroll view's own gesture recognizers, which
+                    // scrollEnabled=NO alone does not stop. Disabling them
+                    // cancels the in-flight swipe action.
+                    for (UIGestureRecognizer *gr in sv.gestureRecognizers) {
+                        if (gr.enabled) {
+                            [g_rcFrozenGestureRecognizers addObject:gr];
+                            gr.enabled = NO;
+                        }
+                    }
+                }
+            }
+            // Block taps/clicks for the gesture duration: a touch that began
+            // on a button or row would otherwise activate on lift. Flipping
+            // userInteraction mid-touch cancels delivery to those views; the
+            // gesture itself is tracked from the raw event above, so it is
+            // unaffected.
+            for (UIWindow *w in windows) {
+                if (w.userInteractionEnabled) {
+                    [g_rcFrozenInteractionWindows addObject:w];
+                    w.userInteractionEnabled = NO;
+                }
+                RC_ClearStuckHighlightsInView(w);
+            }
+        } @catch (__unused NSException *e) { }
+        notify_post("com.saihgupr.remotecompanion.gesture-scroll-begin");
+        // Failsafe: a missed touch-end must never leave the UI untouchable.
+        // Gestures finish in well under a second.
+        g_rcFreezeGen++;
+        unsigned gen = g_rcFreezeGen;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (g_rcGestureScrollFrozen && gen == g_rcFreezeGen) RC_UnfreezeGestureScrolling();
+        });
+    };
+    if ([NSThread isMainThread]) work();
+    else dispatch_async(dispatch_get_main_queue(), work);
+}
+
+static void RC_UnfreezeGestureScrolling(void) {
+    if (!g_rcGestureScrollFrozen) return;
+    void (^work)(void) = ^{
+        if (!g_rcGestureScrollFrozen) return;
+        g_rcGestureScrollFrozen = NO;
+        @try {
+            if (g_rcFreezeBeganGen == g_rcBeganGen && g_rcBeganOffsets.count > 0) {
+                NSUInteger restored = 0;
+                CGFloat maxDelta = 0;
+                for (UIScrollView *sv in g_rcBeganOffsets) {
+                    NSValue *v = [g_rcBeganOffsets objectForKey:sv];
+                    if (!v) continue;
+                    CGPoint to = [v CGPointValue];
+                    CGPoint cur = sv.contentOffset;
+                    CGFloat d = fabs(cur.x - to.x) + fabs(cur.y - to.y);
+                    if (d > maxDelta) maxDelta = d;
+                    @try { if (d > 0.5) [sv setContentOffset:to animated:NO]; } @catch (__unused NSException *e) { }
+                    restored++;
+                }
+                SRLogMin(@"[RCG] Freeze released, restored %lu views (maxDelta=%.1f)", (unsigned long)restored, maxDelta);
+            } else {
+                SRLogMin(@"[RCG] Freeze released");
+            }
+            for (UIScrollView *sv in g_rcFrozenScrollViews) {
+                @try { sv.scrollEnabled = YES; } @catch (__unused NSException *e) { }
+            }
+            for (UIGestureRecognizer *gr in g_rcFrozenGestureRecognizers) {
+                @try { gr.enabled = YES; } @catch (__unused NSException *e) { }
+            }
+            for (UIWindow *w in g_rcFrozenInteractionWindows) {
+                @try { w.userInteractionEnabled = YES; } @catch (__unused NSException *e) { }
+            }
+            for (UIWindow *w in [UIApplication sharedApplication].windows) {
+                @try { RC_ClearStuckHighlightsInView(w); } @catch (__unused NSException *e) { }
+            }
+        } @catch (__unused NSException *e) { }
+        [g_rcFrozenScrollViews removeAllObjects];
+        [g_rcFrozenGestureRecognizers removeAllObjects];
+        [g_rcFrozenInteractionWindows removeAllObjects];
+        [g_rcBeganOffsets removeAllObjects];
+        notify_post("com.saihgupr.remotecompanion.gesture-scroll-end");
+    };
+    if ([NSThread isMainThread]) work();
+    else dispatch_async(dispatch_get_main_queue(), work);
+}
+
 static UIInterfaceOrientation get_current_interface_orientation() {
-    UIInterfaceOrientation orientation = UIInterfaceOrientationPortrait;
+    // SpringBoard's active orientation is authoritative (keyWindow/windowScene can
+    // stay portrait on newer iPhones). Fall back to windowScene only if needed.
+    SpringBoard *sb = (SpringBoard *)[UIApplication sharedApplication];
+    if (sb && [sb respondsToSelector:@selector(activeInterfaceOrientation)]) {
+        return [sb activeInterfaceOrientation];
+    }
     #pragma clang diagnostic push
     #pragma clang diagnostic ignored "-Wdeprecated-declarations"
     UIWindow *window = [UIApplication sharedApplication].keyWindow ?: [[UIApplication sharedApplication].windows firstObject];
     if (window && window.windowScene) {
-        orientation = window.windowScene.interfaceOrientation;
-    } else {
-        orientation = [UIApplication sharedApplication].statusBarOrientation;
+        return window.windowScene.interfaceOrientation;
     }
+    return [UIApplication sharedApplication].statusBarOrientation;
     #pragma clang diagnostic pop
-    return orientation;
+}
+
+// =========================================================================
+// RC ORIENTATION CENTRAL: single source of truth for every bar/edge trigger.
+// -------------------------------------------------------------------------
+// Logical model: portrait is position 1, then the whole block (UI-top,
+// UI-bottom, UI-left, UI-right, bottom swipe-up zones, edge sides, swipe
+// direction) rotates as one. Per Apple, UIInterfaceOrientationLandscapeLeft
+// = home button on the left, LandscapeRight = home button on the right.
+//
+// Coordinate basis (VERIFIED by field logs: in landscape win stays 414x736
+// portrait while screen reports 736x414, and touches arrive with x in [0,S],
+// y in [0,L]): touch coords are device-fixed portrait coords. x ALWAYS spans
+// S (short side), y ALWAYS spans L (long side), in every orientation.
+// UI-top/UI-bottom follow gravity as the user sees the interface:
+//   Portrait:       UI-top = device top,    UI-bottom = device bottom
+//   UpsideDown:     UI-top = device bottom, UI-bottom = device top
+//   LandscapeLeft (home left, CW tilt, top points right):
+//                   UI-top = device left (physical top), UI-bottom = device right
+//   LandscapeRight (home right, CCW tilt, top points left):
+//                   UI-top = device right (physical top), UI-bottom = device left
+// Every zone / progress / delta helper below uses only S/L + orientation,
+// so a mapping fix here fixes all triggers at once.
+// =========================================================================
+
+// Orientation latched at touch Began, reused for Moved/Ended so a rotation
+// mid-swipe can't cross-wire a gesture between top and bottom.
+static UIInterfaceOrientation g_rcLatchedTouchOrientation = UIInterfaceOrientationPortrait;
+static BOOL g_rcLatchedTouchOrientationValid = NO;
+
+static inline void RC_ScreenSL(CGFloat *outS, CGFloat *outL) {
+    CGSize screenSize = [[UIScreen mainScreen] bounds].size;
+    if (outS) *outS = MIN(screenSize.width, screenSize.height);
+    if (outL) *outL = MAX(screenSize.width, screenSize.height);
+}
+
+static inline BOOL RC_InTopRegion(CGPoint loc, UIInterfaceOrientation orientation, CGFloat S, CGFloat L) {
+    (void)S; (void)L;
+    if (orientation == UIInterfaceOrientationPortrait) return (loc.y < 50);
+    if (orientation == UIInterfaceOrientationPortraitUpsideDown) return (loc.y > L - 50);
+    if (orientation == UIInterfaceOrientationLandscapeLeft) return (loc.x < 50);  // home left: UI-top = device left
+    if (orientation == UIInterfaceOrientationLandscapeRight) return (loc.x > S - 50); // home right: UI-top = device right
+    return (loc.y < 50);
+}
+
+static inline BOOL RC_InBottomRegion(CGPoint loc, UIInterfaceOrientation orientation, CGFloat S, CGFloat L) {
+    (void)S; (void)L;
+    if (orientation == UIInterfaceOrientationPortrait) return (loc.y > L - 50);
+    if (orientation == UIInterfaceOrientationPortraitUpsideDown) return (loc.y < 50);
+    if (orientation == UIInterfaceOrientationLandscapeLeft) return (loc.x > S - 50);  // home left: UI-bottom = device right
+    if (orientation == UIInterfaceOrientationLandscapeRight) return (loc.x < 50);     // home right: UI-bottom = device left
+    return (loc.y > L - 50);
+}
+
+// Progress 0..1 along the UI-top / UI-bottom edge, left-to-right as the user sees it.
+// In landscape the bar edges are long edges, so progress runs along y with divisor L.
+static inline CGFloat RC_ProgressAlongEdge(CGPoint loc, UIInterfaceOrientation orientation, CGFloat S, CGFloat L) {
+    if (orientation == UIInterfaceOrientationPortrait) return (S > 0) ? (loc.x / S) : 0.5;
+    if (orientation == UIInterfaceOrientationPortraitUpsideDown) return (S > 0) ? (1.0 - (loc.x / S)) : 0.5;
+    if (L <= 0) return 0.5;
+    if (orientation == UIInterfaceOrientationLandscapeLeft) return (1.0 - (loc.y / L)); // west(device bottom y=L)=0, east(device top y=0)=1
+    return (loc.y / L); // LandscapeRight: west(device top y=0)=0, east(device bottom y=L)=1
+}
+
+static inline NSString *RC_StatusHoldTriggerForProgress(CGFloat progress) {
+    if (progress < 0.33) return @"trigger_statusbar_left_hold";
+    if (progress > 0.66) return @"trigger_statusbar_right_hold";
+    return @"trigger_statusbar_center_hold";
+}
+
+static inline NSString *RC_BottomSwipeTriggerForProgress(CGFloat progress) {
+    if (progress < 0.33) return @"trigger_bottom_swipe_up_left";
+    if (progress > 0.67) return @"trigger_bottom_swipe_up_right";
+    return @"trigger_bottom_swipe_up_center";
+}
+
+// Physical (window-space) delta -> logical delta as the user sees it.
+// Derived from 90-degree rotations of a fixed portrait frame:
+//   LandscapeLeft (home left, clockwise):  user_dx = -dy_p, user_dy = +dx_p
+//   LandscapeRight (home right, CCW):      user_dx = +dy_p, user_dy = -dx_p
+static inline void RC_UserDeltaForOrientation(CGFloat dx_phys, CGFloat dy_phys, UIInterfaceOrientation orientation, CGFloat *outDX, CGFloat *outDY) {
+    CGFloat user_dx = dx_phys, user_dy = dy_phys;
+    if (orientation == UIInterfaceOrientationPortraitUpsideDown) {
+        user_dx = -dx_phys; user_dy = -dy_phys;
+    } else if (orientation == UIInterfaceOrientationLandscapeLeft) {
+        user_dx = -dy_phys; user_dy = dx_phys;
+    } else if (orientation == UIInterfaceOrientationLandscapeRight) {
+        user_dx = dy_phys; user_dy = -dx_phys;
+    }
+    if (outDX) *outDX = user_dx;
+    if (outDY) *outDY = user_dy;
+}
+
+// Logical left/right edges follow the interface as the user sees it. In
+// landscape these are the short side edges: UI-left/UI-right = device
+// bottom/device top (or vice versa). y spans L here, x spans S.
+static inline void RC_EdgeZonesForLoc(CGPoint loc, UIInterfaceOrientation orientation, CGFloat S, CGFloat L, CGFloat edgeThreshold, CGFloat margin, BOOL *outNearLeft, BOOL *outNearRight, BOOL *outWithinBounds) {
+    BOOL nearLeft = NO, nearRight = NO, within = NO;
+    if (orientation == UIInterfaceOrientationPortrait) {
+        nearLeft = (loc.x < edgeThreshold);
+        nearRight = (loc.x > S - edgeThreshold);
+        within = (loc.y > margin) && (loc.y < L - margin);
+    } else if (orientation == UIInterfaceOrientationPortraitUpsideDown) {
+        nearLeft = (loc.x > S - edgeThreshold);
+        nearRight = (loc.x < edgeThreshold);
+        within = (loc.y > margin) && (loc.y < L - margin);
+    } else if (orientation == UIInterfaceOrientationLandscapeLeft) {
+        nearLeft = (loc.y > L - edgeThreshold); // home left: UI-left = device bottom
+        nearRight = (loc.y < edgeThreshold);    // UI-right = device top
+        within = (loc.x > margin) && (loc.x < S - margin);
+    } else { // LandscapeRight
+        nearLeft = (loc.y < edgeThreshold);     // home right: UI-left = device top
+        nearRight = (loc.y > L - edgeThreshold);// UI-right = device bottom
+        within = (loc.x > margin) && (loc.x < S - margin);
+    }
+    if (outNearLeft) *outNearLeft = nearLeft;
+    if (outNearRight) *outNearRight = nearRight;
+    if (outWithinBounds) *outWithinBounds = within;
 }
 
 static NSString *get_bottom_swipe_trigger_for_touch(CGPoint loc, UIInterfaceOrientation orientation, BOOL *outInBottomRegion) {
-    CGSize screenSize = [[UIScreen mainScreen] bounds].size;
-    CGFloat lw = MIN(screenSize.width, screenSize.height);
-    CGFloat lh = MAX(screenSize.width, screenSize.height);
-    CGFloat screenW = screenSize.width;
-    CGFloat screenH = screenSize.height;
-    
-    BOOL inBottom = NO;
-    CGFloat progress = 0.5;
-    
-    if (orientation == UIInterfaceOrientationPortrait) {
-        inBottom = (loc.y > lh - 50);
-        progress = (lw > 0) ? (loc.x / lw) : 0.5;
-    } else if (orientation == UIInterfaceOrientationPortraitUpsideDown) {
-        inBottom = (loc.y < 50);
-        progress = (lw > 0) ? (1.0 - (loc.x / lw)) : 0.5;
-    } else if (orientation == UIInterfaceOrientationLandscapeLeft) {
-        inBottom = (loc.x > lw - 50) || (loc.x > screenW - 50) || (loc.y > screenH - 50);
-        progress = (lh > 0) ? (1.0 - (loc.y / lh)) : 0.5;
-    } else if (orientation == UIInterfaceOrientationLandscapeRight) {
-        inBottom = (loc.x < 50) || (loc.y > screenH - 50);
-        progress = (lh > 0) ? (loc.y / lh) : 0.5;
-    }
-    
+    // Bottom zones always live on the edge that is currently UI-bottom.
+    // Mapping (UIInterfaceOrientationLandscapeLeft = home on left):
+    //   Portrait:       bottom = device bottom (y > L-50), progress = x/S
+    //   UpsideDown:     bottom = device top (y < 50),       progress = 1-x/S
+    //   LandscapeLeft:  bottom = device right (x > S-50),   progress = y/L
+    //   LandscapeRight: bottom = device left (x < 50),      progress = 1-y/L
+    CGFloat S = 0, L = 0;
+    RC_ScreenSL(&S, &L);
+
+    BOOL inBottom = RC_InBottomRegion(loc, orientation, S, L);
+    CGFloat progress = RC_ProgressAlongEdge(loc, orientation, S, L);
+
     if (outInBottomRegion) {
         *outInBottomRegion = inBottom;
     }
-    
+
     if (!inBottom) {
         return nil;
     }
-    
-    if (progress < 0.33) {
-        return @"trigger_bottom_swipe_up_left";
-    } else if (progress > 0.67) {
-        return @"trigger_bottom_swipe_up_right";
-    } else {
-        return @"trigger_bottom_swipe_up_center";
-    }
+
+    return RC_BottomSwipeTriggerForProgress(progress);
 }
 
 // The lock screen, or the cover sheet pulled down over the home screen or an app, keeps iOS's
@@ -13461,7 +15053,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
     if (!g_triggerConfig) {
         load_trigger_config();
     }
-    if (!g_triggerConfig || ![g_triggerConfig[@"masterEnabled"] boolValue]) {
+    if (!g_triggerConfig || !RC_MasterEnabled()) {
         return NO;
     }
     
@@ -13481,7 +15073,7 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
     if (!g_triggerConfig) {
         load_trigger_config();
     }
-    if (!g_triggerConfig || ![g_triggerConfig[@"masterEnabled"] boolValue]) {
+    if (!g_triggerConfig || !RC_MasterEnabled()) {
         return NO;
     }
     NSDictionary *triggers = g_triggerConfig[@"triggers"];
@@ -13498,53 +15090,34 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
         UITouch *touch = [[event allTouches] anyObject];
         
         if (touch && touch.phase == UITouchPhaseBegan) {
-            UIWindow *window = nil;
-            #pragma clang diagnostic push
-            #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-            window = [UIApplication sharedApplication].keyWindow ?: [[UIApplication sharedApplication].windows firstObject];
-            #pragma clang diagnostic pop
-            UIInterfaceOrientation orientation = UIInterfaceOrientationPortrait;
-            
-            #pragma clang diagnostic push
-            #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-            if (window && window.windowScene) {
-                orientation = window.windowScene.interfaceOrientation;
-            } else {
-                orientation = [UIApplication sharedApplication].statusBarOrientation;
-            }
-            #pragma clang diagnostic pop
+            UIInterfaceOrientation orientation = get_current_interface_orientation();
+            // Latch for the life of this touch so Moved/Ended can't cross-wire on rotation.
+            g_rcLatchedTouchOrientation = orientation;
+            g_rcLatchedTouchOrientationValid = YES;
 
             CGPoint loc = [touch locationInView:nil];
             CGSize screenSize = [[UIScreen mainScreen] bounds].size;
-            
-            // Logic width/height (always portrait relative)
-            CGFloat lw = MIN(screenSize.width, screenSize.height);
-            CGFloat lh = MAX(screenSize.width, screenSize.height);
-            
-            // BOOL isLandscape = UIInterfaceOrientationIsLandscape(orientation);
-            
-            // Map coordinates and determine logic regions based on orientation
-            BOOL inTopRegion = NO;
-            BOOL inBottomRegion = NO;
-            
-            if (orientation == UIInterfaceOrientationPortrait) {
-                inTopRegion = (loc.y < 50);
-                inBottomRegion = (loc.y > lh - 50);
-            } else if (orientation == UIInterfaceOrientationPortraitUpsideDown) {
-                inTopRegion = (loc.y > lh - 50);
-                inBottomRegion = (loc.y < 50);
-            } else if (orientation == UIInterfaceOrientationLandscapeLeft) {
-                // Home button on right: Status bar is physically at X=0-50, Bottom bar at X=lw-50
-                inTopRegion = (loc.x < 50);
-                inBottomRegion = (loc.x > lw - 50);
-            } else if (orientation == UIInterfaceOrientationLandscapeRight) {
-                // Home button on left: Status bar is physically at X=lw-50, Bottom bar at X=0-50
-                inTopRegion = (loc.x > lw - 50);
-                inBottomRegion = (loc.x < 50);
-            }
 
-            
+            // S/L from the central helper (same values every call site uses).
+            CGFloat S = 0, L = 0;
+            RC_ScreenSL(&S, &L);
+
+            // All zones come from the orientation central: top/bottom follow UI-top/UI-bottom.
+            // LandscapeLeft = home on left (bottom=device right, top=device left).
+            // LandscapeRight = home on right (bottom=device left, top=device right).
+            BOOL inTopRegion = RC_InTopRegion(loc, orientation, S, L);
+            BOOL inBottomRegion = RC_InBottomRegion(loc, orientation, S, L);
+
+            UIWindow *tw = touch.window;
+            CGSize wsz = tw ? tw.bounds.size : CGSizeZero;
+            NSString *wcls = tw ? NSStringFromClass([tw class]) : @"nil";
+            CGFloat edgeProgress = RC_ProgressAlongEdge(loc, orientation, S, L);
+            BOOL nearEdge = (loc.x < 60 || loc.y < 60 || loc.x > S - 60 || loc.y > L - 60);
+            if (inTopRegion || inBottomRegion || nearEdge) {
+                SRLogMin(@"[RCOrient] began orient=%ld loc=(%.0f,%.0f) screen=(%.0fx%.0f) win=(%.0fx%.0f)%@ top=%d bottom=%d prog=%.2f", (long)orientation, loc.x, loc.y, screenSize.width, screenSize.height, wsz.width, wsz.height, wcls, inTopRegion, inBottomRegion, edgeProgress);
+            }
             if (inTopRegion) {
+                RC_SnapshotGestureOffsets();
                 g_statusBarSwipeStartX = loc.x;
                 g_statusBarSwipeStartY = loc.y;
                 g_statusBarTouchActive = YES;
@@ -13560,7 +15133,7 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
                     g_pendingStatusBarTrigger = nil;
                     
                     load_trigger_config();
-                    BOOL enabled = [g_triggerConfig[@"masterEnabled"] boolValue] && 
+                    BOOL enabled = RC_MasterEnabled() && 
                                    [g_triggerConfig[@"triggers"][@"trigger_statusbar_double_tap"][@"enabled"] boolValue];
                     
                     if (enabled) {
@@ -13577,25 +15150,9 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
                         }
                     }
                 } else {
-                    // Determine region for status bar hold (Left, Center, Right)
-                    CGFloat progress = 0;
-                    if (orientation == UIInterfaceOrientationPortrait) {
-                        progress = loc.x / lw;
-                    } else if (orientation == UIInterfaceOrientationPortraitUpsideDown) {
-                        progress = 1.0 - (loc.x / lw);
-                    } else if (orientation == UIInterfaceOrientationLandscapeLeft) {
-                        progress = 1.0 - (loc.y / lh);
-                    } else if (orientation == UIInterfaceOrientationLandscapeRight) {
-                        progress = loc.y / lh;
-                    }
-                    
-                    if (progress < 0.33) {
-                        g_pendingStatusBarTrigger = @"trigger_statusbar_left_hold";
-                    } else if (progress > 0.66) {
-                        g_pendingStatusBarTrigger = @"trigger_statusbar_right_hold";
-                    } else {
-                        g_pendingStatusBarTrigger = @"trigger_statusbar_center_hold";
-                    }
+                    // Zone along UI-top, left-to-right as the user sees it (central helper).
+                    CGFloat progress = RC_ProgressAlongEdge(loc, orientation, S, L);
+                    g_pendingStatusBarTrigger = RC_StatusHoldTriggerForProgress(progress);
                     
                     SRLog(@"[RCStatus] Top Region Touch at progress=%.2f -> Key: %@", progress, g_pendingStatusBarTrigger);
                     
@@ -13616,12 +15173,13 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
 
                         if (g_pendingStatusBarTrigger) {
                             load_trigger_config();
-                            BOOL enabled = [g_triggerConfig[@"masterEnabled"] boolValue] && 
+                            BOOL enabled = RC_MasterEnabled() && 
                                            [g_triggerConfig[@"triggers"][g_pendingStatusBarTrigger][@"enabled"] boolValue];
                             
                             if (enabled) {
                                 g_statusBarHoldTriggered = YES;
                                 trigger_haptic();
+                                if (RC_TriggerIsActionable(g_pendingStatusBarTrigger)) RC_FreezeGestureScrolling();
                                 RCExecuteTrigger(g_pendingStatusBarTrigger);
                                 SRLog(@"%@ FIRED!", g_pendingStatusBarTrigger);
                             }
@@ -13632,6 +15190,7 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
             
             // Bottom bar region = bottom 50pts
             if (inBottomRegion) {
+                RC_SnapshotGestureOffsets();
                 g_bottomBarSwipeStartX = loc.x;
                 g_bottomBarSwipeStartY = loc.y;
                 g_bottomBarTouchActive = YES;
@@ -13641,42 +15200,22 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
                 g_bottomBarUserDX = 0;
                 g_bottomBarUserDY = 0;
                 
-                CGFloat progress = 0;
-                if (orientation == UIInterfaceOrientationPortrait) {
-                    progress = loc.x / lw;
-                } else if (orientation == UIInterfaceOrientationPortraitUpsideDown) {
-                    progress = 1.0 - (loc.x / lw);
-                } else if (orientation == UIInterfaceOrientationLandscapeLeft) {
-                    progress = 1.0 - (loc.y / lh);
-                } else if (orientation == UIInterfaceOrientationLandscapeRight) {
-                    progress = loc.y / lh;
-                }
-                
+                // Zone along UI-bottom, left-to-right as the user sees it (central helper).
+                CGFloat progress = RC_ProgressAlongEdge(loc, orientation, S, L);
+
                 if (rc_cover_sheet_showing()) {
                     g_pendingBottomBarSwipeUpTrigger = nil; // iOS keeps this swipe (see rc_cover_sheet_showing)
-                } else if (progress < 0.33) {
-                    g_pendingBottomBarSwipeUpTrigger = @"trigger_bottom_swipe_up_left";
-                } else if (progress > 0.67) {
-                    g_pendingBottomBarSwipeUpTrigger = @"trigger_bottom_swipe_up_right";
                 } else {
-                    g_pendingBottomBarSwipeUpTrigger = @"trigger_bottom_swipe_up_center";
+                    g_pendingBottomBarSwipeUpTrigger = RC_BottomSwipeTriggerForProgress(progress);
                 }
                 SRLog(@"[RCBottom] Bottom Touch began at progress=%.2f -> Zone: %@", progress, g_pendingBottomBarSwipeUpTrigger);
             }
         }
         else if (touch && (touch.phase == UITouchPhaseMoved || touch.phase == UITouchPhaseEnded)) {
             CGPoint loc = [touch locationInView:nil];
-            UIWindow *window = nil;
-            #pragma clang diagnostic push
-            #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-            window = [UIApplication sharedApplication].keyWindow ?: [[UIApplication sharedApplication].windows firstObject];
-            #pragma clang diagnostic pop
-            UIInterfaceOrientation orientation = UIInterfaceOrientationPortrait;
-            #pragma clang diagnostic push
-            #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-            if (window && window.windowScene) orientation = window.windowScene.interfaceOrientation;
-            else orientation = [UIApplication sharedApplication].statusBarOrientation;
-            #pragma clang diagnostic pop
+            // Use the orientation latched at Began so a rotation mid-swipe can't
+            // cross-wire top/bottom. Fall back to live only if somehow unlatched.
+            UIInterfaceOrientation orientation = g_rcLatchedTouchOrientationValid ? g_rcLatchedTouchOrientation : get_current_interface_orientation();
 
             BOOL isEnded = (touch.phase == UITouchPhaseEnded);
             
@@ -13686,19 +15225,11 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
                 
                 CGFloat dx_phys = loc.x - startX;
                 CGFloat dy_phys = loc.y - startY;
-                
+
+                // Physical -> logical (as the user sees it), via the orientation central.
                 CGFloat user_dx = 0;
                 CGFloat user_dy = 0;
-                
-                if (orientation == UIInterfaceOrientationPortrait) {
-                    user_dx = dx_phys; user_dy = dy_phys;
-                } else if (orientation == UIInterfaceOrientationPortraitUpsideDown) {
-                    user_dx = -dx_phys; user_dy = -dy_phys;
-                } else if (orientation == UIInterfaceOrientationLandscapeLeft) {
-                    user_dx = -dy_phys; user_dy = dx_phys;
-                } else if (orientation == UIInterfaceOrientationLandscapeRight) {
-                    user_dx = dy_phys; user_dy = -dx_phys;
-                }
+                RC_UserDeltaForOrientation(dx_phys, dy_phys, orientation, &user_dx, &user_dy);
 
                 CGFloat abs_udx = fabs(user_dx);
                 CGFloat abs_udy = fabs(user_dy);
@@ -13720,9 +15251,10 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
                     if (isHoz && abs_udx > 15 && !g_statusBarSwipeHapticFired) {
                         NSString *trigger = (user_dx > 0) ? @"trigger_statusbar_swipe_right" : @"trigger_statusbar_swipe_left";
                         load_trigger_config();
-                        if ([g_triggerConfig[@"masterEnabled"] boolValue] && [g_triggerConfig[@"triggers"][trigger][@"enabled"] boolValue]) {
+                        if (RC_MasterEnabled() && [g_triggerConfig[@"triggers"][trigger][@"enabled"] boolValue]) {
                             trigger_haptic();
                         }
+                        if (RC_TriggerIsActionable(trigger)) RC_FreezeGestureScrolling();
                         g_statusBarSwipeHapticFired = YES;
                     }
                     
@@ -13734,41 +15266,46 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
                 }
                 
                 // --- Bottom Bar Moves ---
+                // Early freeze: once horizontal intent is clear and that
+                // direction's trigger is actionable, hold the list (and any
+                // row swipe actions) still for the rest of the touch.
+                if (g_bottomBarTouchActive && isHoz && abs_udx > 10) {
+                    NSString *sideKey = (user_dx > 0) ? @"trigger_bottombar_swipe_right" : @"trigger_bottombar_swipe_left";
+                    if (RC_TriggerIsActionable(sideKey)) RC_FreezeGestureScrolling();
+                }
                 if (g_bottomBarTouchActive && !g_bottomBarHapticFired) {
                     if (isHoz && abs_udx > 15) {
                         NSString *trigger = (user_dx > 0) ? @"trigger_bottombar_swipe_right" : @"trigger_bottombar_swipe_left";
                         load_trigger_config();
-                        if ([g_triggerConfig[@"masterEnabled"] boolValue] && [g_triggerConfig[@"triggers"][trigger][@"enabled"] boolValue]) {
+                        if (RC_MasterEnabled() && [g_triggerConfig[@"triggers"][trigger][@"enabled"] boolValue]) {
                             trigger_haptic();
                         }
+                        if (RC_TriggerIsActionable(trigger)) RC_FreezeGestureScrolling();
                         g_bottomBarHapticFired = YES;
                     }
                 }
                 
                 // Bottom Bar Swipe Up (3-Zone) during Move
+                // Early freeze: once upward intent is clear and the zoned
+                // trigger is actionable, hold the list still for the rest
+                // of the touch (firing itself happens at 45pt below).
+                if (g_bottomBarTouchActive && !g_bottomBarSwipeUpTriggered && isVertUp && abs_udy > 10) {
+                    if (g_pendingBottomBarSwipeUpTrigger && RC_TriggerIsActionable(g_pendingBottomBarSwipeUpTrigger)) {
+                        RC_FreezeGestureScrolling();
+                    }
+                }
                 if (g_bottomBarTouchActive && !g_bottomBarSwipeUpTriggered && isVertUp && abs_udy > 45) {
                     if (g_pendingBottomBarSwipeUpTrigger) {
                         load_trigger_config();
-                        BOOL enabled = [g_triggerConfig[@"masterEnabled"] boolValue] && 
+                        BOOL enabled = RC_MasterEnabled() && 
                                        [g_triggerConfig[@"triggers"][g_pendingBottomBarSwipeUpTrigger][@"enabled"] boolValue];
                         if (enabled) {
                             g_bottomBarSwipeUpTriggered = YES;
                             g_lastBottomSwipeTriggerTime = [[NSDate date] timeIntervalSince1970];
                             trigger_haptic();
+                            if (RC_TriggerIsActionable(g_pendingBottomBarSwipeUpTrigger)) RC_FreezeGestureScrolling();
                             RCExecuteTrigger(g_pendingBottomBarSwipeUpTrigger);
                             SRLog(@"[RCBottom] %@ FIRED during move!", g_pendingBottomBarSwipeUpTrigger);
-                            
-                            Class ccClass = objc_getClass("SBControlCenterController");
-                            if (ccClass && [ccClass respondsToSelector:@selector(sharedInstanceIfExists)]) {
-                                id cc = [ccClass performSelector:@selector(sharedInstanceIfExists)];
-                                if (cc) {
-                                    if ([cc respondsToSelector:@selector(isVisible)] && [cc isVisible]) {
-                                        [cc dismissAnimated:NO];
-                                    } else if ([cc respondsToSelector:@selector(_presentControlCenterGestureCancelled)]) {
-                                        [cc performSelector:@selector(_presentControlCenterGestureCancelled)];
-                                    }
-                                }
-                            }
                         }
                     }
                 }
@@ -13790,26 +15327,15 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
                     if (g_bottomBarTouchActive && !g_bottomBarSwipeUpTriggered && isVertUp && abs_udy > 35) {
                         if (g_pendingBottomBarSwipeUpTrigger) {
                             load_trigger_config();
-                            BOOL enabled = [g_triggerConfig[@"masterEnabled"] boolValue] && 
+                            BOOL enabled = RC_MasterEnabled() && 
                                            [g_triggerConfig[@"triggers"][g_pendingBottomBarSwipeUpTrigger][@"enabled"] boolValue];
                             if (enabled) {
                                 g_bottomBarSwipeUpTriggered = YES;
                                 g_lastBottomSwipeTriggerTime = [[NSDate date] timeIntervalSince1970];
                                 trigger_haptic();
+                                if (RC_TriggerIsActionable(g_pendingBottomBarSwipeUpTrigger)) RC_FreezeGestureScrolling();
                                 RCExecuteTrigger(g_pendingBottomBarSwipeUpTrigger);
                                 SRLog(@"[RCBottom] %@ FIRED on ended!", g_pendingBottomBarSwipeUpTrigger);
-                                
-                                Class ccClass = objc_getClass("SBControlCenterController");
-                                if (ccClass && [ccClass respondsToSelector:@selector(sharedInstanceIfExists)]) {
-                                    id cc = [ccClass performSelector:@selector(sharedInstanceIfExists)];
-                                    if (cc) {
-                                        if ([cc respondsToSelector:@selector(isVisible)] && [cc isVisible]) {
-                                            [cc dismissAnimated:NO];
-                                        } else if ([cc respondsToSelector:@selector(_presentControlCenterGestureCancelled)]) {
-                                            [cc performSelector:@selector(_presentControlCenterGestureCancelled)];
-                                        }
-                                    }
-                                }
                             }
                         }
                     }
@@ -13824,6 +15350,8 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
                     g_statusBarHoldTriggered = NO;
                     g_bottomBarSwipeUpTriggered = NO;
                     g_pendingBottomBarSwipeUpTrigger = nil;
+                    g_rcLatchedTouchOrientationValid = NO;
+                    RC_UnfreezeGestureScrolling();
                 }
             }
         }
@@ -13839,6 +15367,8 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
             g_bottomBarHapticFired = NO;
             g_bottomBarSwipeUpTriggered = NO;
             g_pendingBottomBarSwipeUpTrigger = nil;
+            g_rcLatchedTouchOrientationValid = NO;
+            RC_UnfreezeGestureScrolling();
         }
     }
     
@@ -13855,39 +15385,41 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
         self.state = UIGestureRecognizerStateFailed;
         return;
     }
-    
+
     UITouch *touch = [touches anyObject];
     CGPoint loc = [touch locationInView:nil];
-    CGSize screenSize = [UIScreen mainScreen].bounds.size;
-    
-    // Check if touch is near edge (within 25pt) - narrower as requested
+    CGFloat S = 0, L = 0;
+    RC_ScreenSL(&S, &L);
+    UIInterfaceOrientation orientation = get_current_interface_orientation();
+
+    // Logical left/right edges follow the interface (orientation central).
+    // In landscape the logical left/right zones are strips along y (the short
+    // axis) bounded on x (the long axis); see RC_EdgeZonesForLoc.
     CGFloat edgeThreshold = 25.0;
-    
-    // Check vertical margins to avoid interference with Control Center (top) and Home Swipe (bottom)
-    CGFloat verticalMargin = 100.0;
-    
-    BOOL isNearLeft = (loc.x < edgeThreshold);
-    BOOL isNearRight = (loc.x > screenSize.width - edgeThreshold);
-    BOOL isWithinVerticalBounds = (loc.y > verticalMargin) && (loc.y < screenSize.height - verticalMargin);
-    
-    if (!isWithinVerticalBounds) {
+    CGFloat margin = 100.0;
+
+    BOOL nearLogicalLeft = NO, nearLogicalRight = NO, withinBounds = NO;
+    RC_EdgeZonesForLoc(loc, orientation, S, L, edgeThreshold, margin, &nearLogicalLeft, &nearLogicalRight, &withinBounds);
+
+    if (!withinBounds) {
         self.state = UIGestureRecognizerStateFailed;
         return;
     }
-    
-    if (self.isLeftEdge && !isNearLeft) {
+
+    if (self.isLeftEdge && !nearLogicalLeft) {
         self.state = UIGestureRecognizerStateFailed;
         return;
     }
-    
-    if (self.isRightEdge && !isNearRight) {
+
+    if (self.isRightEdge && !nearLogicalRight) {
         self.state = UIGestureRecognizerStateFailed;
         return;
     }
 
     [super touchesBegan:touches withEvent:event];
     self.hasTriggered = NO;
-    SRLog(@"Edge Gesture touchesBegan: X=%.2f Y=%.2f", loc.x, loc.y);
+    RC_SnapshotGestureOffsets();
+    SRLogMin(@"Edge Gesture touchesBegan: X=%.2f Y=%.2f orient=%ld", loc.x, loc.y, (long)orientation);
 }
 
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
@@ -13903,11 +15435,91 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
 
 @end
 
+@implementation SRBottomUpGestureRecognizer
+
+- (void)reset {
+    [super reset];
+    self.zoneTriggerKey = nil;
+    self.startPoint = CGPointZero;
+}
+
+- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    [super touchesBegan:touches withEvent:event];
+    if (!should_register_bottom_up_gestures()) {
+        self.state = UIGestureRecognizerStateFailed;
+        return;
+    }
+    if (rc_cover_sheet_showing()) {
+        // The lock screen keeps its own swipe up (matches trigger gating).
+        self.state = UIGestureRecognizerStateFailed;
+        return;
+    }
+    UITouch *touch = [touches anyObject];
+    CGPoint loc = [touch locationInView:nil];
+    UIInterfaceOrientation orientation = get_current_interface_orientation();
+    BOOL inBottom = NO;
+    NSString *key = get_bottom_swipe_trigger_for_touch(loc, orientation, &inBottom);
+    if (!inBottom || !key || !RC_TriggerIsActionable(key)) {
+        self.state = UIGestureRecognizerStateFailed;
+        return;
+    }
+    self.zoneTriggerKey = key;
+    self.startPoint = loc;
+    // Remain Possible while evaluating; fail fast below on any contradiction.
+}
+
+- (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    [super touchesMoved:touches withEvent:event];
+    if (self.state == UIGestureRecognizerStateFailed ||
+        self.state == UIGestureRecognizerStateRecognized) {
+        return;
+    }
+    UITouch *touch = [touches anyObject];
+    CGPoint loc = [touch locationInView:nil];
+    UIInterfaceOrientation orientation = get_current_interface_orientation();
+    CGFloat dx = 0, dy = 0;
+    RC_UserDeltaForOrientation(loc.x - self.startPoint.x, loc.y - self.startPoint.y,
+                              orientation, &dx, &dy);
+    CGFloat ax = fabs(dx), ay = fabs(dy);
+    // Contradicting motion (sideways or downward beyond slop): not ours.
+    // Failing releases any competing recognizers immediately.
+    if ((ax > 25 && ax > ay * 1.5) || dy > 18) {
+        self.state = UIGestureRecognizerStateFailed;
+        return;
+    }
+    // Upward intent past the threshold: claim the touch so the system
+    // cancels app delivery, exactly like the edge recognizers. Firing
+    // itself stays in the sendEvent path.
+    if (dy < -30 && ay > ax * 1.5) {
+        if (self.zoneTriggerKey && RC_TriggerIsActionable(self.zoneTriggerKey)) {
+            RC_FreezeGestureScrolling();
+        }
+        self.state = UIGestureRecognizerStateRecognized;
+    }
+}
+
+- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    [super touchesEnded:touches withEvent:event];
+    if (self.state == UIGestureRecognizerStatePossible) {
+        self.state = UIGestureRecognizerStateFailed;
+    }
+}
+
+- (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    [super touchesCancelled:touches withEvent:event];
+    if (self.state == UIGestureRecognizerStatePossible) {
+        self.state = UIGestureRecognizerStateFailed;
+    }
+}
+
+@end
+
 // --- SYSTEM GESTURE MANAGER HOOK ---
 
 @interface SRGestureHelper : NSObject
 + (instancetype)sharedInstance;
 - (void)handleEdgeGesture:(SREdgeGestureRecognizer *)gesture;
+- (void)handleBottomUpGesture:(SRBottomUpGestureRecognizer *)gesture;
 @end
 
 @implementation SRGestureHelper
@@ -13921,33 +15533,52 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
 }
 
 - (void)handleEdgeGesture:(SREdgeGestureRecognizer *)gesture {
-    // Instant Fire: Trigger as soon as Changed state hits threshold
+    // Instant Fire: Trigger as soon as Changed state hits threshold.
+    // Translation is physical; convert to logical (as the user sees it) so that
+    // "swipe up" always means toward UI-top regardless of orientation.
     if (gesture.state == UIGestureRecognizerStateChanged && !gesture.hasTriggered) {
         CGPoint translation = [gesture translationInView:nil];
-        CGFloat verticalSwipeDistance = fabs(translation.y);
-        CGFloat horizontalDrift = fabs(translation.x);
-        
+        UIInterfaceOrientation orientation = get_current_interface_orientation();
+        CGFloat dx_u = 0, dy_u = 0;
+        RC_UserDeltaForOrientation(translation.x, translation.y, orientation, &dx_u, &dy_u);
+        CGFloat verticalSwipeDistance = fabs(dy_u);
+        CGFloat horizontalDrift = fabs(dx_u);
+
+        // Early freeze: once vertical intent is clear and the matching
+        // trigger is actionable, hold the list still for the rest of the
+        // touch (firing itself happens at the 30pt threshold below).
+        if (!gesture.hasTriggered && verticalSwipeDistance > 10 && horizontalDrift < 100) {
+            NSString *earlyKey = nil;
+            if (gesture.isLeftEdge) {
+                earlyKey = (dy_u < 0) ? @"trigger_edge_left_swipe_up" : @"trigger_edge_left_swipe_down";
+            } else if (gesture.isRightEdge) {
+                earlyKey = (dy_u < 0) ? @"trigger_edge_right_swipe_up" : @"trigger_edge_right_swipe_down";
+            }
+            if (earlyKey && RC_TriggerIsActionable(earlyKey)) RC_FreezeGestureScrolling();
+        }
+
         // Threshold: 30pt for instant trigger
         if (verticalSwipeDistance > 30 && horizontalDrift < 100) {
-            SRLog(@"Instant Edge Trigger! V=%.2f H=%.2f", verticalSwipeDistance, horizontalDrift);
-            
+            SRLogMin(@"Instant Edge Trigger! V=%.2f H=%.2f orient=%ld", verticalSwipeDistance, horizontalDrift, (long)orientation);
+
             gesture.hasTriggered = YES;
 
             NSString *triggerKey = nil;
             if (gesture.isLeftEdge) {
-                triggerKey = (translation.y < 0) ? @"trigger_edge_left_swipe_up" : @"trigger_edge_left_swipe_down";
+                triggerKey = (dy_u < 0) ? @"trigger_edge_left_swipe_up" : @"trigger_edge_left_swipe_down";
             } else if (gesture.isRightEdge) {
-                triggerKey = (translation.y < 0) ? @"trigger_edge_right_swipe_up" : @"trigger_edge_right_swipe_down";
+                triggerKey = (dy_u < 0) ? @"trigger_edge_right_swipe_up" : @"trigger_edge_right_swipe_down";
             }
             
             if (triggerKey) {
                 load_trigger_config();
-                BOOL enabled = [g_triggerConfig[@"masterEnabled"] boolValue] && 
+                BOOL enabled = RC_MasterEnabled() && 
                                [g_triggerConfig[@"triggers"][triggerKey][@"enabled"] boolValue];
                 
                 if (enabled) {
                     // Haptic feedback ONLY if enabled
                     trigger_haptic();
+                    if (RC_TriggerIsActionable(triggerKey)) RC_FreezeGestureScrolling();
                     RCExecuteTrigger(triggerKey);
                     SRLog(@"%@ FIRED INSTANTLY!", triggerKey);
                 } else {
@@ -13963,18 +15594,32 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
         gesture.state == UIGestureRecognizerStateFailed) {
         SRLog(@"Edge Gesture Finished (State %ld): hasTriggered=%d", (long)gesture.state, gesture.hasTriggered);
         gesture.hasTriggered = NO;
+        RC_UnfreezeGestureScrolling();
+    }
+}
+
+// Bottom-up recognition only cancels app delivery and engages the freeze;
+// firing stays in the sendEvent path, and unfreeze stays with touch end
+// there (plus the failsafe), so this handler never unfreezes.
+- (void)handleBottomUpGesture:(SRBottomUpGestureRecognizer *)gesture {
+    if (gesture.state == UIGestureRecognizerStateRecognized) {
+        SRLogMin(@"[RCBottom] System bottom-up recognized, app touches cancelled");
+        if (gesture.zoneTriggerKey && RC_TriggerIsActionable(gesture.zoneTriggerKey)) {
+            RC_FreezeGestureScrolling();
+        }
     }
 }
 @end
 
 static SREdgeGestureRecognizer *leftEdgeRecognizer;
 static SREdgeGestureRecognizer *rightEdgeRecognizer;
+static SRBottomUpGestureRecognizer *bottomUpRecognizer;
 static SBSystemGestureManager *g_gestureManager = nil;
 
 // Helper: Check if any edge gestures are enabled
 static BOOL should_register_edge_gestures() {
     if (!g_triggerConfig) return NO;
-    if (![g_triggerConfig[@"masterEnabled"] boolValue]) return NO;
+    if (!RC_MasterEnabled()) return NO;
     
     NSDictionary *triggers = g_triggerConfig[@"triggers"];
     NSArray *edgeTriggers = @[@"trigger_edge_left_swipe_up", 
@@ -13990,6 +15635,18 @@ static BOOL should_register_edge_gestures() {
     }
     
     return NO;
+}
+
+// Bottom-up system recognizer: only wanted when the scroll-lock toggle is on
+// and at least one bottom swipe-up zone could actually fire. Per-touch zone
+// gating happens in touchesBegan; this is just the registration switch.
+static BOOL should_register_bottom_up_gestures() {
+    if ([g_triggerConfig[@"freezeListsDuringGestures"] isEqual:@NO]) return NO;
+    if (!g_triggerConfig) return NO;
+    if (![g_triggerConfig[@"masterEnabled"] boolValue]) return NO;
+    return (RC_TriggerIsActionable(@"trigger_bottom_swipe_up_left") ||
+            RC_TriggerIsActionable(@"trigger_bottom_swipe_up_center") ||
+            RC_TriggerIsActionable(@"trigger_bottom_swipe_up_right"));
 }
 
 // Register gesture recognizers
@@ -14021,9 +15678,22 @@ static void register_edge_gestures() {
         [g_gestureManager addGestureRecognizer:rightEdgeRecognizer withType:121];
         SRLog(@"Registered RIGHT edge gesture recognizer");
     }
+
+    // Bottom swipe up: claims bottom-strip upward swipes so the system
+    // cancels app delivery at recognition (like the edge recognizers).
+    // cancelsTouchesInView=YES is the whole point here. It never fires
+    // triggers and never touches the home gesture: no failure requirements
+    // are set on anything, so Home and Control Center behave as before.
+    if (!bottomUpRecognizer) {
+        bottomUpRecognizer = [[SRBottomUpGestureRecognizer alloc] initWithTarget:[SRGestureHelper sharedInstance] action:@selector(handleBottomUpGesture:)];
+        bottomUpRecognizer.cancelsTouchesInView = YES; // Cancel app touches on recognition
+        bottomUpRecognizer.delaysTouchesBegan = NO;   // Don't add lag
+        [g_gestureManager addGestureRecognizer:bottomUpRecognizer withType:122];
+        SRLog(@"Registered BOTTOM-UP gesture recognizer");
+    }
 }
 
-// Turn the edge recognizers on or off to match the config. They're registered with
+// Turn the recognizers on or off to match the config. They're registered with
 // SpringBoard's system gesture manager the first time they're needed and only turned off
 // after that: removing them from their view and registering new ones left edge swipes dead
 // once the edge triggers had been turned off and on again, until a respring.
@@ -14039,6 +15709,16 @@ static void update_edge_gestures() {
         }
         leftEdgeRecognizer.enabled = wanted;
         rightEdgeRecognizer.enabled = wanted;
+
+        BOOL bottomWanted = should_register_bottom_up_gestures();
+        if ((wanted || bottomWanted) && !bottomUpRecognizer) {
+            SRLog(@"Bottom-up gesture enabled - registering...");
+            register_edge_gestures();
+        }
+        if (bottomUpRecognizer && bottomUpRecognizer.enabled != bottomWanted) {
+            SRLog(@"Bottom-up gesture %@", bottomWanted ? @"on" : @"off");
+        }
+        if (bottomUpRecognizer) bottomUpRecognizer.enabled = bottomWanted;
     } @catch (NSException *e) {
         SRLogMin(@"ERROR in update_edge_gestures: %@", e);
     }
@@ -14071,6 +15751,23 @@ static void update_edge_gestures() {
 %end
 
 
+// Fires the App Launch / App Exit triggers for an app: the one keyed on it, and any other whose
+// "apps" list holds it (a trigger can cover several apps; its key is the first one's).
+static void RC_FireAppTriggers(NSString *prefix, NSString *bundleId) {
+    load_trigger_config();
+    NSString *exactKey = [prefix stringByAppendingString:bundleId];
+    NSMutableArray<NSString *> *keys = [NSMutableArray arrayWithObject:exactKey];
+    NSDictionary *triggers = g_triggerConfig[@"triggers"];
+    if ([triggers isKindOfClass:[NSDictionary class]]) {
+        for (NSString *key in triggers) {
+            if (![key hasPrefix:prefix] || [key isEqualToString:exactKey]) continue;
+            NSArray *apps = [triggers[key] isKindOfClass:[NSDictionary class]] ? triggers[key][@"apps"] : nil;
+            if ([apps isKindOfClass:[NSArray class]] && [apps containsObject:bundleId]) [keys addObject:key];
+        }
+    }
+    for (NSString *key in keys) RCExecuteTrigger(key);
+}
+
 static NSTimeInterval s_last_camera_app_trigger = 0;
 
 static void rc_camera_launched_notification_callback(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
@@ -14080,7 +15777,7 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
             s_last_camera_app_trigger = now;
             g_currentAppBundleId = @"com.apple.camera";
             SRLog(@"[AppLaunch] Camera App Launched event received (lockscreen or unlocked), triggering app_launch_com.apple.camera");
-            RCExecuteTrigger(@"app_launch_com.apple.camera");
+            RC_FireAppTriggers(@"app_launch_", @"com.apple.camera");
         }
     });
 }
@@ -14113,13 +15810,18 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
             static NSString *lastApp = nil;
             NSString *effectiveBundleId = bundleId ?: @"com.apple.springboard";
             if (![effectiveBundleId isEqualToString:lastApp]) {
+                NSString *exitedApp = lastApp;
                 lastApp = effectiveBundleId;
+                if (exitedApp) {
+                    SRLog(@"[AppExit] App left the foreground: %@", exitedApp);
+                    RC_FireAppTriggers(@"app_exit_", exitedApp);
+                }
                 if ([effectiveBundleId isEqualToString:@"com.apple.camera"]) {
                     s_last_camera_app_trigger = [[NSDate date] timeIntervalSince1970];
                 }
                 SRLog(@"[AppLaunch] App became Active: %@", effectiveBundleId);
-                NSString *triggerKey = [NSString stringWithFormat:@"app_launch_%@", effectiveBundleId];
-                RCExecuteTrigger(triggerKey);
+                RCTKEvent(@"app.foreground", @{ @"bundle": effectiveBundleId ?: @"" });
+                RC_FireAppTriggers(@"app_launch_", effectiveBundleId);
             }
         }
     });
@@ -14348,6 +16050,7 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
 }
 
 - (void)_presentControlCenterGestureBeganWithReason:(id)reason {
+    if (rc_cc_intentional_open_active()) { %orig; return; }
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
     if ((g_bottomBarTouchActive || g_bottomBarSwipeUpTriggered || (now - g_lastBottomSwipeTriggerTime < 0.8)) && has_any_bottom_swipe_trigger_enabled()) {
         SRLog(@"[RCBottom] SBControlCenterController suppressing _presentControlCenterGestureBeganWithReason: %@", reason);
@@ -14357,6 +16060,7 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
 }
 
 - (void)_presentControlCenterGestureUpdatedWithGrabberDistance:(double)dist andVelocity:(double)vel {
+    if (rc_cc_intentional_open_active()) { %orig; return; }
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
     if ((g_bottomBarTouchActive || g_bottomBarSwipeUpTriggered || (now - g_lastBottomSwipeTriggerTime < 0.8)) && has_any_bottom_swipe_trigger_enabled()) {
         return;
@@ -14365,6 +16069,7 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
 }
 
 - (void)_presentControlCenterGestureEndedWithVelocity:(double)vel completion:(id)comp {
+    if (rc_cc_intentional_open_active()) { %orig; return; }
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
     if ((g_bottomBarTouchActive || g_bottomBarSwipeUpTriggered || (now - g_lastBottomSwipeTriggerTime < 0.8)) && has_any_bottom_swipe_trigger_enabled()) {
         SRLog(@"[RCBottom] SBControlCenterController suppressing _presentControlCenterGestureEndedWithVelocity");
@@ -14374,6 +16079,7 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
 }
 
 - (void)presentAnimated:(BOOL)animated {
+    if (rc_cc_intentional_open_active()) { %orig; return; }
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
     if (now - g_lastBottomSwipeTriggerTime < 0.8 && has_any_bottom_swipe_trigger_enabled()) {
         SRLog(@"[RCBottom] Suppressed Control Center presentAnimated within trigger window");
@@ -14383,6 +16089,7 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
 }
 
 - (void)presentAnimated:(BOOL)animated completion:(id)completion {
+    if (rc_cc_intentional_open_active()) { %orig; return; }
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
     if (now - g_lastBottomSwipeTriggerTime < 0.8 && has_any_bottom_swipe_trigger_enabled()) {
         SRLog(@"[RCBottom] Suppressed Control Center presentAnimated:completion: within trigger window");
@@ -14392,6 +16099,7 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
 }
 
 - (BOOL)_canPresent {
+    if (rc_cc_intentional_open_active()) return %orig;
     if (g_bottomBarTouchActive && has_any_bottom_swipe_trigger_enabled()) {
         return NO;
     }
@@ -14522,6 +16230,167 @@ static BOOL RC_ShouldKeepBottomBarSideSwipe(void) {
         }
     }
 }
+%end
+
+// ==========================================
+// App scroll guard (UIKit processes, issue #81)
+// ==========================================
+// SpringBoard detects the gesture and broadcasts a Darwin notification;
+// each UIKit-injected app process freezes its own scroll views for the
+// duration so the foreground list (e.g. Settings) does not scroll along
+// with a status-bar swipe or bottom swipe-up.
+
+%group AppScrollGuard
+
+static BOOL g_appSuppressScroll = NO;
+static NSHashTable *g_appFrozenScrollViews = nil;
+static NSHashTable *g_appFrozenGestureRecognizers = nil;
+static NSHashTable *g_appFrozenInteractionWindows = nil;
+static unsigned g_appFreezeGen = 0;
+static NSMapTable *g_appBeganOffsets = nil;
+static unsigned g_appBeganGen = 0;
+static unsigned g_appFreezeBeganGen = 0;
+
+static void RCApp_CollectScrollViewsInView(UIView *view, NSMutableArray *out) {
+    if ([view isKindOfClass:[UIScrollView class]]) [out addObject:(UIScrollView *)view];
+    for (UIView *sub in view.subviews) RCApp_CollectScrollViewsInView(sub, out);
+}
+
+static void RCApp_ClearStuckHighlightsInView(UIView *view) {
+    if ([view isKindOfClass:[UITableView class]]) {
+        for (UITableViewCell *cell in [(UITableView *)view visibleCells]) cell.highlighted = NO;
+    } else if ([view isKindOfClass:[UICollectionView class]]) {
+        for (UICollectionViewCell *cell in [(UICollectionView *)view visibleCells]) cell.highlighted = NO;
+    } else if ([view isKindOfClass:[UIControl class]]) {
+        [(UIControl *)view setHighlighted:NO];
+    }
+    for (UIView *sub in view.subviews) RCApp_ClearStuckHighlightsInView(sub);
+}
+
+static void RCApp_SetScrollFrozen(BOOL frozen) {
+    void (^work)(void) = ^{
+        if (frozen == g_appSuppressScroll && frozen) return;
+        g_appSuppressScroll = frozen;
+        if (frozen) {
+            g_appFreezeBeganGen = g_appBeganGen;
+            SRLogMin(@"[RCG] App freeze engaged");
+        }
+        if (!g_appFrozenScrollViews) g_appFrozenScrollViews = [NSHashTable weakObjectsHashTable];
+        if (!g_appFrozenGestureRecognizers) g_appFrozenGestureRecognizers = [NSHashTable weakObjectsHashTable];
+        if (!g_appFrozenInteractionWindows) g_appFrozenInteractionWindows = [NSHashTable weakObjectsHashTable];
+        @try {
+            if (frozen) {
+                NSArray *windows = [UIApplication sharedApplication].windows;
+                for (UIWindow *w in windows) {
+                    NSMutableArray *found = [NSMutableArray array];
+                    RCApp_CollectScrollViewsInView(w, found);
+                    for (UIScrollView *sv in found) {
+                        if (sv.scrollEnabled) {
+                            [g_appFrozenScrollViews addObject:sv];
+                            sv.scrollEnabled = NO;
+                        }
+                        for (UIGestureRecognizer *gr in sv.gestureRecognizers) {
+                            if (gr.enabled) {
+                                [g_appFrozenGestureRecognizers addObject:gr];
+                                gr.enabled = NO;
+                            }
+                        }
+                    }
+                }
+                for (UIWindow *w in windows) {
+                    if (w.userInteractionEnabled) {
+                        [g_appFrozenInteractionWindows addObject:w];
+                        w.userInteractionEnabled = NO;
+                    }
+                    RCApp_ClearStuckHighlightsInView(w);
+                }
+                g_appFreezeGen++;
+                unsigned gen = g_appFreezeGen;
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    if (g_appSuppressScroll && gen == g_appFreezeGen) RCApp_SetScrollFrozen(NO);
+                });
+            } else {
+                if (g_appFreezeBeganGen == g_appBeganGen && g_appBeganOffsets.count > 0) {
+                    NSUInteger restored = 0;
+                    CGFloat maxDelta = 0;
+                    for (UIScrollView *sv in g_appBeganOffsets) {
+                        NSValue *v = [g_appBeganOffsets objectForKey:sv];
+                        if (!v) continue;
+                        CGPoint to = [v CGPointValue];
+                        CGPoint cur = sv.contentOffset;
+                        CGFloat d = fabs(cur.x - to.x) + fabs(cur.y - to.y);
+                        if (d > maxDelta) maxDelta = d;
+                        @try { if (d > 0.5) [sv setContentOffset:to animated:NO]; } @catch (__unused NSException *e) { }
+                        restored++;
+                    }
+                    SRLogMin(@"[RCG] App freeze released, restored %lu views (maxDelta=%.1f)", (unsigned long)restored, maxDelta);
+                } else {
+                    SRLogMin(@"[RCG] App freeze released");
+                }
+                for (UIScrollView *sv in g_appFrozenScrollViews) {
+                    @try { sv.scrollEnabled = YES; } @catch (__unused NSException *e) { }
+                }
+                for (UIGestureRecognizer *gr in g_appFrozenGestureRecognizers) {
+                    @try { gr.enabled = YES; } @catch (__unused NSException *e) { }
+                }
+                for (UIWindow *w in g_appFrozenInteractionWindows) {
+                    @try { w.userInteractionEnabled = YES; } @catch (__unused NSException *e) { }
+                }
+                for (UIWindow *w in [UIApplication sharedApplication].windows) {
+                    @try { RCApp_ClearStuckHighlightsInView(w); } @catch (__unused NSException *e) { }
+                }
+                [g_appFrozenScrollViews removeAllObjects];
+                [g_appFrozenGestureRecognizers removeAllObjects];
+                [g_appFrozenInteractionWindows removeAllObjects];
+                [g_appBeganOffsets removeAllObjects];
+            }
+        } @catch (__unused NSException *e) { }
+    };
+    if ([NSThread isMainThread]) work();
+    else dispatch_async(dispatch_get_main_queue(), work);
+}
+
+static void RCApp_TouchBeganCallback(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
+    void (^work)(void) = ^{
+        if (!g_appBeganOffsets) g_appBeganOffsets = [NSMapTable weakToStrongObjectsMapTable];
+        [g_appBeganOffsets removeAllObjects];
+        @try {
+            for (UIWindow *w in [UIApplication sharedApplication].windows) {
+                NSMutableArray *found = [NSMutableArray array];
+                RCApp_CollectScrollViewsInView(w, found);
+                for (UIScrollView *sv in found) {
+                    [g_appBeganOffsets setObject:[NSValue valueWithCGPoint:sv.contentOffset] forKey:sv];
+                }
+            }
+        } @catch (__unused NSException *e) { }
+        g_appBeganGen++;
+    };
+    if ([NSThread isMainThread]) work();
+    else dispatch_async(dispatch_get_main_queue(), work);
+}
+
+static void RCApp_ScrollBeginCallback(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
+    RCApp_SetScrollFrozen(YES);
+}
+
+static void RCApp_ScrollEndCallback(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
+    RCApp_SetScrollFrozen(NO);
+}
+
+%hook UIScrollView
+
+- (void)setContentOffset:(CGPoint)offset {
+    if (g_appSuppressScroll) return;
+    %orig;
+}
+
+- (void)setContentOffset:(CGPoint)offset animated:(BOOL)animated {
+    if (g_appSuppressScroll) return;
+    %orig;
+}
+
+%end
+
 %end
 
 // ==========================================
@@ -14908,6 +16777,16 @@ static NSTimeInterval s_last_camera_launch_notify = 0;
             }
         }
 
+        // Home button: where Home Hold (Siri) and the App Switcher hooks bind
+        Class homeActions = objc_getClass("SBHomeHardwareButtonActions");
+        if (homeActions && rc_has_home_button()) {
+            const char *homeSels[] = { "performLongPressActions", "performDoublePressDownActions", "performSinglePressUpActions" };
+            for (size_t i = 0; i < sizeof(homeSels)/sizeof(homeSels[0]); i++) {
+                BOOL present = class_getInstanceMethod(homeActions, sel_registerName(homeSels[i])) != NULL;
+                SRLog(@"%@ [Home] -[SBHomeHardwareButtonActions %s]", present ? @"✅" : @"❌", homeSels[i]);
+            }
+        }
+
         // The HID listener's combo/click fallbacks exist only for iOS versions
         // where the Actions hooks don't bind. Learning that from each hook's
         // first call left the fallbacks live for the first press after every
@@ -14958,6 +16837,33 @@ static NSTimeInterval s_last_camera_launch_notify = 0;
         %init(CameraHook);
         SRLog(@"[RemoteCompanion] Loaded inside com.apple.camera");
     } else {
-        SRLog(@"Tweak Loaded in %@ - Skipping Full Initialization (Choicy Visibility Only)", bundleID);
+        if (NSClassFromString(@"UIApplication") && NSClassFromString(@"UIWindow")) {
+            %init(AppScrollGuard);
+            CFNotificationCenterAddObserver(
+                CFNotificationCenterGetDarwinNotifyCenter(),
+                NULL,
+                (CFNotificationCallback)RCApp_ScrollBeginCallback,
+                CFSTR("com.saihgupr.remotecompanion.gesture-scroll-begin"),
+                NULL,
+                CFNotificationSuspensionBehaviorDeliverImmediately
+            );
+            CFNotificationCenterAddObserver(
+                CFNotificationCenterGetDarwinNotifyCenter(),
+                NULL,
+                (CFNotificationCallback)RCApp_ScrollEndCallback,
+                CFSTR("com.saihgupr.remotecompanion.gesture-scroll-end"),
+                NULL,
+                CFNotificationSuspensionBehaviorDeliverImmediately
+            );
+            CFNotificationCenterAddObserver(
+                CFNotificationCenterGetDarwinNotifyCenter(),
+                NULL,
+                (CFNotificationCallback)RCApp_TouchBeganCallback,
+                CFSTR("com.saihgupr.remotecompanion.gesture-touch-began"),
+                NULL,
+                CFNotificationSuspensionBehaviorDeliverImmediately
+            );
+        }
+        SRLog(@"Tweak Loaded in %@ - Scroll guard only (Choicy Visibility Only)", bundleID);
     }
 }

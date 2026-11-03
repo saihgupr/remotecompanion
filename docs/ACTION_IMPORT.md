@@ -43,6 +43,7 @@ Here is the complete list of valid commands you can write, along with parameters
 | `app switcher` | Show multitasking App Switcher | `app switcher` |
 | `open <bundle_id>` | Launch an app by its bundle identifier | `open com.apple.Preferences` |
 | `kill <bundle_id>` | Force close/kill an app in background | `kill com.amazon.Amazon` |
+| `kill current` (or `kill front`, `kill foreground`) | Force close the currently focused app | `kill current` |
 | `respring` | Restart SpringBoard | `respring` |
 | `ldrestart` | Perform a soft-reboot of the system | `ldrestart` |
 | `previous app` (or `last app`) | Return to the previously active application | `previous app` |

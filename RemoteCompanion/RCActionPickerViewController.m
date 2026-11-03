@@ -1,6 +1,7 @@
 #import "RCActionPickerViewController.h"
 #import "RCServerClient.h"
 #import "RCDevicePickerViewController.h"
+#import "RCFocusPickerViewController.h"
 #import "RCConfigManager.h"
 #import "RCHAEntityPickerViewController.h"
 #import "RCKMMacroPickerViewController.h"
@@ -158,11 +159,13 @@
         @[
             @{ @"name": @"Open App...", @"command": @"__OPEN_APP__", @"icon": @"square.grid.2x2.fill" },
             @{ @"name": @"Kill App...", @"command": @"__KILL_APP__", @"icon": @"xmark.square.fill" },
+            @{ @"name": @"Kill Current App", @"command": @"kill current", @"icon": @"xmark.square.fill" },
             @{ @"name": @"Home Button", @"command": @"home", @"icon": @"house.fill" },
             @{ @"name": @"App Switcher", @"command": @"switcher", @"icon": @"square.stack.3d.up.fill" },
             @{ @"name": @"Previous App", @"command": @"previous app", @"icon": @"arrow.uturn.backward" },
             @{ @"name": @"Control Center", @"command": @"open control center", @"icon": @"switch.2" },
-            @{ @"name": @"Activate Siri", @"command": @"siri", @"icon": @"mic.circle.fill" }
+            @{ @"name": @"Activate Siri", @"command": @"siri", @"icon": @"mic.circle.fill" },
+            @{ @"name": @"Accessibility Shortcut", @"command": @"accessibility shortcut", @"icon": ([UIImage systemImageNamed:@"accessibility"] ? @"accessibility" : @"figure.stand") }
         ],
         // Device Controls
         @[
@@ -171,10 +174,14 @@
             @{ @"name": @"Flashlight", @"command": @"flashlight toggle", @"icon": @"flashlight.on.fill" },
             @{ @"name": @"Rotation Lock", @"command": @"rotate toggle", @"icon": @"lock.rotation" },
             @{ @"name": @"Lock Device", @"command": @"lock", @"icon": @"lock.fill" },
-            @{ @"name": @"Unlock Device", @"command": @"unlock", @"icon": @"lock.open.fill" },
+            @{ @"name": @"Unlock Device...", @"command": @"__UNLOCK_DEVICE__", @"icon": @"lock.open.fill" },
+            @{ @"name": @"Lock Toggle...", @"command": @"__LOCK_TOGGLE__", @"icon": @"lock.circle" },
             @{ @"name": @"Do Not Disturb", @"command": @"dnd toggle", @"icon": @"moon.circle.fill" },
+            @{ @"name": @"Set Focus...", @"command": @"__FOCUS__", @"icon": @"moon.circle" },
             @{ @"name": @"Low Power Mode", @"command": @"low power toggle", @"icon": @"battery.25" },
-            @{ @"name": @"Auto-Lock", @"command": @"autolock toggle", @"icon": @"timer" }
+            @{ @"name": @"Auto-Lock", @"command": @"autolock toggle", @"icon": @"timer" },
+            @{ @"name": @"NFC Scanner", @"command": @"nfc scanner toggle", @"icon": @"wave.3.right" },
+            @{ @"name": @"Button Triggers", @"command": @"button triggers pause 15", @"icon": @"pause.circle" }
         ],
         // Connectivity
         @[
@@ -297,6 +304,7 @@
             @{ @"name": @"Custom Lua Script", @"command": @"__LUA_SCRIPT__", @"icon": @"scroll.fill" },
             @{ @"name": @"If Condition...", @"command": @"__IF_CONDITION__", @"icon": @"arrow.triangle.branch" },
             @{ @"name": @"Delay", @"command": @"__DELAY__", @"icon": @"hourglass" },
+            @{ @"name": @"Stop Trigger...", @"command": @"__STOP_TRIGGER__", @"icon": @"stop.circle" },
             @{ @"name": @"Terminal Command", @"command": @"__CUSTOM__", @"icon": @"terminal.fill" },
             @{ @"name": @"Toast...", @"command": @"__TOAST__", @"icon": @"text.bubble.fill" },
             @{ @"name": @"Haptic Feedback", @"command": @"haptic", @"icon": @"hand.tap.fill" }
@@ -310,6 +318,8 @@
         NSMutableArray *items = [NSMutableArray array];
         for (NSDictionary *item in section) {
             NSString *command = item[@"command"];
+            // Focus modes came with iOS 15
+            if ([command isEqualToString:@"__FOCUS__"] && ![RCConfigManager supportsFocus]) continue;
             BOOL silent = [command isEqualToString:@"vibration silent-toggle"], ring = [command isEqualToString:@"vibration ring-toggle"];
             if (!silent && !ring) { [items addObject:item]; continue; }
             if ([RCConfigManager usesHapticsMenu]) {
@@ -485,6 +495,7 @@
         [cmd isEqualToString:@"__BT_CONNECT__"] || 
         [cmd isEqualToString:@"__BT_DISCONNECT__"] || 
         [cmd isEqualToString:@"__AIRPLAY_CONNECT__"] || 
+        [cmd isEqualToString:@"__FOCUS__"] || 
         [cmd isEqualToString:@"__SHORTCUT_PICKER__"] || 
         [cmd isEqualToString:@"__OPEN_APP__"] || 
         [cmd isEqualToString:@"__KILL_APP__"] || 
@@ -492,12 +503,15 @@
         [cmd isEqualToString:@"__TOAST__"] || 
         [cmd isEqualToString:@"__IF_CONDITION__"] ||
         [cmd isEqualToString:@"__DELAY__"] ||
+        [cmd isEqualToString:@"__STOP_TRIGGER__"] ||
         [cmd isEqualToString:@"__CUSTOM__"] ||
         [cmd isEqualToString:@"__HA_PICKER__"] ||
         [cmd isEqualToString:@"__KM_TRIGGER__"] ||
         [cmd isEqualToString:@"__TAP__"] ||
         [cmd isEqualToString:@"__HOLD__"] ||
-        [cmd isEqualToString:@"__SWIPE__"]) {
+        [cmd isEqualToString:@"__SWIPE__"] ||
+        [cmd isEqualToString:@"__UNLOCK_DEVICE__"] ||
+        [cmd isEqualToString:@"__LOCK_TOGGLE__"]) {
         
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     }
@@ -511,6 +525,16 @@
     NSDictionary *action = [self actionAtIndexPath:indexPath];
     NSString *command = action[@"command"];
     
+
+    if ([command isEqualToString:@"__UNLOCK_DEVICE__"]) {
+        [self handleUnlockDevice];
+        return;
+    }
+
+    if ([command isEqualToString:@"__LOCK_TOGGLE__"]) {
+        [self handleLockToggle];
+        return;
+    }
 
     if ([command isEqualToString:@"__SET_VOLUME__"] || [command isEqualToString:@"__SET_RINGER_VOLUME__"] || [command isEqualToString:@"__SET_BRIGHTNESS__"] || [command isEqualToString:@"__SET_FLASHLIGHT__"]) {
         [self handleValueInputForCommand:command];
@@ -547,6 +571,11 @@
     
     if ([command isEqualToString:@"__BT_CONNECT__"]) {
         [self handleBluetoothConnect];
+        return;
+    }
+
+    if ([command isEqualToString:@"__FOCUS__"]) {
+        [self handleFocus];
         return;
     }
     
@@ -789,6 +818,114 @@
     [self presentViewController:alert animated:YES completion:nil];
 }
 
+- (void)handleUnlockDevice {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Unlock Device"
+                                                                   message:@"Enter a passcode to unlock automatically, or choose 'Wake Screen Only' to present the passcode screen.\n\nNote: Configured passcodes are stored in plain text in trigger settings (rc_triggers.plist)."
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    
+    [alert addTextFieldWithConfigurationHandler:^(UITextField * _Nonnull textField) {
+        textField.placeholder = @"Passcode (optional)";
+        textField.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
+        textField.secureTextEntry = YES;
+    }];
+    
+    __weak typeof(self) weakSelf = self;
+    
+    UIAlertAction *saveWithPasscode = [UIAlertAction actionWithTitle:@"Set Passcode" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        UITextField *tf = alert.textFields.firstObject;
+        NSString *pin = [tf.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        NSString *finalCmd = pin.length > 0 ? [NSString stringWithFormat:@"unlock %@", pin] : @"unlock";
+        if (strongSelf.onActionSelected) strongSelf.onActionSelected(finalCmd);
+        if (strongSelf.searchController.isActive) {
+            [strongSelf.searchController dismissViewControllerAnimated:NO completion:^{
+                [strongSelf dismissViewControllerAnimated:YES completion:nil];
+            }];
+        } else {
+            [strongSelf dismissViewControllerAnimated:YES completion:nil];
+        }
+    }];
+    
+    UIAlertAction *wakeOnly = [UIAlertAction actionWithTitle:@"Wake Screen Only" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        if (strongSelf.onActionSelected) strongSelf.onActionSelected(@"unlock");
+        if (strongSelf.searchController.isActive) {
+            [strongSelf.searchController dismissViewControllerAnimated:NO completion:^{
+                [strongSelf dismissViewControllerAnimated:YES completion:nil];
+            }];
+        } else {
+            [strongSelf dismissViewControllerAnimated:YES completion:nil];
+        }
+    }];
+    
+    UIAlertAction *cancel = [UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(UIAlertAction * _Nonnull action) {
+        [self.tableView deselectRowAtIndexPath:[self.tableView indexPathForSelectedRow] animated:YES];
+    }];
+    
+    [alert addAction:wakeOnly];
+    [alert addAction:saveWithPasscode];
+    [alert addAction:cancel];
+    alert.preferredAction = saveWithPasscode;
+    
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)handleLockToggle {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Lock Toggle"
+                                                                   message:@"Enter a passcode to unlock automatically when locked, or choose 'Toggle Without Passcode' to toggle without passcode entry.\n\nNote: Configured passcodes are stored in plain text in trigger settings (rc_triggers.plist)."
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    
+    [alert addTextFieldWithConfigurationHandler:^(UITextField * _Nonnull textField) {
+        textField.placeholder = @"Passcode (optional)";
+        textField.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
+        textField.secureTextEntry = YES;
+    }];
+    
+    __weak typeof(self) weakSelf = self;
+    
+    UIAlertAction *saveWithPasscode = [UIAlertAction actionWithTitle:@"Set Passcode" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        UITextField *tf = alert.textFields.firstObject;
+        NSString *pin = [tf.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        NSString *finalCmd = pin.length > 0 ? [NSString stringWithFormat:@"lock-toggle %@", pin] : @"lock-toggle";
+        if (strongSelf.onActionSelected) strongSelf.onActionSelected(finalCmd);
+        if (strongSelf.searchController.isActive) {
+            [strongSelf.searchController dismissViewControllerAnimated:NO completion:^{
+                [strongSelf dismissViewControllerAnimated:YES completion:nil];
+            }];
+        } else {
+            [strongSelf dismissViewControllerAnimated:YES completion:nil];
+        }
+    }];
+    
+    UIAlertAction *noPasscode = [UIAlertAction actionWithTitle:@"Toggle Without Passcode" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        if (strongSelf.onActionSelected) strongSelf.onActionSelected(@"lock-toggle");
+        if (strongSelf.searchController.isActive) {
+            [strongSelf.searchController dismissViewControllerAnimated:NO completion:^{
+                [strongSelf dismissViewControllerAnimated:YES completion:nil];
+            }];
+        } else {
+            [strongSelf dismissViewControllerAnimated:YES completion:nil];
+        }
+    }];
+    
+    UIAlertAction *cancel = [UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(UIAlertAction * _Nonnull action) {
+        [self.tableView deselectRowAtIndexPath:[self.tableView indexPathForSelectedRow] animated:YES];
+    }];
+    
+    [alert addAction:noPasscode];
+    [alert addAction:saveWithPasscode];
+    [alert addAction:cancel];
+    alert.preferredAction = saveWithPasscode;
+    
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
 - (void)handleAirPlayConnect {
     [self pushDevicePickerWithKind:RCDevicePickerKindAirPlay title:@"Connect AirPlay" commandPrefix:@"airplay connect"];
 }
@@ -820,6 +957,28 @@
         }
     };
     [self.navigationController pushViewController:picker animated:YES];
+}
+
+// Off adds "focus off"; a Focus is turned on or toggled (the picker asks which)
+- (void)handleFocus {
+    RCFocusPickerViewController *picker = [[RCFocusPickerViewController alloc] initWithTitle:@"Set Focus" fixedRows:@[ @{ @"name": @"Off", @"value": @"", @"icon": @"moon.zzz" } ]];
+    picker.buildsCommand = YES;
+    __weak typeof(self) weakSelf = self;
+    picker.onSelected = ^(NSDictionary *row) {
+        [weakSelf finishWithFocusCommand:row[@"command"]];
+    };
+    [self.navigationController pushViewController:picker animated:YES];
+}
+
+- (void)finishWithFocusCommand:(NSString *)command {
+    if (self.onActionSelected) self.onActionSelected(command);
+    if (self.searchController.isActive) {
+        [self.searchController dismissViewControllerAnimated:NO completion:^{
+            [self dismissViewControllerAnimated:YES completion:nil];
+        }];
+    } else {
+        [self dismissViewControllerAnimated:YES completion:nil];
+    }
 }
 
 #pragma mark - Search

@@ -79,7 +79,7 @@
                 <h1 class="hero-title">RemoteCompanion</h1>
                 <p class="hero-tagline">Scriptable system control, gesture automation, and desktop hub for modern jailbroken iOS.</p>
                 <div class="badge-group">
-                    <span class="compat-badge"><span class="badge-dot"></span> v4.0.0 Latest</span>
+                    <span class="compat-badge"><span class="badge-dot"></span> v4.1.0 Latest</span>
                     <span class="compat-badge">iOS 14 – 17 • Partial iOS 26</span>
                     <span class="compat-badge secondary">Rootless (Dopamine / Palera1n)</span>
                     <span class="compat-badge secondary">Rootful & RootHide</span>
@@ -144,7 +144,7 @@
                 </div>
                 <div class="meta-item">
                     <span class="meta-label">Latest Version</span>
-                    <span class="meta-value">4.0.0</span>
+                    <span class="meta-value">4.1.0</span>
                 </div>
                 <div class="meta-item">
                     <span class="meta-label">Architectures</span>
@@ -161,21 +161,21 @@
             </div>
         </section>
  
-         <!-- Screenshots Showcase (v4.0.0) -->
-         <section id="screenshots" class="glass-card screenshots-section">
-             <div class="section-title-group">
-                 <div class="section-label">iOS Interface</div>
-                 <h2 class="section-title">v4.0.0 Interface & Experience</h2>
-                 <p class="section-subtitle">Take a look at the modern iOS design, trigger builder, action pickers, and settings.</p>
-             </div>
-             <p align="center" class="screenshots-container">
-                 <img src="images/4.0.0/IMG_2285.PNG" width="160" alt="Main Interface" class="app-screenshot" loading="lazy" />
-                 <img src="images/4.0.0/IMG_2284.PNG" width="160" alt="Action Picker" class="app-screenshot" loading="lazy" />
-                 <img src="images/4.0.0/IMG_2283.PNG" width="160" alt="If Conditions" class="app-screenshot" loading="lazy" />
-                 <img src="images/4.0.0/IMG_2286.PNG" width="160" alt="Settings & Backup" class="app-screenshot" loading="lazy" />
-                 <img src="images/4.0.0/IMG_2287.PNG" width="160" alt="Trigger Config" class="app-screenshot" loading="lazy" />
-             </p>
-         </section>
+        <!-- Screenshots Showcase (v4.1.0) -->
+        <section id="screenshots" class="glass-card screenshots-section">
+            <div class="section-title-group">
+                <div class="section-label">iOS Interface</div>
+                <h2 class="section-title">v4.1.0 Interface & Experience</h2>
+                <p class="section-subtitle">Take a look at the modern iOS design, trigger builder, action pickers, and settings.</p>
+            </div>
+            <p align="center" class="screenshots-container">
+                <img src="images/4.1.0/01_dashboard.png" width="160" alt="Main Interface" class="app-screenshot" loading="lazy" />
+                <img src="images/4.1.0/02_add_trigger.png" width="160" alt="Add Trigger" class="app-screenshot" loading="lazy" />
+                <img src="images/4.1.0/03_action_conditions.png" width="160" alt="If Conditions" class="app-screenshot" loading="lazy" />
+                <img src="images/4.1.0/04_settings.png" width="160" alt="Settings & Web UI" class="app-screenshot" loading="lazy" />
+                <img src="images/4.1.0/05_home_assistant.png" width="160" alt="Home Assistant" class="app-screenshot" loading="lazy" />
+            </p>
+        </section>
  
          <!-- Features Showcase -->
          <section id="features">
@@ -354,7 +354,7 @@
             <div class="changelog-header">
                 <div>
                     <div class="section-label">Release Notes</div>
-                    <h2 class="section-title">What's New in v4.0</h2>
+                    <h2 class="section-title">What's New in v4.1</h2>
                 </div>
                 <span class="version-badge">October 2026</span>
             </div>
@@ -362,30 +362,34 @@
             <div class="changelog-list">
                 <div class="changelog-item">
                     <span class="changelog-tag tag-new">New</span>
-                    <p class="changelog-text"><strong>Button Timing Engine & Settings:</strong> Dedicated settings menu for Power Clicks, Home Clicks, Volume Sequences, and Holds. Instant native passthrough for volume buttons with zero lag, and intelligent dark-screen wake detection.</p>
+                    <p class="changelog-text"><strong>Web UI Access Control:</strong> Settings → General → Access limits where the Web UI can be reached from — Any Network (default), Trusted Networks, or This iPhone Only. Covers <code>/api/*</code> too.</p>
                 </div>
                 <div class="changelog-item">
                     <span class="changelog-tag tag-new">New</span>
-                    <p class="changelog-text"><strong>Sound & Haptics Category:</strong> Direct controls for Silent Mode (<code>ringer silent|ring|toggle</code>), Ringer Volume %, system Haptics modes (always/silent-only/ring-only/never), unified Noise Control (ANC), and incremental volume adjustments (<code>volume up/down N</code>).</p>
+                    <p class="changelog-text"><strong>New Triggers:</strong> CarPlay Connected/Disconnected, Ping iPhone from Apple Watch, Home Button (Hold) and Home + Power — plus a per-trigger Keep Default Action option and retrigger control (Run Alongside / Restart / Ignore) with a Stop Trigger action.</p>
+                </div>
+                <div class="changelog-item">
+                    <span class="changelog-tag tag-new">New</span>
+                    <p class="changelog-text"><strong>Focus & Button Control:</strong> Set Focus action + Focus condition, Accessibility Shortcut action, and a Button Triggers action to pause hardware buttons while event triggers keep working.</p>
                 </div>
                 <div class="changelog-item">
                     <span class="changelog-tag tag-improved">UI Refresh</span>
-                    <p class="changelog-text"><strong>New Navigation & Triggers:</strong> Dedicated New Trigger screen, auto-hiding category bar, modal AirPlay/Bluetooth device pickers, and configurable action banners.</p>
+                    <p class="changelog-text"><strong>NFC, Shortcuts & Test Kit:</strong> Opt-in Experimental NFC mode (Apple Pay keeps working), Shortcuts run with no SpringCuts install required, and a new on-device Test Kit in Settings → Diagnostics.</p>
                 </div>
                 <div class="changelog-item">
-                    <span class="changelog-tag tag-new">New</span>
-                    <p class="changelog-text"><strong>Expanded Automations:</strong> 13 new If Conditions including Auto-Lock timeouts, Haptics modes, vibration states, and relative volume conditions.</p>
-                </div>
-                <div class="changelog-item">
-                    <span class="changelog-tag tag-fix">Compatibility</span>
-                    <p class="changelog-text"><strong>iOS 17 Compatibility & Bug Fixes:</strong> Full support for iOS 17 button hooks, Camera actions, App Switcher, Siri, and Ringer Switch triggers.</p>
+                    <span class="changelog-tag tag-fix">Security</span>
+                    <p class="changelog-text"><strong>Fixes:</strong> Web UI unreachable-no-more API hole when the UI is off, long commands over 1KB no longer truncated, unlock passcode hardening, and Control Center from Bottom Swipe Up.</p>
                 </div>
             </div>
 
             <!-- Expandable Past Releases -->
             <details class="history-accordion">
-                <summary>View Previous Version History (v3.5.2 – v3.0.0)</summary>
+                <summary>View Previous Version History (v4.0.0 – v3.0.0)</summary>
                 <div class="history-content">
+                    <div class="changelog-item">
+                        <span class="changelog-tag tag-new">v4.0.0</span>
+                        <p class="changelog-text"><strong>Button Timing Engine & Settings:</strong> Dedicated settings menu for Power Clicks, Home Clicks, Volume Sequences, and Holds. <strong>Sound & Haptics Category:</strong> Silent Mode, Ringer Volume %, Haptics modes, unified Noise Control (ANC). <strong>New Navigation & Triggers:</strong> New Trigger screen, auto-hiding category bar, AirPlay/Bluetooth pickers, configurable banners. <strong>Expanded Automations:</strong> 13 new If Conditions and Auto-Lock controls. <strong>iOS 17 Compatibility.</strong></p>
+                    </div>
                     <div class="changelog-item">
                         <span class="changelog-tag tag-fix">v3.5.2</span>
                         <p class="changelog-text">Modernized Siri Shortcuts execution with WorkflowKit / VoiceShortcutClient fallbacks, respring reliability improvements, and multi-button combo detection.</p>

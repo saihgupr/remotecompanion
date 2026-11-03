@@ -1,4 +1,6 @@
 #import "RCConfigManager.h"
+#import <sys/sysctl.h>
+#import <LocalAuthentication/LocalAuthentication.h>
 #import <notify.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -86,6 +88,7 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
                              @"trigger_statusbar_swipe_left", @"trigger_statusbar_swipe_right",
                              @"trigger_statusbar_double_tap",
                              @"trigger_home_triple_click", @"trigger_home_quadruple_click", @"trigger_home_double_click",
+                             @"trigger_home_hold", @"trigger_home_power",
                              @"trigger_edge_left_swipe_up", @"trigger_edge_left_swipe_down", 
                              @"trigger_edge_right_swipe_up", @"trigger_edge_right_swipe_down",
                              @"volume_both_press", @"volume_up_then_down", @"volume_down_then_up", @"touchid_tap",
@@ -139,13 +142,19 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
             [self saveConfig];
         }
 
+        // Auto-add freezeListsDuringGestures (default to YES for upgrades)
+        if (_config[@"freezeListsDuringGestures"] == nil) {
+            _config[@"freezeListsDuringGestures"] = @YES;
+            [self saveConfig];
+        }
+
         // Cleanup deprecated watch triggers
         BOOL didChange = NO;
         if (triggers[@"watch_near"]) { [triggers removeObjectForKey:@"watch_near"]; didChange = YES; }
         if (triggers[@"watch_far"]) { [triggers removeObjectForKey:@"watch_far"]; didChange = YES; }
         
-        // Also cleanup unconfigured device state and media triggers so they don't show up in the main list unless created
-        NSArray *deviceStateKeys = @[@"trigger_device_lock", @"trigger_device_unlock", @"trigger_media_play", @"trigger_media_pause", @"trigger_media_track_change"];
+        // Also cleanup unconfigured device state, media, and watch triggers so they don't show up in the main list unless created
+        NSArray *deviceStateKeys = @[@"trigger_device_lock", @"trigger_device_unlock", @"trigger_media_play", @"trigger_media_pause", @"trigger_media_track_change", @"trigger_watch_ping", @"trigger_watch_ping_hold"];
         for (NSString *key in deviceStateKeys) {
             NSDictionary *trig = triggers[key];
             if (trig && (!trig[@"actions"] || [trig[@"actions"] count] == 0)) {
@@ -165,6 +174,7 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
             @"masterEnabled": @YES,
             @"tcpEnabled": @YES,
             @"webUIEnabled": @NO,
+            @"freezeListsDuringGestures": @YES,
             @"nfcEnabled": @YES,
             @"rootEnabled": @YES,
             @"triggers": [@{
@@ -182,6 +192,8 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
                 @"trigger_statusbar_double_tap": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
                 @"trigger_home_triple_click": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
                 @"trigger_home_quadruple_click": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
+                @"trigger_home_hold": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
+                @"trigger_home_power": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
                 @"trigger_home_double_click": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
                 @"touchid_hold": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
                 @"touchid_tap": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
@@ -239,6 +251,40 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
 
 - (void)setWebUIEnabled:(BOOL)webUIEnabled {
     _config[@"webUIEnabled"] = @(webUIEnabled);
+    [self saveConfig];
+}
+
+- (NSString *)webUIAccess {
+    NSString *access = _config[@"webUIAccess"];
+    return [access isKindOfClass:[NSString class]] && ([access isEqualToString:@"networks"] || [access isEqualToString:@"local"]) ? access : @"any";
+}
+
+- (void)setWebUIAccess:(NSString *)access {
+    if ([access isEqualToString:@"networks"] || [access isEqualToString:@"local"]) _config[@"webUIAccess"] = access;
+    else [_config removeObjectForKey:@"webUIAccess"];
+    [self saveConfig];
+}
+
+- (NSArray<NSString *> *)webUINetworks {
+    NSArray *networks = _config[@"webUINetworks"];
+    return [networks isKindOfClass:[NSArray class]] ? networks : @[];
+}
+
+- (void)setWebUINetworks:(NSArray<NSString *> *)networks {
+    if (networks.count) _config[@"webUINetworks"] = [networks copy];
+    else [_config removeObjectForKey:@"webUINetworks"];
+    [self saveConfig];
+}
+
+- (BOOL)freezeListsDuringGestures {
+    if (!_config[@"freezeListsDuringGestures"]) {
+        return YES;
+    }
+    return [_config[@"freezeListsDuringGestures"] boolValue];
+}
+
+- (void)setFreezeListsDuringGestures:(BOOL)freezeListsDuringGestures {
+    _config[@"freezeListsDuringGestures"] = @(freezeListsDuringGestures);
     [self saveConfig];
 }
 
@@ -331,6 +377,28 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         return YES;
     }
     return [_config[@"nfcEnabled"] boolValue];
+}
+
+- (BOOL)nfcBackgroundReading {
+    return [RCConfigManager nfcBackgroundReadingSupported] && [_config[@"nfcBackgroundReading"] boolValue];
+}
+
+- (void)setNfcBackgroundReading:(BOOL)on {
+    _config[@"nfcBackgroundReading"] = @(on);
+    [self saveConfig];
+}
+
+// iPhone XS and later (iPhone11,x and up) read NFC tags in the background
++ (BOOL)nfcBackgroundReadingSupported {
+    static int supported = -1;
+    if (supported < 0) {
+        char model[64] = {0};
+        size_t size = sizeof(model);
+        int major = 0;
+        if (sysctlbyname("hw.machine", model, &size, NULL, 0) == 0 && strncmp(model, "iPhone", 6) == 0) major = atoi(model + 6);
+        supported = major >= 11;
+    }
+    return supported;
 }
 
 - (double)nfcScreenOffSeconds {
@@ -540,7 +608,7 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
 }
 
 - (NSArray<NSString *> *)allTriggerKeys {
-    return @[@"volume_up_hold", @"volume_down_hold", @"volume_both_press", @"volume_up_then_down", @"volume_down_then_up", @"power_double_tap", @"power_long_press", @"power_triple_click", @"power_quadruple_click", @"trigger_statusbar_left_hold", @"trigger_statusbar_center_hold", @"trigger_statusbar_right_hold", @"trigger_statusbar_swipe_left", @"trigger_statusbar_swipe_right", @"trigger_statusbar_double_tap", @"trigger_home_triple_click", @"trigger_home_quadruple_click", @"trigger_home_double_click", @"touchid_tap", @"touchid_hold", @"trigger_edge_left_swipe_up", @"trigger_edge_left_swipe_down", @"trigger_edge_right_swipe_up", @"trigger_edge_right_swipe_down", @"trigger_ringer_mute", @"trigger_ringer_unmute", @"trigger_ringer_toggle", @"trigger_bottombar_swipe_left", @"trigger_bottombar_swipe_right", @"trigger_bottom_swipe_up_left", @"trigger_bottom_swipe_up_center", @"trigger_bottom_swipe_up_right", @"power_volume_up", @"power_volume_down", @"shake", @"trigger_device_lock", @"trigger_device_unlock", @"trigger_media_play", @"trigger_media_pause", @"trigger_media_track_change"];
+    return @[@"volume_up_hold", @"volume_down_hold", @"volume_both_press", @"volume_up_then_down", @"volume_down_then_up", @"power_double_tap", @"power_long_press", @"power_triple_click", @"power_quadruple_click", @"trigger_statusbar_left_hold", @"trigger_statusbar_center_hold", @"trigger_statusbar_right_hold", @"trigger_statusbar_swipe_left", @"trigger_statusbar_swipe_right", @"trigger_statusbar_double_tap", @"trigger_home_triple_click", @"trigger_home_quadruple_click", @"trigger_home_double_click", @"trigger_home_hold", @"trigger_home_power", @"touchid_tap", @"touchid_hold", @"trigger_edge_left_swipe_up", @"trigger_edge_left_swipe_down", @"trigger_edge_right_swipe_up", @"trigger_edge_right_swipe_down", @"trigger_ringer_mute", @"trigger_ringer_unmute", @"trigger_ringer_toggle", @"trigger_watch_ping", @"trigger_watch_ping_hold", @"trigger_bottombar_swipe_left", @"trigger_bottombar_swipe_right", @"trigger_bottom_swipe_up_left", @"trigger_bottom_swipe_up_center", @"trigger_bottom_swipe_up_right", @"power_volume_up", @"power_volume_down", @"shake", @"trigger_device_lock", @"trigger_device_unlock", @"trigger_media_play", @"trigger_media_pause", @"trigger_media_track_change"];
 }
 
 - (NSArray<NSDictionary *> *)notificationTriggers {
@@ -563,6 +631,8 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         @"trigger_device_unlock": @"Device Unlocked",
         @"trigger_power_connect": @"Power Connected",
         @"trigger_power_disconnect": @"Power Disconnected",
+        @"trigger_carplay_connect": @"CarPlay Connected",
+        @"trigger_carplay_disconnect": @"CarPlay Disconnected",
         @"trigger_media_play": @"Media Playing",
         @"trigger_media_pause": @"Media Paused",
         @"trigger_media_track_change": @"Media Track Changed",
@@ -585,6 +655,8 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         @"trigger_statusbar_double_tap": @"Status Bar Double Tap",
         @"trigger_home_triple_click": @"Home Button (Triple Click)",
         @"trigger_home_quadruple_click": @"Home Button (Quadruple Click)",
+        @"trigger_home_hold": @"Home Button (Hold)",
+        @"trigger_home_power": @"Home + Power",
         @"trigger_home_double_click": @"Home Button (Double Click)",
         @"touchid_hold": @"Touch ID Hold (Rest Finger)",
         @"touchid_tap": @"Touch ID Single Tap",
@@ -595,6 +667,8 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         @"trigger_ringer_mute": @"Ringer Muted (Silent Mode On)",
         @"trigger_ringer_unmute": @"Ringer Unmuted (Silent Mode Off)",
         @"trigger_ringer_toggle": @"Ringer Toggled (Any Change)",
+        @"trigger_watch_ping": @"Ping iPhone",
+        @"trigger_watch_ping_hold": @"Ping iPhone (Hold)",
         @"trigger_bottombar_swipe_left": @"Bottom Bar Swipe Left",
         @"trigger_bottombar_swipe_right": @"Bottom Bar Swipe Right",
         @"trigger_bottom_swipe_up_left": @"Bottom Swipe Up (Left)",
@@ -608,7 +682,7 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         return customName ?: [NSString stringWithFormat:@"NFC Tag %@", [triggerKey substringFromIndex:4]];
     }
 
-    if ([triggerKey hasPrefix:@"wifi_"] || [triggerKey hasPrefix:@"bt_"] || [triggerKey hasPrefix:@"app_launch_"] || [triggerKey hasPrefix:@"notif_"] || [triggerKey hasPrefix:@"notify_"] || [triggerKey hasPrefix:@"sched_"] || [triggerKey hasPrefix:@"mqtt_"] || [triggerKey hasPrefix:@"mqtt_sub_"]) {
+    if ([triggerKey hasPrefix:@"wifi_"] || [triggerKey hasPrefix:@"bt_"] || [triggerKey hasPrefix:@"app_launch_"] || [triggerKey hasPrefix:@"app_exit_"] || [triggerKey hasPrefix:@"output_"] || [triggerKey hasPrefix:@"notif_"] || [triggerKey hasPrefix:@"notify_"] || [triggerKey hasPrefix:@"sched_"] || [triggerKey hasPrefix:@"mqtt_"] || [triggerKey hasPrefix:@"mqtt_sub_"]) {
         return _config[@"triggers"][triggerKey][@"name"] ?: triggerKey;
     }
     
@@ -633,7 +707,8 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
 }
 
 - (BOOL)isTriggerEnabled:(NSString *)triggerKey {
-    return [[self triggerDict:triggerKey][@"enabled"] boolValue];
+    id trigger = _config[@"triggers"][triggerKey];
+    return [trigger isKindOfClass:[NSDictionary class]] && [trigger[@"enabled"] boolValue];
 }
 
 - (void)setTriggerEnabled:(BOOL)enabled forTrigger:(NSString *)triggerKey {
@@ -671,7 +746,10 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
 }
 
 - (NSArray *)actionsForTrigger:(NSString *)triggerKey {
-    return [self triggerDict:triggerKey][@"actions"] ?: @[];
+    // Reading must not create the trigger: a screen still holding the key of a trigger that was
+    // renamed or removed brought it back as an empty, disabled one just by looking
+    id trigger = _config[@"triggers"][triggerKey];
+    return [trigger isKindOfClass:[NSDictionary class]] ? (trigger[@"actions"] ?: @[]) : @[];
 }
 
 - (void)setActions:(NSArray *)actions forTrigger:(NSString *)triggerKey {
@@ -845,6 +923,9 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         _config[@"masterEnabled"] = importedConfig[@"masterEnabled"];
     }
     
+    if (importedConfig[@"nfcBackgroundReading"]) {
+        _config[@"nfcBackgroundReading"] = importedConfig[@"nfcBackgroundReading"];
+    }
     if (importedConfig[@"nfcEnabled"]) {
         _config[@"nfcEnabled"] = importedConfig[@"nfcEnabled"];
     }
@@ -975,6 +1056,13 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         @"location on": @"Location Services On",
         @"location off": @"Location Services Off",
         @"location toggle": @"Location Services Toggle",
+        @"nfc scanner resume": @"NFC Scanner Resume",
+        @"nfc scanner pause": @"NFC Scanner Pause",
+        @"nfc scanner toggle": @"NFC Scanner Toggle",
+        @"button triggers pause 15": @"Button Triggers Pause 15 Minutes",
+        @"button triggers pause 60": @"Button Triggers Pause 1 Hour",
+        @"button triggers pause": @"Button Triggers Pause Until Resumed",
+        @"button triggers resume": @"Button Triggers Resume",
         @"location status": @"Location Services Status",
         @"gps on": @"Location Services On",
         @"gps off": @"Location Services Off",
@@ -994,10 +1082,12 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         @"lock": @"Lock Device",
         @"unlock": @"Unlock Device",
         @"lock toggle": @"Lock Toggle",
+        @"lock-toggle": @"Lock Toggle",
         @"lock status": @"Lock Status",
         @"dnd on": @"Do Not Disturb On",
         @"dnd off": @"Do Not Disturb Off",
         @"dnd toggle": @"Do Not Disturb Toggle",
+        @"focus off": @"Focus Off",
         @"respring": @"Respring",
         @"safemode": @"Safe Mode",
         @"safe-mode": @"Safe Mode",
@@ -1043,6 +1133,7 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         @"mute status": @"Mute Status",
         @"mute": @"Mute Toggle",
         @"siri": @"Activate Siri",
+        @"accessibility shortcut": @"Accessibility Shortcut",
         @"home": @"Home Button",
         @"open control center": @"Open Control Center",
         @"control center": @"Open Control Center",
@@ -1053,6 +1144,11 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         @"switcher": @"App Switcher",
         @"previous app": @"Previous App",
         @"last app": @"Previous App",
+        @"kill current": @"Kill Current App",
+        @"kill front": @"Kill Current App",
+        @"kill foreground": @"Kill Current App",
+        @"kill current app": @"Kill Current App",
+        @"kill front app": @"Kill Current App",
         // Touch gestures
         @"swipeU": @"Swipe Up",
         @"swipeUp": @"Swipe Up",
@@ -1155,12 +1251,22 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
             result = [cmd substringFromIndex:5];
         } else if ([cmd hasPrefix:@"delay "]) {
             result = [NSString stringWithFormat:@"Delay %@s", [cmd substringFromIndex:6]];
+        } else if ([cmd hasPrefix:@"unlock "]) {
+            result = @"Unlock Device (Passcode)";
+        } else if ([cmd hasPrefix:@"lock-toggle "] || [cmd hasPrefix:@"lock toggle "]) {
+            result = @"Lock Toggle (Passcode)";
+        } else if ([cmd hasPrefix:@"stop trigger "]) {
+            result = [NSString stringWithFormat:@"Stop %@", [self displayNameForTrigger:[cmd substringFromIndex:13]]];
         } else if ([cmd hasPrefix:@"bt connect "] || [cmd hasPrefix:@"bluetooth connect "]) {
             NSString *val = [cmd hasPrefix:@"bluetooth connect "] ? [cmd substringFromIndex:18] : [cmd substringFromIndex:11];
             result = [NSString stringWithFormat:@"Connect %@", val];
         } else if ([cmd hasPrefix:@"bt disconnect "] || [cmd hasPrefix:@"bluetooth disconnect "]) {
             NSString *val = [cmd hasPrefix:@"bluetooth disconnect "] ? [cmd substringFromIndex:21] : [cmd substringFromIndex:14];
             result = [NSString stringWithFormat:@"Disconnect %@", val];
+        } else if ([cmd hasPrefix:@"focus on "]) {
+            result = [NSString stringWithFormat:@"Turn On %@", [cmd substringFromIndex:9]];
+        } else if ([cmd hasPrefix:@"focus toggle "]) {
+            result = [NSString stringWithFormat:@"Toggle %@", [cmd substringFromIndex:13]];
         } else if ([cmd hasPrefix:@"airplay connect "]) {
             NSString *val = [cmd substringFromIndex:16];
             if ([val containsString:@" # "]) {
@@ -1180,7 +1286,31 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         } else if ([cmd hasPrefix:@"flash "] && ![[cmd lowercaseString] hasSuffix:@"on"] && ![[cmd lowercaseString] hasSuffix:@"off"] && ![[cmd lowercaseString] hasSuffix:@"toggle"]) {
             result = [NSString stringWithFormat:@"Flashlight %@%%", [cmd substringFromIndex:6]];
         } else if ([cmd hasPrefix:@"shortcut:"]) {
-            result = [NSString stringWithFormat:@"Run %@", [cmd substringFromIndex:9]];
+            result = [NSString stringWithFormat:@"Run %@", [RCConfigManager shortcutNameForAction:cmd silent:NULL input:NULL]];
+        } else if ([cmd hasPrefix:@"toast "] || [cmd isEqualToString:@"toast"]) {
+            NSString *argString = originalCmd.length > 5 ? [[originalCmd substringFromIndex:5] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] : @"";
+            NSString *firstArg = nil;
+            if ([argString hasPrefix:@"\""]) {
+                NSRange nextQuote = [argString rangeOfString:@"\"" options:0 range:NSMakeRange(1, argString.length - 1)];
+                if (nextQuote.location != NSNotFound) {
+                    firstArg = [argString substringWithRange:NSMakeRange(1, nextQuote.location - 1)];
+                } else {
+                    firstArg = [argString substringFromIndex:1];
+                }
+            } else {
+                NSRange firstSpace = [argString rangeOfString:@" "];
+                if (firstSpace.location != NSNotFound) {
+                    firstArg = [argString substringToIndex:firstSpace.location];
+                } else {
+                    firstArg = argString;
+                }
+            }
+            firstArg = [firstArg stringByReplacingOccurrencesOfString:@"\\\"" withString:@"\""];
+            if (firstArg.length > 0) {
+                result = [NSString stringWithFormat:@"Toast %@", firstArg];
+            } else {
+                result = @"Toast";
+            }
         } else if ([cmd hasPrefix:@"snapper "] || [cmd isEqualToString:@"snapper"]) {
             NSString *sub = [cmd hasPrefix:@"snapper "] ? [cmd substringFromIndex:8] : @"";
             if ([sub isEqualToString:@"freeze"]) result = @"Snapper: Freeze Screen";
@@ -1329,6 +1459,10 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
             } else {
                 result = [NSString stringWithFormat:@"Open %@", bundleId];
             }
+        } else if ([cmd isEqualToString:@"kill current"] || [cmd isEqualToString:@"kill front"] ||
+                   [cmd isEqualToString:@"kill foreground"] || [cmd isEqualToString:@"kill current app"] ||
+                   [cmd isEqualToString:@"kill front app"]) {
+            result = @"Kill Current App";
         } else if ([cmd hasPrefix:@"kill "]) {
             NSString *bundleId = [cmd substringFromIndex:5];
             Class LSProxy = NSClassFromString(@"LSApplicationProxy");
@@ -1415,9 +1549,11 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
     if ([cmd hasPrefix:@"root "] || [cmd hasPrefix:@"exec-root "]) return @"terminal.fill";
     if ([cmd hasPrefix:@"exec "]) return @"terminal.fill";
     if ([cmd hasPrefix:@"delay "]) return @"hourglass";
+    if ([cmd hasPrefix:@"stop trigger "]) return @"stop.circle";
     if ([cmd hasPrefix:@"bt connect "] || [cmd hasPrefix:@"bluetooth connect "]) return @"link";
     if ([cmd hasPrefix:@"bt disconnect "] || [cmd hasPrefix:@"bluetooth disconnect "]) return @"xmark.circle";
     if ([cmd hasPrefix:@"airplay connect "]) return @"airplayaudio";
+    if ([cmd hasPrefix:@"focus "]) return @"moon.circle";
     if ([cmd hasPrefix:@"shortcut:"]) return @"wand.and.stars";
     if ([cmd hasPrefix:@"set-vol "]) return @"slider.horizontal.3";
     if ([cmd hasPrefix:@"ringer volume "]) return @"bell.fill";
@@ -1429,6 +1565,9 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
     if ([cmd hasPrefix:@"spotify "]) return @"music.note";
     if ([cmd isEqualToString:@"home"]) return @"house.fill";
     if ([cmd hasPrefix:@"uiopen "]) return [NSString stringWithFormat:@"USER_APP:%@", [cmd substringFromIndex:7]];
+    if ([cmd isEqualToString:@"kill current"] || [cmd isEqualToString:@"kill front"] ||
+        [cmd isEqualToString:@"kill foreground"] || [cmd isEqualToString:@"kill current app"] ||
+        [cmd isEqualToString:@"kill front app"]) return @"xmark.square.fill";
     if ([cmd hasPrefix:@"kill "]) return [NSString stringWithFormat:@"USER_APP:%@", [cmd substringFromIndex:5]];
     // Touch gesture prefix icons
     if ([cmd hasPrefix:@"tap "]) return @"hand.tap.fill";
@@ -1471,6 +1610,13 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         @"location on": @"location.fill",
         @"location off": @"location.slash",
         @"location toggle": @"location.fill",
+        @"nfc scanner resume": @"wave.3.right",
+        @"nfc scanner pause": @"wave.3.right",
+        @"nfc scanner toggle": @"wave.3.right",
+        @"button triggers pause 15": @"pause.circle",
+        @"button triggers pause 60": @"pause.circle",
+        @"button triggers pause": @"pause.circle",
+        @"button triggers resume": @"play.circle",
         @"location status": @"location.circle",
         @"gps on": @"location.fill",
         @"gps off": @"location.slash",
@@ -1493,6 +1639,7 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         @"lock": @"lock.fill",
         @"unlock": @"lock.open.fill",
         @"lock toggle": @"lock.circle",
+        @"lock-toggle": @"lock.circle",
         @"lock status": @"lock.circle",
         @"dnd on": @"moon.fill",
         @"dnd off": @"moon",
@@ -1525,6 +1672,7 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         @"mute status": @"speaker.slash.fill",
         @"mute": @"speaker.slash.fill",
         @"siri": @"mic.circle.fill",
+        @"accessibility shortcut": ([UIImage systemImageNamed:@"accessibility"] ? @"accessibility" : @"figure.stand"), // "accessibility" is iOS 15+
         @"open control center": @"switch.2",
         @"control center": @"switch.2",
         @"ldrestart": @"arrow.clockwise",
@@ -1542,6 +1690,11 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         @"switcher": @"square.stack.3d.up.fill",
         @"previous app": @"arrow.uturn.backward",
         @"last app": @"arrow.uturn.backward",
+        @"kill current": @"xmark.square.fill",
+        @"kill front": @"xmark.square.fill",
+        @"kill foreground": @"xmark.square.fill",
+        @"kill current app": @"xmark.square.fill",
+        @"kill front app": @"xmark.square.fill",
         @"queuealbum": @"music.note.list",
         @"queue album": @"music.note.list",
         @"queueartist": @"music.mic",
@@ -1567,17 +1720,84 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
     if (!result) {
         if ([cmd hasPrefix:@"root "]) return @"command.square";
         if ([cmd hasPrefix:@"delay "]) return @"hourglass";
+        if ([cmd hasPrefix:@"stop trigger "]) return @"stop.circle";
         if ([cmd hasPrefix:@"exec "]) return @"chevron.right.square";
         if ([cmd hasPrefix:@"flashlight "] || [cmd hasPrefix:@"flash "]) return @"flashlight.on.fill";
         if ([cmd hasPrefix:@"low power "]) return @"battery.100.bolt";
         if ([cmd hasPrefix:@"autolock "] || [cmd hasPrefix:@"auto-lock "]) return @"timer";
+        if ([cmd hasPrefix:@"unlock "]) return @"lock.open.fill";
+        if ([cmd hasPrefix:@"lock-toggle "] || [cmd hasPrefix:@"lock toggle "]) return @"lock.circle";
     }
     
     return result ?: @"circle.fill";
 }
 
+// iPhones with Face ID are the ones without a Home button. biometryType is set by
+// canEvaluatePolicy: whatever it returns, so this holds without Face ID set up too.
++ (BOOL)hasHomeButton {
+    static BOOL hasHomeButton;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        LAContext *context = [[LAContext alloc] init];
+        [context canEvaluatePolicy:LAPolicyDeviceOwnerAuthenticationWithBiometrics error:nil];
+        hasHomeButton = context.biometryType != LABiometryTypeFaceID;
+    });
+    return hasHomeButton;
+}
+
 + (BOOL)usesHapticsMenu {
     return [[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:(NSOperatingSystemVersion){17, 0, 0}];
+}
+
++ (BOOL)supportsFocus {
+    return [[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:(NSOperatingSystemVersion){15, 0, 0}];
+}
+
+// The same format the tweak reads (rc_parse_shortcut_args): the name, quoted when it needs to be,
+// then -i, then -p and the input
++ (NSString *)shortcutNameForAction:(NSString *)action silent:(BOOL *)silent input:(NSString **)input {
+    NSCharacterSet *spaces = [NSCharacterSet whitespaceCharacterSet];
+    NSString *args = [action hasPrefix:@"shortcut:"] ? [action substringFromIndex:9] : action;
+    args = [args stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if ([args hasPrefix:@"-r "]) args = [[args substringFromIndex:3] stringByTrimmingCharactersInSet:spaces];
+    NSString *name = args, *rest = @"";
+    if ([args hasPrefix:@"\""]) {
+        NSRange endQuote = args.length > 1 ? [args rangeOfString:@"\"" options:0 range:NSMakeRange(1, args.length - 1)] : NSMakeRange(NSNotFound, 0);
+        if (endQuote.location != NSNotFound) {
+            name = [args substringWithRange:NSMakeRange(1, endQuote.location - 1)];
+            rest = [[args substringFromIndex:endQuote.location + 1] stringByTrimmingCharactersInSet:spaces];
+        }
+    } else {
+        NSRange p = [args rangeOfString:@" -p "];
+        if (p.location != NSNotFound) {
+            name = [args substringToIndex:p.location];
+            rest = [args substringFromIndex:p.location + 1];
+        }
+        if ([name hasSuffix:@" -i"]) {
+            name = [name substringToIndex:name.length - 3];
+            rest = [@"-i " stringByAppendingString:rest];
+        }
+        name = [name stringByTrimmingCharactersInSet:spaces];
+    }
+    BOOL isSilent = [rest isEqualToString:@"-i"] || [rest hasPrefix:@"-i "];
+    if (isSilent) rest = [[rest substringFromIndex:2] stringByTrimmingCharactersInSet:spaces];
+    NSString *text = nil;
+    if ([rest hasPrefix:@"-p "]) {
+        text = [[rest substringFromIndex:3] stringByTrimmingCharactersInSet:spaces];
+        if ([text hasPrefix:@"\""] && [text hasSuffix:@"\""] && text.length >= 2) text = [text substringWithRange:NSMakeRange(1, text.length - 2)];
+    }
+    if (silent) *silent = isSilent;
+    if (input) *input = text;
+    return name;
+}
+
++ (NSString *)shortcutActionWithName:(NSString *)name silent:(BOOL)silent input:(NSString *)input {
+    // Quoted only when the name would read as options or a quoted name
+    BOOL quote = [name hasPrefix:@"\""] || [name hasPrefix:@"-r "] || [name hasSuffix:@" -i"] || [name containsString:@" -p "];
+    NSMutableString *action = [NSMutableString stringWithFormat:quote ? @"shortcut:\"%@\"" : @"shortcut:%@", name];
+    if (silent) [action appendString:@" -i"];
+    if (input.length) [action appendFormat:@" -p %@", input];
+    return action;
 }
 
 + (NSString *)vibrationNameForSilentMode:(BOOL)silent {
@@ -1673,6 +1893,23 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
             @"prefixes": @[@"flashlight ", @"flash "],
             @"suffixes": @[@"on", @"off", @"toggle"],
             @"displaySuffixes": @[@"On", @"Off", @"Toggle"]
+        },
+        @{
+            @"key": @"nfcscanner",
+            @"name": @"NFC Scanner",
+            @"icon": @"wave.3.right",
+            @"prefixes": @[@"nfc scanner "],
+            @"suffixes": @[@"resume", @"pause", @"toggle"],
+            @"displaySuffixes": @[@"Resume", @"Pause", @"Toggle"]
+        },
+        @{
+            // No toggle: while paused, a button can't run the resume
+            @"key": @"buttontriggers",
+            @"name": @"Button Triggers",
+            @"icon": @"pause.circle",
+            @"prefixes": @[@"button triggers "],
+            @"suffixes": @[@"pause 15", @"pause 60", @"pause", @"resume"],
+            @"displaySuffixes": @[@"Pause 15 Minutes", @"Pause 1 Hour", @"Pause Until Resumed", @"Resume"]
         },
         @{
             @"key": @"appearance",
@@ -1903,6 +2140,28 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
 - (NSString *)nameForKMMacroUid:(NSString *)uid {
     if (!uid.length) return nil;
     return _config[@"kmNamesByUuid"][uid];
+}
+
+
+- (NSString *)saveAppTriggerWithPrefix:(NSString *)prefix names:(NSArray<NSString *> *)names bundleIds:(NSArray<NSString *> *)bundleIds replacing:(NSString *)oldKey {
+    if (bundleIds.count == 0) return oldKey;
+    NSString *verb = [prefix isEqualToString:@"app_exit_"] ? @"Exit" : @"Launch";
+    NSString *newKey = [prefix stringByAppendingString:bundleIds.firstObject];
+    // The name says which apps: "Launch Safari, Notes" (a long one wraps in the lists)
+    NSMutableArray<NSString *> *shown = [NSMutableArray array];
+    for (NSUInteger i = 0; i < bundleIds.count; i++) [shown addObject:(i < names.count && names[i].length) ? names[i] : bundleIds[i]];
+    NSString *name = [NSString stringWithFormat:@"%@ %@", verb, [shown componentsJoinedByString:@", "]];
+
+    NSDictionary *previous = [self triggerDataForKey:(oldKey ?: newKey)];
+    NSMutableDictionary *data = [NSMutableDictionary dictionary];
+    data[@"name"] = name;
+    data[@"enabled"] = previous[@"enabled"] ?: @YES;
+    data[@"actions"] = previous[@"actions"] ?: @[];
+    if (bundleIds.count > 1) data[@"apps"] = bundleIds;
+
+    [self updateTrigger:newKey withData:data];
+    if (oldKey && ![oldKey isEqualToString:newKey]) [self removeTrigger:oldKey];
+    return newKey;
 }
 
 @end

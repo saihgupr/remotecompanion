@@ -2,6 +2,58 @@
 
 All notable changes to this project will be documented in this file.
 
+## [4.1.0] - 2026-11-03
+
+### Added
+- **Deep Linking URL Scheme & CLI Navigation**: added `remotecompanion://` URL scheme support and `rc nav <panel>` CLI command to jump directly into Settings, Integrations (Home Assistant, Keyboard Maestro, MQTT), New Trigger picker, or Triggers list from Siri Shortcuts, automation scripts, or terminal.
+- **Web UI access control**: Settings > General > Access limits where the Web UI can be reached from — Any Network (default, as before), Trusted Networks (only while on listed Wi-Fi networks), or This iPhone Only. The check runs per-connection before any endpoint, so it covers `/api/*` too, and the phone itself can always connect. Also `rc webui access any|networks|local` and `rc webui wifi` (#105).
+- **CarPlay triggers and condition**: new CarPlay Connected / Disconnected triggers plus a CarPlay connection condition; device/media triggers flattened in the New Trigger screen, Home Button section hidden on button-less phones (#67).
+- **On-device test kit**: Settings > Diagnostics > Test Kit self-tests conditions, toggles, gestures, and button presses and produces a shareable report; also fixed a SpringBoard crash when saving config from the Web UI (#68).
+- **Focus modes**: new Set Focus action (on/toggle/off) and Focus If condition on iOS 15+; Do Not Disturb actions/conditions now only affect the Do Not Disturb Focus (#80).
+- **Shortcuts without SpringCuts**: shortcuts run in the background and appear in the picker with no SpringCuts install required; failures and unknown names are logged, and each shortcut action can optionally Run Silently (#94).
+- **Retrigger options and Stop Trigger**: each trigger has a "When Triggered Again" option (Run Alongside / Restart / Ignore) so retriggering a delayed sequence restarts or skips it, plus a new Stop Trigger action to cancel another trigger's running sequence (#95).
+- **Experimental NFC mode**: opt-in mode (iPhone XS+) using iOS's own background tag reader so Apple Pay, Express Transit, and car keys keep working; new NFC Scanner pause/resume/toggle action and dedicated NFC settings section (#98).
+- **Ping iPhone triggers**: Ping iPhone and Ping iPhone (Hold) triggers so tapping or holding Ping on a paired Apple Watch runs custom actions (no Watch app or Wi-Fi needed); with no actions assigned the normal ping sound/flash still plays (#100).
+- **Keep Default Action**: per-trigger option so button actions run alongside stock behavior (Siri, screenshot, Wallet, App Switcher, Accessibility Shortcut). Power Double-Tap with actions now blocks Wallet unless this is on (#101).
+- **Home Button (Hold) and Home + Power triggers** on Home-button iPhones; replace Siri / screenshot-and-sleep by default or run alongside with Keep Default Action (#102).
+- **Button Triggers action**: pause button triggers for 15 min / 1 hour / until resumed (event triggers like NFC and schedules keep working), with a pause banner and Resume button on the Triggers screen; plus an API so other tweaks can hook button events (#103).
+- **Accessibility Shortcut action**: run the Accessibility Shortcut from any trigger; fixed triple-click firing both the shortcut and Power Double-Tap, and a bound Power/Home Triple Click now takes over the shortcut from iOS (#92).
+
+### Fixed
+- **Power Long Press put device to sleep on release**: releasing the side button after a Power Long Press trigger fired iOS's native single-press handler and slept the phone on non-Face ID devices (iPhone 8 / iOS 14). Suppressed the native sleep action when Power Long Press has executed (#109).
+- **Long commands cut at 1KB**: the tweak read its local socket in one 1KB read, truncating long commands. It now keeps reading while more arrives (up to 256KB); `rc` piped input is also sent in full (#107).
+- **Apple Pay/Wallet with NFC scanning on**: fixed Wallet showing "Updating Cards" for up to a minute by stepping the tag scan aside while Apple Pay or Wallet is on screen (#97).
+
+### Changed
+- **Apple Watch triggers hidden until configured**: Ping iPhone / Ping iPhone (Hold) no longer sit empty in the main list. The Apple Watch section only appears once a Watch trigger has actions, and both triggers are now addable from the + menu (Device section) with swipe-to-delete.
+- **Banners screen groups enabled first**: ticked actions show in an "Enabled" section at the top, moving instantly when toggled (#89).
+- **Toast dialog simplified**: Web UI Toast editor now has labeled Title / Message (optional) / Icon (optional) fields, plain-word icon presets, and a slimmer live preview pill.
+
+### Fixed
+- **Toast editor preview clipped message**: the live preview pill stayed at the stale single-line row height when a message was typed, squeezing the message's bottom padding unlike the fired toast. The preview row is now re-measured when the pill height changes (40pt / 50pt).
+- **Bottom swipe-up left/right zones mirrored in landscape**: `RC_ProgressAlongEdge` returned `y/L` for LandscapeLeft and `1-y/L` for LandscapeRight, which is backwards (west is device-bottom in LandscapeLeft, device-top in LandscapeRight). Swapped so left/center/right triggers fire on the correct side in both landscape orientations; also fixes the mirrored top status-bar hold zones which share the helper.
+- **Toast action editor reuse**: creating a Toast from the Web UI picker now opens the same title/message/icon dialog with live preview as editing (previously a single-field prompt that dropped subtitle/icon), and editing a Toast in the iOS action list now reopens the same 3-field editor used at creation instead of a generic single-field alert.
+
+### Added
+- **Lock Toggle passcode support**: added optional passcode argument to lock toggle (`lock-toggle <pin>` / `lock toggle <pin>`), enabling automatic passcode unlocking when the device is locked, with dedicated configuration dialogs in the iOS action picker, action editor, and Web UI (#99).
+- **Kill Current App action**: new `kill current` command (aliases `kill front`, `kill foreground`, `kill current app`, `kill front app`) force-closes the currently focused app, available in the iOS action picker, Web UI, and `rc` shell commands (#93).
+- **Web UI Settings parity with iOS**: Settings root now mirrors iOS (General / Buttons / Integrations / Advanced Settings / Backup & Diagnostics) with dedicated sub-panels for Button Timing, Integrations (HA/KM/MQTT), Advanced (Banners/NFC/Logging), and Backup & Diagnostics.
+- **Web UI Diagnostics buttons fixed**: added the missing `showConfirm` dialog (Respring/Safe Mode/Clear Log were throwing `ReferenceError`), hardened `triggerActionApi`/command fetches with status checks and failure toasts, and fixed Web UI URL Copy on plain HTTP with a textarea fallback.
+- **Web UI Advanced Settings parity with iOS**: added the missing Experimental NFC toggle, NFC With Screen Off picker (with long-window confirmation), Wrap Long Names display preference, Lock Scrolling During Gestures toggle, and Banners/NFC footers to match `RCAdvancedSettingsViewController`.
+
+### Fixed
+- **Orientation central for bar/edge triggers**: top bar, bottom bar, bottom swipe-up zones, edge sides, and swipe direction now share one orientation mapping (single helpers + orientation latched at touch Began). Field logs proved touch coordinates are device-fixed portrait coords (window stays 414x736 in landscape), so landscape top/bottom zones were corrected to the device-left/device-right strips with progress along the long axis, and edge zones to short-axis thresholds; `[RCOrient]` began log also reports the resolved edge progress.
+- **Landscape orientation for edge and bar triggers**: top bar, bottom bar, bottom swipe-up zones, and left/right edge swipes now rotate as one logical block using SpringBoard active orientation, with corrected landscape left/right mapping, thresholds, and swipe direction.
+- **Control Center from Bottom Swipe Up triggers**: the `open control center` action no longer gets swallowed when fired from a Bottom Swipe Up zone. Intentional opens now bypass the bottom-swipe suppression window in `SBControlCenterController`, and the post-fire gesture-cancel that interfered with the programmatic open on iOS 16+ was removed (native swipe-up is still suppressed by the gesture hooks) (#57).
+- **Settings footer**: RemoteCompanion version label now scrolls with Settings content (table footer) instead of floating over it.
+- **Settings Web UI URL**: Open Web UI row now shows the device IP address instead of localhost.
+- **Unlock Device security**: Removed hardcoded fallback PIN, redacted passcodes from command logs, hex dumps, and HTTP API responses, masked passcodes in iOS action list and edit dialogs (`RCActionsViewController`), masked passcodes in the Web UI trigger lists and action sequences (`rc_webui.html`), added secure passcode configuration with wake fallback, and prevented lockout attempts when no passcode is configured (#41).
+
+### Changed
+- **iOS 14 architecture docs clarified**: Clarified that RemoteCompanion ships fat `arm64 + arm64e` binaries with native `arm64e` (ABI v2) support on A12+ devices across iOS 14+, and `arm64` for A11 and older devices. `build.sh` enforces that packaged dylibs and helper tools retain both architectures so both modern and legacy devices remain supported.
+- **Settings reorganization**: slim root (General, Buttons, Integrations, Advanced Settings, Backup & Diagnostics) with button timing in Buttons, NFC/Banners/Wrap Long Names/Web UI/Logging in Advanced Settings, and Export/Import/Test Kit in Backup & Diagnostics.
+- **Backup & Diagnostics dissolved into Settings root**: the sub-panel is gone on iOS and Web UI. Diagnostics (Test Kit on iOS, Device Diagnostics & Health on Web) is its own section, and Backup (Export/Import Configuration) sits at the bottom of the main Settings screen.
+
 ## [4.0.0]
 
 ### Added
@@ -29,6 +81,12 @@ All notable changes to this project will be documented in this file.
   - 13 new If Conditions including Auto-Lock timeout state, Haptics mode, Silent/Ring vibration states, and more.
   - **Auto-Lock** system action and condition support (`autolock toggle`, `never`, `30s`, `1m`, etc.).
   - Bottom Bar Swipe Left/Right gesture support on bezel-less Face ID devices.
+- App Exit trigger: fires when a chosen app is switched away from (the inverse of App Launch).
+- App Launch and App Exit triggers can cover several apps: tick as many as needed in the app picker and one trigger runs its actions for any of them.
+- Audio Output triggers fire when an AirPlay, Bluetooth, or iPhone output device is set or unset.
+- Auto-Lock action and condition support.
+- Configurable banners for action triggers.
+- Smaller relative volume steps with `volume up N` and `volume down N`.
 
 ### Fixed
 - **iOS 15+ & 17 Compatibility & Shortcuts**:

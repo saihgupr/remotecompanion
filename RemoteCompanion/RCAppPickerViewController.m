@@ -24,6 +24,8 @@
 @property (nonatomic, strong) NSArray<LSApplicationProxy *> *allApps;
 @property (nonatomic, strong) NSArray<LSApplicationProxy *> *filteredApps;
 @property (nonatomic, strong) UISearchController *searchController;
+@property (nonatomic, strong) NSMutableArray<NSString *> *chosen; // multi-select: bundle ids, in the order ticked
+@property (nonatomic, strong) UIBarButtonItem *doneItem;
 @end
 
 @implementation RCAppPickerViewController
@@ -36,7 +38,12 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     
-    self.title = @"Select App";
+    self.title = self.allowsMultipleApps ? @"Select Apps" : @"Select App";
+    self.chosen = [NSMutableArray arrayWithArray:self.selectedBundleIds ?: @[]];
+    if (self.allowsMultipleApps) {
+        self.doneItem = [[UIBarButtonItem alloc] initWithTitle:@"Done" style:UIBarButtonItemStyleDone target:self action:@selector(donePressed)];
+        self.doneItem.enabled = self.chosen.count > 0;
+    }
     
     // Enable Large Titles
     self.navigationController.navigationBar.prefersLargeTitles = YES;
@@ -84,7 +91,7 @@
         
         dispatch_async(dispatch_get_main_queue(), ^{
             [self.tableView reloadData];
-            self.navigationItem.rightBarButtonItem = nil;
+            self.navigationItem.rightBarButtonItem = self.doneItem; // nil unless several apps can be ticked
         });
     });
 }
@@ -112,6 +119,7 @@
     // Let's try standard UIImage private method
     UIImage *icon = [UIImage _applicationIconImageForBundleIdentifier:app.applicationIdentifier format:0 scale:[UIScreen mainScreen].scale];
     cell.imageView.image = icon;
+    cell.accessoryType = (self.allowsMultipleApps && [self.chosen containsObject:app.applicationIdentifier]) ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
     
     return cell;
 }
@@ -122,6 +130,14 @@
     LSApplicationProxy *app = self.filteredApps[indexPath.row];
     NSString *bundleId = app.applicationIdentifier;
     NSString *name = app.localizedName ?: bundleId;
+
+    if (self.allowsMultipleApps) {
+        if ([self.chosen containsObject:bundleId]) [self.chosen removeObject:bundleId];
+        else [self.chosen addObject:bundleId];
+        self.doneItem.enabled = self.chosen.count > 0;
+        [tableView reloadRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationNone];
+        return;
+    }
     
     if (self.onAppSelected) {
         self.onAppSelected(name, bundleId);
@@ -148,6 +164,26 @@
     }
 }
 
+
+// Multi-select: hands the ticked apps over
+- (void)donePressed {
+    NSMutableArray<NSString *> *names = [NSMutableArray array];
+    for (NSString *bundleId in self.chosen) {
+        NSString *name = bundleId; // an app that is no longer installed keeps its id
+        for (LSApplicationProxy *app in self.allApps) {
+            if ([app.applicationIdentifier isEqualToString:bundleId]) { name = app.localizedName ?: bundleId; break; }
+        }
+        [names addObject:name];
+    }
+    if (self.onAppsSelected) self.onAppsSelected(names, [self.chosen copy]);
+    if (self.suppressAutoPop) return; // Caller handles navigation
+    if (self.searchController.isActive) [self.searchController dismissViewControllerAnimated:NO completion:nil];
+    if (self.navigationController && self.navigationController.viewControllers.count > 1) {
+        [self.navigationController popViewControllerAnimated:YES];
+    } else if (self.presentingViewController) {
+        [self dismissViewControllerAnimated:YES completion:nil];
+    }
+}
 
 #pragma mark - Search
 

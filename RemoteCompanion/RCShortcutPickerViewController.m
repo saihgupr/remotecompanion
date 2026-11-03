@@ -1,4 +1,5 @@
 #import "RCShortcutPickerViewController.h"
+#import "RCServerClient.h"
 #import <dlfcn.h>
 #import <objc/runtime.h>
 
@@ -42,7 +43,46 @@
     self.navigationItem.hidesSearchBarWhenScrolling = NO;
     self.definesPresentationContext = YES;
     
+    if (self.showsSilentOption) self.tableView.tableHeaderView = [self silentOptionHeader];
     [self loadShortcuts];
+}
+
+- (UIView *)silentOptionHeader {
+    UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.tableView.bounds.size.width, 64)];
+    UIView *card = [[UIView alloc] init];
+    card.backgroundColor = [UIColor secondarySystemBackgroundColor];
+    card.layer.cornerRadius = 10;
+    card.translatesAutoresizingMaskIntoConstraints = NO;
+    [header addSubview:card];
+
+    UILabel *label = [[UILabel alloc] init];
+    label.text = @"Run Silently";
+    label.font = [UIFont systemFontOfSize:17];
+    label.translatesAutoresizingMaskIntoConstraints = NO;
+    [card addSubview:label];
+
+    UISwitch *toggle = [[UISwitch alloc] init];
+    toggle.on = self.runSilently;
+    [toggle addTarget:self action:@selector(silentSwitchChanged:) forControlEvents:UIControlEventValueChanged];
+    toggle.translatesAutoresizingMaskIntoConstraints = NO;
+    [card addSubview:toggle];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [card.leadingAnchor constraintEqualToAnchor:header.layoutMarginsGuide.leadingAnchor],
+        [card.trailingAnchor constraintEqualToAnchor:header.layoutMarginsGuide.trailingAnchor],
+        [card.topAnchor constraintEqualToAnchor:header.topAnchor constant:8],
+        [card.bottomAnchor constraintEqualToAnchor:header.bottomAnchor constant:-8],
+        [label.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:16],
+        [label.centerYAnchor constraintEqualToAnchor:card.centerYAnchor],
+        [toggle.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-16],
+        [toggle.centerYAnchor constraintEqualToAnchor:card.centerYAnchor],
+        [label.trailingAnchor constraintLessThanOrEqualToAnchor:toggle.leadingAnchor constant:-8],
+    ]];
+    return header;
+}
+
+- (void)silentSwitchChanged:(UISwitch *)sender {
+    self.runSilently = sender.on;
 }
 
 - (void)loadShortcuts {
@@ -53,9 +93,22 @@
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSMutableArray *results = [NSMutableArray array];
         NSMutableString *debugLog = [NSMutableString string];
-        [debugLog appendString:@"Loading via springcuts -l...\n"];
-        
-        @try {
+
+        // From the tweak, which reads them from the Shortcuts database (no SpringCuts needed)
+        dispatch_semaphore_t listed = dispatch_semaphore_create(0);
+        __block NSString *listOutput = nil;
+        [[RCServerClient sharedClient] executeCommand:@"shortcuts list" completion:^(NSString *output, NSError *error) {
+            listOutput = output;
+            dispatch_semaphore_signal(listed);
+        }];
+        BOOL answered = dispatch_semaphore_wait(listed, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(8 * NSEC_PER_SEC))) == 0;
+        for (NSString *line in [listOutput componentsSeparatedByString:@"\n"]) {
+            if (line.length && ![results containsObject:line]) [results addObject:line];
+        }
+        BOOL listedByTweak = listOutput.length > 0; // a lone newline: no shortcuts
+        if (!listedByTweak) [debugLog appendFormat:@"%@\nLoading via springcuts -l...\n", answered ? @"No list from RemoteCompanion" : @"RemoteCompanion didn't answer"];
+
+        if (!listedByTweak) @try {
             Class NSTaskClass = NSClassFromString(@"NSTask");
             if (!NSTaskClass) {
                  [debugLog appendString:@"❌ NSTask class not found\n"];

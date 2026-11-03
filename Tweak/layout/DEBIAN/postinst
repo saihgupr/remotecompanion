@@ -14,4 +14,10 @@ for RC_ROOT in $RC_PATHS; do
     fi
 done
 
+# nfcd loads RCNFCReader when it starts: restart it (launchd starts it again at once)
+killall -9 nfcd 2>/dev/null || /var/jb/usr/bin/killall -9 nfcd 2>/dev/null
+# Same for companionfindlocallyd, which loads RCWatchPing
+killall -9 companionfindlocallyd 2>/dev/null || /var/jb/usr/bin/killall -9 companionfindlocallyd 2>/dev/null
+launchctl kickstart -p system/com.apple.companionfindlocallyd 2>/dev/null || true
+
 exit 0

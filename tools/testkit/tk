@@ -1,0 +1,30 @@
+#!/bin/bash
+# tk - send one request to the RemoteCompanion test kit and pretty-print the JSON reply.
+#   tk <endpoint> [POST-body]        e.g.  tk probe | tk "journal?since=40" | tk run "wifi status"
+#   tk /api/trigger/<key>            any other API path, used as-is
+# A body (or TK_METHOD=POST) makes it a POST. With TK_LOG set to a file, every request and
+# reply is also appended there, so someone can watch them with:  tail -f "$TK_LOG"
+# Phone: TK_HOST (its IP address, required), port TK_PORT (default 8080); TK_TIMEOUT (default 30 s).
+HOST="$TK_HOST"; PORT="${TK_PORT:-8080}"; LOG="$TK_LOG"
+ENDPOINT="$1"; BODY="$2"
+[ -z "$ENDPOINT" ] && { sed -n 2,7p "$0"; exit 1; }
+[ -z "$HOST" ] && { echo "Set TK_HOST to the phone's IP address, e.g.  TK_HOST=192.168.1.20 tk probe" >&2; exit 1; }
+# A path starting with / is used as-is (e.g. /api/trigger/<key>); anything else is under /api/testkit/
+case "$ENDPOINT" in /*) URL="http://$HOST:$PORT$ENDPOINT" ;; *) URL="http://$HOST:$PORT/api/testkit/$ENDPOINT" ;; esac
+METHOD="${TK_METHOD:-$([ -n "$BODY" ] && echo POST || echo GET)}"
+if [ -n "$BODY" ]; then
+  REPLY=$(curl -s -m "${TK_TIMEOUT:-30}" -X "$METHOD" --data-binary "$BODY" "$URL")
+else
+  REPLY=$(curl -s -m "${TK_TIMEOUT:-30}" -X "$METHOD" "$URL")
+fi
+STATUS=$?
+PRETTY=$(printf '%s' "$REPLY" | python3 -m json.tool 2>/dev/null || printf '%s' "${REPLY:-(no reply, curl exit $STATUS)}")
+if [ -n "$LOG" ]; then
+  mkdir -p "$(dirname "$LOG")"
+  {
+    printf '\n\033[1;36m%s  %s %s\033[0m' "$(date '+%H:%M:%S')" "$METHOD" "$URL"
+    [ -n "$BODY" ] && printf '\n\033[2mbody: %s\033[0m' "$BODY"
+    printf '\n%s\n' "$PRETTY"
+  } >> "$LOG"
+fi
+printf '%s\n' "$PRETTY"

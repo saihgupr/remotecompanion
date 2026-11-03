@@ -49,6 +49,9 @@ if [ -z "$1" ]; then
     echo "  flash on/off      - Turn flashlight on/off"
     echo "  rotate lock/unlock - Toggle orientation lock"
     echo "  appearance dark/light/toggle - Set device appearance"
+    echo "  lock              - Lock the device screen"
+    echo "  unlock [pin]      - Unlock the device screen"
+    echo "  lock-toggle [pin] - Toggle device lock/unlock state"
     echo "  is-locked         - Check if device is locked"
     echo "  dnd on/off/debug   - Toggle Do Not Disturb or inspect state"
     echo "  audiomix on/off/toggle/status - Control AudioMix tweak"
@@ -63,6 +66,7 @@ if [ -z "$1" ]; then
     echo "  km <trigger|url>  - Trigger Keyboard Maestro Macro or URL"
     echo "  mqtt <pub|publish> <topic> [payload] - Publish MQTT topic"
     echo "  blacklist <list|add|remove|reset> - Manage app exclusion"
+    echo "  nav <panel>       - Navigate companion app (triggers, settings, ha, km, mqtt, add)"
     echo "  log               - Stream device logs"
     echo ""
     exit 1

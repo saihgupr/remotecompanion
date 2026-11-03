@@ -6,6 +6,13 @@
 @property (nonatomic, assign) BOOL masterEnabled;
 @property (nonatomic, assign) BOOL tcpEnabled;
 @property (nonatomic, assign) BOOL webUIEnabled;
+// Who can reach the Web UI: @"any" (the default), @"networks" (only on webUINetworks) or @"local" (this iPhone only)
+@property (nonatomic, copy) NSString *webUIAccess;
+// Wi-Fi network names the Web UI can be reached on when webUIAccess is @"networks"
+@property (nonatomic, copy) NSArray<NSString *> *webUINetworks;
+// Hold lists (and row swipe actions) still while a status bar, bottom bar,
+// or edge swipe gesture is being executed. Off by default.
+@property (nonatomic, assign) BOOL freezeListsDuringGestures;
 // The tweak's log: @"off", @"minimal" (the default: triggers, actions, conditions, errors)
 // or @"full" (every step, for chasing a bug)
 @property (nonatomic, copy) NSString *logLevel;
@@ -28,6 +35,9 @@
 @property (nonatomic, assign) BOOL nfcEnabled;
 // Seconds the NFC scan keeps going after the screen turns off (0: only while the screen is on)
 @property (nonatomic, assign) double nfcScreenOffSeconds;
+// Experimental NFC: the system's own background reader reads tags while the screen is on (iPhone XS and later)
+@property (nonatomic, assign) BOOL nfcBackgroundReading;
++ (BOOL)nfcBackgroundReadingSupported;
 @property (nonatomic, assign) BOOL rootEnabled;
 @property (nonatomic, assign) BOOL haEnabled;
 @property (nonatomic, copy) NSString *haUrl;
@@ -61,6 +71,12 @@
 - (NSDictionary *)triggerDataForKey:(NSString *)triggerKey;
 - (void)updateTrigger:(NSString *)triggerKey withData:(NSDictionary *)data;
 - (void)removeTrigger:(NSString *)triggerKey;
+
+// Saves an App Launch ("app_launch_") or App Exit ("app_exit_") trigger for these apps and
+// returns its key, which is the first app's. The actions of the trigger it replaces (oldKey),
+// or of one that already exists for the first app, are kept. Two or more apps are stored
+// in the trigger's "apps" list.
+- (NSString *)saveAppTriggerWithPrefix:(NSString *)prefix names:(NSArray<NSString *> *)names bundleIds:(NSArray<NSString *> *)bundleIds replacing:(NSString *)oldKey;
 - (void)renameTrigger:(NSString *)triggerKey toName:(NSString *)newName;
 - (NSArray<NSString *> *)nfcTriggerKeys;
 - (NSArray<NSDictionary *> *)notificationTriggers;
@@ -83,8 +99,15 @@
 - (NSDictionary *)toggleInfoForCommand:(NSString *)cmd;
 // Vibration settings, the way this iOS version's Settings shows them: one Haptics menu from
 // iOS 17 (over the same two on/off values), the two switches by their names before that
++ (BOOL)hasHomeButton;
 + (BOOL)usesHapticsMenu;
 + (NSString *)vibrationNameForSilentMode:(BOOL)silent;
+// A "shortcut:" action: its shortcut name, whether it runs silently (-i) and its text input (-p);
+// and an action from those (input nil for none)
++ (NSString *)shortcutNameForAction:(NSString *)action silent:(BOOL *)silent input:(NSString **)input;
++ (NSString *)shortcutActionWithName:(NSString *)name silent:(BOOL)silent input:(NSString *)input;
+// Focus modes (the Set Focus action, the Focus condition) came with iOS 15
++ (BOOL)supportsFocus;
 - (BOOL)isActionDisabled:(id)actionItem;
 - (id)toggleActionDisabled:(id)actionItem;
 - (void)registerKMMacroName:(NSString *)name forUid:(NSString *)uid;

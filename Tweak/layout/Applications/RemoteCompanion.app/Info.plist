@@ -25,11 +25,22 @@
 	<key>CFBundleName</key>
 	<string>RemoteCompanion</string>
 	<key>CFBundleShortVersionString</key>
-	<string>4.0.0</string>
+	<string>4.1.0</string>
 	<key>CFBundleSignature</key>
 	<string>????</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.saihgupr.remotecompanion</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>remotecompanion</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleVersion</key>
-	<string>4.0.0</string>
+	<string>4.1.0</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>MinimumOSVersion</key>

@@ -2,23 +2,26 @@
 #import "RCConfigManager.h"
 #import "RCUITweaker.h"
 #import "RCIntegrationsViewController.h"
-#import "RCBannersViewController.h"
+#import "RCAdvancedSettingsViewController.h"
+#import "RCTestKitViewController.h"
+#import "RCWebUIAccessViewController.h"
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#include <ifaddrs.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
 
 @interface RCSettingsViewController () <UIDocumentPickerDelegate>
 @property (nonatomic, strong) UITableView *tableView;
-@property (nonatomic, strong) UILabel *versionLabel;
-@property (nonatomic, strong) UILabel *appTitleLabel;
 @property (nonatomic, strong) UISwitch *masterSwitch;
-@property (nonatomic, strong) UISwitch *nfcSwitch;
 @property (nonatomic, strong) UISwitch *webUISwitch;
 @end
 
-// Sections of the Settings table, in order
+// Sections of the Settings table, in order. Backup sits at the bottom.
 typedef NS_ENUM(NSInteger, RCSettingsSection) {
     RCSettingsSectionGeneral,
-    RCSettingsSectionTiming,
     RCSettingsSectionIntegrations,
+    RCSettingsSectionAdvanced,
+    RCSettingsSectionDiagnostics,
     RCSettingsSectionBackup,
 };
 
@@ -52,67 +55,76 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     }
     
     [self.view addSubview:self.tableView];
+
+    // Footer lives at the bottom of the table content (tableFooterView) so it
+    // only appears once you scroll to the bottom, instead of floating over content.
+    [self setupFooterView];
+
+    // Constraints - table fills the view, footer scrolls with content
+    [NSLayoutConstraint activateConstraints:@[
+        [self.tableView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
+        [self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [self.tableView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]
+    ]];
     
-    // Setup App Title Label (Sticky Bottom)
+    // Listen for color tweak changes
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(handleTweaksChanged:)
+                                                 name:@"RCConfigTweaksChangedNotification"
+                                               object:nil];
+    [self applyTweaks];
+}
+
+- (void)setupFooterView {
+    UIView *footerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, 60)];
+    footerView.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+
     UILabel *appTitleLabel = [[UILabel alloc] init];
     appTitleLabel.translatesAutoresizingMaskIntoConstraints = NO;
     appTitleLabel.textAlignment = NSTextAlignmentCenter;
     appTitleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
     appTitleLabel.textColor = [UIColor secondaryLabelColor];
     appTitleLabel.text = @"RemoteCompanion";
-    [self.view addSubview:appTitleLabel];
 
-    // Setup Version Label (Sticky Bottom)
     UILabel *versionLabel = [[UILabel alloc] init];
     versionLabel.translatesAutoresizingMaskIntoConstraints = NO;
     versionLabel.textAlignment = NSTextAlignmentCenter;
     versionLabel.font = [UIFont systemFontOfSize:13];
     versionLabel.textColor = [UIColor secondaryLabelColor];
-    
+
     NSDictionary *infoDict = [[NSBundle mainBundle] infoDictionary];
     NSString *version = [infoDict objectForKey:@"CFBundleShortVersionString"];
     versionLabel.text = [NSString stringWithFormat:@"v%@", version];
-    [self.view addSubview:versionLabel];
-    
-    // Add Tap Gesture to Footer Labels
+
+    [footerView addSubview:appTitleLabel];
+    [footerView addSubview:versionLabel];
+
     appTitleLabel.userInteractionEnabled = YES;
     versionLabel.userInteractionEnabled = YES;
-    
+
     UITapGestureRecognizer *titleTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(openGitHub)];
     [appTitleLabel addGestureRecognizer:titleTap];
-    
+
     UITapGestureRecognizer *versionTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(openGitHub)];
     [versionLabel addGestureRecognizer:versionTap];
-    
-    // Constraints for Sticky Footer
+
     [NSLayoutConstraint activateConstraints:@[
-        [versionLabel.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
-        [versionLabel.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-10],
-        
-        [appTitleLabel.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
-        [appTitleLabel.bottomAnchor constraintEqualToAnchor:versionLabel.topAnchor constant:-2]
+        [appTitleLabel.centerXAnchor constraintEqualToAnchor:footerView.centerXAnchor],
+        [appTitleLabel.topAnchor constraintEqualToAnchor:footerView.topAnchor constant:10],
+        [appTitleLabel.heightAnchor constraintEqualToConstant:20],
+
+        [versionLabel.centerXAnchor constraintEqualToAnchor:footerView.centerXAnchor],
+        [versionLabel.topAnchor constraintEqualToAnchor:appTitleLabel.bottomAnchor constant:0],
+        [versionLabel.heightAnchor constraintEqualToConstant:16]
     ]];
-    
-    // Constraints
-    [NSLayoutConstraint activateConstraints:@[
-        [self.tableView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
-        [self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-        [self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        // The table view ends above the footer labels
-        [self.tableView.bottomAnchor constraintEqualToAnchor:appTitleLabel.topAnchor constant:-10]
-    ]];
-    
-    // Listen for color tweak changes
-    [[NSNotificationCenter defaultCenter] addObserver:self 
-                                             selector:@selector(handleTweaksChanged:) 
-                                                 name:@"RCConfigTweaksChangedNotification" 
-                                               object:nil];
-    [self applyTweaks];
+
+    self.tableView.tableFooterView = footerView;
 }
 
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
-    [self.tableView reloadData]; // refresh the Banners count after returning from it
+    [self.tableView reloadData];
 }
 
 - (void)dealloc {
@@ -147,49 +159,52 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     [self dismissViewControllerAnimated:YES completion:nil];
 }
 
-#pragma mark - Table View Data Source
+#pragma mark - Web UI URL
 
-// The Button Timing rows, in order: the click and sequence windows, then the hold times. Home
-// Clicks only on a phone with a Home button.
-- (NSArray<NSDictionary *> *)timingRows {
-    RCConfigManager *cm = [RCConfigManager sharedManager];
-    NSMutableArray *rows = [NSMutableArray array];
-    [rows addObject:@{ @"title": @"Volume Sequence",
-        @"message": @"How soon after a volume press the other volume button completes an Up then Down or Down then Up sequence.",
-        @"values": @[@0.20, @0.25, @0.30, @0.38, @0.45, @0.55, @0.65], @"default": @0.38,
-        @"get": ^double{ return cm.volumeSequenceWindow; }, @"set": ^(double v) { cm.volumeSequenceWindow = v; } }];
-    [rows addObject:@{ @"title": @"Power Clicks",
-        @"message": @"How long a Power press waits for the next click before the clicks count as a double, triple or quadruple click.",
-        @"values": @[@0.10, @0.15, @0.20, @0.25, @0.30, @0.35, @0.40, @0.50, @0.60, @0.70], @"default": @0.40,
-        @"get": ^double{ return cm.powerClickWindow; }, @"set": ^(double v) { cm.powerClickWindow = v; } }];
-    // A phone with a Home button has no safe area at the bottom of the screen
-    UIWindow *window = self.view.window ?: [UIApplication sharedApplication].windows.firstObject;
-    if (window && window.safeAreaInsets.bottom <= 0) {
-        [rows addObject:@{ @"title": @"Home Clicks",
-            @"message": @"How long a Home press waits for the next click before the clicks count as a double, triple or quadruple click.",
-            @"values": @[@0.25, @0.30, @0.35, @0.45, @0.55, @0.65], @"default": @0.35,
-            @"get": ^double{ return cm.homeClickWindow; }, @"set": ^(double v) { cm.homeClickWindow = v; } }];
+- (NSString *)deviceIPAddress {
+    NSString *address = nil;
+    struct ifaddrs *interfaces = NULL;
+    if (getifaddrs(&interfaces) == 0) {
+        struct ifaddrs *temp_addr = interfaces;
+        while (temp_addr != NULL) {
+            if (temp_addr->ifa_addr && temp_addr->ifa_addr->sa_family == AF_INET) {
+                NSString *name = [NSString stringWithUTF8String:temp_addr->ifa_name];
+                if ([name isEqualToString:@"en0"]) {
+                    address = [NSString stringWithUTF8String:inet_ntoa(((struct sockaddr_in *)temp_addr->ifa_addr)->sin_addr)];
+                    break;
+                }
+                if (!address && [name isEqualToString:@"pdp_ip0"]) {
+                    address = [NSString stringWithUTF8String:inet_ntoa(((struct sockaddr_in *)temp_addr->ifa_addr)->sin_addr)];
+                }
+            }
+            temp_addr = temp_addr->ifa_next;
+        }
     }
-    [rows addObject:@{ @"title": @"Volume Hold",
-        @"message": @"How long a Volume Up or Down press is held before it counts as a hold rather than a tap. Taps wait this long when a hold trigger is set.",
-        @"values": @[@0.20, @0.25, @0.30, @0.35, @0.45, @0.55, @0.70], @"default": @0.35,
-        @"get": ^double{ return cm.volumeHoldTime; }, @"set": ^(double v) { cm.volumeHoldTime = v; } }];
-    [rows addObject:@{ @"title": @"Power Hold",
-        @"message": @"How long a Power press is held before it counts as a long press.",
-        @"values": @[@0.30, @0.40, @0.50, @0.60, @0.75], @"default": @0.50,
-        @"get": ^double{ return cm.powerHoldTime; }, @"set": ^(double v) { cm.powerHoldTime = v; } }];
-    return rows;
+    if (interfaces) freeifaddrs(interfaces);
+    return address;
 }
 
+- (NSString *)webUIUrlString {
+    if ([[RCConfigManager sharedManager].webUIAccess isEqualToString:@"local"]) return @"http://localhost:8080";
+    NSString *ip = [self deviceIPAddress];
+    if (ip.length) {
+        return [NSString stringWithFormat:@"http://%@:8080", ip];
+    }
+    return @"http://localhost:8080";
+}
+
+#pragma mark - Table View Data Source
+
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    return 4;
+    return 5;
 }
 
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
     NSString *title;
     if (section == RCSettingsSectionGeneral) title = @"General";
-    else if (section == RCSettingsSectionTiming) title = @"Button Timing";
     else if (section == RCSettingsSectionIntegrations) title = @"Integrations";
+    else if (section == RCSettingsSectionAdvanced) title = @"Advanced Settings";
+    else if (section == RCSettingsSectionDiagnostics) title = @"Diagnostics";
     else title = @"Backup";
     
     UIView *headerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, tableView.bounds.size.width, 40)];
@@ -207,11 +222,13 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == RCSettingsSectionGeneral) {
-        return nil;
-    } else if (section == RCSettingsSectionTiming) {
-        return @"How long a press waits for the next one before it counts. A shorter time responds sooner and needs quicker presses.";
+        return @"Enable the built-in Web UI to configure RemoteCompanion from a browser.";
     } else if (section == RCSettingsSectionIntegrations) {
         return @"Configure connections to external services and automations.";
+    } else if (section == RCSettingsSectionAdvanced) {
+        return @"NFC, banners, logging, and display options.";
+    } else if (section == RCSettingsSectionDiagnostics) {
+        return @"Tests RemoteCompanion on this device and shares the results.";
     } else if (section == RCSettingsSectionBackup) {
         return @"Export your configuration to share or backup. Import to restore.";
     }
@@ -219,17 +236,21 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    if (section == RCSettingsSectionGeneral) return 6; // Master + NFC + NFC screen off + WebUI + Banners + Logging
-    if (section == RCSettingsSectionTiming) return (NSInteger)[self timingRows].count;
-    if (section == RCSettingsSectionIntegrations) return 1; // Integrations Submenu Row
-    return 2; // Export, Import
+    if (section == RCSettingsSectionGeneral) {
+        return [RCConfigManager sharedManager].webUIEnabled ? 4 : 2; // with Access and Open Web UI
+    }
+    if (section == RCSettingsSectionBackup) {
+        return 2;
+    }
+    return 1; // Integrations, Advanced Settings, Diagnostics
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     RCConfigManager *cm = [RCConfigManager sharedManager];
     
-    BOOL isValueRow = (indexPath.section == RCSettingsSectionGeneral && (indexPath.row == 2 || indexPath.row >= 4)) || indexPath.section == RCSettingsSectionTiming; // NFC With Screen Off, Banners, Logging, the timings
-    UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:isValueRow ? UITableViewCellStyleValue1 : UITableViewCellStyleDefault reuseIdentifier:nil];
+    BOOL isLinkRow = (indexPath.section == RCSettingsSectionGeneral && indexPath.row >= 2);
+    UITableViewCellStyle style = isLinkRow ? UITableViewCellStyleValue1 : UITableViewCellStyleDefault;
+    UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:style reuseIdentifier:nil];
     cell.backgroundColor = [cm tweakColorForKey:@"blockBackground" defaultVal:0.12];
     
     UIView *selBg = [[UIView alloc] init];
@@ -254,39 +275,21 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
             cell.accessoryView = _masterSwitch;
             cell.selectionStyle = UITableViewCellSelectionStyleNone;
         } else if (indexPath.row == 1) {
-            cell.textLabel.text = @"NFC Scanning";
-            _nfcSwitch = [[UISwitch alloc] init];
-            _nfcSwitch.on = cm.nfcEnabled;
-            [_nfcSwitch addTarget:self action:@selector(nfcToggleChanged:) forControlEvents:UIControlEventValueChanged];
-            cell.accessoryView = _nfcSwitch;
-            cell.selectionStyle = UITableViewCellSelectionStyleNone;
-        } else if (indexPath.row == 2) {
-            cell.textLabel.text = @"NFC With Screen Off";
-            cell.detailTextLabel.text = [self nfcWindowTitleForSeconds:cm.nfcScreenOffSeconds];
-            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-        } else if (indexPath.row == 3) {
             cell.textLabel.text = @"Web UI";
             _webUISwitch = [[UISwitch alloc] init];
             _webUISwitch.on = cm.webUIEnabled;
             [_webUISwitch addTarget:self action:@selector(webUIToggleChanged:) forControlEvents:UIControlEventValueChanged];
             cell.accessoryView = _webUISwitch;
             cell.selectionStyle = UITableViewCellSelectionStyleNone;
-        } else if (indexPath.row == 4) {
-            cell.textLabel.text = @"Banners";
-            NSUInteger count = [RCBannersViewController checkedCount];
-            cell.detailTextLabel.text = count ? [NSString stringWithFormat:@"%lu", (unsigned long)count] : @"Off";
+        } else if (indexPath.row == 2) {
+            cell.textLabel.text = @"Access";
+            cell.detailTextLabel.text = [RCWebUIAccessViewController titleForAccess:cm.webUIAccess];
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-        } else if (indexPath.row == 5) {
-            cell.textLabel.text = @"Logging";
-            cell.detailTextLabel.text = [cm.logLevel capitalizedString];
+        } else if (indexPath.row == 3) {
+            cell.textLabel.text = @"Open Web UI";
+            cell.detailTextLabel.text = [self webUIUrlString];
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         }
-    } else if (indexPath.section == RCSettingsSectionTiming) {
-        NSDictionary *row = [self timingRows][indexPath.row];
-        double (^get)(void) = row[@"get"];
-        cell.textLabel.text = row[@"title"];
-        cell.detailTextLabel.text = [NSString stringWithFormat:@"%.2f s", get()];
-        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     } else if (indexPath.section == RCSettingsSectionIntegrations) {
         cell.textLabel.text = @"Integrations";
         UIImage *puzzleImg = [UIImage systemImageNamed:@"puzzlepiece.extension.fill"];
@@ -296,7 +299,14 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
         cell.imageView.image = puzzleImg;
         cell.imageView.tintColor = [UIColor systemIndigoColor];
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-    } else {
+    } else if (indexPath.section == RCSettingsSectionAdvanced) {
+        cell.textLabel.text = @"Advanced Settings";
+        UIImage *img = [UIImage systemImageNamed:@"gearshape.2.fill"];
+        if (!img) img = [UIImage systemImageNamed:@"gearshape"];
+        cell.imageView.image = img;
+        cell.imageView.tintColor = [UIColor systemPurpleColor];
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    } else if (indexPath.section == RCSettingsSectionBackup) {
         if (indexPath.row == 0) {
             cell.textLabel.text = @"Export Configuration";
             cell.imageView.image = [UIImage systemImageNamed:@"square.and.arrow.up"];
@@ -308,6 +318,11 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
             cell.imageView.tintColor = [UIColor systemGreenColor];
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         }
+    } else if (indexPath.section == RCSettingsSectionDiagnostics) {
+        cell.textLabel.text = @"Test Kit";
+        cell.imageView.image = [UIImage systemImageNamed:@"checklist"] ?: [UIImage systemImageNamed:@"list.bullet.rectangle"];
+        cell.imageView.tintColor = [UIColor systemTealColor];
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     }
     
     return cell;
@@ -317,20 +332,16 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
 
     if (indexPath.section == RCSettingsSectionGeneral && indexPath.row == 2) {
-        [self chooseNFCWindowFromView:[tableView cellForRowAtIndexPath:indexPath]];
-    } else if (indexPath.section == RCSettingsSectionGeneral && indexPath.row == 4) {
-        [self.navigationController pushViewController:[[RCBannersViewController alloc] init] animated:YES];
-    } else if (indexPath.section == RCSettingsSectionGeneral && indexPath.row == 5) {
-        [self chooseLogLevelFromView:[tableView cellForRowAtIndexPath:indexPath]];
-    } else if (indexPath.section == RCSettingsSectionTiming) {
-        NSDictionary *row = [self timingRows][indexPath.row];
-        double (^get)(void) = row[@"get"];
-        void (^set)(double) = row[@"set"];
-        [self chooseTimingNamed:row[@"title"] message:row[@"message"] values:row[@"values"] defaultValue:[row[@"default"] doubleValue]
-                        current:get() from:[tableView cellForRowAtIndexPath:indexPath] apply:set];
+        [self.navigationController pushViewController:[[RCWebUIAccessViewController alloc] init] animated:YES];
+    } else if (indexPath.section == RCSettingsSectionGeneral && indexPath.row == 3) {
+        [self openWebUI];
     } else if (indexPath.section == RCSettingsSectionIntegrations) {
         RCIntegrationsViewController *integrationsVC = [[RCIntegrationsViewController alloc] init];
         [self.navigationController pushViewController:integrationsVC animated:YES];
+    } else if (indexPath.section == RCSettingsSectionAdvanced) {
+        [self.navigationController pushViewController:[[RCAdvancedSettingsViewController alloc] init] animated:YES];
+    } else if (indexPath.section == RCSettingsSectionDiagnostics) {
+        [self.navigationController pushViewController:[[RCTestKitViewController alloc] init] animated:YES];
     } else if (indexPath.section == RCSettingsSectionBackup) {
         if (indexPath.row == 0) {
             [self exportConfig];
@@ -346,95 +357,23 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     [RCConfigManager sharedManager].masterEnabled = sender.on;
 }
 
-- (void)nfcToggleChanged:(UISwitch *)sender {
-    [RCConfigManager sharedManager].nfcEnabled = sender.on;
-}
-
 - (void)webUIToggleChanged:(UISwitch *)sender {
     [RCConfigManager sharedManager].webUIEnabled = sender.on;
+    [self.tableView reloadData];
 }
 
-// A list of times in seconds, the current one ticked, for one of the Button Timing rows
-- (void)chooseTimingNamed:(NSString *)name message:(NSString *)message values:(NSArray<NSNumber *> *)values defaultValue:(double)defaultValue
-                  current:(double)current from:(UIView *)sourceView apply:(void (^)(double value))apply {
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:name message:message preferredStyle:UIAlertControllerStyleActionSheet];
-    for (NSNumber *value in values) {
-        BOOL isCurrent = fabs(value.doubleValue - current) < 0.005;
-        BOOL isDefault = fabs(value.doubleValue - defaultValue) < 0.005;
-        NSString *title = [NSString stringWithFormat:@"%.2f s%@%@", value.doubleValue, isDefault ? @" (Default)" : @"", isCurrent ? @" \u2713" : @""];
-        [sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-            apply(value.doubleValue);
-            [self.tableView reloadData];
-        }]];
+- (void)openWebUI {
+    NSURL *url = [NSURL URLWithString:[self webUIUrlString]];
+    if (url) {
+        [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    sheet.popoverPresentationController.sourceView = sourceView;
-    sheet.popoverPresentationController.sourceRect = sourceView.bounds;
-    [self presentViewController:sheet animated:YES completion:nil];
 }
 
-// How long the NFC scan keeps going after the screen turns off. A window longer than the default
-// asks first: it costs battery and keeps the reader in use.
-static const double kRCNFCDefaultWindow = 120.0;
-
-- (NSString *)nfcWindowTitleForSeconds:(double)seconds {
-    if (seconds <= 0) return @"Off";
-    if (seconds < 60) return [NSString stringWithFormat:@"%.0f s", seconds];
-    NSInteger minutes = (NSInteger)lround(seconds / 60.0);
-    return minutes == 1 ? @"1 min" : [NSString stringWithFormat:@"%ld min", (long)minutes];
+- (void)openGitHub {
+    [[UIApplication sharedApplication] openURL:[NSURL URLWithString:@"https://github.com/saihgupr/RemoteCompanion"] options:@{} completionHandler:nil];
 }
 
-- (void)chooseNFCWindowFromView:(UIView *)sourceView {
-    RCConfigManager *cm = [RCConfigManager sharedManager];
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"NFC With Screen Off"
-        message:@"How long a tag can still be tapped after the screen turns off. Off reads tags only while the screen is on."
-        preferredStyle:UIAlertControllerStyleActionSheet];
-    NSArray<NSNumber *> *choices = @[@0, @30, @60, @120, @300, @600, @1800];
-    NSArray<NSString *> *names = @[@"Off", @"30 Seconds", @"1 Minute", @"2 Minutes", @"5 Minutes", @"10 Minutes", @"30 Minutes"];
-    for (NSUInteger i = 0; i < choices.count; i++) {
-        double seconds = choices[i].doubleValue;
-        BOOL isCurrent = fabs(seconds - cm.nfcScreenOffSeconds) < 1.0;
-        NSString *title = [NSString stringWithFormat:@"%@%@%@", names[i], seconds == kRCNFCDefaultWindow ? @" (Default)" : @"", isCurrent ? @" \u2713" : @""];
-        [sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-            if (seconds <= kRCNFCDefaultWindow) {
-                cm.nfcScreenOffSeconds = seconds;
-                [self.tableView reloadData];
-                return;
-            }
-            UIAlertController *warning = [UIAlertController alertControllerWithTitle:@"Longer Scan Window"
-                message:@"The NFC reader stays in use while the screen is off. That costs battery (about 3% an hour on an iPhone 8) and warms the phone, and the system may switch the reader off for a few minutes. A longer window only helps when tags are tapped long after the screen goes dark."
-                preferredStyle:UIAlertControllerStyleAlert];
-            [warning addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"Use %@", names[i]] style:UIAlertActionStyleDefault handler:^(UIAlertAction *confirm) {
-                cm.nfcScreenOffSeconds = seconds;
-                [self.tableView reloadData];
-            }]];
-            [warning addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-            [self presentViewController:warning animated:YES completion:nil];
-        }]];
-    }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    sheet.popoverPresentationController.sourceView = sourceView;
-    sheet.popoverPresentationController.sourceRect = sourceView.bounds;
-    [self presentViewController:sheet animated:YES completion:nil];
-}
-
-- (void)chooseLogLevelFromView:(UIView *)sourceView {
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Logging"
-        message:@"Minimal records triggers, their actions and conditions, and errors. Full records every step, for tracking down a problem."
-        preferredStyle:UIAlertControllerStyleActionSheet];
-    NSString *current = [RCConfigManager sharedManager].logLevel;
-    for (NSString *level in @[@"off", @"minimal", @"full"]) {
-        NSString *title = [level isEqualToString:current] ? [NSString stringWithFormat:@"%@ \u2713", [level capitalizedString]] : [level capitalizedString];
-        [sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-            [RCConfigManager sharedManager].logLevel = level;
-            [self.tableView reloadData];
-        }]];
-    }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    sheet.popoverPresentationController.sourceView = sourceView;
-    sheet.popoverPresentationController.sourceRect = sourceView.bounds;
-    [self presentViewController:sheet animated:YES completion:nil];
-}
+#pragma mark - Backup / Import
 
 - (void)exportConfig {
     NSData *jsonData = [[RCConfigManager sharedManager] exportConfigAsJSON];
@@ -444,20 +383,20 @@ static const double kRCNFCDefaultWindow = 120.0;
         [self presentViewController:alert animated:YES completion:nil];
         return;
     }
-    
+
     NSDateFormatter *df = [[NSDateFormatter alloc] init];
     [df setDateFormat:@"yyyyMMdd_HHmm"];
     NSString *dateStr = [df stringFromDate:[NSDate date]];
     if (!dateStr) dateStr = @"backup";
-    
+
     NSString *filename = [NSString stringWithFormat:@"rc_config_%@.json", dateStr];
-    
+
     // Use system /tmp directly to avoid sandbox confusion for system app
     NSString *exportPath = [@"/tmp" stringByAppendingPathComponent:filename];
-    
+
     NSError *writeError = nil;
     BOOL written = [jsonData writeToFile:exportPath options:NSDataWritingAtomic error:&writeError];
-    
+
     if (!written || writeError) {
         NSLog(@"[RemoteCompanion] Error writing export file: %@", writeError);
         // Show exact path in alert for debugging
@@ -470,17 +409,17 @@ static const double kRCNFCDefaultWindow = 120.0;
         [self presentViewController:alert animated:YES completion:nil];
         return;
     }
-    
+
     NSURL *fileURL = [NSURL fileURLWithPath:exportPath];
     if (!fileURL) {
          NSLog(@"[RemoteCompanion] Error: fileURL is nil");
          return;
     }
-    
+
     // Use share sheet instead of document picker to avoid glitchy loading indicator
     UIActivityViewController *activityVC = [[UIActivityViewController alloc] initWithActivityItems:@[fileURL] applicationActivities:nil];
     activityVC.modalPresentationStyle = UIModalPresentationFormSheet;
-    
+
     // Success callback when user saves the file
     activityVC.completionWithItemsHandler = ^(UIActivityType activityType, BOOL completed, NSArray *returnedItems, NSError *error) {
         if (completed) {
@@ -490,7 +429,7 @@ static const double kRCNFCDefaultWindow = 120.0;
             [self presentViewController:alert animated:YES completion:nil];
         }
     };
-    
+
     [self presentViewController:activityVC animated:YES completion:nil];
 }
 
@@ -503,28 +442,24 @@ static const double kRCNFCDefaultWindow = 120.0;
     [self presentViewController:picker animated:YES completion:nil];
 }
 
-- (void)openGitHub {
-    [[UIApplication sharedApplication] openURL:[NSURL URLWithString:@"https://github.com/saihgupr/RemoteCompanion"] options:@{} completionHandler:nil];
-}
-
 #pragma mark - UIDocumentPickerDelegate (Import only)
 
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
     NSURL *url = urls.firstObject;
     if (!url) return;
-    
+
     NSLog(@"[RemoteCompanion] Import selected URL: %@", url);
-    
+
     // Security scoped access is mandatory for 'Opening' mode
     BOOL accessing = [url startAccessingSecurityScopedResource];
-    
+
     NSError *readError = nil;
     NSData *data = [NSData dataWithContentsOfURL:url options:0 error:&readError];
-    
+
     if (accessing) {
         [url stopAccessingSecurityScopedResource];
     }
-    
+
     if (!data) {
         NSLog(@"[RemoteCompanion] Failed to read file: %@", readError);
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Import Failed" message:[NSString stringWithFormat:@"Could not read file: %@", readError.localizedDescription] preferredStyle:UIAlertControllerStyleAlert];
@@ -532,16 +467,13 @@ static const double kRCNFCDefaultWindow = 120.0;
         [self presentViewController:alert animated:YES completion:nil];
         return;
     }
-    
+
     NSError *error = nil;
     BOOL success = [[RCConfigManager sharedManager] importConfigFromJSON:data error:&error];
-    
+
     if (success) {
-        _masterSwitch.on = [RCConfigManager sharedManager].masterEnabled;
-        _nfcSwitch.on = [RCConfigManager sharedManager].nfcEnabled;
-        _webUISwitch.on = [RCConfigManager sharedManager].webUIEnabled;
         [self.tableView reloadData];
-        
+
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Import Successful" message:@"Configuration restored. Return to Triggers to see changes." preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
         [self presentViewController:alert animated:YES completion:nil];

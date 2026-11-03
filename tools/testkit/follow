@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+"""follow - stream the RemoteCompanion test-kit journal live.
+    follow [type-prefix]     e.g.  follow            follow power
+Phone: TK_HOST (its IP address, required), TK_PORT (default 8080). Ctrl-C to stop.
+Following keeps the journal on (it records only while the test kit is in use)."""
+import json, os, sys, time, urllib.request
+from datetime import datetime
+
+host = os.environ.get("TK_HOST"); port = os.environ.get("TK_PORT", "8080")
+if not host:
+    sys.exit("Set TK_HOST to the phone's IP address, e.g.  TK_HOST=192.168.1.20 follow")
+prefix = sys.argv[1] if len(sys.argv) > 1 else ""
+base = f"http://{host}:{port}/api/testkit/journal"
+DIM, BOLD, CYAN, YELLOW, RESET = "\033[2m", "\033[1m", "\033[36m", "\033[33m", "\033[0m"
+COLORS = {"mark": BOLD + YELLOW, "trigger": BOLD + CYAN, "ios": CYAN, "power": "", "hid": DIM, "replay": DIM}
+
+def get(since):
+    url = f"{base}?since={since}" + (f"&type={prefix}" if prefix else "")
+    with urllib.request.urlopen(url, timeout=5) as r:
+        return json.load(r)
+
+since, last_t, waiting, session = None, None, False, None
+print(f"{DIM}following {base}{' (type ' + prefix + '*)' if prefix else ''} - Ctrl-C to stop{RESET}")
+while True:
+    try:
+        if since is None:  # start from now: skip what's already in the journal
+            since = get(0)["next"]
+        data = get(since)
+        if session is not None and data.get("session") != session:
+            # the phone resprung: its journal restarted from seq 1
+            print(f"{DIM}(phone resprung - journal restarted){RESET}")
+            since, last_t = 0, None
+            data = get(0)
+        session = data.get("session")
+        if waiting:
+            print(f"{DIM}(reconnected){RESET}"); waiting = False
+        for e in data["events"]:
+            t = e.pop("t"); kind = e.pop("type"); e.pop("seq", None)
+            stamp = datetime.fromtimestamp(t / 1000).strftime("%H:%M:%S.%f")[:-3]
+            gap = f"+{t - last_t:6.0f}ms" if last_t is not None and t - last_t < 10000 else "        "
+            color = next((c for k, c in COLORS.items() if kind.startswith(k)), "")
+            details = "  ".join(f"{k}={v}" for k, v in e.items())
+            print(f"{DIM}{stamp} {gap}{RESET}  {color}{kind:<22}{RESET} {details}", flush=True)
+            last_t = t
+        since = data["next"]
+    except KeyboardInterrupt:
+        break
+    except Exception as ex:
+        if not waiting:
+            print(f"{DIM}(phone not answering: {ex}) - retrying{RESET}", flush=True); waiting = True
+        time.sleep(2); continue
+    time.sleep(0.3)

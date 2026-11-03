@@ -61,6 +61,7 @@ A sequence is a **JSON array** of actions. Each action is either:
 | `home` | Press Home button |
 | `switcher` | Open App Switcher |
 | `previous app` | Switch to previous app |
+| `kill current` | Force-close the currently focused app |
 | `open control center` | Open Control Center |
 | `screenshot` | Take a screenshot |
 | `camera photo 0.5x` | Open Camera in Photo mode (0.5x ultra-wide lens) |
@@ -76,6 +77,7 @@ A sequence is a **JSON array** of actions. Each action is either:
 | `camera record` | Toggle video recording in Camera app |
 | `haptic` | Trigger haptic feedback |
 | `siri` | Activate Siri |
+| `accessibility shortcut` | Run the Accessibility Shortcut |
 | `respring` | Respring (restart SpringBoard) |
 | `safemode` | Enter Safe Mode (restart SpringBoard with tweaks disabled) |
 | `ldrestart` | Soft reboot |
@@ -85,6 +87,8 @@ A sequence is a **JSON array** of actions. Each action is either:
 | `dnd toggle` | Toggle Do Not Disturb |
 | `uiopen com.bundle.id` | Open an app by bundle ID |
 | `shortcut:My Shortcut Name` | Run an Apple Shortcut by name |
+| `shortcut:My Shortcut Name -i` | Run it silently (no Shortcuts progress on screen) |
+| `shortcut:My Shortcut Name -p Some text` | Run it with text input (`-i` goes before `-p`) |
 
 ### Connectivity
 | Command | What it does |
@@ -127,6 +131,11 @@ A sequence is a **JSON array** of actions. Each action is either:
 | Command | What it does |
 |---|---|
 | `delay 1.5` | Wait 1.5 seconds before next action |
+| `stop trigger power_long_press` | Stop that trigger's sequence while it's still running (in a delay) |
+
+A trigger fired again while its sequence is still running runs it again alongside, unless the
+trigger's **When Triggered Again** setting (the ⋯ menu on its screen) is **Restart** (the running
+sequence stops and starts over) or **Ignore** (the new trigger is skipped).
 
 ### Terminal / Shell
 | Command | What it does |

@@ -137,6 +137,24 @@ else
     build_scheme "$SCHEME"
 fi
 
+# Every dylib and helper tool must retain an arm64 slice for A11 and older
+# devices, alongside the arm64e slice for A12+ devices.
+verify_arch() {
+    echo "🔎 Verifying arch slices..."
+    local bad=0 f archs
+    while IFS= read -r f; do
+        case "$f" in */RemoteCompanion.app/RemoteCompanion|*/rc-root) continue;; esac
+        archs=$(lipo -archs "$f" 2>/dev/null) || continue
+        case " $archs " in
+            *" arm64 "*) ;;
+            *) echo "❌ ${f#Tweak/.theos/_/} has no arm64 slice (A11 and older support lost)"; bad=1 ;;
+        esac
+    done < <(find Tweak/.theos/_ -type f \( -name "*.dylib" -o -name "rc-client" \))
+    [ "$bad" -eq 0 ] || exit 1
+}
+
+verify_arch
+
 echo ""
 echo "✅ Build Complete! Packages are located in Tweak/packages/:"
 ls -lh Tweak/packages/*"${VERSION}"*.deb 2>/dev/null || ls -lh Tweak/packages/*.deb 2>/dev/null || echo "No .deb files found in Tweak/packages/"

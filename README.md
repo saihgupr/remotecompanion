@@ -3,12 +3,14 @@
 RemoteCompanion provides fast, scriptable system control for modern rootless jailbreaks. It lets you bind physical gestures and hardware buttons, or send commands remotely from your computer, to trigger system actions, control media playback, and run custom scripts.
 
 > [!IMPORTANT]
-> **What’s New in v4.0**
-> - **Button Timing Engine & Settings**: Fine-grained configuration for Power Clicks, Home Clicks, Volume Sequences, and Holds. Instant native button responsiveness without lag.
-> - **Sound & Haptics Category**: Direct controls for Silent Mode, Ringer Volume (0-100%), Haptics modes (always/silent-only/ring-only/never), unified Noise Control (ANC), and custom relative volume adjustments (`volume up N` / `volume down N`) reporting the updated volume percentage.
-> - **New UI Experience**: Brand new New Trigger screen, collapsible category navigation bars, AirPlay/Bluetooth picker modals, and configurable action banners.
-> - **iOS 17 Compatibility**: Complete support for iOS 17 button hooks, Camera actions, App Switcher, Siri, and Ringer Switch.
-> - **Expanded Automation**: 13 new If Conditions (Auto-Lock, Haptics, vibration modes) and Auto-Lock system controls.
+> **What’s New in v4.1**
+> - **Web UI Access Control**: Settings → General → Access limits where the Web UI can be reached from — Any Network (default), Trusted Networks, or This iPhone Only. Covers `/api/*` too (`rc webui access any|networks|local`, `rc webui wifi`).
+> - **New Triggers**: CarPlay Connected/Disconnected, Ping iPhone (tap/hold from Apple Watch), Home Button (Hold) and Home + Power, plus a per-trigger Keep Default Action option so actions run alongside stock behavior.
+> - **Retrigger Control**: "When Triggered Again" option (Run Alongside / Restart / Ignore) plus a Stop Trigger action to cancel another trigger's running sequence.
+> - **Focus & Button Control**: Set Focus action + Focus condition, Accessibility Shortcut action, and a Button Triggers action to pause hardware buttons (15 min / 1 hour / until resumed).
+> - **NFC Improvements**: Opt-in Experimental NFC mode (Apple Pay keeps working), NFC Scanner action, and Apple Pay/Wallet coexist with tag scanning.
+> - **Shortcuts Without SpringCuts**: Shortcuts run in the background with no extra install required, with an optional Run Silently mode.
+> - **On-Device Test Kit**: Settings → Diagnostics → Test Kit self-tests conditions, toggles, gestures, and buttons with a shareable report.
 
 <p align="center">
   <a href="https://saihgupr.github.io/remotecompanion/">Official Website</a> •
@@ -22,10 +24,10 @@ RemoteCompanion provides fast, scriptable system control for modern rootless jai
 </p>
 
 <p align="center">
-  <img src="images/4.0.0/IMG_2285.PNG" width="200" alt="Main Interface" />
-  <img src="images/4.0.0/IMG_2284.PNG" width="200" alt="Action Picker" />
-  <img src="images/4.0.0/IMG_2283.PNG" width="200" alt="If Conditions" />
-  <img src="images/4.0.0/IMG_2286.PNG" width="200" alt="Settings & Backup" />
+  <img src="images/4.1.0/01_dashboard.png" width="200" alt="Main Dashboard" />
+  <img src="images/4.1.0/02_add_trigger.png" width="200" alt="Add Trigger" />
+  <img src="images/4.1.0/03_action_conditions.png" width="200" alt="Conditional Logic" />
+  <img src="images/4.1.0/04_settings.png" width="200" alt="Settings & Web UI" />
 </p>
 
 ## Features
@@ -33,7 +35,6 @@ RemoteCompanion provides fast, scriptable system control for modern rootless jai
 - **Universal Search**: Instantly find actions, shortcuts, and devices with integrated search bars in every picker.
 - **Cross-Version Support**: Supports iOS 14 through iOS 17, with partial iOS 26 support, across Rootless, Rootful, and RootHide environments.
 - **Advanced Automation**: Full support for NFC tags, custom Lua scripts (with `objc_call` support), and native Siri integration.
-- **AI-Assisted Scripting**: Use any AI assistant to generate action sequences from plain English — see [SCRIPTING.md](SCRIPTING.md).
 - **iPad Experience**: Native landscape orientation and optimized layouts for iPad power users.
 - **Live Discovery**: Discovery-based live lists for nearby AirPlay and Bluetooth hardware.
 - **Trigger Favorites**: Mark any trigger as a favorite for instant access at the top of the picker.
@@ -82,8 +83,9 @@ Access the desktop-class automation hub at `http://[DEVICE_IP]:8080` from any co
 - `rc anc [on|off|transparency]` - Control headphone ANC (requires Sonitus).
 
 ### Device Control
-- `rc lock` / `rc lock toggle` - Lock the screen.
-- `rc unlock <pin>` - Wakes and unlocks the device.
+- `rc lock` - Lock the screen.
+- `rc unlock [pin]` - Wakes and unlocks the device (or wakes screen if pin omitted).
+- `rc lock-toggle [pin]` / `rc lock toggle [pin]` - Toggle screen lock/unlock state (unlocks with optional passcode if locked).
 - `rc autolock [toggle|30s|1m|2m|3m|4m|5m|never]` - Configure or toggle auto-lock timeout.
 - `rc button [power|lock|home|volup|voldown|mute]` - Simulate physical button presses.
 - `rc brightness 0-100` - Set screen brightness.
@@ -102,9 +104,11 @@ Access the desktop-class automation hub at `http://[DEVICE_IP]:8080` from any co
 - `rc vibration [silent-toggle|ring-toggle]` - System "Vibrate on Silent/Ring" settings.
 
 ### Apps, URLs & Shortcuts
+- `rc nav <triggers|settings|ha|km|mqtt|add|advanced|testkit>` - Navigate directly to any RemoteCompanion panel or trigger editor (supports `remotecompanion://` deep linking URL scheme).
 - `rc open <alias|bundleID>` (e.g., `youtube`, `spotify`, `settings`, `messages`, `home`, `photos`, `camera`, `clock`, `maps`, `calendar`, `weather`, `notes`, `reminders`, `appstore`, `mail`, `music`, `phone`, `stocks`, `calculator`, `tv`, `wallet`, `facetime`, `files`).
 - `rc kill <alias|bundleID>` - Force close an app.
-- `rc shortcut -r "Name" [-p "Input"]` - Run any Shortcut (requires SpringCuts).
+- `rc kill current` - Force close the currently focused app.
+- `rc shortcut -r "Name" [-i] [-p "Input"]` - Run any Shortcut (`-i`: silently, without the Shortcuts progress on screen).
 - `rc url "https://google.com"` - Open any link (with smart unlock).
 - `rc spotify <playlist|album|artist> <id>` - Play specific Spotify content.
 - `rc spotify play` - Resume Spotify playback.
@@ -147,6 +151,12 @@ Access the desktop-class automation hub at `http://[DEVICE_IP]:8080` from any co
 - `rc ldrestart` - Soft-reboot the device.
 - `rc userspace-reboot` - Restart userspace.
 - `rc webui [on|off|status]` - Enable, disable, or check the status of the Web UI server.
+- `rc webui access [any|networks|local]` - Limit where the Web UI can be reached from (default `any`).
+- `rc webui wifi` - Show the current Wi-Fi network name (used for Trusted Networks access).
+- `rc focus [on|toggle] <name>` / `rc focus off` / `rc focus status` - Set or query a Focus mode.
+- `rc stop trigger <key>` - Cancel another trigger's running sequence.
+- `rc button triggers pause [minutes]` / `rc button triggers resume` - Temporarily return buttons and gestures to stock behavior.
+- `rc nfc scanner [pause|resume|toggle]` - Pause or resume NFC tag scanning.
 
 <details>
 <summary><b>Hardware Triggers Reference (Tweak App)</b></summary>
@@ -156,7 +166,9 @@ Configure these in the `RemoteCompanion` app for custom action sequences. Tip: *
 - **Hardware Buttons**:
   - **Power**: Double-tap, Long-press, **Triple/Quadruple click**, or **Power + Volume Up/Down** combos.
   - **Volume**: Long hold Up/Down (0.3s), **Volume Up + Down** combo, or sequential **Volume Up then Down** / **Volume Down then Up** one-handed pocket gestures.
-  - **Home**: Double-tap (Touch ID), Double, Triple, or Quadruple click.
+  - **Home**: Double-tap (Touch ID), Double, Triple, or Quadruple click, **Hold**, or **Home + Power** combo.
+  - **CarPlay**: Connected / Disconnected triggers.
+  - **Apple Watch**: Ping iPhone (tap or hold Ping on a paired Watch).
 - **Touch ID Sensor**: **Single Tap** and **Hold (Rest Finger)** triggers.
 - **NFC Triggers**: Scan physical NFC tags to run actions on screen wake (Optional toggle in Settings).
 - **Ringer Switch**: Mute, Unmute, or Toggle triggers.
@@ -170,6 +182,8 @@ Configure these in the `RemoteCompanion` app for custom action sequences. Tip: *
   - **Scheduled**: Run actions at specific times (e.g., Daily at 4 PM).
   - **WiFi/Bluetooth**: Trigger actions on network or device connectivity.
   - **App Launch**: Fire actions when a specific app is opened.
+  - **App Exit**: Fire actions when a specific app is switched away from.
+  - **Audio Output**: Fire actions when an AirPlay, Bluetooth, or iPhone output is set or unset.
 
 </details>
 
@@ -234,6 +248,10 @@ Enable two-way automation between your iOS device and Home Assistant:
 3. Enter your **Server URL** (e.g., `http://192.168.1.100:8123`) and a **Long-Lived Access Token** (generated under your Home Assistant Profile &rarr; Long-Lived Access Tokens).
 4. Click **Test Connection** to verify setup.
 
+<p align="center">
+  <img src="images/4.1.0/05_home_assistant.png" width="220" alt="Home Assistant Setup" />
+</p>
+
 Once configured:
 - Use **Control Home Assistant Entity…** in any trigger sequence to search and select entities (lights, switches, scenes, scripts, automations, locks) with live state badges and quick action options (Toggle, Turn On, Turn Off), or enter custom commands manually.
 - Execute HA commands directly via CLI: `rc ha toggle light.bedroom_lights`, `rc ha call light.turn_on light.bedroom_lights`, or `rc ha raw light.turn_on '{"entity_id":"light.bedroom","brightness":200}'`.
@@ -272,6 +290,10 @@ Trigger macros on your Mac directly from iPhone hardware gestures, buttons, NFC 
 4. Toggle on **Enable Keyboard Maestro**.
 5. Enter your **Web Server URL** (e.g., `http://192.168.1.50:4490`) and optional **Username** and **Password** (supports HTTP Basic Authentication).
 6. Click **Test Connection** to verify connectivity.
+
+<p align="center">
+  <img src="images/4.1.0/06_keyboard_maestro.png" width="220" alt="Keyboard Maestro Setup" />
+</p>
 
 Once configured:
 - **Visual Macro Picker**: Open **Keyboard Maestro: Trigger Macro…** in the action picker to browse and search all macros categorized by group, with instant live filtering and parameter selection.
@@ -424,11 +446,11 @@ end
 </details>
 
 <details>
-<summary><b>AI-Assisted Sequence Builder</b></summary>
+<summary><b>Assistant Sequence Builder</b></summary>
 
-Use any AI assistant (ChatGPT, Claude, Gemini, etc.) to build action sequences from plain English, then paste the result directly into the app using **Import**.
+Build custom action sequences, then paste the result directly into the app using **Import**.
 
-**[→ Full guide + copy-paste AI prompt: SCRIPTING.md](SCRIPTING.md)**
+**[→ Full guide](SCRIPTING.md)**
 
 Example prompt:
 ```
@@ -472,6 +494,26 @@ Execution URLs for your specific triggers:
 
 </details>
 
+<details>
+<summary><b>Pausing Button Triggers</b></summary>
+
+The **Button Triggers** action pauses the hardware button, Touch ID, ringer switch and screen gesture triggers for 15 minutes, an hour, or until resumed. While paused those buttons and gestures work as without RemoteCompanion; event triggers (NFC tags, Wi-Fi, Bluetooth, schedules, notifications, apps) still run. The app shows the pause above its title, with Resume. A paused button can't resume itself, so resume from the app, an NFC tag or another event trigger, the Web UI or a shortcut (`button triggers resume`).
+
+Commands: `button triggers pause [minutes]`, `button triggers resume`, and `button triggers` for the state.
+
+A tweak that needs the buttons to itself for a while (an alarm, for one) can pause them the same way by setting the state of the Darwin notification `com.pizzaman.rc.pause_triggers` to 1, and back to 0 when it's done:
+
+```objc
+int token;
+notify_register_check("com.pizzaman.rc.pause_triggers", &token);
+notify_set_state(token, 1);   // pause; 0 resumes
+notify_post("com.pizzaman.rc.pause_triggers");
+```
+
+A pause from a tweak left on for 4 hours ends by itself.
+
+</details>
+
 ---
 
 ## Security
@@ -493,11 +535,11 @@ If you experience the "Updating Cards" screen or other conflicts with Apple Pay 
 
 This ensures the tweak does not attempt to access the NFC controller on wake, resolving conflicts with system services.
 
-### iOS 14 arm64e (A12+) Compatibility
-Due to Pointer Authentication Code (PAC) changes in modern toolchains, iOS 14 on **arm64e (A12 and newer)** devices is currently unsupported and may cause a Safe Mode loop.
-- **Supported**: iOS 14 on A11 and below (iPhone 8/X and older, iPad Air 2, etc.)
-- **Supported**: iOS 15+ on all devices.
-- **Workaround**: If you are on iOS 14 with a newer device, you may need to compile the tweak using **Xcode 15.4** or earlier to ensure correct PAC signatures.
+### iOS 14 Architecture Compatibility
+RemoteCompanion ships as fat universal binaries containing both `arm64` and `arm64e` slices:
+- **A12 and newer (iPhone XS, 11, 12, etc.)**: Runs the native `arm64e` slice across iOS 14, 15, and 16+. On iOS 14, binaries are compiled targeting iOS 14.0 (`TARGET := iphone:clang:latest:14.0`) to match the iOS 14+ `arm64e` ABI v2 standard.
+- **A11 and older (iPhone 8/X, iPad Air 2, etc.)**: Runs the standard `arm64` slice natively on iOS 14–16+.
+- **Troubleshooting**: If compiling from source or experiencing Safe Mode on iOS 14, ensure your Theos target deployment is explicitly set to `14.0` and that the installed dylibs retain both slices (`lipo -archs "/Library/MobileSubstrate/DynamicLibraries/RemoteCommand.dylib"`, prefixed with `/var/jb/` on rootless).
 
 </details>
 
@@ -505,6 +547,8 @@ Due to Pointer Authentication Code (PAC) changes in modern toolchains, iOS 14 on
 
 ## Support & Feedback
 
-If you encounter any issues or have feature requests, please [open an issue](https://github.com/saihgupr/remotecompanion/issues) on GitHub.
+If you encounter any issues, bugs, or have feature requests, please [open an issue on GitHub](https://github.com/saihgupr/remotecompanion/issues).
 
-RemoteCompanion is open-source and free. If you find it useful, consider giving it a star on GitHub or making a small [donation](https://ko-fi.com/saihgupr) to support development.
+RemoteCompanion is open-source and free. If you find it useful, consider giving it a star on GitHub or making a donation to support development!
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/saihgupr)

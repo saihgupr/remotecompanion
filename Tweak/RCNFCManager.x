@@ -18,6 +18,20 @@ extern BOOL RCIsNFCEnabled();
 // Declare the screen-off window from Tweak.x
 extern NSTimeInterval RCNFCScreenOffWindow();
 
+// Experimental NFC: iOS's own background tag reader (iPhone XS and later) reads tags while the screen is
+// on; the scan below runs only with the screen off. From Tweak.x.
+extern BOOL RCNFCBackgroundReading();
+
+// Darwin notifications shared with RCNFCReader (in nfcd)
+#define kRCNFCBackgroundState "com.pizzaman.rc.nfc_background"         // state 1: Experimental NFC is on
+#define kRCNFCBackgroundTag   "com.pizzaman.rc.nfc_background_tag"     // a tag: state = ID length << 56 | ID bytes
+
+// The scan paused by the NFC Scanner action (Pause / Resume / Toggle) until resumed or a respring.
+// Only the scan: with Experimental NFC, tags are still read while the screen is on.
+static BOOL g_rcnfcScannerPaused;
+// The screen is dark (com.apple.springboard.hasBlankedScreen): SpringBoard's own screen state can lag it
+static BOOL g_rcnfcScreenBlanked;
+
 // ============ Private NearField API ============
 @class NFReaderSession, NFTag;
 
@@ -57,6 +71,8 @@ extern NSTimeInterval RCNFCScreenOffWindow();
 @property (nonatomic, strong) NSDate *screenOffSince; // when the screen was first seen off, nil while it is on
 @property (nonatomic, strong) NSTimer *screenWatch;   // checks the screen while a scan is open
 @property (nonatomic, assign) NSUInteger endedEarly;  // sessions iOS ended on its own, in a row
+@property (nonatomic, assign) BOOL quiet;             // a routine restart (Wallet still on screen): not logged step by step
+@property (nonatomic, assign) BOOL waitingLogged;     // "waiting for the controller" logged for this scan
 
 + (instancetype)sharedInstance;
 - (void)startScanning;
@@ -96,6 +112,84 @@ static const NSTimeInterval kRCNFCRescanDelay = 0.3;
 static const NSTimeInterval kRCNFCMaxRescanDelay = 5.0;
 // The app's own scanner has the reader this long after it asks the tweak to stop
 static const NSTimeInterval kRCNFCAppHoldsReader = 120.0;
+// nfcd gives the NFC controller to one session at a time, in the order they asked, and doesn't take
+// it from a session that has it: while the scan is open, Apple Pay and Wallet wait for it.
+// A new scan that is waiting for the controller tries to start polling this often until it gets it
+static const NSTimeInterval kRCNFCWaitRetry = 0.5;
+
+// Apple Pay (the side button double-click, or a pass shown on the lock screen) and the Wallet app need
+// the NFC controller for the cards: while one of them is on screen, the scan steps aside
+static BOOL rcnfc_atLeastIOS15(void) {
+    static int answer = -1;
+    if (answer < 0) answer = [[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:(NSOperatingSystemVersion){15, 0, 0}];
+    return answer;
+}
+
+// Apple Pay on iOS 14 (the Home button double-click): a transient overlay window, hosting a view from the
+// process whose state is given. YES while one is on screen.
+static BOOL rcnfc_overlayFromProcess(id state) {
+    SEL pidSel = NSSelectorFromString(@"pid");
+    int pid = [state respondsToSelector:pidSel] ? ((int (*)(id, SEL))objc_msgSend)(state, pidSel) : 0;
+    if (pid <= 0) return NO;
+    Class overlayWindow = objc_getClass("SBTransientOverlayWindow");
+    if (!overlayWindow) return NO;
+    SEL serviceSel = NSSelectorFromString(@"serviceProcessIdentifier");
+    for (UIWindow *window in [UIApplication sharedApplication].windows) {
+        if (window.hidden || ![window isKindOfClass:overlayWindow]) continue;
+        NSMutableArray *controllers = [NSMutableArray array];
+        if (window.rootViewController) [controllers addObject:window.rootViewController];
+        for (NSUInteger i = 0; i < controllers.count; i++) {
+            UIViewController *controller = controllers[i];
+            if ([controller respondsToSelector:serviceSel] && ((int (*)(id, SEL))objc_msgSend)(controller, serviceSel) == pid) return YES;
+            [controllers addObjectsFromArray:controller.childViewControllers];
+            if (controller.presentedViewController) [controllers addObject:controller.presentedViewController];
+        }
+    }
+    return NO;
+}
+
+static BOOL rcnfc_walletOnScreen(void) {
+    // The Wallet app in front - while unlocked: locked, it still counts as in front behind the lock screen
+    Class lockClass = objc_getClass("SBLockScreenManager");
+    SEL sharedLock = NSSelectorFromString(@"sharedInstance"), uiLocked = NSSelectorFromString(@"isUILocked");
+    id lockManager = [lockClass respondsToSelector:sharedLock] ? ((id (*)(Class, SEL))objc_msgSend)(lockClass, sharedLock) : nil;
+    BOOL locked = [lockManager respondsToSelector:uiLocked] && ((BOOL (*)(id, SEL))objc_msgSend)(lockManager, uiLocked);
+    id springBoard = [UIApplication sharedApplication];
+    SEL frontSel = NSSelectorFromString(@"_accessibilityFrontMostApplication");
+    id front = !locked && [springBoard respondsToSelector:frontSel] ? ((id (*)(id, SEL))objc_msgSend)(springBoard, frontSel) : nil;
+    if ([front respondsToSelector:@selector(bundleIdentifier)] && [[front bundleIdentifier] isEqualToString:@"com.apple.Passbook"]) return YES;
+
+    // Apple Pay (the side button double-click, or a pass on the lock screen) runs in these services. They
+    // keep running once closed, so what counts is being in front, or running rather than suspended
+    // (task state 2; suspended is 3), which on iOS 17 is the sign PassbookUIService is on screen.
+    Class controllerClass = objc_getClass("SBApplicationController");
+    SEL shared = NSSelectorFromString(@"sharedInstance"), lookup = NSSelectorFromString(@"applicationWithBundleIdentifier:");
+    if (![controllerClass respondsToSelector:shared]) return NO;
+    id controller = ((id (*)(Class, SEL))objc_msgSend)(controllerClass, shared);
+    if (![controller respondsToSelector:lookup]) return NO;
+    for (NSString *bundle in @[@"com.apple.PassbookUIService", @"com.apple.PassbookUISceneService"]) {
+        id app = ((id (*)(id, SEL, id))objc_msgSend)(controller, lookup, bundle);
+        SEL stateSel = NSSelectorFromString(@"processState");
+        id state = [app respondsToSelector:stateSel] ? ((id (*)(id, SEL))objc_msgSend)(app, stateSel) : nil;
+        SEL foreground = NSSelectorFromString(@"isForeground"), taskState = NSSelectorFromString(@"taskState");
+        BOOL isFront = [state respondsToSelector:foreground] && ((BOOL (*)(id, SEL))objc_msgSend)(state, foreground);
+        long long task = [state respondsToSelector:taskState] ? ((long long (*)(id, SEL))objc_msgSend)(state, taskState) : -1;
+        if (isFront) return YES;
+        // iOS 14 keeps PassbookUIService running whenever the phone is locked, so there it says nothing
+        if (task == 2 && rcnfc_atLeastIOS15()) return YES;
+        if ([bundle isEqualToString:@"com.apple.PassbookUIService"] && rcnfc_overlayFromProcess(state)) return YES;
+    }
+    return NO;
+}
+
+// Logged only when it changes
+static BOOL rcnfc_walletCheck(void) {
+    static BOOL wasOnScreen;
+    BOOL onScreen = rcnfc_walletOnScreen();
+    if (onScreen != wasOnScreen) SRLog(@"[NFC] Wallet / Apple Pay %@", onScreen ? @"on screen - the scan steps aside" : @"closed - scanning again");
+    wasOnScreen = onScreen;
+    return onScreen;
+}
 
 static BOOL rcnfc_screenIsOn(void) {
     Class backlightClass = objc_getClass("SBBacklightController");
@@ -113,17 +207,19 @@ static BOOL rcnfc_screenIsOn(void) {
         if (self.isScanning) return;
         if (self.suspendedUntil && [self.suspendedUntil timeIntervalSinceNow] > 0) {
             SRLog(@"[NFC] Not restarting: the app is scanning");
+            self.quiet = NO;
             return;
         }
         if (![self screenOffWindowOpen]) {
             SRLog(@"[NFC] Not restarting: the screen is off and nothing was read for %.0f s", RCNFCScreenOffWindow());
+            self.quiet = NO;
             return;
         }
         // Timers stand still while the phone idles with the screen off, so the scan can restart much
         // later than planned. A tag that stayed on the phone meanwhile is the same tap, not a new one.
         self.rescanLateness = MAX(0, -[planned timeIntervalSinceNow]);
         if (self.rescanLateness > 2.0) SRLog(@"[NFC] The restart ran %.0f s late", self.rescanLateness);
-        SRLog(@"[NFC] Restarting the scan");
+        if (!self.quiet) SRLog(@"[NFC] Restarting the scan");
         [self startScanning];
     });
 }
@@ -158,6 +254,11 @@ static BOOL rcnfc_screenIsOn(void) {
             self.screenWatch = nil;
             return;
         }
+        if (rcnfc_walletCheck()) {
+            [self stopScanning];
+            [self scheduleRescanAfter:1.0];
+            return;
+        }
         if ([self screenOffWindowOpen]) return;
         SRLog(@"[NFC] Screen off and nothing read for %.0f s - stopping the scan", RCNFCScreenOffWindow());
         [self stopScanning];
@@ -183,19 +284,27 @@ static BOOL rcnfc_screenIsOn(void) {
     NSError *error = nil;
     BOOL polling = ((BOOL (*)(id, SEL, NSError **))objc_msgSend)(session, NSSelectorFromString(@"startPollingWithError:"), &error);
     if (polling) {
-        SRLog(@"[NFC] Polling started (attempt %d)", attempt);
+        if (!self.quiet || attempt > 4) SRLog(@"[NFC] Polling started (attempt %d)", attempt);
+        self.quiet = NO;
         return;
     }
-    if (attempt >= 20) {
+    // Error 47: nfcd has switched reader mode off for a while (its heat protection). Try again later
+    if (error.code == 47 && attempt >= 20) {
         SRLog(@"[NFC] Polling would not start after %d attempts: %@", attempt, error);
-        // Error 47: nfcd has switched reader mode off for a while (its heat protection). Try again later
-        if (error.code == 47) {
-            [self stopScanning];
-            [self scheduleRescanAfter:30.0];
-        }
+        self.quiet = NO;
+        [self stopScanning];
+        [self scheduleRescanAfter:30.0];
         return;
     }
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    // "Session not active" for more than a moment: another session has the controller (Wallet, an
+    // app). This one is next in line: keep trying until it gets the controller, then poll at once.
+    NSTimeInterval wait = 0.25;
+    if (attempt >= 20) {
+        if (!self.waitingLogged) SRLog(@"[NFC] Waiting for the NFC controller: %@", error.localizedDescription);
+        self.waitingLogged = YES;
+        wait = kRCNFCWaitRetry;
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(wait * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [self startPollingSession:session attempt:attempt + 1];
     });
 }
@@ -211,6 +320,26 @@ static BOOL rcnfc_screenIsOn(void) {
         return;
     }
 
+    if (g_rcnfcScannerPaused) {
+        if (!self.quiet) SRLog(@"[NFC] The scanner is paused (NFC Scanner action) - not scanning");
+        self.quiet = NO;
+        return;
+    }
+
+    // Experimental NFC: with the screen on, iOS reads the tags itself and the scan stays out of the way
+    if (RCNFCBackgroundReading() && !g_rcnfcScreenBlanked && rcnfc_screenIsOn()) {
+        if (!self.quiet) SRLog(@"[NFC] Screen on with Experimental NFC: iOS reads the tags - not scanning");
+        self.quiet = NO;
+        return;
+    }
+
+    // Wallet or Apple Pay is using the controller: look again in a moment
+    if (rcnfc_walletCheck()) {
+        self.quiet = YES; // looked at every second until it closes: not logged each time
+        [self scheduleRescanAfter:1.0];
+        return;
+    }
+
     // Debounce: a start right after another one (several wake hooks fire together)
     if (self.lastScanTime && [[NSDate date] timeIntervalSinceDate:self.lastScanTime] < 0.3) {
         SRLog(@"[NFC] Skipping scan (debounce) - trying again shortly");
@@ -218,27 +347,28 @@ static BOOL rcnfc_screenIsOn(void) {
         return;
     }
 
-    SRLog(@"[NFC] Starting NFC Session...");
+    if (!self.quiet) SRLog(@"[NFC] Starting NFC Session...");
     [self stopScanning];
 
     self.isScanning = YES;
+    self.waitingLogged = NO;
     self.lastScanTime = [NSDate date];
     self.sessionStart = [NSDate date];
 
     // Force load NearField
     void *nfHandle = dlopen("/System/Library/PrivateFrameworks/NearField.framework/NearField", RTLD_NOW);
-    SRLog(@"[NFC] NearField framework loaded: %@", nfHandle ? @"YES" : @"NO");
+    if (!self.quiet) SRLog(@"[NFC] NearField framework loaded: %@", nfHandle ? @"YES" : @"NO");
 
     // Try Private API
     Class nfManager = NSClassFromString(@"NFHardwareManager");
-    SRLog(@"[NFC] NFHardwareManager class: %@", nfManager ? @"FOUND" : @"NOT FOUND");
+    if (!self.quiet) SRLog(@"[NFC] NFHardwareManager class: %@", nfManager ? @"FOUND" : @"NOT FOUND");
     
     BOOL privateStarted = NO;
     if (nfManager && [nfManager respondsToSelector:@selector(sharedHardwareManager)]) {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
         id manager = [nfManager performSelector:@selector(sharedHardwareManager)];
-        SRLog(@"[NFC] sharedHardwareManager: %@", manager ? @"GOT" : @"NIL");
+        if (!self.quiet) SRLog(@"[NFC] sharedHardwareManager: %@", manager ? @"GOT" : @"NIL");
         
         if (manager) {
             SEL startWithDelSel = NSSelectorFromString(@"startReaderSessionWithDelegate:");
@@ -247,10 +377,10 @@ static BOOL rcnfc_screenIsOn(void) {
 
             if ([manager respondsToSelector:startWithDelSel]) {
                 session = [manager performSelector:startWithDelSel withObject:self];
-                SRLog(@"[NFC] Private Session started via startReaderSessionWithDelegate: %@", session ? @"SUCCESS" : @"FAILED");
+                if (!self.quiet || !session) SRLog(@"[NFC] Private Session started via startReaderSessionWithDelegate: %@", session ? @"SUCCESS" : @"FAILED");
             } else if ([manager respondsToSelector:startSel]) {
                 session = [manager performSelector:startSel withObject:nil];
-                SRLog(@"[NFC] Private Session started via startReaderSession: %@", session ? @"SUCCESS" : @"FAILED");
+                if (!self.quiet || !session) SRLog(@"[NFC] Private Session started via startReaderSession: %@", session ? @"SUCCESS" : @"FAILED");
             } else {
                 SRLog(@"[NFC] No known start session selector found!");
             }
@@ -261,10 +391,10 @@ static BOOL rcnfc_screenIsOn(void) {
                 // Try various delegate setters
                 if ([session respondsToSelector:NSSelectorFromString(@"setDelegate:")]) {
                     [session performSelector:NSSelectorFromString(@"setDelegate:") withObject:self];
-                    SRLog(@"[NFC] Set delegate via setDelegate:");
+                    if (!self.quiet) SRLog(@"[NFC] Set delegate via setDelegate:");
                 } else if ([session respondsToSelector:NSSelectorFromString(@"setSessionDelegate:")]) {
                     [session performSelector:NSSelectorFromString(@"setSessionDelegate:") withObject:self];
-                    SRLog(@"[NFC] Set delegate via setSessionDelegate:");
+                    if (!self.quiet) SRLog(@"[NFC] Set delegate via setSessionDelegate:");
                 }
 
                 if ([session respondsToSelector:NSSelectorFromString(@"startPollingWithError:")]) {
@@ -283,7 +413,7 @@ static BOOL rcnfc_screenIsOn(void) {
     }
 
     if (privateStarted) {
-        SRLog(@"[NFC] Using Private API - scan active");
+        if (!self.quiet) SRLog(@"[NFC] Using Private API - scan active");
         [self startScreenWatch];
         return;
     }
@@ -323,7 +453,7 @@ static BOOL rcnfc_screenIsOn(void) {
             [self.privateSession performSelector:NSSelectorFromString(@"endSession")];
         }
         self.privateSession = nil;
-        SRLog(@"[NFC] Stopped private session");
+        if (!self.quiet) SRLog(@"[NFC] Stopped private session");
     }
 #pragma clang diagnostic pop
     [self.screenWatch invalidate];
@@ -335,6 +465,11 @@ static BOOL rcnfc_screenIsOn(void) {
     if (!RCIsNFCEnabled()) {
         return;
     }
+    // Experimental NFC: iOS reads the tags while the screen is on. These wake hooks also fire as the
+    // screen goes dark, so they leave the scan alone: the screen-dark notification starts and ends it.
+    if (RCNFCBackgroundReading()) {
+        return;
+    }
 
     // Prevent duplicate handling within short window
     if (self.wakeHandled) {
@@ -343,6 +478,7 @@ static BOOL rcnfc_screenIsOn(void) {
     }
     self.wakeHandled = YES;
     self.suspendedUntil = nil;
+    self.quiet = NO;
     [self noteActivity];
     
     // Reset wake flag after 1 second (was 3s)
@@ -594,6 +730,62 @@ static void resume_nfc_callback(CFNotificationCenterRef center, void *observer, 
     [manager scheduleRescanAfter:2.5];
 }
 
+// Experimental NFC on or off (settings changed, or at start): RCNFCReader in nfcd is told, and the scan
+// starts or stops to match the screen
+void RCNFCConfigChanged(void) {
+    static int token = NOTIFY_TOKEN_INVALID;
+    if (token == NOTIFY_TOKEN_INVALID) notify_register_check(kRCNFCBackgroundState, &token);
+    BOOL on = RCNFCBackgroundReading();
+    uint64_t previous = 2;
+    notify_get_state(token, &previous);
+    if (previous == (on ? 1 : 0)) return;
+    notify_set_state(token, on ? 1 : 0);
+    notify_post(kRCNFCBackgroundState);
+    SRLog(@"[NFC] Experimental NFC %@", on ? @"on: iOS reads tags while the screen is on" : @"off");
+    RCNFCManager *manager = [RCNFCManager sharedInstance];
+    if (!rcnfc_screenIsOn()) return;
+    if (on) [manager stopScanning];
+    else [manager startScanning];
+}
+
+// The NFC Scanner action: "pause", "resume" or "toggle"; returns the state after it
+NSString *RCNFCScannerCommand(NSString *what) {
+    RCNFCManager *manager = [RCNFCManager sharedInstance];
+    BOOL pause = [what isEqualToString:@"pause"] ? YES : [what isEqualToString:@"resume"] ? NO : !g_rcnfcScannerPaused;
+    if (![what isEqualToString:@"pause"] && ![what isEqualToString:@"resume"] && ![what isEqualToString:@"toggle"]) {
+        return g_rcnfcScannerPaused ? @"paused" : @"running";
+    }
+    if (pause != g_rcnfcScannerPaused) {
+        g_rcnfcScannerPaused = pause;
+        SRLog(@"[NFC] Scanner %@ (NFC Scanner action)", pause ? @"paused" : @"resumed");
+        if (pause) {
+            [manager stopScanning];
+        } else {
+            [manager noteActivity];
+            manager.rescanLateness = 0;
+            [manager startScanning];
+        }
+    }
+    return g_rcnfcScannerPaused ? @"paused" : @"running";
+}
+
+// A tag iOS's own reader detected (Experimental NFC), from RCNFCReader in nfcd
+static void rcnfc_backgroundTag(uint64_t state) {
+    unsigned length = (unsigned)(state >> 56);
+    if (length == 0 || length > 7 || !RCIsNFCEnabled() || !RCNFCBackgroundReading()) return;
+    NSMutableString *uid = [NSMutableString string];
+    for (int i = (int)length - 1; i >= 0; i--) [uid appendFormat:@"%02X", (unsigned)((state >> (8 * i)) & 0xFF)];
+    RCNFCManager *manager = [RCNFCManager sharedInstance];
+    [manager noteActivity];
+    if ([manager isRepeatOfTag:uid]) {
+        SRLog(@"[NFC] Same tag as a moment ago (iOS reader) - not triggering again");
+        return;
+    }
+    SRLog(@"[NFC] Tag %@ read by iOS (Experimental NFC)", uid);
+    AudioServicesPlaySystemSound(1520);
+    RCExecuteTrigger([@"nfc_" stringByAppendingString:uid]);
+}
+
 %ctor {
     %init;
 
@@ -614,6 +806,42 @@ static void resume_nfc_callback(CFNotificationCenterRef center, void *observer, 
         CFNotificationSuspensionBehaviorDeliverImmediately);
         
     SRLog(@"[NFC-WAKE] RCNFCManager hooks initialized - multi-hook wake detection active");
+
+    // Experimental NFC: tags from iOS's own reader, and the screen going dark (the scan runs only then)
+    int tagToken;
+    notify_register_dispatch(kRCNFCBackgroundTag, &tagToken, dispatch_get_main_queue(), ^(int t) {
+        uint64_t state = 0;
+        notify_get_state(t, &state);
+        rcnfc_backgroundTag(state);
+    });
+    int blankToken;
+    notify_register_dispatch("com.apple.springboard.hasBlankedScreen", &blankToken, dispatch_get_main_queue(), ^(int t) {
+        uint64_t blanked = 0;
+        notify_get_state(t, &blanked);
+        g_rcnfcScreenBlanked = blanked != 0;
+        if (!RCIsNFCEnabled() || !RCNFCBackgroundReading()) return;
+        RCNFCManager *manager = [RCNFCManager sharedInstance];
+        if (!blanked) {
+            if (manager.isScanning) {
+                SRLog(@"[NFC] Screen on with Experimental NFC - ending the screen-off scan");
+                [manager stopScanning];
+            }
+            return;
+        }
+        if (RCNFCScreenOffWindow() <= 0) return;
+        if (g_rcnfcScannerPaused) {
+            SRLog(@"[NFC] Screen off with Experimental NFC - the scanner is paused (NFC Scanner action)");
+            return;
+        }
+        // Screen off: tags can be tapped for the screen-off window (Settings > NFC With Screen Off)
+        SRLog(@"[NFC] Screen off with Experimental NFC - scanning for %.0f s", RCNFCScreenOffWindow());
+        manager.screenOffSince = [NSDate date];
+        [manager noteActivity];
+        manager.rescanLateness = 0;
+        [manager startScanning];
+    });
+    // Tell nfcd once the settings are readable
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ RCNFCConfigChanged(); });
 }
 
 

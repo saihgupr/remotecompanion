@@ -7,13 +7,27 @@
 #import <notify.h>
 #import "RCWiFiTriggerViewController.h"
 #import "RCBluetoothTriggerViewController.h"
+#import "RCAudioOutputTriggerViewController.h"
+#import "RCWrapSizing.h"
 #import "RCAppPickerViewController.h"
 #import "RCNotificationTriggerViewController.h"
 #import "RCScheduledTriggerViewController.h"
 #import "RCMQTTTriggerViewController.h"
 #import "RCCategoryBar.h"
+#import "RCServerClient.h"
 
 #define kSimulateNotificationPrefix "com.pizzaman.rc.simulate."
+
+// Grows to show the whole title and subtitle, never below the usual row height
+@interface RCTriggerCell : UITableViewCell
+@end
+
+@implementation RCTriggerCell
+- (CGSize)systemLayoutSizeFittingSize:(CGSize)targetSize withHorizontalFittingPriority:(UILayoutPriority)horizontalFittingPriority verticalFittingPriority:(UILayoutPriority)verticalFittingPriority {
+    if (![[NSUserDefaults standardUserDefaults] boolForKey:@"RCWrapLongNamesEnabled"]) return CGSizeMake(targetSize.width, 64.0);
+    return CGSizeMake(targetSize.width, RCWrappedCellHeight(self, targetSize.width, 64.0));
+}
+@end
 
 @interface RCTriggersViewController ()
 @property (nonatomic, strong) NSArray<NSArray<NSString *> *> *sections;
@@ -42,6 +56,10 @@
     if ([triggerKey containsString:@"statusbar"]) return @"hand.draw"; // Status bar / screen gestures
     if ([triggerKey containsString:@"home"]) return @"circle.circle"; // Home button
     if ([triggerKey containsString:@"ringer"]) return @"bell.fill";
+    if ([triggerKey hasPrefix:@"trigger_watch_ping"]) {
+        if (@available(iOS 14.0, *)) return @"applewatch.radiowaves.left.and.right";
+        return @"bell.fill";
+    }
     if ([triggerKey containsString:@"edge"]) {
         if (@available(iOS 14.2, *)) return @"iphone.homebutton.radiowaves.left.and.right";
         return @"hand.draw";
@@ -50,13 +68,17 @@
     if ([triggerKey hasPrefix:@"nfc_"]) return @"wave.3.right.circle.fill";
     if ([triggerKey hasPrefix:@"wifi_"]) return @"wifi";
     if ([triggerKey hasPrefix:@"bt_"]) return @"bolt.horizontal.fill";
+    if ([triggerKey hasPrefix:@"output_"]) return @"airplayaudio";
     if ([triggerKey hasPrefix:@"app_launch_"]) return @"app.badge";
+    if ([triggerKey hasPrefix:@"app_exit_"]) return @"rectangle.portrait.and.arrow.right";
     if ([triggerKey hasPrefix:@"notif_"] || [triggerKey hasPrefix:@"notify_"]) return @"bell.badge.fill";
     if ([triggerKey hasPrefix:@"sched_"]) return @"clock.fill";
     if ([triggerKey hasPrefix:@"mqtt_"] || [triggerKey hasPrefix:@"mqtt_sub_"]) return @"antenna.radiowaves.left.and.right";
     if ([triggerKey isEqualToString:@"shake"]) return @"waveform.path.ecg";
     if ([triggerKey isEqualToString:@"trigger_power_connect"]) return @"bolt.fill";
     if ([triggerKey isEqualToString:@"trigger_power_disconnect"]) return @"bolt.slash.fill";
+    if ([triggerKey isEqualToString:@"trigger_carplay_connect"]) return @"car.fill";
+    if ([triggerKey isEqualToString:@"trigger_carplay_disconnect"]) return @"car";
     if ([triggerKey isEqualToString:@"trigger_device_lock"]) return @"lock.fill";
     if ([triggerKey isEqualToString:@"trigger_device_unlock"]) return @"lock.open.fill";
     if ([triggerKey isEqualToString:@"trigger_media_play"]) return @"play.fill";
@@ -94,7 +116,9 @@
 
     self.navigationItem.rightBarButtonItems = @[settingsItem, addItem];
     
-    self.tableView.rowHeight = 64;
+    // Long names (a device or app name, a chain of actions) wrap, and the row grows with them
+    self.tableView.rowHeight = [[NSUserDefaults standardUserDefaults] boolForKey:@"RCWrapLongNamesEnabled"] ? UITableViewAutomaticDimension : 64.0;
+    self.tableView.estimatedRowHeight = 64;
     if (@available(iOS 15.0, *)) {
         // Spacing above headers is built into the header views instead (see
         // heightForHeaderInSection:), so the first one can sit close to the category bar
@@ -134,6 +158,7 @@
                                              selector:@selector(handleTweaksChanged:) 
                                                  name:@"RCConfigTweaksChangedNotification" 
                                                object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(wrapLongNamesSettingChanged:) name:@"RCWrapLongNamesSettingChanged" object:nil];
                                                
     [self setupFooterView];
     [self applyTweaks];
@@ -141,6 +166,11 @@
 
 - (void)handleTweaksChanged:(NSNotification *)note {
     [self applyTweaks];
+}
+
+- (void)wrapLongNamesSettingChanged:(NSNotification *)note {
+    self.tableView.rowHeight = [[NSUserDefaults standardUserDefaults] boolForKey:@"RCWrapLongNamesEnabled"] ? UITableViewAutomaticDimension : 64.0;
+    [self.tableView reloadData];
 }
 
 - (void)applyTweaks {
@@ -231,6 +261,45 @@
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     [self reloadTableData];
+    [self updatePauseState];
+}
+
+// Paused button triggers (the Button Triggers action, or another tweak): a line above the title,
+// and Resume when it's the action's pause. The states are the tweak's (see RC_TriggersPaused).
+- (void)updatePauseState {
+    static int untilToken = -1, tweakToken = -1;
+    static dispatch_once_t once;
+    __weak typeof(self) weakSelf = self;
+    dispatch_once(&once, ^{
+        notify_register_check("com.pizzaman.rc.pause_buttons_until", &untilToken);
+        notify_register_check("com.pizzaman.rc.pause_triggers", &tweakToken);
+        int t1, t2;
+        notify_register_dispatch("com.pizzaman.rc.pause_buttons_until", &t1, dispatch_get_main_queue(), ^(int t) { [weakSelf updatePauseState]; });
+        notify_register_dispatch("com.pizzaman.rc.pause_triggers", &t2, dispatch_get_main_queue(), ^(int t) { [weakSelf updatePauseState]; });
+    });
+    uint64_t until = 0, byTweak = 0;
+    if (untilToken != -1) notify_get_state(untilToken, &until);
+    if (tweakToken != -1) notify_get_state(tweakToken, &byTweak);
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    if (until != UINT64_MAX && until <= (uint64_t)now) until = 0;
+
+    NSString *prompt = nil;
+    if (until == UINT64_MAX) {
+        prompt = @"Button triggers paused";
+    } else if (until) {
+        NSString *time = [NSDateFormatter localizedStringFromDate:[NSDate dateWithTimeIntervalSince1970:until] dateStyle:NSDateFormatterNoStyle timeStyle:NSDateFormatterShortStyle];
+        prompt = [NSString stringWithFormat:@"Button triggers paused until %@", time];
+        // Clear the line when the pause runs out
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((until - now + 1) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [weakSelf updatePauseState]; });
+    } else if (byTweak) {
+        prompt = @"Button triggers paused by another tweak";
+    }
+    self.navigationItem.prompt = prompt;
+    self.navigationItem.leftBarButtonItem = until ? [[UIBarButtonItem alloc] initWithTitle:@"Resume" style:UIBarButtonItemStylePlain target:self action:@selector(resumeButtonTriggers)] : nil;
+}
+
+- (void)resumeButtonTriggers {
+    [[RCServerClient sharedClient] executeCommand:@"button triggers resume" completion:^(NSString *output, NSError *error) {}];
 }
 
 - (void)reloadTableData {
@@ -270,8 +339,18 @@
     addSection(@[@"trigger_statusbar_left_hold", @"trigger_statusbar_center_hold", @"trigger_statusbar_right_hold", @"trigger_statusbar_swipe_left", @"trigger_statusbar_swipe_right", @"trigger_statusbar_double_tap"], @"Screen Gestures", NO);
     addSection(@[@"trigger_edge_left_swipe_up", @"trigger_edge_left_swipe_down", @"trigger_edge_right_swipe_up", @"trigger_edge_right_swipe_down"], @"Edge Gestures", NO);
     addSection(@[@"trigger_bottombar_swipe_left", @"trigger_bottombar_swipe_right", @"trigger_bottom_swipe_up_left", @"trigger_bottom_swipe_up_center", @"trigger_bottom_swipe_up_right"], @"Bottom Bar Gestures", NO);
-    addSection(@[@"trigger_home_double_click", @"trigger_home_triple_click", @"trigger_home_quadruple_click", @"touchid_tap", @"touchid_hold"], @"Home Button", NO);
+    if ([RCConfigManager hasHomeButton]) {
+        addSection(@[@"trigger_home_double_click", @"trigger_home_triple_click", @"trigger_home_quadruple_click", @"trigger_home_hold", @"trigger_home_power", @"touchid_tap", @"touchid_hold"], @"Home Button", NO);
+    }
     addSection(@[@"trigger_ringer_mute", @"trigger_ringer_unmute", @"trigger_ringer_toggle"], @"Ringer Switch", NO);
+    // Apple Watch Section (Only show if configured, hide if empty)
+    NSMutableArray *watchKeys = [NSMutableArray array];
+    for (NSString *key in @[@"trigger_watch_ping", @"trigger_watch_ping_hold"]) {
+        if ([[RCConfigManager sharedManager] actionsForTrigger:key].count > 0) {
+            [watchKeys addObject:key];
+        }
+    }
+    addSection(watchKeys, @"Apple Watch", YES);
     // Device State Section (Only show if configured, hide if empty)
     NSMutableArray *deviceStateKeys = [NSMutableArray array];
     NSArray *configuredKeys = [[RCConfigManager sharedManager] allConfiguredTriggerKeys];
@@ -286,6 +365,12 @@
     }
     if ([configuredKeys containsObject:@"trigger_power_disconnect"]) {
         [deviceStateKeys addObject:@"trigger_power_disconnect"];
+    }
+    if ([configuredKeys containsObject:@"trigger_carplay_connect"]) {
+        [deviceStateKeys addObject:@"trigger_carplay_connect"];
+    }
+    if ([configuredKeys containsObject:@"trigger_carplay_disconnect"]) {
+        [deviceStateKeys addObject:@"trigger_carplay_disconnect"];
     }
     if ([configuredKeys containsObject:@"trigger_media_play"]) {
         [deviceStateKeys addObject:@"trigger_media_play"];
@@ -316,6 +401,12 @@
     }
     addSection(btKeys, @"Bluetooth Device Triggers", YES);
 
+    NSMutableArray *outputKeys = [NSMutableArray array];
+    for (NSString *key in [[RCConfigManager sharedManager] allConfiguredTriggerKeys]) {
+        if ([key hasPrefix:@"output_"]) [outputKeys addObject:key];
+    }
+    addSection(outputKeys, @"Audio Output Triggers", YES);
+
     // Notification Triggers Section
     NSMutableArray *notifKeys = [NSMutableArray array];
     for (NSString *key in [[RCConfigManager sharedManager] allConfiguredTriggerKeys]) {
@@ -329,6 +420,12 @@
         if ([key hasPrefix:@"app_launch_"]) [appKeys addObject:key];
     }
     addSection(appKeys, @"App Launch Triggers", YES);
+
+    NSMutableArray *appExitKeys = [NSMutableArray array];
+    for (NSString *key in [[RCConfigManager sharedManager] allConfiguredTriggerKeys]) {
+        if ([key hasPrefix:@"app_exit_"]) [appExitKeys addObject:key];
+    }
+    addSection(appExitKeys, @"App Exit Triggers", YES);
 
     // Scheduled Triggers Section
     NSMutableArray *schedKeys = [NSMutableArray array];
@@ -357,7 +454,7 @@
     if (selected == NSNotFound) self.selectedCategoryTitle = nil;
     self.categoryBar.selectedIndex = (selected == NSNotFound) ? -1 : (NSInteger)selected;
 
-    self.navigationItem.leftBarButtonItem = nil;
+    [self updatePauseState]; // the left button is Resume while paused, otherwise none
 
     [self.tableView reloadData];
 }
@@ -375,6 +472,12 @@
     [self presentViewController:nav animated:YES completion:nil];
 }
 
+- (void)openTriggerWithKey:(NSString *)triggerKey {
+    if (!triggerKey.length) return;
+    RCActionsViewController *actionsVC = [[RCActionsViewController alloc] initWithTriggerKey:triggerKey];
+    [self.navigationController pushViewController:actionsVC animated:YES];
+}
+
 - (void)addNewItem {
     __weak typeof(self) weakSelf = self;
     void (^push)(UIViewController *) = ^(UIViewController *vc) {
@@ -384,45 +487,60 @@
     // System events can only be added once; one that exists just opens
     NSArray *configured = [[RCConfigManager sharedManager] allConfiguredTriggerKeys];
     NSMutableArray *systemEvents = [NSMutableArray array];
-    for (NSArray *event in @[@[@"trigger_device_lock", @"Device Locked", @"lock.fill"],
-                             @[@"trigger_device_unlock", @"Device Unlocked", @"lock.open.fill"],
-                             @[@"trigger_power_connect", @"Power Connected", @"bolt.fill"],
-                             @[@"trigger_power_disconnect", @"Power Disconnected", @"bolt.slash.fill"],
-                             @[@"trigger_media_play", @"Media Playing", @"play.fill"],
-                             @[@"trigger_media_pause", @"Media Paused", @"pause.fill"],
-                             @[@"trigger_media_track_change", @"Media Track Changed", @"forward.fill"]]) {
+    for (NSArray *event in @[@[@"trigger_device_lock", @"Device Locked", @"lock.fill", @"Device"],
+                             @[@"trigger_device_unlock", @"Device Unlocked", @"lock.open.fill", @"Device"],
+                             @[@"trigger_power_connect", @"Power Connected", @"bolt.fill", @"Device"],
+                             @[@"trigger_power_disconnect", @"Power Disconnected", @"bolt.slash.fill", @"Device"],
+                             @[@"trigger_carplay_connect", @"CarPlay Connected", @"car.fill", @"Device"],
+                             @[@"trigger_carplay_disconnect", @"CarPlay Disconnected", @"car", @"Device"],
+                             @[@"trigger_media_play", @"Media Playing", @"play.fill", @"Media"],
+                             @[@"trigger_media_pause", @"Media Paused", @"pause.fill", @"Media"],
+                             @[@"trigger_media_track_change", @"Media Track Changed", @"forward.fill", @"Media"],
+                             @[@"trigger_watch_ping", @"Ping iPhone", @"applewatch.radiowaves.left.and.right", @"Apple Watch"],
+                             @[@"trigger_watch_ping_hold", @"Ping iPhone (Hold)", @"applewatch.radiowaves.left.and.right", @"Apple Watch"]]) {
         NSString *key = event[0], *title = event[1];
-        NSMutableDictionary *child = [@{ @"title": title, @"icon": event[2], @"handler": ^{
+        NSMutableDictionary *item = [@{ @"title": title, @"icon": event[2], @"section": event[3], @"handler": ^{
             if (![[[RCConfigManager sharedManager] allConfiguredTriggerKeys] containsObject:key]) {
                 [[RCConfigManager sharedManager] updateTrigger:key withData:@{@"name": title, @"enabled": @YES, @"actions": @[]}];
             }
             push([[RCActionsViewController alloc] initWithTriggerKey:key]);
         } } mutableCopy];
-        if ([configured containsObject:key]) child[@"detail"] = @"Added";
-        [systemEvents addObject:child];
+        if ([configured containsObject:key]) item[@"detail"] = @"Added";
+        [systemEvents addObject:item];
     }
 
-    NSArray *items = @[
+    NSMutableArray *items = [@[
         @{ @"title": @"NFC Tag", @"icon": @"wave.3.right", @"section": @"Nearby", @"handler": ^{ push([[RCNFCTriggerViewController alloc] init]); } },
         @{ @"title": @"Wi-Fi Network", @"icon": @"wifi", @"section": @"Nearby", @"handler": ^{ push([[RCWiFiTriggerViewController alloc] init]); } },
         @{ @"title": @"Bluetooth Device", @"icon": @"dot.radiowaves.left.and.right", @"section": @"Nearby", @"handler": ^{ push([[RCBluetoothTriggerViewController alloc] init]); } },
+        @{ @"title": @"Audio Output", @"icon": @"airplayaudio", @"section": @"Nearby", @"handler": ^{ push([[RCAudioOutputTriggerViewController alloc] init]); } },
         @{ @"title": @"App Launch", @"icon": @"square.grid.2x2", @"section": @"Apps", @"handler": ^{
             RCAppPickerViewController *vc = [[RCAppPickerViewController alloc] init];
+            vc.allowsMultipleApps = YES;
             vc.suppressAutoPop = YES; // We handle navigation ourselves
-            vc.onAppSelected = ^(NSString *appName, NSString *bundleId) {
+            vc.onAppsSelected = ^(NSArray<NSString *> *names, NSArray<NSString *> *bundleIds) {
                 __strong typeof(weakSelf) self = weakSelf;
                 if (!self) return;
-                NSString *triggerKey = [NSString stringWithFormat:@"app_launch_%@", bundleId];
-                NSString *friendlyName = [NSString stringWithFormat:@"Launch %@", appName];
-                
-                NSDictionary *triggerData = @{
-                    @"name": friendlyName,
-                    @"enabled": @YES,
-                    @"actions": @[]
-                };
-                
-                [[RCConfigManager sharedManager] updateTrigger:triggerKey withData:triggerData];
-                
+                NSString *triggerKey = [[RCConfigManager sharedManager] saveAppTriggerWithPrefix:@"app_launch_" names:names bundleIds:bundleIds replacing:nil];
+
+                // Push actionsVC, then let the app picker pop (leaving [TriggersVC, ActionsVC])
+                RCActionsViewController *actionsVC = [[RCActionsViewController alloc] initWithTriggerKey:triggerKey];
+                NSMutableArray *vcs = [self.navigationController.viewControllers mutableCopy];
+                [vcs removeLastObject]; // Remove the app picker
+                [vcs addObject:actionsVC];
+                [self.navigationController setViewControllers:vcs animated:YES];
+            };
+            push(vc);
+        } },
+        @{ @"title": @"App Exit", @"icon": @"square.grid.2x2", @"section": @"Apps", @"handler": ^{
+            RCAppPickerViewController *vc = [[RCAppPickerViewController alloc] init];
+            vc.allowsMultipleApps = YES;
+            vc.suppressAutoPop = YES; // We handle navigation ourselves
+            vc.onAppsSelected = ^(NSArray<NSString *> *names, NSArray<NSString *> *bundleIds) {
+                __strong typeof(weakSelf) self = weakSelf;
+                if (!self) return;
+                NSString *triggerKey = [[RCConfigManager sharedManager] saveAppTriggerWithPrefix:@"app_exit_" names:names bundleIds:bundleIds replacing:nil];
+
                 // Push actionsVC, then let the app picker pop (leaving [TriggersVC, ActionsVC])
                 RCActionsViewController *actionsVC = [[RCActionsViewController alloc] initWithTriggerKey:triggerKey];
                 NSMutableArray *vcs = [self.navigationController.viewControllers mutableCopy];
@@ -434,9 +552,9 @@
         } },
         @{ @"title": @"Notification", @"icon": @"bell.badge", @"section": @"Apps", @"handler": ^{ push([[RCNotificationTriggerViewController alloc] init]); } },
         @{ @"title": @"Scheduled Trigger", @"icon": @"calendar.badge.clock", @"section": @"Time", @"handler": ^{ push([[RCScheduledTriggerViewController alloc] init]); } },
-        @{ @"title": @"System Event", @"icon": @"gearshape", @"section": @"System", @"children": systemEvents },
-        @{ @"title": @"MQTT Topic", @"icon": @"antenna.radiowaves.left.and.right", @"section": @"Integrations", @"handler": ^{ push([[RCMQTTTriggerViewController alloc] init]); } },
-    ];
+    ] mutableCopy];
+    [items addObjectsFromArray:systemEvents];
+    [items addObject:@{ @"title": @"MQTT Topic", @"icon": @"antenna.radiowaves.left.and.right", @"section": @"Integrations", @"handler": ^{ push([[RCMQTTTriggerViewController alloc] init]); } }];
     [self.navigationController pushViewController:[[RCNewTriggerViewController alloc] initWithItems:items] animated:YES];
 }
 
@@ -698,8 +816,12 @@
     NSString *triggerKey = [self triggerKeyAtIndexPath:indexPath];
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"TriggerCell"];
     if (!cell) {
-        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"TriggerCell"];
+        cell = [[RCTriggerCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"TriggerCell"];
     }
+
+    BOOL wrapLongNames = [[NSUserDefaults standardUserDefaults] boolForKey:@"RCWrapLongNamesEnabled"];
+    cell.textLabel.numberOfLines = wrapLongNames ? 0 : 1;
+    cell.detailTextLabel.numberOfLines = wrapLongNames ? 0 : 1;
     
     RCConfigManager *config = [RCConfigManager sharedManager];
     
@@ -786,7 +908,7 @@
     NSString *triggerKey = [self triggerKeyAtIndexPath:indexPath];
 
     // Only allow delete for NFC, WiFi, BT, App, Notif, Sched, MQTT, Device State triggers
-    if (![triggerKey hasPrefix:@"nfc_"] && ![triggerKey hasPrefix:@"wifi_"] && ![triggerKey hasPrefix:@"bt_"] && ![triggerKey hasPrefix:@"app_launch_"] && ![triggerKey hasPrefix:@"notif_"] && ![triggerKey hasPrefix:@"notify_"] && ![triggerKey hasPrefix:@"sched_"] && ![triggerKey hasPrefix:@"mqtt_"] && ![triggerKey hasPrefix:@"mqtt_sub_"] && ![triggerKey hasPrefix:@"trigger_device_"] && ![triggerKey hasPrefix:@"trigger_media_"]) {
+    if (![triggerKey hasPrefix:@"nfc_"] && ![triggerKey hasPrefix:@"wifi_"] && ![triggerKey hasPrefix:@"bt_"] && ![triggerKey hasPrefix:@"app_launch_"] && ![triggerKey hasPrefix:@"app_exit_"] && ![triggerKey hasPrefix:@"output_"] && ![triggerKey hasPrefix:@"notif_"] && ![triggerKey hasPrefix:@"notify_"] && ![triggerKey hasPrefix:@"sched_"] && ![triggerKey hasPrefix:@"mqtt_"] && ![triggerKey hasPrefix:@"mqtt_sub_"] && ![triggerKey hasPrefix:@"trigger_device_"] && ![triggerKey hasPrefix:@"trigger_media_"] && ![triggerKey hasPrefix:@"trigger_power_"] && ![triggerKey hasPrefix:@"trigger_carplay_"] && ![triggerKey hasPrefix:@"trigger_watch_"]) {
         return [UISwipeActionsConfiguration configurationWithActions:@[]];
     }
 
