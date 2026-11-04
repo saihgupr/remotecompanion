@@ -4,6 +4,7 @@
 #import "RCIntegrationsViewController.h"
 #import "RCAdvancedSettingsViewController.h"
 #import "RCTestKitViewController.h"
+#import "RCRunningViewController.h"
 #import "RCWebUIAccessViewController.h"
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #include <ifaddrs.h>
@@ -228,7 +229,7 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     } else if (section == RCSettingsSectionAdvanced) {
         return @"NFC, banners, logging, and display options.";
     } else if (section == RCSettingsSectionDiagnostics) {
-        return @"Tests RemoteCompanion on this device and shares the results.";
+        return @"See what's running on this device, and run tests that share their results.";
     } else if (section == RCSettingsSectionBackup) {
         return @"Export your configuration to share or backup. Import to restore.";
     }
@@ -242,7 +243,10 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     if (section == RCSettingsSectionBackup) {
         return 2;
     }
-    return 1; // Integrations, Advanced Settings, Diagnostics
+    if (section == RCSettingsSectionDiagnostics) {
+        return 2; // Running, Test Kit
+    }
+    return 1; // Integrations, Advanced Settings
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -319,9 +323,15 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         }
     } else if (indexPath.section == RCSettingsSectionDiagnostics) {
-        cell.textLabel.text = @"Test Kit";
-        cell.imageView.image = [UIImage systemImageNamed:@"checklist"] ?: [UIImage systemImageNamed:@"list.bullet.rectangle"];
-        cell.imageView.tintColor = [UIColor systemTealColor];
+        if (indexPath.row == 0) {
+            cell.textLabel.text = @"Running";
+            cell.imageView.image = [UIImage systemImageNamed:@"list.bullet.rectangle"];
+            cell.imageView.tintColor = [UIColor systemGreenColor];
+        } else {
+            cell.textLabel.text = @"Test Kit";
+            cell.imageView.image = [UIImage systemImageNamed:@"checklist"] ?: [UIImage systemImageNamed:@"list.bullet.rectangle"];
+            cell.imageView.tintColor = [UIColor systemTealColor];
+        }
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     }
     
@@ -341,7 +351,11 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     } else if (indexPath.section == RCSettingsSectionAdvanced) {
         [self.navigationController pushViewController:[[RCAdvancedSettingsViewController alloc] init] animated:YES];
     } else if (indexPath.section == RCSettingsSectionDiagnostics) {
-        [self.navigationController pushViewController:[[RCTestKitViewController alloc] init] animated:YES];
+        if (indexPath.row == 0) {
+            [self.navigationController pushViewController:[[RCRunningViewController alloc] init] animated:YES];
+        } else {
+            [self.navigationController pushViewController:[[RCTestKitViewController alloc] init] animated:YES];
+        }
     } else if (indexPath.section == RCSettingsSectionBackup) {
         if (indexPath.row == 0) {
             [self exportConfig];
