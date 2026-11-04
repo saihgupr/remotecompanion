@@ -12,7 +12,9 @@
 //   rc-screen tap TEXT|#N           a real touch on the element's center (for what press can't reach)
 //   rc-screen hold TEXT|#N [SECONDS] touches and holds it (default 1 s)
 //   rc-screen menu TEXT|#N          opens the element's menu (as a long press does, without the touch)
-//   rc-screen type TEXT             types into the text field being edited
+//   rc-screen type TEXT             types into the text field being edited (--replace: clears it first)
+//   rc-screen clear                 empties the text field being edited
+//   rc-screen set TEXT|#N on|off    turns a switch on or off (only presses it if it needs to)
 //   rc-screen adjust TEXT|#N up|down [STEPS] | adjust TEXT|#N 30%
 //                                   moves a slider, stepper or picker a step at a time (as
 //                                   VoiceOver's swipe up/down does), or toward a percentage
@@ -76,6 +78,13 @@ static NSString *rc_text(id value) {
     return [text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
 }
 
+// A switch: iOS 17's toggle trait (1 << 53), or (iOS 14) a button reading 0 or 1 with the
+// trait switches carry there too (0x400000000)
+static BOOL rc_is_switch(uint64_t traits, NSString *value) {
+    if (traits & (1ULL << 53)) return YES;
+    return (traits & 0x1) && (traits & 0x400000000ULL) && ([value isEqualToString:@"0"] || [value isEqualToString:@"1"]);
+}
+
 // What kind of element, from its UIAccessibilityTraits
 static NSString *rc_kind(uint64_t traits) {
     if (traits & 0x400) return @"search";       // search field
@@ -119,7 +128,7 @@ static NSArray<RCScreenElement *> *rc_elements(id app) {
         e.label = rc_text(rc_call(element, @"label"));
         e.value = rc_text(rc_call(element, @"value"));
         e.traits = rc_traits(element);
-        e.kind = rc_kind(e.traits);
+        e.kind = rc_is_switch(e.traits, e.value) ? @"switch" : rc_kind(e.traits);
         e.frame = rc_frame(element);
         e.number = ++number;
         [list addObject:e];
@@ -221,7 +230,7 @@ static void rc_quit(int sig) {
 }
 
 static int rc_usage(void) {
-    fprintf(stderr, "Usage: rc-screen [--json] | find TEXT [--json] | press TEXT|#N | wait TEXT [SECONDS] | tap TEXT|#N | hold TEXT|#N [SECONDS] | menu TEXT|#N | type TEXT | scroll-to TEXT [up] | adjust TEXT|#N up|down [STEPS] | adjust TEXT|#N PERCENT%%\n");
+    fprintf(stderr, "Usage: rc-screen [--json] | find TEXT [--json] | press TEXT|#N | wait TEXT [SECONDS] | tap TEXT|#N | hold TEXT|#N [SECONDS] | menu TEXT|#N | type TEXT | scroll-to TEXT [up] | adjust TEXT|#N up|down [STEPS] | adjust TEXT|#N PERCENT%% | set TEXT|#N on|off | clear\n");
     return 2;
 }
 
@@ -268,16 +277,17 @@ int main(int argc, char **argv) {
         signal(SIGINT, rc_quit);
         signal(SIGTERM, rc_quit);
         NSMutableArray<NSString *> *args = [NSMutableArray array];
-        BOOL json = NO;
+        BOOL json = NO, replace = NO;
         for (int i = 1; i < argc; i++) {
             NSString *a = @(argv[i]);
             if ([a isEqualToString:@"--json"]) json = YES;
+            else if ([a isEqualToString:@"--replace"]) replace = YES;
             else if ([a isEqualToString:@"-h"] || [a isEqualToString:@"--help"]) return rc_usage();
             else [args addObject:a];
         }
         NSString *verb = args.count ? args[0] : @"list";
-        if (![@[@"list", @"find", @"press", @"wait", @"tap", @"hold", @"menu", @"type", @"scroll-to", @"adjust"] containsObject:verb]) return rc_usage();
-        if (![verb isEqualToString:@"list"] && args.count < 2) return rc_usage();
+        if (![@[@"list", @"find", @"press", @"wait", @"tap", @"hold", @"menu", @"type", @"scroll-to", @"adjust", @"set", @"clear"] containsObject:verb]) return rc_usage();
+        if (![verb isEqualToString:@"list"] && ![verb isEqualToString:@"clear"] && args.count < 2) return rc_usage();
 
         void *lib = dlopen("/usr/lib/libAccessibility.dylib", RTLD_NOW);
         AXSAutomationEnabled = lib ? dlsym(lib, "_AXSAutomationEnabled") : NULL;
@@ -333,12 +343,21 @@ int main(int argc, char **argv) {
             return 1;
         }
 
-        if ([verb isEqualToString:@"type"]) {
+        if ([verb isEqualToString:@"type"] || [verb isEqualToString:@"clear"]) {
             // Into the field being edited, as if typed: any characters, at the cursor
             id field = rc_call(app, @"firstResponder");
             if (!field) {
                 fprintf(stderr, "No text field is being edited\n");
                 return 1;
+            }
+            if (replace || [verb isEqualToString:@"clear"]) {
+                // Setting the value empties a text field (a slider ignores it)
+                ((void (*)(id, SEL, id))objc_msgSend)(field, NSSelectorFromString(@"setValue:"), @"");
+                [NSThread sleepForTimeInterval:0.15];
+                if ([verb isEqualToString:@"clear"]) {
+                    printf("Cleared %s\n", rc_quote(rc_text(rc_call(field, @"label"))).UTF8String);
+                    return 0;
+                }
             }
             NSString *text = [[args subarrayWithRange:NSMakeRange(1, args.count - 1)] componentsJoinedByString:@" "];
             NSString *before = rc_text(rc_call(field, @"value"));
@@ -395,6 +414,49 @@ int main(int argc, char **argv) {
         }
 
         NSArray<RCScreenElement *> *list = rc_elements(app);
+
+        if ([verb isEqualToString:@"set"]) {
+            // The switch itself (its text row beside it has the same label): by #N, or the
+            // pressable switch with this label (an exact label first)
+            if (args.count < 3 || ![@[@"on", @"off"] containsObject:args[2].lowercaseString]) return rc_usage();
+            BOOL wantOn = [args[2].lowercaseString isEqualToString:@"on"];
+            RCScreenElement *e = nil;
+            if ([args[1] hasPrefix:@"#"]) e = rc_pick(list, args[1]);
+            NSArray<NSNumber *> *passes = @[@YES, @NO]; // exact label, then contains
+            for (NSNumber *exact in passes) {
+                for (RCScreenElement *x in list) {
+                    if (e) break;
+                    if (![x.kind isEqualToString:@"switch"] || !(x.traits & 0x1)) continue;
+                    BOOL match = exact.boolValue ? [x.label compare:rc_text(args[1]) options:NSCaseInsensitiveSearch | NSDiacriticInsensitiveSearch] == NSOrderedSame : rc_matches(x, args[1]);
+                    if (match) e = x;
+                }
+            }
+            if (!e || ![e.kind isEqualToString:@"switch"]) {
+                fprintf(stderr, "No switch on screen: %s\n", args[1].UTF8String);
+                return 1;
+            }
+            BOOL isOn = [e.value isEqualToString:@"1"];
+            if (isOn == wantOn) {
+                printf("Already %s: %s\n", wantOn ? "on" : "off", rc_line(e).UTF8String);
+                return 0;
+            }
+            ((BOOL (*)(id, SEL))objc_msgSend)(e.element, NSSelectorFromString(@"press"));
+            // Read back (a switch can refuse, or ask first)
+            RCScreenElement *now = nil;
+            for (int i = 0; i < 10; i++) {
+                [NSThread sleepForTimeInterval:0.1];
+                for (RCScreenElement *x in rc_elements(rc_primary_app())) {
+                    if ([x.label isEqualToString:e.label] && CGRectEqualToRect(x.frame, e.frame)) { now = x; break; }
+                }
+                if (now && [now.value isEqualToString:wantOn ? @"1" : @"0"]) break;
+            }
+            if (!now || ![now.value isEqualToString:wantOn ? @"1" : @"0"]) {
+                fprintf(stderr, "Pressed it, but it reads %s now: %s\n", now ? now.value.UTF8String : "nothing", rc_line(now ?: e).UTF8String);
+                return 2;
+            }
+            printf("Turned %s: %s\n", wantOn ? "on" : "off", rc_line(now).UTF8String);
+            return 0;
+        }
 
         if ([verb isEqualToString:@"adjust"]) {
             // Accessibility's increment (2004) and decrement (2005) actions: the step is the

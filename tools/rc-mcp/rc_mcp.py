@@ -191,7 +191,18 @@ def t_adjust(args):
 
 def t_type(args):
     host = host_for(args.get("phone"))
-    return with_screen(host, run(host, screen_cmd("type", args["text"])), args)
+    words = ["type"] + (["--replace"] if args.get("replace") else []) + [args["text"]]
+    return with_screen(host, run(host, screen_cmd(*words)), args)
+
+
+def t_clear(args):
+    host = host_for(args.get("phone"))
+    return with_screen(host, run(host, screen_cmd("clear")), args)
+
+
+def t_set_switch(args):
+    host = host_for(args.get("phone"))
+    return with_screen(host, run(host, screen_cmd("set", args["target"], "on" if args["on"] else "off")), args)
 
 
 def t_wait(args):
@@ -297,7 +308,13 @@ TOOLS = [
      {"target": TARGET, "to": {"type": "string", "description": "up, down, 'up 3', or a percentage like 30%."},
       "show_screen": SHOW}, ["target", "to"]),
     ("type", t_type, "Types text into the field being edited (tap or press a text field first). Any characters.",
-     {"text": {"type": "string"}, "show_screen": SHOW}, ["text"]),
+     {"text": {"type": "string"}, "replace": {"type": "boolean", "description": "Empty the field first."},
+      "show_screen": SHOW}, ["text"]),
+    ("clear", t_clear, "Empties the text field being edited.", {"show_screen": SHOW}, []),
+    ("set_switch", t_set_switch,
+     "Turns a switch (kind 'switch' in the screen list) on or off. Reads it first and presses it only if it needs "
+     "to change, then checks the result. Prefer this to press for switches.",
+     {"target": TARGET, "on": {"type": "boolean"}, "show_screen": SHOW}, ["target", "on"]),
     ("menu", t_menu, "Opens an element's menu, as a long press would (e.g. an app icon's quick actions).",
      {"target": TARGET, "show_screen": SHOW}, ["target"]),
     ("wait", t_wait, "Waits until text is on screen and the screen has settled. Use after anything that changes screens.",

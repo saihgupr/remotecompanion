@@ -142,7 +142,8 @@ use it to find and act on what's there.
 | `rc-screen find "Wi-Fi"` | The elements whose label or value contains the text |
 | `rc-screen press "Bluetooth"` | Activates an element by its label, or by number: `press "#7"` |
 | `rc-screen tap "Search"` | A real touch on an element (`hold "Text" 1` holds it) |
-| `rc-screen type "Hello"` | Types into the field being edited |
+| `rc-screen type "Hello"` | Types into the field being edited (`type --replace "Hello"` empties it first; `clear` just empties it) |
+| `rc-screen set "Wi-Fi" off` | Turns a switch on or off, only pressing it if it needs to change |
 | `rc-screen adjust "Sound volume" up` | Moves a slider, stepper or picker a step (`down 2`, or `30%` for a percentage) |
 | `rc-screen menu "Settings"` | Opens an element's menu, like a long press |
 | `rc-screen wait "Done" 10` | Waits until the text is on screen and the screen has settled |

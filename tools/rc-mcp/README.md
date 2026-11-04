@@ -33,7 +33,9 @@ the phone. One file, Python 3.8 or later, nothing to install.
 | `press` | Activates an element, as VoiceOver does |
 | `tap`, `hold` | A real touch on an element or at x, y |
 | `swipe` | A real swipe; from a screen edge it's an edge swipe (home, back) |
-| `type` | Types into the field being edited |
+| `type` | Types into the field being edited (`replace` empties it first) |
+| `clear` | Empties the field being edited |
+| `set_switch` | Turns a switch on or off, only pressing it if it needs to change |
 | `adjust` | Moves a slider, stepper or picker: up, down, or to a percentage |
 | `menu` | Opens an element's menu (like a long press) |
 | `wait` | Waits until some text is on screen and the screen has settled |
