@@ -2034,7 +2034,9 @@ static NSString *get_human_name_for_trigger(NSString *key, NSDictionary *trigger
             @"trigger_bottombar_swipe_right": @"Bottom Bar Swipe Right",
             @"trigger_bottom_swipe_up_left": @"Bottom Swipe Up (Left)",
             @"trigger_bottom_swipe_up_center": @"Bottom Swipe Up (Center)",
-            @"trigger_bottom_swipe_up_right": @"Bottom Swipe Up (Right)"
+            @"trigger_bottom_swipe_up_right": @"Bottom Swipe Up (Right)",
+            @"trigger_statusbar_two_finger_swipe_down": @"2-Finger Top Slide Down",
+            @"trigger_bottom_two_finger_swipe_up": @"2-Finger Bottom Slide Up"
         };
     });
     
@@ -14688,6 +14690,18 @@ static NSTimeInterval g_lastStatusBarDoubleTapTime = 0;
 // Bottom Bar Extended State
 static NSTimeInterval g_lastBottomSwipeTriggerTime = 0;
 
+// Multi-finger Gestures
+static BOOL g_twoFingerTopActive = NO;
+static BOOL g_twoFingerTopTriggered = NO;
+static CGFloat g_twoFingerTopStartX = 0;
+static CGFloat g_twoFingerTopStartY = 0;
+
+static BOOL g_twoFingerBottomActive = NO;
+static BOOL g_twoFingerBottomTriggered = NO;
+static CGFloat g_twoFingerBottomStartX = 0;
+static CGFloat g_twoFingerBottomStartY = 0;
+static NSTimeInterval g_lastTwoFingerBottomSwipeTriggerTime = 0;
+
 // ============ GESTURE SCROLL SUPPRESSION (issue #81) ============
 // While a status-bar swipe or bottom swipe-up is being executed, the
 // underlying list (SpringBoard home pages, Notification Center, cover
@@ -14724,7 +14738,8 @@ static BOOL RC_GestureScrollSuppressionWanted(void) {
         @"trigger_bottom_swipe_up_left", @"trigger_bottom_swipe_up_center",
         @"trigger_bottom_swipe_up_right",
         @"trigger_edge_left_swipe_up", @"trigger_edge_left_swipe_down",
-        @"trigger_edge_right_swipe_up", @"trigger_edge_right_swipe_down"
+        @"trigger_edge_right_swipe_up", @"trigger_edge_right_swipe_down",
+        @"trigger_statusbar_two_finger_swipe_down", @"trigger_bottom_two_finger_swipe_up"
     };
     for (unsigned i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
         if (RC_TriggerIsActionable(keys[i])) return YES;
@@ -14946,6 +14961,26 @@ static inline BOOL RC_InBottomRegion(CGPoint loc, UIInterfaceOrientation orienta
     return (loc.y > L - 50);
 }
 
+static inline BOOL RC_InTopRegionMulti(CGPoint loc, UIInterfaceOrientation orientation, CGFloat S, CGFloat L) {
+    (void)S; (void)L;
+    CGFloat threshold = 75.0;
+    if (orientation == UIInterfaceOrientationPortrait) return (loc.y < threshold);
+    if (orientation == UIInterfaceOrientationPortraitUpsideDown) return (loc.y > L - threshold);
+    if (orientation == UIInterfaceOrientationLandscapeLeft) return (loc.x < threshold);
+    if (orientation == UIInterfaceOrientationLandscapeRight) return (loc.x > S - threshold);
+    return (loc.y < threshold);
+}
+
+static inline BOOL RC_InBottomRegionMulti(CGPoint loc, UIInterfaceOrientation orientation, CGFloat S, CGFloat L) {
+    (void)S; (void)L;
+    CGFloat threshold = 75.0;
+    if (orientation == UIInterfaceOrientationPortrait) return (loc.y > L - threshold);
+    if (orientation == UIInterfaceOrientationPortraitUpsideDown) return (loc.y < threshold);
+    if (orientation == UIInterfaceOrientationLandscapeLeft) return (loc.x > S - threshold);
+    if (orientation == UIInterfaceOrientationLandscapeRight) return (loc.x < threshold);
+    return (loc.y > L - threshold);
+}
+
 // Progress 0..1 along the UI-top / UI-bottom edge, left-to-right as the user sees it.
 // In landscape the bar edges are long edges, so progress runs along y with divisor L.
 static inline CGFloat RC_ProgressAlongEdge(CGPoint loc, UIInterfaceOrientation orientation, CGFloat S, CGFloat L) {
@@ -15048,6 +15083,28 @@ static BOOL rc_cover_sheet_showing(void) {
     return [lockScreen respondsToSelector:@selector(isUILocked)] && [lockScreen isUILocked];
 }
 
+static BOOL has_any_bottom_swipe_trigger_enabled() {
+    if (rc_cover_sheet_showing()) return NO;
+    if (!g_triggerConfig) {
+        load_trigger_config();
+    }
+    if (!g_triggerConfig || !RC_MasterEnabled()) {
+        return NO;
+    }
+    NSDictionary *triggers = g_triggerConfig[@"triggers"];
+    return ([triggers[@"trigger_bottom_swipe_up_left"][@"enabled"] boolValue] ||
+            [triggers[@"trigger_bottom_swipe_up_center"][@"enabled"] boolValue] ||
+            [triggers[@"trigger_bottom_swipe_up_right"][@"enabled"] boolValue] ||
+            [triggers[@"trigger_bottom_two_finger_swipe_up"][@"enabled"] boolValue]);
+}
+
+static inline BOOL rc_is_bottom_gesture_active(void) {
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    BOOL oneFinger = (g_bottomBarTouchActive || g_bottomBarSwipeUpTriggered || (now - g_lastBottomSwipeTriggerTime < 0.8)) && has_any_bottom_swipe_trigger_enabled();
+    BOOL twoFinger = (g_twoFingerBottomActive || g_twoFingerBottomTriggered || (now - g_lastTwoFingerBottomSwipeTriggerTime < 0.8)) && RC_TriggerIsActionable(@"trigger_bottom_two_finger_swipe_up");
+    return oneFinger || twoFinger;
+}
+
 static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientation orientation) {
     if (rc_cover_sheet_showing()) return NO;
     if (!g_triggerConfig) {
@@ -15055,6 +15112,15 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
     }
     if (!g_triggerConfig || !RC_MasterEnabled()) {
         return NO;
+    }
+    if (rc_is_bottom_gesture_active()) {
+        return YES;
+    }
+    
+    CGFloat S = 0, L = 0;
+    RC_ScreenSL(&S, &L);
+    if (RC_InBottomRegionMulti(loc, orientation, S, L) && RC_TriggerIsActionable(@"trigger_bottom_two_finger_swipe_up")) {
+        return YES;
     }
     
     BOOL inBottom = NO;
@@ -15068,55 +15134,90 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
     return (trigger && [trigger[@"enabled"] boolValue]);
 }
 
-static BOOL has_any_bottom_swipe_trigger_enabled() {
-    if (rc_cover_sheet_showing()) return NO;
-    if (!g_triggerConfig) {
-        load_trigger_config();
-    }
-    if (!g_triggerConfig || !RC_MasterEnabled()) {
-        return NO;
-    }
-    NSDictionary *triggers = g_triggerConfig[@"triggers"];
-    return ([triggers[@"trigger_bottom_swipe_up_left"][@"enabled"] boolValue] ||
-            [triggers[@"trigger_bottom_swipe_up_center"][@"enabled"] boolValue] ||
-            [triggers[@"trigger_bottom_swipe_up_right"][@"enabled"] boolValue]);
-}
-
 %hook UIApplication
 
 - (void)sendEvent:(UIEvent *)event {
     // Only process touch events
     if (event.type == UIEventTypeTouches) {
-        UITouch *touch = [[event allTouches] anyObject];
-        
-        if (touch && touch.phase == UITouchPhaseBegan) {
-            UIInterfaceOrientation orientation = get_current_interface_orientation();
+        NSSet<UITouch *> *allTouches = [event allTouches];
+        UITouch *touch = [allTouches anyObject];
+        if (!touch) {
+            %orig;
+            return;
+        }
+
+        UIInterfaceOrientation orientation = g_rcLatchedTouchOrientationValid ? g_rcLatchedTouchOrientation : get_current_interface_orientation();
+        CGFloat S = 0, L = 0;
+        RC_ScreenSL(&S, &L);
+
+        // Check for multi-finger (2-finger) activation
+        if (allTouches.count >= 2) {
+            NSArray<UITouch *> *touchArr = [allTouches allObjects];
+            CGPoint p0 = [touchArr[0] locationInView:nil];
+            CGPoint p1 = [touchArr[1] locationInView:nil];
+            BOOL p0Top = RC_InTopRegionMulti(p0, orientation, S, L);
+            BOOL p1Top = RC_InTopRegionMulti(p1, orientation, S, L);
+            BOOL p0Bottom = RC_InBottomRegionMulti(p0, orientation, S, L);
+            BOOL p1Bottom = RC_InBottomRegionMulti(p1, orientation, S, L);
+
+            if (p0Top && p1Top && !g_twoFingerTopActive && !g_twoFingerTopTriggered) {
+                RC_SnapshotGestureOffsets();
+                if (g_statusBarHoldTimer) {
+                    [g_statusBarHoldTimer invalidate];
+                    g_statusBarHoldTimer = nil;
+                }
+                g_pendingStatusBarTrigger = nil;
+                g_statusBarTouchActive = NO;
+                g_statusBarSwipeTriggered = NO;
+                g_statusBarHoldTriggered = NO;
+                g_twoFingerTopActive = YES;
+                g_twoFingerTopTriggered = NO;
+                g_twoFingerTopStartX = (p0.x + p1.x) / 2.0;
+                g_twoFingerTopStartY = (p0.y + p1.y) / 2.0;
+                g_rcLatchedTouchOrientation = orientation;
+                g_rcLatchedTouchOrientationValid = YES;
+                SRLog(@"[RCMultiFinger] Two Finger Top Active at (%.0f, %.0f)", g_twoFingerTopStartX, g_twoFingerTopStartY);
+            } else if (p0Bottom && p1Bottom && !g_twoFingerBottomActive && !g_twoFingerBottomTriggered) {
+                RC_SnapshotGestureOffsets();
+                g_bottomBarTouchActive = NO;
+                g_bottomBarSwipeUpTriggered = NO;
+                g_pendingBottomBarSwipeUpTrigger = nil;
+                g_twoFingerBottomActive = YES;
+                g_twoFingerBottomTriggered = NO;
+                g_twoFingerBottomStartX = (p0.x + p1.x) / 2.0;
+                g_twoFingerBottomStartY = (p0.y + p1.y) / 2.0;
+                g_rcLatchedTouchOrientation = orientation;
+                g_rcLatchedTouchOrientationValid = YES;
+                SRLog(@"[RCMultiFinger] Two Finger Bottom Active at (%.0f, %.0f)", g_twoFingerBottomStartX, g_twoFingerBottomStartY);
+            }
+        }
+
+        if (touch.phase == UITouchPhaseBegan) {
+            UIInterfaceOrientation touchOrientation = get_current_interface_orientation();
             // Latch for the life of this touch so Moved/Ended can't cross-wire on rotation.
-            g_rcLatchedTouchOrientation = orientation;
+            g_rcLatchedTouchOrientation = touchOrientation;
             g_rcLatchedTouchOrientationValid = YES;
 
             CGPoint loc = [touch locationInView:nil];
             CGSize screenSize = [[UIScreen mainScreen] bounds].size;
 
             // S/L from the central helper (same values every call site uses).
-            CGFloat S = 0, L = 0;
-            RC_ScreenSL(&S, &L);
-
             // All zones come from the orientation central: top/bottom follow UI-top/UI-bottom.
             // LandscapeLeft = home on left (bottom=device right, top=device left).
             // LandscapeRight = home on right (bottom=device left, top=device right).
-            BOOL inTopRegion = RC_InTopRegion(loc, orientation, S, L);
-            BOOL inBottomRegion = RC_InBottomRegion(loc, orientation, S, L);
+            BOOL inTopRegion = RC_InTopRegion(loc, touchOrientation, S, L);
+            BOOL inBottomRegion = RC_InBottomRegion(loc, touchOrientation, S, L);
 
             UIWindow *tw = touch.window;
             CGSize wsz = tw ? tw.bounds.size : CGSizeZero;
             NSString *wcls = tw ? NSStringFromClass([tw class]) : @"nil";
-            CGFloat edgeProgress = RC_ProgressAlongEdge(loc, orientation, S, L);
+            CGFloat edgeProgress = RC_ProgressAlongEdge(loc, touchOrientation, S, L);
             BOOL nearEdge = (loc.x < 60 || loc.y < 60 || loc.x > S - 60 || loc.y > L - 60);
             if (inTopRegion || inBottomRegion || nearEdge) {
-                SRLogMin(@"[RCOrient] began orient=%ld loc=(%.0f,%.0f) screen=(%.0fx%.0f) win=(%.0fx%.0f)%@ top=%d bottom=%d prog=%.2f", (long)orientation, loc.x, loc.y, screenSize.width, screenSize.height, wsz.width, wsz.height, wcls, inTopRegion, inBottomRegion, edgeProgress);
+                SRLogMin(@"[RCOrient] began orient=%ld loc=(%.0f,%.0f) screen=(%.0fx%.0f) win=(%.0fx%.0f)%@ top=%d bottom=%d prog=%.2f", (long)touchOrientation, loc.x, loc.y, screenSize.width, screenSize.height, wsz.width, wsz.height, wcls, inTopRegion, inBottomRegion, edgeProgress);
             }
-            if (inTopRegion) {
+
+            if (inTopRegion && !g_twoFingerTopActive) {
                 RC_SnapshotGestureOffsets();
                 g_statusBarSwipeStartX = loc.x;
                 g_statusBarSwipeStartY = loc.y;
@@ -15151,7 +15252,7 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
                     }
                 } else {
                     // Zone along UI-top, left-to-right as the user sees it (central helper).
-                    CGFloat progress = RC_ProgressAlongEdge(loc, orientation, S, L);
+                    CGFloat progress = RC_ProgressAlongEdge(loc, touchOrientation, S, L);
                     g_pendingStatusBarTrigger = RC_StatusHoldTriggerForProgress(progress);
                     
                     SRLog(@"[RCStatus] Top Region Touch at progress=%.2f -> Key: %@", progress, g_pendingStatusBarTrigger);
@@ -15189,7 +15290,7 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
             }
             
             // Bottom bar region = bottom 50pts
-            if (inBottomRegion) {
+            if (inBottomRegion && !g_twoFingerBottomActive) {
                 RC_SnapshotGestureOffsets();
                 g_bottomBarSwipeStartX = loc.x;
                 g_bottomBarSwipeStartY = loc.y;
@@ -15201,7 +15302,7 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
                 g_bottomBarUserDY = 0;
                 
                 // Zone along UI-bottom, left-to-right as the user sees it (central helper).
-                CGFloat progress = RC_ProgressAlongEdge(loc, orientation, S, L);
+                CGFloat progress = RC_ProgressAlongEdge(loc, touchOrientation, S, L);
 
                 if (rc_cover_sheet_showing()) {
                     g_pendingBottomBarSwipeUpTrigger = nil; // iOS keeps this swipe (see rc_cover_sheet_showing)
@@ -15211,7 +15312,7 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
                 SRLog(@"[RCBottom] Bottom Touch began at progress=%.2f -> Zone: %@", progress, g_pendingBottomBarSwipeUpTrigger);
             }
         }
-        else if (touch && (touch.phase == UITouchPhaseMoved || touch.phase == UITouchPhaseEnded)) {
+        else if (touch.phase == UITouchPhaseMoved || touch.phase == UITouchPhaseEnded) {
             CGPoint loc = [touch locationInView:nil];
             // Use the orientation latched at Began so a rotation mid-swipe can't
             // cross-wire top/bottom. Fall back to live only if somehow unlatched.
@@ -15219,7 +15320,88 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
 
             BOOL isEnded = (touch.phase == UITouchPhaseEnded);
             
-            if (g_statusBarTouchActive || g_bottomBarTouchActive) {
+            if (g_twoFingerTopActive || g_twoFingerBottomActive) {
+                CGFloat startX = g_twoFingerTopActive ? g_twoFingerTopStartX : g_twoFingerBottomStartX;
+                CGFloat startY = g_twoFingerTopActive ? g_twoFingerTopStartY : g_twoFingerBottomStartY;
+
+                NSSet<UITouch *> *allTouches = [event allTouches];
+                CGPoint curPt = CGPointZero;
+                if (allTouches.count >= 2) {
+                    NSArray<UITouch *> *touchArr = [allTouches allObjects];
+                    CGPoint p0 = [touchArr[0] locationInView:nil];
+                    CGPoint p1 = [touchArr[1] locationInView:nil];
+                    curPt = CGPointMake((p0.x + p1.x) / 2.0, (p0.y + p1.y) / 2.0);
+                } else {
+                    curPt = loc;
+                }
+
+                CGFloat dx_phys = curPt.x - startX;
+                CGFloat dy_phys = curPt.y - startY;
+                CGFloat user_dx = 0, user_dy = 0;
+                RC_UserDeltaForOrientation(dx_phys, dy_phys, orientation, &user_dx, &user_dy);
+
+                CGFloat abs_udx = fabs(user_dx);
+                CGFloat abs_udy = fabs(user_dy);
+
+                // Two Finger Top Slide Down (user_dy > 0 is downward)
+                if (g_twoFingerTopActive && !g_twoFingerTopTriggered) {
+                    BOOL isVertDown = (user_dy > 10 && abs_udy > abs_udx * 0.9);
+                    if (isVertDown && RC_TriggerIsActionable(@"trigger_statusbar_two_finger_swipe_down")) {
+                        RC_FreezeGestureScrolling();
+                    }
+                    if ((user_dy >= 28 && isVertDown) || (isEnded && user_dy >= 20 && isVertDown)) {
+                        load_trigger_config();
+                        BOOL enabled = RC_MasterEnabled() && 
+                                       [g_triggerConfig[@"triggers"][@"trigger_statusbar_two_finger_swipe_down"][@"enabled"] boolValue];
+                        if (enabled) {
+                            g_twoFingerTopTriggered = YES;
+                            trigger_haptic();
+                            if (RC_TriggerIsActionable(@"trigger_statusbar_two_finger_swipe_down")) RC_FreezeGestureScrolling();
+                            RCExecuteTrigger(@"trigger_statusbar_two_finger_swipe_down");
+                            SRLog(@"[RCMultiFinger] trigger_statusbar_two_finger_swipe_down FIRED during move at dy=%.1f", user_dy);
+                        }
+                    }
+                }
+
+                // Two Finger Bottom Slide Up (user_dy < 0 is upward)
+                if (g_twoFingerBottomActive && !g_twoFingerBottomTriggered) {
+                    BOOL isVertUp = (user_dy < -10 && abs_udy > abs_udx * 0.9);
+                    if (isVertUp && RC_TriggerIsActionable(@"trigger_bottom_two_finger_swipe_up")) {
+                        RC_FreezeGestureScrolling();
+                    }
+                    if ((user_dy <= -28 && isVertUp) || (isEnded && user_dy <= -20 && isVertUp)) {
+                        load_trigger_config();
+                        BOOL enabled = RC_MasterEnabled() && 
+                                       [g_triggerConfig[@"triggers"][@"trigger_bottom_two_finger_swipe_up"][@"enabled"] boolValue];
+                        if (enabled) {
+                            g_twoFingerBottomTriggered = YES;
+                            g_lastTwoFingerBottomSwipeTriggerTime = [[NSDate date] timeIntervalSince1970];
+                            trigger_haptic();
+                            if (RC_TriggerIsActionable(@"trigger_bottom_two_finger_swipe_up")) RC_FreezeGestureScrolling();
+                            RCExecuteTrigger(@"trigger_bottom_two_finger_swipe_up");
+                            SRLog(@"[RCMultiFinger] trigger_bottom_two_finger_swipe_up FIRED during move at dy=%.1f", user_dy);
+                        }
+                    }
+                }
+
+                if (isEnded) {
+                    BOOL anyActive = NO;
+                    for (UITouch *t in allTouches) {
+                        if (t != touch && (t.phase == UITouchPhaseBegan || t.phase == UITouchPhaseMoved || t.phase == UITouchPhaseStationary)) {
+                            anyActive = YES;
+                            break;
+                        }
+                    }
+                    if (!anyActive) {
+                        g_twoFingerTopActive = NO;
+                        g_twoFingerTopTriggered = NO;
+                        g_twoFingerBottomActive = NO;
+                        g_twoFingerBottomTriggered = NO;
+                        g_rcLatchedTouchOrientationValid = NO;
+                        RC_UnfreezeGestureScrolling();
+                    }
+                }
+            } else if (g_statusBarTouchActive || g_bottomBarTouchActive) {
                 CGFloat startX = g_statusBarTouchActive ? g_statusBarSwipeStartX : g_bottomBarSwipeStartX;
                 CGFloat startY = g_statusBarTouchActive ? g_statusBarSwipeStartY : g_bottomBarSwipeStartY;
                 
@@ -15367,8 +15549,21 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
             g_bottomBarHapticFired = NO;
             g_bottomBarSwipeUpTriggered = NO;
             g_pendingBottomBarSwipeUpTrigger = nil;
-            g_rcLatchedTouchOrientationValid = NO;
-            RC_UnfreezeGestureScrolling();
+            BOOL anyActive = NO;
+            for (UITouch *t in [event allTouches]) {
+                if (t != touch && (t.phase == UITouchPhaseBegan || t.phase == UITouchPhaseMoved || t.phase == UITouchPhaseStationary)) {
+                    anyActive = YES;
+                    break;
+                }
+            }
+            if (!anyActive) {
+                g_twoFingerTopActive = NO;
+                g_twoFingerTopTriggered = NO;
+                g_twoFingerBottomActive = NO;
+                g_twoFingerBottomTriggered = NO;
+                g_rcLatchedTouchOrientationValid = NO;
+                RC_UnfreezeGestureScrolling();
+            }
         }
     }
     
@@ -15460,6 +15655,11 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
     BOOL inBottom = NO;
     NSString *key = get_bottom_swipe_trigger_for_touch(loc, orientation, &inBottom);
     if (!inBottom || !key || !RC_TriggerIsActionable(key)) {
+        if (inBottom && RC_TriggerIsActionable(@"trigger_bottom_two_finger_swipe_up")) {
+            self.zoneTriggerKey = @"trigger_bottom_two_finger_swipe_up";
+            self.startPoint = loc;
+            return;
+        }
         self.state = UIGestureRecognizerStateFailed;
         return;
     }
@@ -15490,7 +15690,7 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
     // Upward intent past the threshold: claim the touch so the system
     // cancels app delivery, exactly like the edge recognizers. Firing
     // itself stays in the sendEvent path.
-    if (dy < -30 && ay > ax * 1.5) {
+    if (dy < -25 && ay > ax * 1.0) {
         if (self.zoneTriggerKey && RC_TriggerIsActionable(self.zoneTriggerKey)) {
             RC_FreezeGestureScrolling();
         }
@@ -15646,7 +15846,8 @@ static BOOL should_register_bottom_up_gestures() {
     if (![g_triggerConfig[@"masterEnabled"] boolValue]) return NO;
     return (RC_TriggerIsActionable(@"trigger_bottom_swipe_up_left") ||
             RC_TriggerIsActionable(@"trigger_bottom_swipe_up_center") ||
-            RC_TriggerIsActionable(@"trigger_bottom_swipe_up_right"));
+            RC_TriggerIsActionable(@"trigger_bottom_swipe_up_right") ||
+            RC_TriggerIsActionable(@"trigger_bottom_two_finger_swipe_up"));
 }
 
 // Register gesture recognizers
@@ -16007,7 +16208,7 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
         edge = [self edge];
     }
     if (edge == 4 || edge == 0) {
-        if (g_bottomBarTouchActive && has_any_bottom_swipe_trigger_enabled()) {
+        if (rc_is_bottom_gesture_active()) {
             SRLog(@"[RCBottom] SBGrabberTongue _shouldAllowPulling: NO");
             return NO;
         }
@@ -16033,7 +16234,7 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
 
 - (BOOL)grabberTongue:(id)tongue shouldAllowPullingForScreenEdge:(NSUInteger)edge {
     if (edge == 4 || edge == 0) {
-        if (g_bottomBarTouchActive && has_any_bottom_swipe_trigger_enabled()) {
+        if (rc_is_bottom_gesture_active()) {
             SRLog(@"[RCBottom] SBControlCenterController grabberTongue:shouldAllowPullingForScreenEdge: NO for bottom edge");
             return NO;
         }
@@ -16042,7 +16243,7 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
 }
 
 - (void)grabberTongueBeganPulling:(id)tongue withDistance:(double)dist andVelocity:(double)vel {
-    if (g_bottomBarTouchActive && has_any_bottom_swipe_trigger_enabled()) {
+    if (rc_is_bottom_gesture_active()) {
         SRLog(@"[RCBottom] SBControlCenterController suppressing grabberTongueBeganPulling");
         return;
     }
@@ -16051,8 +16252,7 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
 
 - (void)_presentControlCenterGestureBeganWithReason:(id)reason {
     if (rc_cc_intentional_open_active()) { %orig; return; }
-    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    if ((g_bottomBarTouchActive || g_bottomBarSwipeUpTriggered || (now - g_lastBottomSwipeTriggerTime < 0.8)) && has_any_bottom_swipe_trigger_enabled()) {
+    if (rc_is_bottom_gesture_active()) {
         SRLog(@"[RCBottom] SBControlCenterController suppressing _presentControlCenterGestureBeganWithReason: %@", reason);
         return;
     }
@@ -16061,8 +16261,7 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
 
 - (void)_presentControlCenterGestureUpdatedWithGrabberDistance:(double)dist andVelocity:(double)vel {
     if (rc_cc_intentional_open_active()) { %orig; return; }
-    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    if ((g_bottomBarTouchActive || g_bottomBarSwipeUpTriggered || (now - g_lastBottomSwipeTriggerTime < 0.8)) && has_any_bottom_swipe_trigger_enabled()) {
+    if (rc_is_bottom_gesture_active()) {
         return;
     }
     %orig;
@@ -16070,8 +16269,7 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
 
 - (void)_presentControlCenterGestureEndedWithVelocity:(double)vel completion:(id)comp {
     if (rc_cc_intentional_open_active()) { %orig; return; }
-    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    if ((g_bottomBarTouchActive || g_bottomBarSwipeUpTriggered || (now - g_lastBottomSwipeTriggerTime < 0.8)) && has_any_bottom_swipe_trigger_enabled()) {
+    if (rc_is_bottom_gesture_active()) {
         SRLog(@"[RCBottom] SBControlCenterController suppressing _presentControlCenterGestureEndedWithVelocity");
         return;
     }
@@ -16080,8 +16278,7 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
 
 - (void)presentAnimated:(BOOL)animated {
     if (rc_cc_intentional_open_active()) { %orig; return; }
-    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    if (now - g_lastBottomSwipeTriggerTime < 0.8 && has_any_bottom_swipe_trigger_enabled()) {
+    if (rc_is_bottom_gesture_active()) {
         SRLog(@"[RCBottom] Suppressed Control Center presentAnimated within trigger window");
         return;
     }
@@ -16090,8 +16287,7 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
 
 - (void)presentAnimated:(BOOL)animated completion:(id)completion {
     if (rc_cc_intentional_open_active()) { %orig; return; }
-    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    if (now - g_lastBottomSwipeTriggerTime < 0.8 && has_any_bottom_swipe_trigger_enabled()) {
+    if (rc_is_bottom_gesture_active()) {
         SRLog(@"[RCBottom] Suppressed Control Center presentAnimated:completion: within trigger window");
         return;
     }
@@ -16100,7 +16296,7 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
 
 - (BOOL)_canPresent {
     if (rc_cc_intentional_open_active()) return %orig;
-    if (g_bottomBarTouchActive && has_any_bottom_swipe_trigger_enabled()) {
+    if (rc_is_bottom_gesture_active()) {
         return NO;
     }
     return %orig;
@@ -16173,7 +16369,7 @@ static BOOL RC_ShouldKeepBottomBarSideSwipe(void) {
     if (recognizer && [recognizer respondsToSelector:@selector(edges)]) {
         UIRectEdge edges = [(UIScreenEdgePanGestureRecognizer *)recognizer edges];
         if ((edges & UIRectEdgeBottom) || edges == 0) {
-            if (g_bottomBarTouchActive && has_any_bottom_swipe_trigger_enabled()) {
+            if (rc_is_bottom_gesture_active()) {
                 SRLog(@"[RCBottom] SBSystemGestureManager gestureRecognizerShouldBegin: NO for recognizer %@", recognizer);
                 return NO;
             }
