@@ -1139,12 +1139,22 @@
         if (strongSelf.onActionSelected) {
             strongSelf.onActionSelected(actionString);
         }
+        // Dismiss the editor, then the picker itself so Save returns to the
+        // main actions sequence like every other action editor.
+        void (^dismissPickerToActions)(void) = ^{
+            UINavigationController *pickerNav = strongSelf.navigationController;
+            [pickerNav.presentingViewController dismissViewControllerAnimated:YES completion:nil];
+        };
         if (strongSelf.searchController.isActive) {
             [strongSelf.searchController dismissViewControllerAnimated:NO completion:^{
-                [strongSelf dismissViewControllerAnimated:YES completion:nil];
+                [strongSelf dismissViewControllerAnimated:YES completion:^{
+                    dismissPickerToActions();
+                }];
             }];
         } else {
-            [strongSelf dismissViewControllerAnimated:YES completion:nil];
+            [strongSelf dismissViewControllerAnimated:YES completion:^{
+                dismissPickerToActions();
+            }];
         }
     };
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:editor];

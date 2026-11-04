@@ -108,9 +108,12 @@
     self.revealButton = [UIButton buttonWithType:UIButtonTypeCustom];
     [self.revealButton setImage:[UIImage systemImageNamed:@"eye.slash"] forState:UIControlStateNormal];
     self.revealButton.tintColor = [UIColor secondaryLabelColor];
-    self.revealButton.frame = CGRectMake(0, 0, 34, 24);
+    // Leave a gap between the text/placeholder and the eye so they never touch.
+    self.revealButton.frame = CGRectMake(12, 0, 34, 24);
     [self.revealButton addTarget:self action:@selector(revealTapped:) forControlEvents:UIControlEventTouchUpInside];
-    self.passwordField.rightView = self.revealButton;
+    UIView *revealWrapper = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 46, 24)];
+    [revealWrapper addSubview:self.revealButton];
+    self.passwordField.rightView = revealWrapper;
     self.passwordField.rightViewMode = UITextFieldViewModeAlways;
 
     self.keyPathField = [self fieldWithPlaceholder:@"~/.ssh/id_rsa"];
