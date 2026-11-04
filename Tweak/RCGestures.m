@@ -1159,6 +1159,55 @@ NSString *RCGestureCommand(NSString *cmd) {
         rc_gestures_save(list);
         return [NSString stringWithFormat:@"Deleted '%@'\n", arg];
     }
+    if ([verb isEqualToString:@"trim"]) {
+        // gesture trim "Name" START END: keeps what happened between START and END (seconds) and
+        // starts it at 0. A finger down at START starts there; one still down at END lifts there.
+        if (words.count < 5) return @"Error: Usage: gesture trim \"Name\" START END\n";
+        double from = MAX(0, [words[3] doubleValue]), to = [words[4] doubleValue];
+        if (to <= from) return @"Error: The end must come after the start\n";
+        NSMutableArray *list = rc_gestures_load();
+        NSMutableDictionary *g = rc_gesture_named(list, arg);
+        if (!g) return [NSString stringWithFormat:@"Error: No gesture named '%@'\n", arg];
+        NSUInteger count = 0;
+        NSData *data = rc_gesture_unpack(g[@"frames"], &count);
+        const RCGestureFrame *frames = data.bytes;
+        NSMutableData *kept = [NSMutableData data];
+        NSUInteger keptCount = 0;
+        RCGestureFrame last = {0};
+        for (NSUInteger i = 0; i < count; i++) {
+            if (frames[i].t < from - 1e-6 || frames[i].t > to + 1e-6) continue;
+            RCGestureFrame f = frames[i];
+            f.t = MAX(0, f.t - from);
+            [kept appendBytes:&f length:sizeof(f)];
+            keptCount++;
+            last = f;
+        }
+        if (!keptCount) return @"Error: Nothing happens in that part\n";
+        // Lift any finger still down where it ends
+        RCGestureFrame lift = last;
+        int lifting = 0;
+        for (int j = 0; j < last.count; j++) {
+            if (last.fingers[j].touching) {
+                lift.fingers[lifting] = last.fingers[j];
+                lift.fingers[lifting].touching = 0;
+                lifting++;
+            }
+        }
+        if (lifting) {
+            lift.count = lifting;
+            lift.t = last.t + 0.008;
+            [kept appendBytes:&lift length:sizeof(lift)];
+            keptCount++;
+        }
+        const RCGestureFrame *out = kept.bytes;
+        NSUInteger strokes = rc_gesture_stroke_count(out, keptCount);
+        if (!strokes) return @"Error: No touches in that part\n";
+        g[@"frames"] = rc_gesture_pack(out, keptCount);
+        g[@"duration"] = @(out[keptCount - 1].t);
+        g[@"strokes"] = @(strokes);
+        if (!rc_gestures_save(list)) return @"Error: The gesture couldn't be saved\n";
+        return [NSString stringWithFormat:@"Trimmed to %.1f s\n", out[keptCount - 1].t];
+    }
     if ([verb isEqualToString:@"rename"]) {
         NSString *to = words.count > 3 ? [words[3] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]] : @"";
         if (!to.length) return @"Error: Usage: gesture rename \"Old\" \"New\"\n";
@@ -1172,5 +1221,5 @@ NSString *RCGestureCommand(NSString *cmd) {
         return [NSString stringWithFormat:@"Renamed to '%@'\n", to];
     }
 
-    return @"Usage: gesture list | record \"Name\" | record-toggle [\"Name\"] | record-stop | record-cancel | record-status | play \"Name\" [SPEED] | play-soon \"Name\" [SPEED] | play-latest [SPEED] | stop | idle-stop [SECONDS] | tab-size [small|medium|large] | export PATH [\"Name\" ...] | import PATH | delete \"Name\" | rename \"Old\" \"New\"\n";
+    return @"Usage: gesture list | record \"Name\" | record-toggle [\"Name\"] | record-stop | record-cancel | record-status | play \"Name\" [SPEED] | play-soon \"Name\" [SPEED] | play-latest [SPEED] | stop | idle-stop [SECONDS] | tab-size [small|medium|large] | export PATH [\"Name\" ...] | import PATH | trim \"Name\" START END | delete \"Name\" | rename \"Old\" \"New\"\n";
 }

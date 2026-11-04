@@ -90,6 +90,10 @@ typedef NS_ENUM(NSInteger, RCGestureSection) {
     self = [super initWithStyle:UITableViewStyleInsetGrouped];
     if (self) {
         _gestures = @[];
+        // The settings as last seen, so the rows don't show defaults until the tweak answers
+        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+        _idleStop = [defaults doubleForKey:@"RCGestureIdleStop"];
+        _tabSize = [defaults stringForKey:@"RCGestureTabSize"];
         self.title = @"Gestures";
     }
     return self;
@@ -97,6 +101,16 @@ typedef NS_ENUM(NSInteger, RCGestureSection) {
 
 - (void)dealloc {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+
+- (void)setIdleStop:(double)idleStop {
+    _idleStop = idleStop;
+    [[NSUserDefaults standardUserDefaults] setDouble:idleStop forKey:@"RCGestureIdleStop"];
+}
+
+- (void)setTabSize:(NSString *)tabSize {
+    _tabSize = [tabSize copy];
+    if (tabSize) [[NSUserDefaults standardUserDefaults] setObject:tabSize forKey:@"RCGestureTabSize"];
 }
 
 - (void)viewDidLoad {
@@ -334,11 +348,12 @@ typedef NS_ENUM(NSInteger, RCGestureSection) {
     detail.onAction = ^(NSString *action, UIView *source) {
         NSString *current = weakDetail.name;
         if ([action isEqualToString:@"play"]) [weakSelf play:current];
-        else if ([action isEqualToString:@"record"]) [weakSelf record:current];
+        else if ([action isEqualToString:@"record"]) [weakSelf confirmReplaceRecording:current];
         else if ([action isEqualToString:@"rename"]) [weakSelf askRename:current];
         else if ([action isEqualToString:@"export"]) [weakSelf exportGestures:@[current] fromView:source];
         else if ([action isEqualToString:@"delete"]) [weakSelf confirmDelete:current];
     };
+    detail.onChange = ^{ [weakSelf reload]; };
     self.detail = detail;
     [self.navigationController pushViewController:detail animated:YES];
 }
@@ -648,7 +663,10 @@ typedef NS_ENUM(NSInteger, RCGestureSection) {
     if (exists) {
         [sheet addAction:[UIAlertAction actionWithTitle:@"Play" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) { [weakSelf play:name]; }]];
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:exists ? @"Record Again" : @"Record" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) { [weakSelf record:name]; }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:exists ? @"Replace Recording" : @"Record" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        if (exists) [weakSelf confirmReplaceRecording:name];
+        else [weakSelf record:name];
+    }]];
     if (exists) {
         [sheet addAction:[UIAlertAction actionWithTitle:@"Rename" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) { [weakSelf askRename:name]; }]];
         [sheet addAction:[UIAlertAction actionWithTitle:@"Export" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) { [weakSelf exportGestures:@[name] fromView:source]; }]];
@@ -829,6 +847,18 @@ typedef NS_ENUM(NSInteger, RCGestureSection) {
     if (!changed) return;
     [config setDictionary:updated];
     [cm saveConfig];
+}
+
+// Recording again throws the old recording away, so it's asked first
+- (void)confirmReplaceRecording:(NSString *)name {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Replace Recording?"
+        message:@"The current recording is lost. Actions that play this gesture play the new one." preferredStyle:UIAlertControllerStyleAlert];
+    __weak typeof(self) weakSelf = self;
+    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Replace" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
+        [weakSelf record:name];
+    }]];
+    [[self presenter] presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)confirmDelete:(NSString *)name {

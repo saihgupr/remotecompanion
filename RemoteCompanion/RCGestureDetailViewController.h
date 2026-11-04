@@ -9,5 +9,7 @@
 
 // "play", "record", "rename", "export" or "delete", with the row it came from
 @property (nonatomic, copy) void (^onAction)(NSString *action, UIView *source);
+// After the gesture itself changed here (Trim), so the library can show it fresh
+@property (nonatomic, copy) void (^onChange)(void);
 
 @end
