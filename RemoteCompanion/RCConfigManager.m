@@ -1696,9 +1696,9 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         // Touch gestures with coordinates
         } else if ([cmd hasPrefix:@"gesture record-toggle"]) {
             result = @"Record Gesture";
-        } else if ([RCGesturesViewController gestureForCommand:cmd]) {
-            NSString *name = [RCGesturesViewController gestureForCommand:cmd];
-            double speed = [RCGesturesViewController speedForCommand:cmd];
+        } else if ([RCGesturesViewController gestureForCommand:originalCmd]) {
+            NSString *name = [RCGesturesViewController gestureForCommand:originalCmd]; // as named, not lowercased
+            double speed = [RCGesturesViewController speedForCommand:originalCmd];
             result = [NSString stringWithFormat:@"Gesture: %@", name.length ? name : @"Latest Recording"];
             if (fabs(speed - 1) > 0.01) result = [result stringByAppendingFormat:@" at %@", [RCGesturesViewController titleForSpeed:speed]];
         } else if ([cmd hasPrefix:@"tap "]) {
