@@ -12,6 +12,7 @@ RemoteCompanion_FILES = main.m RCAppDelegate.m RCConfigManager.m RCTriggersViewC
 RemoteCompanion_FRAMEWORKS = UIKit Foundation UserNotifications CoreNFC MobileCoreServices LocalAuthentication
 RemoteCompanion_CFLAGS = -fobjc-arc
 RemoteCompanion_FILES += RCNewTriggerViewController.m
+RemoteCompanion_FILES += RCTriggerPickerViewController.m
 RemoteCompanion_LDFLAGS = -lc++
 RemoteCompanion_CODESIGN_FLAGS = -SEntitlements.plist
 RemoteCompanion_FILES += RCConditionPickerViewController.m

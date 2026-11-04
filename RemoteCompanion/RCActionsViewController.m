@@ -19,6 +19,7 @@
 #import "RCNFCTriggerViewController.h"
 #import "RCDevicePickerViewController.h"
 #import "RCFocusPickerViewController.h"
+#import "RCTriggerPickerViewController.h"
 #import "RCKMMacroPickerViewController.h"
 #import <notify.h>
 #import <objc/runtime.h>
@@ -1068,21 +1069,21 @@ static id g_actionClipboard = nil;
     return [UIMenu menuWithTitle:@"" children:menuActions];
 }
 
-// Picks a trigger for a "stop trigger" action; done gets its key
-- (void)pickTriggerToStop:(void (^)(NSString *key))done {
-    RCConfigManager *config = [RCConfigManager sharedManager];
-    NSMutableArray *keys = [NSMutableArray array];
-    for (NSString *key in [config allConfiguredTriggerKeys]) if (![key isEqualToString:_triggerKey]) [keys addObject:key];
-    [keys sortUsingComparator:^NSComparisonResult(NSString *a, NSString *b) {
-        return [[config displayNameForTrigger:a] localizedCaseInsensitiveCompare:[config displayNameForTrigger:b]];
-    }];
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Stop Trigger" message:@"Stops that trigger's actions while they're still running, such as during a delay." preferredStyle:UIAlertControllerStyleActionSheet];
-    for (NSString *key in keys) {
-        [sheet addAction:[UIAlertAction actionWithTitle:[config displayNameForTrigger:key] style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) { done(key); }]];
-    }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    sheet.popoverPresentationController.barButtonItem = self.navigationItem.rightBarButtonItems.lastObject;
-    [self presentViewController:sheet animated:YES completion:nil];
+// Picks a trigger for a "stop trigger" action (current: the one it names now, or nil); done gets
+// its key
+- (void)pickTriggerToStop:(NSString *)current done:(void (^)(NSString *key))done {
+    RCTriggerPickerViewController *picker = [[RCTriggerPickerViewController alloc] initWithTitle:@"Stop Trigger" excludingTrigger:_triggerKey];
+    picker.currentKey = current;
+    picker.footerText = @"Stops that trigger's actions while they're still running, such as during a delay.";
+    __weak RCTriggerPickerViewController *weakPicker = picker;
+    picker.onSelected = ^(NSString *key) {
+        // Closed by the screen that opened it: while searching, the picker itself is presenting the
+        // search field, so asking the picker would close only that and leave the list open
+        UIViewController *opener = weakPicker.navigationController.presentingViewController;
+        [opener dismissViewControllerAnimated:YES completion:^{ done(key); }];
+    };
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:picker];
+    [self presentViewController:nav animated:YES completion:nil];
 }
 
 - (instancetype)initWithTriggerKey:(NSString *)triggerKey followingRun:(NSString *)runID {
@@ -1893,7 +1894,7 @@ static void RCSetRunWatching(BOOL watching) {
 
         } else if ([action isEqualToString:@"__STOP_TRIGGER__"]) {
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                [self pickTriggerToStop:^(NSString *key) {
+                [self pickTriggerToStop:nil done:^(NSString *key) {
                     [self.actions addObject:[@"stop trigger " stringByAppendingString:key]];
                     [self saveActions];
                     [self.tableView reloadData];
@@ -3285,7 +3286,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         [self presentViewController:nav animated:YES completion:nil];
 
     } else if ([currentAction hasPrefix:@"stop trigger "]) {
-        [self pickTriggerToStop:^(NSString *key) {
+        [self pickTriggerToStop:[currentAction substringFromIndex:13] done:^(NSString *key) {
             self.actions[indexPath.row] = [@"stop trigger " stringByAppendingString:key];
             [self saveActions];
             [self.tableView reloadData];
