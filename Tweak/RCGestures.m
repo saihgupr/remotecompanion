@@ -271,12 +271,8 @@ static BOOL rc_gesture_was_sent(uint64_t stamp) {
     return NO;
 }
 
-// Fingers really on the screen (by slot). A new one while a gesture plays stops it; one already
-// down when it started (the touch that ran the trigger) doesn't.
-static uint32_t g_realDown;
 // What the watcher saw during the current playback, for the log
 static uint32_t g_watchEvents, g_watchSent, g_watchDowns, g_watchMixed;
-static double g_realTouchAt; // the last real finger seen (CFAbsoluteTime)
 
 // Playback's fingers all have this contact size (read back as fixed point, so close to it); a
 // real fingertip's varies
@@ -291,39 +287,31 @@ static void rc_gesture_watch_real_touch(RCHIDEventRef event) {
     if (playing && sentEvent) g_watchSent++;
     CFArrayRef children = IOHIDEventGetChildren(event);
     if (!children) return;
-    // A real event lists every finger on the screen, so it replaces what's held: a lift that went
-    // unseen can't leave a finger marked down
-    uint32_t nowDown = 0;
-    BOOL sawReal = NO;
     for (CFIndex i = 0; i < CFArrayGetCount(children); i++) {
         RCHIDEventRef child = (RCHIDEventRef)CFArrayGetValueAtIndex(children, i);
         if (IOHIDEventGetType(child) != 11) continue;
         // A finger of playback's own, whether it came alone or with a real one in the same event
         if (rc_gesture_finger_is_sent(child)) continue;
-        sawReal = YES;
         if (sentEvent && playing) {
             g_watchMixed++;
             if (g_watchMixed <= 3) SRLog(@"[Gesture] a real finger came inside a playback event (size %.6f)", IOHIDEventGetFloatValue(child, 0xB0014));
         }
+        // A new touch: its mask says the touch changed (0x2) and it's on. A finger already down
+        // when playback started (the one that ran the trigger) only moves, rests or lifts.
         uint32_t index = (uint32_t)IOHIDEventGetIntegerValue(child, 0xB0005);
-        uint32_t bit = 1u << (index & 31);
         BOOL touching = IOHIDEventGetIntegerValue(child, 0xB0009) != 0;
-        if (playing && touching && !(g_realDown & bit)) {
+        uint32_t mask = (uint32_t)IOHIDEventGetIntegerValue(child, 0xB0007);
+        if (playing && touching && (mask & 0x2)) {
             g_watchDowns++;
-            SRLog(@"[Gesture] touch down during playback: finger %u (size %.4f, %@), held before 0x%x, stop on touch %@",
-                index, IOHIDEventGetFloatValue(child, 0xB0014), sentEvent ? @"inside a playback event" : @"its own event",
-                g_realDown, g_playStopOnTouch ? @"on" : @"off");
+            SRLog(@"[Gesture] touch down during playback: finger %u (size %.4f, mask 0x%x, %@), stop on touch %@",
+                index, IOHIDEventGetFloatValue(child, 0xB0014), mask, sentEvent ? @"inside a playback event" : @"its own event",
+                g_playStopOnTouch ? @"on" : @"off");
             if (g_playStopOnTouch && !g_playCancel) {
                 g_playTouched = YES;
                 g_playCancel = YES;
             }
         }
-        if (touching) nowDown |= bit;
-        if (!sentEvent) continue;
-        if (touching) g_realDown |= bit; else g_realDown &= ~bit; // inside a playback event: only this finger
     }
-    if (sawReal) g_realTouchAt = CFAbsoluteTimeGetCurrent();
-    if (!sentEvent) g_realDown = nowDown;
 }
 
 void RCGestureHIDEvent(const void *rawEvent) {
@@ -1032,8 +1020,6 @@ static void rc_gesture_play(NSString *name, const RCGestureFrame *frames, NSUInt
     g_playCancel = NO;
     g_playTouched = NO;
     g_watchEvents = g_watchSent = g_watchDowns = g_watchMixed = 0;
-    // A finger still on the screen keeps sending events; with none for a moment, nothing is held
-    if (CFAbsoluteTimeGetCurrent() - g_realTouchAt > 0.25) g_realDown = 0;
     g_playResult = @"playing";
     g_playStopOnTouch = rc_gestures_stop_on_touch();
     g_playing = YES;
@@ -1047,8 +1033,8 @@ static void rc_gesture_play(NSString *name, const RCGestureFrame *frames, NSUInt
     }
     NSUInteger edgeFrames = 0;
     for (NSUInteger k = 0; k < count; k++) for (int j = 0; j < frames[k].count; j++) if (frames[k].fingers[j].edge) { edgeFrames++; break; }
-    SRLog(@"[Gesture] playing '%@' at %gx (%lu frames, %lu on an edge), stop on touch %@, fingers held 0x%x",
-        name, speed, (unsigned long)count, (unsigned long)edgeFrames, g_playStopOnTouch ? @"on" : @"off", g_realDown);
+    SRLog(@"[Gesture] playing '%@' at %gx (%lu frames, %lu on an edge), stop on touch %@",
+        name, speed, (unsigned long)count, (unsigned long)edgeFrames, g_playStopOnTouch ? @"on" : @"off");
     uint64_t start = mach_absolute_time();
     uint32_t down = 0;
     RCTouchFinger held[32] = {0}; // where each finger down was last sent
