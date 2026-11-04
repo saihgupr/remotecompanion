@@ -26,6 +26,7 @@ All notable changes to this project will be documented in this file.
 - **Deep Linking URL Scheme & CLI Navigation**: added `remotecompanion://` URL scheme support and `rc nav <panel>` CLI command to jump directly into Settings, Integrations (Home Assistant, Keyboard Maestro, MQTT), New Trigger picker, or Triggers list from Siri Shortcuts, automation scripts, or terminal.
 
 ### Fixed
+- **Center Bottom Swipe Up blocked Control Center**: with only the center zone set up, swiping up from the bottom-right corner no longer opens Control Center because the touch was counted as a bottom gesture for every zone. A touch now counts only when its own zone has actions.
 - **SSH banner toggle never fired**: ticking SSH in Settings > Banners saved the picker's internal id as the match pattern, which no real `ssh-run` command could match. It now matches the `ssh-run ` prefix, so enabled SSH actions banner like everything else (re-tick SSH once to pick up the fix).
 - **SSH action editor stranded on Save**: creating an SSH action via + left you on the picker instead of returning to the actions list like other editors. Save now dismisses both and lands back on the actions sequence.
 - **Top-button Touch ID triggers died after lock**: on Touch ID power-button devices (iPad mini 6, iPad Air) the sensor sleeps with the screen, so triggers only worked while Settings was open. The tweak now holds a finger-detection assertion so the sensor stays awake (#99).

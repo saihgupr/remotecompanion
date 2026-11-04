@@ -16091,7 +16091,11 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
 
 static inline BOOL rc_is_bottom_gesture_active(void) {
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    BOOL oneFinger = (g_bottomBarTouchActive || g_bottomBarSwipeUpTriggered || (now - g_lastBottomSwipeTriggerTime < 0.8)) && has_any_bottom_swipe_trigger_enabled();
+    // The touch counts only when its own zone will do something. Using "any bottom trigger
+    // enabled" made a center swipe-up swallow the bottom-right swipe that opens Control Center.
+    BOOL inLiveZone = g_bottomBarTouchActive && g_pendingBottomBarSwipeUpTrigger &&
+                      RC_TriggerIsActionable(g_pendingBottomBarSwipeUpTrigger);
+    BOOL oneFinger = (inLiveZone || g_bottomBarSwipeUpTriggered || (now - g_lastBottomSwipeTriggerTime < 0.8)) && has_any_bottom_swipe_trigger_enabled();
     BOOL twoFinger = (g_twoFingerBottomActive || g_twoFingerBottomTriggered || (now - g_lastTwoFingerBottomSwipeTriggerTime < 0.8)) && RC_TriggerIsActionable(@"trigger_bottom_two_finger_swipe_up");
     return oneFinger || twoFinger;
 }
