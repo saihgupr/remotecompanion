@@ -1186,10 +1186,105 @@ NSArray<NSDictionary *> *RCGestureList(void) {
     return out;
 }
 
+#pragma mark - Tap, hold and swipe
+
+// A touch made up on the spot (gesture tap / hold / swipe), played like a recording. Points are in
+// screen points as the screen is turned now (what rc-screen reports); they're turned upright here.
+static CGPoint rc_gesture_upright(CGPoint p, CGSize *fixedSize) {
+    __block CGPoint out = p;
+    __block CGSize size = CGSizeZero;
+    rc_on_main_sync(^{
+        UIScreen *screen = [UIScreen mainScreen];
+        out = [screen.coordinateSpace convertPoint:p toCoordinateSpace:screen.fixedCoordinateSpace];
+        size = screen.fixedCoordinateSpace.bounds.size;
+    });
+    if (fixedSize) *fixedSize = size;
+    return out;
+}
+
+// The edge a touch starts on (the touchscreen's edge bits >> 24): iOS starts the home bar
+// gesture, swipe back and the like only for touches that begin there
+static uint8_t rc_gesture_edge(CGPoint p, CGSize size) {
+    if (p.y >= size.height - 2) return 0x1; // bottom
+    if (p.x <= 2) return 0x8;               // left
+    if (p.y <= 2) return 0x2;               // top
+    if (p.x >= size.width - 2) return 0x4;  // right
+    return 0;
+}
+
+// Frames from (x1,y1) to (x2,y2) over `seconds`, lifting at the end; the same point for a tap
+// or hold. A still finger keeps reporting, as a real one does, so long presses register.
+static NSData *rc_gesture_make(CGPoint from, CGPoint to, double seconds, CGSize size) {
+    NSMutableData *data = [NSMutableData data];
+    uint8_t edge = rc_gesture_edge(from, size);
+    double step = 1.0 / 60;
+    int moves = MAX(1, (int)ceil(seconds / step));
+    for (int i = 0; i <= moves; i++) {
+        double f = (double)i / moves;
+        RCGestureFrame frame = {0};
+        frame.t = seconds * f;
+        frame.count = 1;
+        frame.fingers[0].slot = 2;
+        frame.fingers[0].touching = 1;
+        frame.fingers[0].edge = edge;
+        frame.fingers[0].x = from.x + (to.x - from.x) * f;
+        frame.fingers[0].y = from.y + (to.y - from.y) * f;
+        [data appendBytes:&frame length:sizeof(frame)];
+    }
+    RCGestureFrame lift = {0};
+    lift.t = seconds + step;
+    lift.count = 1;
+    lift.fingers[0].slot = 2;
+    lift.fingers[0].edge = edge;
+    lift.fingers[0].x = to.x;
+    lift.fingers[0].y = to.y;
+    [data appendBytes:&lift length:sizeof(lift)];
+    return data;
+}
+
+static NSString *rc_gesture_touch_command(NSString *verb, NSArray<NSString *> *words) {
+    // gesture tap X Y | hold X Y [SECONDS] | swipe X1 Y1 X2 Y2 [SECONDS]
+    BOOL swipe = [verb isEqualToString:@"swipe"];
+    NSUInteger points = swipe ? 4 : 2;
+    if (words.count < 2 + points) {
+        return swipe ? @"Error: Use gesture swipe X1 Y1 X2 Y2 [SECONDS]\n" : [NSString stringWithFormat:@"Error: Use gesture %@ X Y%@\n", verb, [verb isEqualToString:@"hold"] ? @" [SECONDS]" : @""];
+    }
+    NSCharacterSet *number = [NSCharacterSet characterSetWithCharactersInString:@"0123456789.-"];
+    for (NSUInteger i = 2; i < words.count; i++) {
+        if (![[words[i] stringByTrimmingCharactersInSet:number] isEqualToString:@""]) return [NSString stringWithFormat:@"Error: Not a number: %@\n", words[i]];
+    }
+    double seconds = [verb isEqualToString:@"tap"] ? 0.05 : swipe ? 0.3 : 1;
+    if (words.count > 2 + points) seconds = MIN(MAX([words[2 + points] doubleValue], 0.02), 30);
+    CGSize size = CGSizeZero;
+    CGPoint from = rc_gesture_upright(CGPointMake([words[2] doubleValue], [words[3] doubleValue]), &size);
+    CGPoint to = swipe ? rc_gesture_upright(CGPointMake([words[4] doubleValue], [words[5] doubleValue]), NULL) : from;
+    // A point on the edge (0, or the width) is kept just inside
+    from = CGPointMake(MIN(MAX(from.x, 0), size.width - 0.5), MIN(MAX(from.y, 0), size.height - 0.5));
+    to = CGPointMake(MIN(MAX(to.x, 0), size.width - 0.5), MIN(MAX(to.y, 0), size.height - 0.5));
+    if (g_playing) return @"Error: A gesture is already playing\n";
+    uint64_t sender = rc_touch_sender();
+    if (!sender) return @"Error: Touch the screen once first (after a respring the touchscreen's ID isn't known yet)\n";
+    NSData *frames = rc_gesture_make(from, to, seconds, size);
+    NSUInteger count = frames.length / sizeof(RCGestureFrame);
+    NSString *name = verb;
+    dispatch_block_t play = ^{ rc_gesture_play(name, frames.bytes, count, sender, 1, size); };
+    // Waits for the touch to finish, so the next command sees its result; from the main thread
+    // (the Web UI) it can't wait
+    if ([NSThread isMainThread]) {
+        dispatch_async(rc_gesture_play_queue(), play);
+    } else {
+        dispatch_sync(rc_gesture_play_queue(), play);
+        if (g_playTouched) return @"Stopped by a touch\n";
+    }
+    return [NSString stringWithFormat:@"%@%@\n", [[verb substringToIndex:1] uppercaseString], [verb substringFromIndex:1]];
+}
+
 NSString *RCGestureCommand(NSString *cmd) {
     NSArray<NSString *> *words = rc_gesture_words(cmd);
     NSString *verb = words.count > 1 ? words[1].lowercaseString : @"";
     NSString *arg = words.count > 2 ? [words[2] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]] : @"";
+
+    if ([@[@"tap", @"hold", @"swipe"] containsObject:verb]) return rc_gesture_touch_command(verb, words);
 
     if ([verb isEqualToString:@"list"]) {
         NSMutableString *out = [NSMutableString string];
@@ -1460,5 +1555,5 @@ NSString *RCGestureCommand(NSString *cmd) {
         return [NSString stringWithFormat:@"Renamed to '%@'\n", to];
     }
 
-    return @"Usage: gesture list | record \"Name\" | record-toggle [\"Name\"] | record-stop | record-cancel | record-status | play \"Name\" [SPEED] | play-soon \"Name\" [SPEED] | play-latest [SPEED] | play-status | stop | idle-stop [SECONDS] | tab-size [small|medium|large] | stop-on-touch [on|off] | show-touches [on|off] | export PATH [\"Name\" ...] | import PATH | trim \"Name\" START END | delete \"Name\" | rename \"Old\" \"New\"\n";
+    return @"Usage: gesture tap X Y | hold X Y [SECONDS] | swipe X1 Y1 X2 Y2 [SECONDS] | list | record \"Name\" | record-toggle [\"Name\"] | record-stop | record-cancel | record-status | play \"Name\" [SPEED] | play-soon \"Name\" [SPEED] | play-latest [SPEED] | play-status | stop | idle-stop [SECONDS] | tab-size [small|medium|large] | stop-on-touch [on|off] | show-touches [on|off] | export PATH [\"Name\" ...] | import PATH | trim \"Name\" START END | delete \"Name\" | rename \"Old\" \"New\"\n";
 }
