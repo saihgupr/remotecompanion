@@ -166,6 +166,33 @@ def t_hold(args):
     return with_screen(host, text, args)
 
 
+def two_finger(args, verb, amount_key):
+    host = host_for(args.get("phone"))
+    amount = float(args[amount_key])
+    secs = (" %g" % float(args["seconds"])) if args.get("seconds") else ""
+    point = point_or_target(args, verb)
+    if point is None:
+        text = run(host, screen_cmd(verb, args["target"], "%g" % amount, *([secs.strip()] if secs else [])))
+    else:
+        text = run(host, rc_cmd("gesture %s %g %g %g%s" % (verb, point[0], point[1], amount, secs)))
+    return with_screen(host, text, args)
+
+
+def t_pinch(args):
+    return two_finger(args, "pinch", "scale")
+
+
+def t_rotate(args):
+    return two_finger(args, "rotate", "degrees")
+
+
+def t_swipe2(args):
+    host = host_for(args.get("phone"))
+    seconds = float(args.get("seconds", 0.4))
+    text = run(host, rc_cmd("gesture swipe2 %g %g %g %g %g" % (args["x1"], args["y1"], args["x2"], args["y2"], seconds)))
+    return with_screen(host, text, args)
+
+
 def t_swipe(args):
     host = host_for(args.get("phone"))
     seconds = float(args.get("seconds", 0.3))
@@ -307,6 +334,18 @@ TOOLS = [
      "(as close as its steps allow).",
      {"target": TARGET, "to": {"type": "string", "description": "up, down, 'up 3', or a percentage like 30%."},
       "show_screen": SHOW}, ["target", "to"]),
+    ("pinch", t_pinch,
+     "Two fingers on an element (target) or point (x, y): scale above 1 spreads them (zoom in, e.g. 2), below 1 "
+     "brings them together (zoom out, e.g. 0.5).",
+     {"target": TARGET, "x": {"type": "number"}, "y": {"type": "number"}, "scale": {"type": "number"},
+      "seconds": {"type": "number", "description": "Duration (default 0.6)."}, "show_screen": SHOW}, ["scale"]),
+    ("rotate", t_rotate, "Two fingers turning on an element or point: degrees, clockwise when above 0.",
+     {"target": TARGET, "x": {"type": "number"}, "y": {"type": "number"}, "degrees": {"type": "number"},
+      "seconds": {"type": "number", "description": "Duration (default 0.6)."}, "show_screen": SHOW}, ["degrees"]),
+    ("two_finger_swipe", t_swipe2, "A swipe with two fingers side by side, from x1,y1 to x2,y2 (e.g. to pan a map).",
+     {"x1": {"type": "number"}, "y1": {"type": "number"}, "x2": {"type": "number"}, "y2": {"type": "number"},
+      "seconds": {"type": "number", "description": "Duration (default 0.4)."}, "show_screen": SHOW},
+     ["x1", "y1", "x2", "y2"]),
     ("type", t_type, "Types text into the field being edited (tap or press a text field first). Any characters.",
      {"text": {"type": "string"}, "replace": {"type": "boolean", "description": "Empty the field first."},
       "show_screen": SHOW}, ["text"]),

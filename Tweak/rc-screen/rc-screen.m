@@ -11,6 +11,8 @@
 //                                   other way once the list ends
 //   rc-screen tap TEXT|#N           a real touch on the element's center (for what press can't reach)
 //   rc-screen hold TEXT|#N [SECONDS] touches and holds it (default 1 s)
+//   rc-screen pinch TEXT|#N SCALE   two fingers on it, apart (2: zoom in) or together (0.5: zoom out)
+//   rc-screen rotate TEXT|#N DEGREES two fingers turning on it (clockwise above 0)
 //   rc-screen menu TEXT|#N          opens the element's menu (as a long press does, without the touch)
 //   rc-screen type TEXT             types into the text field being edited (--replace: clears it first)
 //   rc-screen clear                 empties the text field being edited
@@ -230,7 +232,7 @@ static void rc_quit(int sig) {
 }
 
 static int rc_usage(void) {
-    fprintf(stderr, "Usage: rc-screen [--json] | find TEXT [--json] | press TEXT|#N | wait TEXT [SECONDS] | tap TEXT|#N | hold TEXT|#N [SECONDS] | menu TEXT|#N | type TEXT | scroll-to TEXT [up] | adjust TEXT|#N up|down [STEPS] | adjust TEXT|#N PERCENT%% | set TEXT|#N on|off | clear\n");
+    fprintf(stderr, "Usage: rc-screen [--json] | find TEXT [--json] | press TEXT|#N | wait TEXT [SECONDS] | tap TEXT|#N | hold TEXT|#N [SECONDS] | menu TEXT|#N | type TEXT | scroll-to TEXT [up] | adjust TEXT|#N up|down [STEPS] | adjust TEXT|#N PERCENT%% | set TEXT|#N on|off | clear | pinch TEXT|#N SCALE | rotate TEXT|#N DEGREES\n");
     return 2;
 }
 
@@ -286,7 +288,7 @@ int main(int argc, char **argv) {
             else [args addObject:a];
         }
         NSString *verb = args.count ? args[0] : @"list";
-        if (![@[@"list", @"find", @"press", @"wait", @"tap", @"hold", @"menu", @"type", @"scroll-to", @"adjust", @"set", @"clear"] containsObject:verb]) return rc_usage();
+        if (![@[@"list", @"find", @"press", @"wait", @"tap", @"hold", @"menu", @"type", @"scroll-to", @"adjust", @"set", @"clear", @"pinch", @"rotate"] containsObject:verb]) return rc_usage();
         if (![verb isEqualToString:@"list"] && ![verb isEqualToString:@"clear"] && args.count < 2) return rc_usage();
 
         void *lib = dlopen("/usr/lib/libAccessibility.dylib", RTLD_NOW);
@@ -528,6 +530,21 @@ int main(int argc, char **argv) {
             [NSThread sleepForTimeInterval:0.15];
             printf("Adjusted %s\n", rc_line(again() ?: e).UTF8String);
             return 0;
+        }
+
+        if ([verb isEqualToString:@"pinch"] || [verb isEqualToString:@"rotate"]) {
+            if (args.count < 3) return rc_usage();
+            RCScreenElement *e = rc_pick(list, args[1]);
+            if (!e) {
+                fprintf(stderr, "Not on screen: %s\n", args[1].UTF8String);
+                return 1;
+            }
+            CGRect f = e.frame;
+            NSString *command = [NSString stringWithFormat:@"gesture %@ %.1f %.1f %g", verb, CGRectGetMidX(f), CGRectGetMidY(f), [args[2] doubleValue]];
+            if (args.count > 3) command = [command stringByAppendingFormat:@" %g", [args[3] doubleValue]];
+            int result = rc_command(command);
+            if (result == 0) printf("%s %s\n", [verb isEqualToString:@"pinch"] ? "Pinched" : "Rotated", rc_line(e).UTF8String);
+            return result;
         }
 
         if ([verb isEqualToString:@"tap"] || [verb isEqualToString:@"hold"]) {

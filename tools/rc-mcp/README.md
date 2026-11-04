@@ -33,6 +33,7 @@ the phone. One file, Python 3.8 or later, nothing to install.
 | `press` | Activates an element, as VoiceOver does |
 | `tap`, `hold` | A real touch on an element or at x, y |
 | `swipe` | A real swipe; from a screen edge it's an edge swipe (home, back) |
+| `pinch`, `rotate`, `two_finger_swipe` | Two-finger gestures: zoom in or out, turn, pan |
 | `type` | Types into the field being edited (`replace` empties it first) |
 | `clear` | Empties the field being edited |
 | `set_switch` | Turns a switch on or off, only pressing it if it needs to change |

@@ -127,6 +127,9 @@ A sequence is a **JSON array** of actions. Each action is either:
 | `gesture hold 195 422 0.8` | Hold at x=195, y=422 for 0.8 seconds |
 | `gesture swipe 195 700 195 200` | Swipe from (195,700) to (195,200); add seconds to set the speed (default 0.3) |
 | `gesture swipe 195 852 195 450` | A swipe that starts on a screen edge is an edge swipe (this one goes home) |
+| `gesture pinch 195 422 2` | Two fingers apart around (195,422): zoom in (0.5 zooms out); add seconds for the speed |
+| `gesture rotate 195 422 90` | Two fingers turning 90° clockwise around (195,422) (negative turns the other way) |
+| `gesture swipe2 195 600 195 300` | A two-finger swipe, e.g. to pan a map |
 | `gesture play "Name"` | Play a recorded gesture (Settings > Gestures); add a speed like `2x` |
 
 The next action starts once the touch is done.
