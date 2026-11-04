@@ -42,6 +42,8 @@
 // Experimental NFC: the system's own background reader reads tags while the screen is on (iPhone XS and later)
 @property (nonatomic, assign) BOOL nfcBackgroundReading;
 + (BOOL)nfcBackgroundReadingSupported;
+// Run History: how many runs of each trigger are kept (0 for none; 10 unless set)
+@property (nonatomic, assign) NSInteger runHistoryCount;
 @property (nonatomic, assign) BOOL rootEnabled;
 // The root helper only runs shell commands when SpringBoard asks it to. Turn this on to let
 // scripts, terminals and other tools call it directly. Off by default (Settings > Advanced
