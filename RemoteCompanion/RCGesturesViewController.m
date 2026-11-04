@@ -20,6 +20,7 @@ typedef NS_ENUM(NSInteger, RCGestureSection) {
 @property (nonatomic, assign) double idleStop; // Show Stop After, in seconds (0: never)
 @property (nonatomic, copy) NSString *tabSize; // Tab Size: small, medium or large
 @property (nonatomic, assign) BOOL stopOnTouch; // Stop on Touch: a touch stops a playing gesture
+@property (nonatomic, assign) BOOL showTouches; // Show Touches: dots where a playing gesture touches
 @property (nonatomic, strong) UIBarButtonItem *clearButton;     // Select mode's Clear, bottom right
 @property (nonatomic, strong) UIBarButtonItem *selectAllButton; // and Select All, bottom left
 @property (nonatomic, strong) UIBarButtonItem *exportButton;    // and Export, in the middle
@@ -96,6 +97,7 @@ typedef NS_ENUM(NSInteger, RCGestureSection) {
         _idleStop = [defaults doubleForKey:@"RCGestureIdleStop"];
         _tabSize = [defaults stringForKey:@"RCGestureTabSize"];
         _stopOnTouch = [defaults objectForKey:@"RCGestureStopOnTouch"] ? [defaults boolForKey:@"RCGestureStopOnTouch"] : YES;
+        _showTouches = [defaults objectForKey:@"RCGestureShowTouches"] ? [defaults boolForKey:@"RCGestureShowTouches"] : YES;
         self.title = @"Gestures";
     }
     return self;
@@ -124,6 +126,23 @@ typedef NS_ENUM(NSInteger, RCGestureSection) {
         if (!strongSelf || error || !output) return;
         strongSelf.stopOnTouch = [output hasPrefix:@"on"];
         toggle.on = strongSelf.stopOnTouch;
+    }];
+}
+
+- (void)setShowTouches:(BOOL)showTouches {
+    _showTouches = showTouches;
+    [[NSUserDefaults standardUserDefaults] setBool:showTouches forKey:@"RCGestureShowTouches"];
+}
+
+- (void)showTouchesChanged:(UISwitch *)toggle {
+    self.showTouches = toggle.on;
+    NSString *command = toggle.on ? @"gesture show-touches on" : @"gesture show-touches off";
+    __weak typeof(self) weakSelf = self;
+    [[RCServerClient sharedClient] executeCommand:command completion:^(NSString *output, NSError *error) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf || error || !output) return;
+        strongSelf.showTouches = [output hasPrefix:@"on"];
+        toggle.on = strongSelf.showTouches;
     }];
 }
 
@@ -209,6 +228,12 @@ typedef NS_ENUM(NSInteger, RCGestureSection) {
         strongSelf.stopOnTouch = [output hasPrefix:@"on"];
         [strongSelf.tableView reloadSections:[NSIndexSet indexSetWithIndex:RCGestureSectionOptions] withRowAnimation:UITableViewRowAnimationNone];
     }];
+    [[RCServerClient sharedClient] executeCommand:@"gesture show-touches" completion:^(NSString *output, NSError *error) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf || error || !output || [output hasPrefix:@"Error"]) return;
+        strongSelf.showTouches = [output hasPrefix:@"on"];
+        [strongSelf.tableView reloadSections:[NSIndexSet indexSetWithIndex:RCGestureSectionOptions] withRowAnimation:UITableViewRowAnimationNone];
+    }];
     [[RCServerClient sharedClient] executeCommand:@"gesture tab-size" completion:^(NSString *output, NSError *error) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf || error || !output) return;
@@ -238,7 +263,7 @@ typedef NS_ENUM(NSInteger, RCGestureSection) {
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if (section == RCGestureSectionTop) return 1;
-    if (section == RCGestureSectionOptions) return 3;
+    if (section == RCGestureSectionOptions) return 4;
     return [self showsStatusRow] ? 1 : self.gestures.count;
 }
 
@@ -249,7 +274,7 @@ typedef NS_ENUM(NSInteger, RCGestureSection) {
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    if (section == RCGestureSectionOptions) return @"While recording, a red tab sits at the screen's edge. Pull it out to show Stop. Show Stop After brings Stop out by itself after a time without a touch. Stop on Touch stops a playing gesture when you touch the screen.";
+    if (section == RCGestureSectionOptions) return @"While recording, a red tab sits at the screen's edge. Pull it out to show Stop. Show Stop After brings Stop out by itself after a time without a touch. Stop on Touch stops a playing gesture when you touch the screen. Show Touches marks where a playing gesture touches.";
     if (section != RCGestureSectionTop) return nil;
     return @"Recording starts after a short countdown. Use the phone as usual, then tap Stop. Touches play back with the same timing, so start from the screen the gesture begins on.";
 }
@@ -269,13 +294,14 @@ typedef NS_ENUM(NSInteger, RCGestureSection) {
     cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
     cell.imageView.tintColor = [UIColor secondaryLabelColor];
 
-    if (indexPath.section == RCGestureSectionOptions && indexPath.row == 2) {
-        cell.textLabel.text = @"Stop on Touch";
-        cell.imageView.image = [UIImage systemImageNamed:@"hand.raised"];
+    if (indexPath.section == RCGestureSectionOptions && indexPath.row >= 2) {
+        BOOL stop = indexPath.row == 2;
+        cell.textLabel.text = stop ? @"Stop on Touch" : @"Show Touches";
+        cell.imageView.image = [UIImage systemImageNamed:stop ? @"hand.raised" : @"circle.circle"];
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
         UISwitch *toggle = [[UISwitch alloc] init];
-        toggle.on = self.stopOnTouch;
-        [toggle addTarget:self action:@selector(stopOnTouchChanged:) forControlEvents:UIControlEventValueChanged];
+        toggle.on = stop ? self.stopOnTouch : self.showTouches;
+        [toggle addTarget:self action:stop ? @selector(stopOnTouchChanged:) : @selector(showTouchesChanged:) forControlEvents:UIControlEventValueChanged];
         cell.accessoryView = toggle;
         return cell;
     }
@@ -355,7 +381,7 @@ typedef NS_ENUM(NSInteger, RCGestureSection) {
     }
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     if (indexPath.section == RCGestureSectionOptions) {
-        if (indexPath.row == 2) return;
+        if (indexPath.row >= 2) return; // the switches
         UIView *source = [tableView cellForRowAtIndexPath:indexPath];
         if (indexPath.row == 1) [self chooseTabSizeFromView:source];
         else [self chooseIdleStopFromView:source];

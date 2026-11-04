@@ -102,6 +102,12 @@ static BOOL rc_gestures_stop_on_touch(void) {
     return value ? [value boolValue] : YES;
 }
 
+// Show Touches: dots where a playing gesture's fingers are
+static BOOL rc_gestures_show_touches(void) {
+    id value = [NSDictionary dictionaryWithContentsOfFile:kRCGesturesPath][@"showTouches"];
+    return value ? [value boolValue] : YES;
+}
+
 static BOOL rc_gestures_set_idle_stop(double seconds) {
     return rc_gestures_set_setting(@"idleStopSeconds", @(MAX(0, seconds)));
 }
@@ -1009,6 +1015,74 @@ static void rc_gesture_send_frame(const RCGestureFrame *frame, uint32_t *down, C
     rc_gesture_send_frame_ex(frame, down, screen, sender, 0);
 }
 
+#pragma mark - Show Touches
+
+// While a gesture plays, a dot under each of its fingers, in a window that takes no touches
+static UIWindow *g_dotsWindow;
+static NSMutableDictionary<NSNumber *, UIView *> *g_dots; // by finger slot
+
+static void rc_gesture_dots_show(void) {
+    if (g_dotsWindow) return;
+    UIWindowScene *scene = rc_gesture_window_scene();
+    UIWindow *window = scene ? [[RCGesturePillWindow alloc] initWithWindowScene:scene] : [[RCGesturePillWindow alloc] init];
+    window.frame = [UIScreen mainScreen].bounds;
+    window.windowLevel = UIWindowLevelAlert + 2590; // under the recording tab
+    window.backgroundColor = [UIColor clearColor];
+    window.userInteractionEnabled = NO;
+    window.hidden = NO;
+    g_dotsWindow = window;
+    g_dots = [NSMutableDictionary dictionary];
+}
+
+static void rc_gesture_dots_hide(void) {
+    UIWindow *window = g_dotsWindow;
+    g_dotsWindow = nil;
+    g_dots = nil;
+    [UIView animateWithDuration:0.2 animations:^{ window.alpha = 0; } completion:^(BOOL finished) { window.hidden = YES; }];
+}
+
+// Moves the dots to a frame's fingers. Positions are fractions of the recorded screen, placed on
+// this one as it's turned now.
+static void rc_gesture_dots_update(const RCGestureFrame *frame, CGSize screen) {
+    if (!g_dotsWindow) return;
+    CGSize fixed = [UIScreen mainScreen].fixedCoordinateSpace.bounds.size;
+    for (int i = 0; i < frame->count; i++) {
+        const RCTouchFinger *f = &frame->fingers[i];
+        NSNumber *slot = @(f->slot);
+        UIView *dot = g_dots[slot];
+        if (!f->touching) {
+            if (!dot) continue;
+            [g_dots removeObjectForKey:slot];
+            [UIView animateWithDuration:0.15 animations:^{
+                dot.alpha = 0;
+                dot.transform = CGAffineTransformMakeScale(1.3, 1.3);
+            } completion:^(BOOL finished) { [dot removeFromSuperview]; }];
+            continue;
+        }
+        if (!dot) {
+            dot = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 40, 40)];
+            dot.layer.cornerRadius = 20;
+            dot.backgroundColor = [UIColor colorWithWhite:1 alpha:0.55];
+            dot.layer.borderColor = [UIColor colorWithWhite:0 alpha:0.25].CGColor;
+            dot.layer.borderWidth = 1.5;
+            dot.layer.shadowColor = [UIColor blackColor].CGColor;
+            dot.layer.shadowOpacity = 0.3;
+            dot.layer.shadowRadius = 4;
+            dot.layer.shadowOffset = CGSizeZero;
+            dot.userInteractionEnabled = NO;
+            [g_dotsWindow addSubview:dot];
+            g_dots[slot] = dot;
+        }
+        CGPoint p = CGPointMake(MIN(MAX(f->x / screen.width, 0), 1) * fixed.width, MIN(MAX(f->y / screen.height, 0), 1) * fixed.height);
+        dot.center = [[UIScreen mainScreen].fixedCoordinateSpace convertPoint:p toCoordinateSpace:g_dotsWindow];
+    }
+}
+
+static void rc_gesture_dots_frame(const RCGestureFrame *frame, CGSize screen) {
+    RCGestureFrame copy = *frame;
+    dispatch_async(dispatch_get_main_queue(), ^{ rc_gesture_dots_update(&copy, screen); });
+}
+
 // Playback speed from "2x", "0.5x" or "1.5": 1 when missing, kept between 0.25 and 4
 static double rc_gesture_speed(NSString *word) {
     NSString *text = [word.lowercaseString stringByReplacingOccurrencesOfString:@"x" withString:@""];
@@ -1022,6 +1096,8 @@ static void rc_gesture_play(NSString *name, const RCGestureFrame *frames, NSUInt
     g_watchEvents = g_watchSent = g_watchDowns = g_watchMixed = 0;
     g_playResult = @"playing";
     g_playStopOnTouch = rc_gestures_stop_on_touch();
+    BOOL dots = rc_gestures_show_touches();
+    if (dots) dispatch_async(dispatch_get_main_queue(), ^{ rc_gesture_dots_show(); });
     g_playing = YES;
     __block CGSize screen = CGSizeZero;
     rc_on_main_sync(^{ screen = [UIScreen mainScreen].fixedCoordinateSpace.bounds.size; });
@@ -1042,6 +1118,7 @@ static void rc_gesture_play(NSString *name, const RCGestureFrame *frames, NSUInt
     for (; i < count; i++) {
         if (!rc_gesture_wait_until(start + rc_mach_from_seconds(MAX(0, frames[i].t) / speed))) break;
         rc_gesture_send_frame(&frames[i], &down, screen, sender);
+        if (dots) rc_gesture_dots_frame(&frames[i], screen);
         for (int j = 0; j < frames[i].count; j++) held[frames[i].fingers[j].slot & 31] = frames[i].fingers[j];
     }
     if (down) {
@@ -1060,6 +1137,7 @@ static void rc_gesture_play(NSString *name, const RCGestureFrame *frames, NSUInt
         rc_gesture_send_frame_ex(&still, &down, screen, sender, 0x80);
         down = 0;
     }
+    if (dots) dispatch_async(dispatch_get_main_queue(), ^{ rc_gesture_dots_hide(); });
     g_playResult = g_playTouched ? @"stopped by touch" : g_playCancel ? @"stopped" : @"done";
     SRLog(@"[Gesture] '%@' %@: %u touch events seen, %u of them sent by playback (%u with a real finger inside), %u new fingers",
         name, g_playResult, g_watchEvents, g_watchSent, g_watchMixed, g_watchDowns);
@@ -1156,6 +1234,15 @@ NSString *RCGestureCommand(NSString *cmd) {
             rc_gestures_set_setting(@"stopOnTouch", @([value isEqualToString:@"on"]));
         }
         return rc_gestures_stop_on_touch() ? @"on\n" : @"off\n";
+    }
+    if ([verb isEqualToString:@"show-touches"]) {
+        // gesture show-touches [on|off]: Show Touches; without one, the setting
+        if (words.count > 2) {
+            NSString *value = arg.lowercaseString;
+            if (![@[@"on", @"off"] containsObject:value]) return @"Error: Use on or off\n";
+            rc_gestures_set_setting(@"showTouches", @([value isEqualToString:@"on"]));
+        }
+        return rc_gestures_show_touches() ? @"on\n" : @"off\n";
     }
     if ([verb isEqualToString:@"tab-size"]) {
         // gesture tab-size [small|medium|large]: Tab Size; without one, the setting
@@ -1347,5 +1434,5 @@ NSString *RCGestureCommand(NSString *cmd) {
         return [NSString stringWithFormat:@"Renamed to '%@'\n", to];
     }
 
-    return @"Usage: gesture list | record \"Name\" | record-toggle [\"Name\"] | record-stop | record-cancel | record-status | play \"Name\" [SPEED] | play-soon \"Name\" [SPEED] | play-latest [SPEED] | play-status | stop | idle-stop [SECONDS] | tab-size [small|medium|large] | stop-on-touch [on|off] | export PATH [\"Name\" ...] | import PATH | trim \"Name\" START END | delete \"Name\" | rename \"Old\" \"New\"\n";
+    return @"Usage: gesture list | record \"Name\" | record-toggle [\"Name\"] | record-stop | record-cancel | record-status | play \"Name\" [SPEED] | play-soon \"Name\" [SPEED] | play-latest [SPEED] | play-status | stop | idle-stop [SECONDS] | tab-size [small|medium|large] | stop-on-touch [on|off] | show-touches [on|off] | export PATH [\"Name\" ...] | import PATH | trim \"Name\" START END | delete \"Name\" | rename \"Old\" \"New\"\n";
 }
