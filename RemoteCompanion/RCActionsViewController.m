@@ -1004,24 +1004,26 @@ static id g_actionClipboard = nil;
     [self setRunMode:@"restart"];
 }
 
-// When Triggered Again: in the ••• menu, and on the banner above the sequence
-- (UIMenu *)runModeMenu {
-    __weak typeof(self) weakSelf = self;
-    NSMutableArray *modes = [NSMutableArray array];
-    NSString *current = [self runMode];
-    NSArray *choices = @[@[@"parallel", @"Run Alongside", @"square.stack"], @[@"restart", @"Restart", @"arrow.counterclockwise"], @[@"single", @"Ignore", @"nosign"]];
-    for (NSArray *choice in choices) {
-        UIAction *action = [UIAction actionWithTitle:choice[1] image:[UIImage systemImageNamed:choice[2]] identifier:nil handler:^(__kindof UIAction *a) {
-            [weakSelf setRunMode:choice[0]];
-        }];
-        action.state = [current isEqualToString:choice[0]] ? UIMenuElementStateOn : UIMenuElementStateOff;
-        [modes addObject:action];
-    }
-    return [UIMenu menuWithTitle:@"When Triggered Again" image:[UIImage systemImageNamed:@"repeat"] identifier:nil options:0 children:modes];
-}
 - (UIMenu *)moreMenu {
     __weak typeof(self) weakSelf = self;
-    NSMutableArray *menuActions = [NSMutableArray arrayWithObject:[self runModeMenu]];
+    NSString *current = [self runMode];
+    NSString *currentTitle = @"Run Alongside";
+    if ([current isEqualToString:@"restart"]) {
+        currentTitle = @"Restart";
+    } else if ([current isEqualToString:@"single"]) {
+        currentTitle = @"Ignore";
+    }
+
+    NSString *displayTitle = [NSString stringWithFormat:@"When Triggered: %@", currentTitle];
+    UIAction *whenFiredAction = [UIAction actionWithTitle:displayTitle image:[UIImage systemImageNamed:@"repeat"] identifier:nil handler:^(__kindof UIAction *a) {
+        [weakSelf presentWhenTriggeredAgainPicker];
+    }];
+    if (@available(iOS 15.0, *)) {
+        whenFiredAction.title = @"When Triggered Again";
+        whenFiredAction.subtitle = currentTitle;
+    }
+
+    NSMutableArray *menuActions = [NSMutableArray arrayWithObject:whenFiredAction];
     // Triggers that take over what iOS normally does can keep it as well: the ping sound, and with a
     // Home button the Accessibility Shortcut, App Switcher, Siri and screenshot, otherwise Siri, the
     // Accessibility Shortcut, a screenshot and Wallet
@@ -3994,22 +3996,13 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         banner.autoresizingMask = UIViewAutoresizingFlexibleWidth;
         banner.backgroundColor = [UIColor tertiarySystemFillColor];
         banner.layer.cornerRadius = 10;
-        banner.menu = [self runModeMenu];
-        banner.showsMenuAsPrimaryAction = YES;
+        UITapGestureRecognizer *bannerTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(presentWhenTriggeredAgainPicker)];
+        [banner addGestureRecognizer:bannerTap];
         banner.enabled = ![self runShown]; // the debugger view is read-only
         banner.accessibilityLabel = [self runModeBannerText];
         banner.accessibilityHint = @"Changes what happens when triggered again";
-        UIImageView *chevron = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"chevron.up.chevron.down" withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:12 weight:UIImageSymbolWeightSemibold]]];
-        chevron.tintColor = [UIColor tertiaryLabelColor];
-        chevron.contentMode = UIViewContentModeCenter;
-        chevron.frame = CGRectMake(banner.bounds.size.width - 30, 0, 20, bannerHeight);
-        chevron.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
-        chevron.userInteractionEnabled = NO;
-        chevron.hidden = [self runShown];
-        [banner addSubview:chevron];
-        NSString *mode = [self runMode];
-        NSString *iconName = [mode isEqualToString:@"restart"] ? @"arrow.counterclockwise" : [mode isEqualToString:@"single"] ? @"nosign" : @"square.stack";
-        UIImageView *icon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:iconName]];
+        BOOL restart = [[self runMode] isEqualToString:@"restart"];
+        UIImageView *icon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:restart ? @"arrow.counterclockwise" : @"nosign"]];
         icon.tintColor = [UIColor secondaryLabelColor];
         icon.contentMode = UIViewContentModeCenter;
         icon.frame = CGRectMake(12, 0, 22, bannerHeight);
