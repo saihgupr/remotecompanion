@@ -39,6 +39,7 @@
 #import <sys/wait.h>
 #import <fcntl.h>
 #import <signal.h>
+#import "../RCSpawn.h"
 
 extern char **environ;
 
@@ -297,8 +298,11 @@ static void rc_restore(void) {
     unlink(kRCScreenMarker);
 }
 
+// Stopped (Ctrl-C, a timeout): out at once. Cleaning up isn't safe inside a signal handler (it
+// would call into accessibility and the allocator); the next rc-screen run finds the marker and
+// turns accessibility automation back off
 static void rc_quit(int sig) {
-    exit(130);
+    _exit(130);
 }
 
 static int rc_usage(void) {
@@ -308,37 +312,18 @@ static int rc_usage(void) {
 
 // Runs an RC command (tap and hold go through the tweak, which makes the touch); 0 when it worked
 static int rc_command(NSString *command) {
-    const char *paths[] = { "/var/jb/usr/bin/rc-client", "/usr/bin/rc-client" };
-    for (int i = 0; i < 2; i++) {
-        if (access(paths[i], X_OK) != 0) continue;
-        int out[2];
-        if (pipe(out) != 0) return 2;
-        posix_spawn_file_actions_t actions;
-        posix_spawn_file_actions_init(&actions);
-        posix_spawn_file_actions_adddup2(&actions, out[1], STDOUT_FILENO);
-        posix_spawn_file_actions_addclose(&actions, out[0]);
-        char *argv[] = { (char *)paths[i], (char *)command.UTF8String, NULL };
-        pid_t pid;
-        int err = posix_spawn(&pid, paths[i], &actions, NULL, argv, environ);
-        posix_spawn_file_actions_destroy(&actions);
-        close(out[1]);
-        if (err != 0) { close(out[0]); return 2; }
-        NSMutableData *reply = [NSMutableData data];
-        char buffer[512];
-        ssize_t n;
-        while ((n = read(out[0], buffer, sizeof(buffer))) > 0) [reply appendBytes:buffer length:n];
-        close(out[0]);
-        int status = 0;
-        waitpid(pid, &status, 0);
-        NSString *text = [[NSString alloc] initWithData:reply encoding:NSUTF8StringEncoding] ?: @"";
-        if ([text hasPrefix:@"Error"] || [text hasPrefix:@"Stopped"]) {
-            fprintf(stderr, "%s", text.UTF8String);
-            return 2;
-        }
-        return WIFEXITED(status) && WEXITSTATUS(status) == 0 ? 0 : 2;
+    NSString *client = rc_tool_path(@"rc-client");
+    if (!client) {
+        fprintf(stderr, "Error: rc-client isn't installed\n");
+        return 2;
     }
-    fprintf(stderr, "Error: rc-client isn't installed\n");
-    return 2;
+    NSString *text = nil;
+    int code = rc_run_tool(client, @[command], 60, &text);
+    if (code != 0 || [text hasPrefix:@"Error"] || [text hasPrefix:@"Stopped"]) {
+        fprintf(stderr, "%s\n", text.length ? text.UTF8String : (code == -1 ? "Error: RemoteCompanion didn't answer" : "Error"));
+        return 2;
+    }
+    return 0;
 }
 
 int main(int argc, char **argv) {

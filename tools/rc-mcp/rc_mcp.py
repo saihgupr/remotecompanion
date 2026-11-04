@@ -271,14 +271,13 @@ def t_home(args):
 
 def testkit_unlock(host):
     """Asks the phone's test kit to unlock with the passcode the user typed into it on the phone
-    (Settings > Diagnostics > Test Kit). The code never leaves the phone: this only asks, and the
-    reply says whether it worked. None when there's no test kit."""
-    port = os.environ.get("RC_WEB_PORT", "8080")
+    (Settings > Diagnostics > Test Kit). Asked over SSH through RemoteCompanion's local socket, so
+    the phone treats it as coming from itself; its network API doesn't unlock. The code never
+    leaves the phone, and the reply only says whether it worked. None when there's no test kit."""
+    code, out, _ = ssh(host, rc_cmd("testkit unlock"), timeout=20)
     try:
-        req = urllib.request.Request("http://%s:%s/api/testkit/unlock" % (host, port), data=b"", method="POST")
-        with urllib.request.urlopen(req, timeout=12) as r:
-            return json.loads(r.read().decode("utf-8", "replace"))
-    except Exception:
+        return json.loads(out.strip().splitlines()[-1]) if code == 0 and out.strip() else None
+    except (ValueError, IndexError):
         return None
 
 
