@@ -23,6 +23,7 @@ the phone. One file, Python 3.8 or later, nothing to install.
 | `RC_SSH_KEY` | SSH private key |
 | `RC_SSH_PORT` | SSH port (default 22) |
 | `RC_WEB_PORT` | Web UI port, for `log` (default 8080) |
+| `RC_SCREEN` | `rc-screen` on the phone, for development (default: the installed one) |
 
 ## Tools
 
@@ -42,6 +43,7 @@ the phone. One file, Python 3.8 or later, nothing to install.
 | `wait` | Waits until some text is on screen and the screen has settled |
 | `scroll_to` | Scrolls the list until some text is on screen |
 | `open_app`, `home`, `wake` | Opens an app, goes home, turns the screen on |
+| `screen_events`, `watch_stop` | A live log of what changes on the screen; `wait` waits for the next change |
 | `rc_command` | Any RemoteCompanion command, with its reply |
 | `log` | The end of RemoteCompanion's log |
 | `list_phones` | The phones it can reach |

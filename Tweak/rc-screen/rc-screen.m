@@ -17,6 +17,8 @@
 //   rc-screen pinch TEXT|#N SCALE   two fingers on it, apart (2: zoom in) or together (0.5: zoom out)
 //   rc-screen rotate TEXT|#N DEGREES two fingers turning on it (clockwise above 0)
 //   rc-screen menu TEXT|#N          opens the element's menu (as a long press does, without the touch)
+//   rc-screen watch [SECONDS] [--every S]  a line per change on the screen (and the outline when
+//                                   the app or page changes), until stopped or for SECONDS
 //   rc-screen type TEXT             types into the text field being edited (--replace: clears it first)
 //   rc-screen clear                 empties the text field being edited
 //   rc-screen set TEXT|#N on|off    turns a switch on or off (only presses it if it needs to)
@@ -41,6 +43,7 @@
 #import <sys/wait.h>
 #import <fcntl.h>
 #import <signal.h>
+#import <poll.h>
 #import "../RCSpawn.h"
 
 extern char **environ;
@@ -50,6 +53,17 @@ static void (*AXSSetAutomationEnabled)(Boolean);
 // Set while rc-screen has accessibility automation on. Any run that finds it turns automation
 // back off when done, so a run that was killed (or overlapped another) can't leave it on.
 static const char *kRCScreenMarker = "/tmp/rc-screen-automation";
+// While a watcher runs (its pid in here), automation stays on whatever other runs do
+static const char *kRCScreenWatching = "/tmp/rc-screen-watching";
+
+static BOOL rc_watcher_running(void) {
+    FILE *f = fopen(kRCScreenWatching, "r");
+    if (!f) return NO;
+    int pid = 0;
+    BOOL ok = fscanf(f, "%d", &pid) == 1;
+    fclose(f);
+    return ok && pid > 0 && pid != getpid() && kill(pid, 0) == 0;
+}
 
 static id rc_call(id object, NSString *name) {
     SEL sel = NSSelectorFromString(name);
@@ -296,6 +310,7 @@ static RCScreenElement *rc_pick(NSArray<RCScreenElement *> *list, NSString *text
 
 static void rc_restore(void) {
     if (access(kRCScreenMarker, F_OK) != 0 || !AXSSetAutomationEnabled) return;
+    if (rc_watcher_running()) return; // the watcher needs it; it turns it off when it stops
     AXSSetAutomationEnabled(0);
     // The setting is saved by another process; wait until it reads back, or it's lost at exit
     for (int i = 0; i < 20 && AXSAutomationEnabled && AXSAutomationEnabled(); i++) usleep(25000);
@@ -310,7 +325,7 @@ static void rc_quit(int sig) {
 }
 
 static int rc_usage(void) {
-    fprintf(stderr, "Usage: rc-screen [--json|--outline] | find TEXT [--json] | press TEXT|#N | wait TEXT [SECONDS] | tap TEXT|#N | hold TEXT|#N [SECONDS] | menu TEXT|#N | type TEXT | scroll-to TEXT [up|left|right] | adjust TEXT|#N up|down [STEPS] | adjust TEXT|#N PERCENT%% | set TEXT|#N on|off | clear | pinch TEXT|#N SCALE | rotate TEXT|#N DEGREES\n");
+    fprintf(stderr, "Usage: rc-screen [--json|--outline] | find TEXT [--json] | press TEXT|#N | wait TEXT [SECONDS] | tap TEXT|#N | hold TEXT|#N [SECONDS] | menu TEXT|#N | type TEXT | scroll-to TEXT [up|left|right] | adjust TEXT|#N up|down [STEPS] | adjust TEXT|#N PERCENT%% | set TEXT|#N on|off | clear | pinch TEXT|#N SCALE | rotate TEXT|#N DEGREES | watch [SECONDS] [--every S]\n");
     return 2;
 }
 
@@ -561,6 +576,162 @@ static NSString *rc_outline(id app, NSString *appName, NSString *bundleID, NSArr
     return [out componentsJoinedByString:@"\n"];
 }
 
+#pragma mark - Watch
+
+// rc-screen watch: a running log of what changes on the screen, a line per change once the screen
+// has settled, and the whole outline when the app or page changes. For assistants that follow
+// the phone as it goes, and for logs.
+
+@interface RCWatchState : NSObject
+@property (nonatomic, copy) NSString *outline;
+@property (nonatomic, copy) NSString *head;     // the outline's first line: app, page, bundle
+@property (nonatomic, copy) NSString *bundle;
+@property (nonatomic, copy) NSString *alert;    // the ALERT line, if any
+@property (nonatomic) BOOL keyboard;
+@property (nonatomic, copy) NSString *headers;  // the page's section headers, joined
+@property (nonatomic, strong) NSDictionary<NSString *, RCScreenElement *> *items; // by kind|label
+@property (nonatomic, strong) NSArray<NSString *> *order; // item keys, top to bottom
+@end
+@implementation RCWatchState
+@end
+
+static RCWatchState *rc_watch_state(void) {
+    id app = rc_primary_app();
+    NSString *appName = rc_text(rc_call(app, @"label"));
+    SEL systemSel = NSSelectorFromString(@"isSystemApplication");
+    BOOL system = [app respondsToSelector:systemSel] && ((BOOL (*)(id, SEL))objc_msgSend)(app, systemSel);
+    if (system || !appName.length) appName = @"SpringBoard";
+    NSString *bundle = rc_text(rc_call(app, @"bundleId"));
+    if (!bundle.length && [appName isEqualToString:@"SpringBoard"]) bundle = @"com.apple.springboard";
+    NSArray<RCScreenElement *> *list = rc_elements(app);
+    RCWatchState *st = [RCWatchState new];
+    st.outline = rc_outline(app, appName, bundle, list);
+    st.bundle = bundle;
+    NSArray *lines = [st.outline componentsSeparatedByString:@"\n"];
+    st.head = lines.firstObject ?: appName;
+    NSMutableArray *headers = [NSMutableArray array];
+    for (NSString *line in lines) {
+        if ([line hasPrefix:@"ALERT"]) st.alert = line;
+        if ([line hasPrefix:@"keyboard:"]) st.keyboard = YES;
+        if ([line hasPrefix:@"## "]) [headers addObject:line];
+    }
+    st.headers = [headers componentsJoinedByString:@"|"];
+    NSMutableDictionary *items = [NSMutableDictionary dictionary];
+    NSMutableArray *order = [NSMutableArray array];
+    for (RCScreenElement *e in list) {
+        if ([e.kind isEqualToString:@"key"] || !rc_ol_shown(e)) continue;
+        NSString *key = [NSString stringWithFormat:@"%@|%@", e.kind, e.label];
+        if (items[key]) continue;
+        items[key] = e;
+        [order addObject:key];
+    }
+    st.items = items;
+    st.order = order;
+    return st;
+}
+
+static void rc_watch_say(NSString *line) {
+    static NSDateFormatter *clock;
+    if (!clock) {
+        clock = [NSDateFormatter new];
+        clock.dateFormat = @"HH:mm:ss";
+    }
+    printf("%s %s\n", [clock stringFromDate:[NSDate date]].UTF8String, line.UTF8String);
+    fflush(stdout);
+}
+
+static void rc_watch_outline(RCWatchState *st) {
+    for (NSString *line in [st.outline componentsSeparatedByString:@"\n"]) printf("    %s\n", line.UTF8String);
+    fflush(stdout);
+}
+
+// What changed from `was` to `now`, as lines
+static void rc_watch_report(RCWatchState *was, RCWatchState *now) {
+    if (!was || ![was.bundle isEqualToString:now.bundle]) {
+        rc_watch_say([@"app → " stringByAppendingString:now.head]);
+        rc_watch_outline(now);
+        return;
+    }
+    if (![was.head isEqualToString:now.head] || ![was.headers isEqualToString:now.headers]) {
+        // The same page scrolled keeps its title; new section headers alone are a scroll
+        BOOL titleChanged = ![was.head isEqualToString:now.head];
+        NSUInteger shared = 0;
+        for (NSString *key in now.order) if (was.items[key]) shared++;
+        if (titleChanged || shared * 3 < MIN(was.order.count, now.order.count)) {
+            rc_watch_say([@"page → " stringByAppendingString:now.head]);
+            rc_watch_outline(now);
+            return;
+        }
+    }
+    if (!was.alert && now.alert) rc_watch_say(now.alert);
+    else if (was.alert && !now.alert) rc_watch_say(@"alert gone");
+    else if (was.alert && now.alert && ![was.alert isEqualToString:now.alert]) rc_watch_say(now.alert);
+    if (!was.keyboard && now.keyboard) rc_watch_say(@"keyboard up");
+    if (was.keyboard && !now.keyboard) rc_watch_say(@"keyboard down");
+    // Values that changed (a switch, a slider, a field, a row's detail)
+    for (NSString *key in now.order) {
+        RCScreenElement *a = was.items[key], *b = now.items[key];
+        if (a && ![a.value isEqualToString:b.value]) {
+            // "Lock Sound: on → off": the label once, then the old and new value as the outline writes them
+            NSString *from = rc_ol_text(a), *to = rc_ol_text(b), *prefix = [b.label stringByAppendingString:@": "];
+            if (b.label.length && [from hasPrefix:prefix] && [to hasPrefix:prefix]) {
+                rc_watch_say([NSString stringWithFormat:@"#%lu %@%@ \u2192 %@", (unsigned long)b.number, prefix,
+                              [from substringFromIndex:prefix.length], [to substringFromIndex:prefix.length]]);
+            } else {
+                rc_watch_say([NSString stringWithFormat:@"#%lu %@ \u2192 %@", (unsigned long)b.number, from, to]);
+            }
+        }
+    }
+    NSMutableArray *added = [NSMutableArray array], *gone = [NSMutableArray array];
+    for (NSString *key in now.order) if (!was.items[key]) [added addObject:now.items[key]];
+    for (NSString *key in was.order) if (!now.items[key]) [gone addObject:was.items[key]];
+    if (added.count + gone.count == 0) return;
+    if (added.count + gone.count <= 6) {
+        for (RCScreenElement *e in added) rc_watch_say([@"+ " stringByAppendingString:rc_ol_item(e)]);
+        for (RCScreenElement *e in gone) rc_watch_say([@"- " stringByAppendingString:rc_ol_text(e)]);
+    } else {
+        // Most often a scroll: say what's showing now
+        RCScreenElement *first = now.items[now.order.firstObject], *last = now.items[now.order.lastObject];
+        rc_watch_say([NSString stringWithFormat:@"content changed: +%lu −%lu (now “%@” … “%@”)",
+                      (unsigned long)added.count, (unsigned long)gone.count, rc_ol_text(first), rc_ol_text(last)]);
+    }
+}
+
+static int rc_watch(double interval, double duration) {
+    NSDate *until = duration > 0 ? [NSDate dateWithTimeIntervalSinceNow:duration] : nil;
+    RCWatchState *shown = nil;  // what was last reported
+    NSString *last = nil;       // the previous read, to know when the screen has settled
+    rc_watch_say(@"watching (a line per change; the outline when the app or page changes)");
+    FILE *mark = fopen(kRCScreenWatching, "w");
+    if (mark) { fprintf(mark, "%d\n", getpid()); fclose(mark); }
+    while (!until || [until timeIntervalSinceNow] > 0) {
+        // Whoever was reading is gone (an SSH session that ends without a terminal sends no
+        // hangup, and with a shared connection the parent lives on): stop, so accessibility
+        // automation goes back off
+        struct pollfd out = { .fd = STDOUT_FILENO, .events = 0 };
+        if (getppid() == 1 || ferror(stdout) || (poll(&out, 1, 0) > 0 && (out.revents & (POLLHUP | POLLERR | POLLNVAL)))) break;
+        // On, in case something switched it off (apps opened meanwhile only answer while it's on);
+        // every 10 s, since this process's own reading of the setting can be out of date
+        static double lastOn = 0;
+        if (AXSSetAutomationEnabled && CFAbsoluteTimeGetCurrent() - lastOn > 10) {
+            close(open(kRCScreenMarker, O_CREAT | O_WRONLY, 0666));
+            AXSSetAutomationEnabled(1);
+            lastOn = CFAbsoluteTimeGetCurrent();
+        }
+        @autoreleasepool {
+            RCWatchState *now = rc_watch_state();
+            if ([now.outline isEqualToString:last] && ![now.outline isEqualToString:shown.outline]) {
+                rc_watch_report(shown, now);
+                shown = now;
+            }
+            last = now.outline;
+        }
+        [NSThread sleepForTimeInterval:interval];
+    }
+    unlink(kRCScreenWatching);
+    return 0;
+}
+
 int main(int argc, char **argv) {
     @autoreleasepool {
         setvbuf(stdout, NULL, _IOLBF, 0);
@@ -579,8 +750,8 @@ int main(int argc, char **argv) {
             else [args addObject:a];
         }
         NSString *verb = args.count ? args[0] : @"list";
-        if (![@[@"list", @"find", @"press", @"wait", @"tap", @"hold", @"menu", @"type", @"scroll-to", @"adjust", @"set", @"clear", @"pinch", @"rotate"] containsObject:verb]) return rc_usage();
-        if (![verb isEqualToString:@"list"] && ![verb isEqualToString:@"clear"] && args.count < 2) return rc_usage();
+        if (![@[@"list", @"find", @"press", @"wait", @"tap", @"hold", @"menu", @"type", @"scroll-to", @"adjust", @"set", @"clear", @"pinch", @"rotate", @"watch"] containsObject:verb]) return rc_usage();
+        if (![verb isEqualToString:@"list"] && ![verb isEqualToString:@"clear"] && ![verb isEqualToString:@"watch"] && args.count < 2) return rc_usage();
 
         void *lib = dlopen("/usr/lib/libAccessibility.dylib", RTLD_NOW);
         AXSAutomationEnabled = lib ? dlsym(lib, "_AXSAutomationEnabled") : NULL;
@@ -597,6 +768,14 @@ int main(int argc, char **argv) {
             AXSSetAutomationEnabled(1);
         }
         atexit(rc_restore);
+
+        if ([verb isEqualToString:@"watch"]) {
+            // watch [SECONDS] [--every SECONDS]: forever (until stopped) or for SECONDS
+            double duration = args.count > 1 ? [args[1] doubleValue] : 0, interval = 0.5;
+            NSUInteger every = [args indexOfObject:@"--every"];
+            if (every != NSNotFound && every + 1 < args.count) interval = MIN(MAX([args[every + 1] doubleValue], 0.2), 10);
+            return rc_watch(interval, duration);
+        }
 
         id app = rc_primary_app();
         NSString *appName = rc_text(rc_call(app, @"label"));

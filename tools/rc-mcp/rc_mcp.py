@@ -12,9 +12,12 @@ Settings (environment variables):
   RC_SSH_KEY   SSH private key (default: SSH's own choice)
   RC_SSH_PORT  SSH port (default: 22)
   RC_WEB_PORT  Web UI port, for the log (default: 8080)
+  RC_SCREEN    rc-screen on the phone (default: rc-screen, from the PATH)
 """
 
 import json
+import threading
+import time
 import os
 import shlex
 import subprocess
@@ -76,8 +79,12 @@ def ssh(host, command, timeout=60):
     return p.returncode, out, err
 
 
+def screen_tool():
+    return os.environ.get("RC_SCREEN", "rc-screen")  # another rc-screen on the phone, for development
+
+
 def screen_cmd(*words):
-    return " ".join(["rc-screen"] + [shlex.quote(str(w)) for w in words])
+    return " ".join([screen_tool()] + [shlex.quote(str(w)) for w in words])
 
 
 def rc_cmd(command):
@@ -107,6 +114,83 @@ def point_or_target(args, verb):
     if args.get("x") is None or args.get("y") is None:
         raise ToolError("Give a target (text or #N from the screen list), or x and y.")
     return float(args["x"]), float(args["y"])
+
+
+# ---- the screen as it changes ----
+
+class Watcher:
+    """rc-screen watch on one phone, read in the background: a numbered log of what changed (and
+    the outline when the app or page changes). It stops after a while without anyone asking."""
+    IDLE = 600  # seconds without screen_events before it stops
+
+    def __init__(self, host):
+        self.host = host
+        self.lines = []          # (number, text)
+        self.next = 1
+        self.cond = threading.Condition()
+        self.last_asked = time.time()
+        # Its own connection, not the shared one: stopping it then closes the session on the phone,
+        # and rc-screen sees its reader gone and stops
+        args = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-o", "ServerAliveInterval=15",
+                "-o", "ControlMaster=no", "-o", "ControlPath=none"]
+        key = os.environ.get("RC_SSH_KEY")
+        if key:
+            args += ["-i", os.path.expanduser(key), "-o", "IdentitiesOnly=yes"]
+        if os.environ.get("RC_SSH_PORT"):
+            args += ["-p", os.environ["RC_SSH_PORT"]]
+        # exec: the phone's rc-screen gets the hangup when the connection closes, and turns
+        # accessibility automation back off
+        args += ["%s@%s" % (os.environ.get("RC_SSH_USER", "mobile"), host), "exec %s watch --every 0.5" % screen_tool()]
+        self.proc = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        threading.Thread(target=self._read, daemon=True).start()
+        threading.Thread(target=self._idle, daemon=True).start()
+
+    def _read(self):
+        for raw in self.proc.stdout:
+            text = raw.decode("utf-8", "replace").rstrip("\n")
+            with self.cond:
+                self.lines.append((self.next, text))
+                self.next += 1
+                del self.lines[:-2000]
+                self.cond.notify_all()
+        with self.cond:
+            self.lines.append((self.next, "(watching stopped)"))
+            self.next += 1
+            self.cond.notify_all()
+
+    def _idle(self):
+        while self.alive():
+            time.sleep(30)
+            if time.time() - self.last_asked > self.IDLE:
+                self.stop()
+
+    def alive(self):
+        return self.proc.poll() is None
+
+    def stop(self):
+        if self.alive():
+            self.proc.terminate()
+
+    def since(self, cursor, wait):
+        """The lines after `cursor`, waiting up to `wait` seconds for one if there are none"""
+        self.last_asked = time.time()
+        deadline = time.time() + wait
+        with self.cond:
+            while True:
+                fresh = [(n, t) for n, t in self.lines if n > cursor]
+                if fresh or time.time() >= deadline or not self.alive():
+                    return fresh, self.next - 1
+                self.cond.wait(max(0.05, deadline - time.time()))
+
+
+WATCHERS = {}
+
+
+def watcher_for(host, start=True):
+    w = WATCHERS.get(host)
+    if (not w or not w.alive()) and start:
+        w = WATCHERS[host] = Watcher(host)
+    return w
 
 
 # ---- tools ----
@@ -284,6 +368,33 @@ def testkit_unlock(host):
         return None
 
 
+def t_screen_events(args):
+    host = host_for(args.get("phone"))
+    w = WATCHERS.get(host)
+    fresh_start = not w or not w.alive()
+    w = watcher_for(host)
+    cursor = int(args.get("since", 0) or 0)
+    wait = min(max(float(args.get("wait", 0) or 0), 0), 120)
+    lines, last = w.since(cursor, wait)
+    if fresh_start:
+        # The first report (the app and its outline) comes once the screen has settled
+        deadline = time.time() + 6
+        while time.time() < deadline and not any(t.startswith(("app", "page")) or " app \u2192 " in t for _, t in lines):
+            more, last = w.since(last, deadline - time.time())
+            lines += more
+    text = "\n".join(t for _, t in lines) or "(nothing changed)"
+    return "%s\n\n(cursor %d: pass since=%d next time for what's new after this)" % (text, last, last)
+
+
+def t_watch_stop(args):
+    host = host_for(args.get("phone"))
+    w = watcher_for(host, start=False)
+    if w and w.alive():
+        w.stop()
+        return "Stopped watching."
+    return "Wasn't watching."
+
+
 def t_wake(args):
     host = host_for(args.get("phone"))
     run(host, rc_cmd("unlock"))
@@ -397,6 +508,16 @@ TOOLS = [
      "RemoteCompanion's Test Kit on the phone (kept there for 30 minutes; never sent to you). "
      "Use it when the screen list is empty or shows the lock screen; apps don't open while the screen is off.",
      {"show_screen": SHOW}, []),
+    ("screen_events", t_screen_events,
+     "A live log of the screen: what changed since `since` (a cursor from the last call), one line per change "
+     "once the screen settles: 'app → …' and 'page → …' (followed by the new page's outline, indented), "
+     "'ALERT …' / 'alert gone', 'keyboard up/down', '#17 Lock Sound: on → off', '+ [Item] #9' / '- Item', "
+     "'content changed: +12 −10 (now “A” … “B”)' (usually a scroll). The first call starts watching and "
+     "returns the current outline. `wait` waits up to that many seconds for the next change, so you can follow "
+     "the phone without reading the whole screen again. Watching stops after 10 minutes without a call.",
+     {"since": {"type": "integer", "description": "The cursor from the last call (0 or omitted: everything so far)."},
+      "wait": {"type": "number", "description": "Seconds to wait for a change if there's none yet (up to 120)."}}, []),
+    ("watch_stop", t_watch_stop, "Stops the screen_events log for a phone.", {}, []),
     ("rc_command", t_command,
      "Runs any RemoteCompanion command and returns its reply (e.g. 'lock status', 'wifi status', 'flashlight toggle', "
      "'gesture list', 'gesture play \"Name\"').",
