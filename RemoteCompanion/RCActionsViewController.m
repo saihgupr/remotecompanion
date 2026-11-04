@@ -6,6 +6,12 @@
 #import "RCAppPickerViewController.h"
 #import "RCConditionPickerViewController.h"
 #import "RCTextInputViewController.h"
+#import "RCTimeRangeViewController.h"
+#import "RCSetVariableViewController.h"
+#import "RCVariableConditionViewController.h"
+#import "RCNumberSettingViewController.h"
+#import "RCVariableEditorParts.h"
+#import "RCSymbolPickerViewController.h"
 #import "RCServerClient.h"
 #import "RCRunningViewController.h"
 #import "RCRunHistoryViewController.h"
@@ -70,8 +76,8 @@ static void rc_parse_km_cmd(NSString *cmd, NSString **outMacro, NSString **outPa
     if (outParam) *outParam = param ?: @"";
 }
 
-// Favorite icons shown at the top of the picker. Anything else can still
-// be typed by name and is stored verbatim.
+// Favorite icons, shown first in the icon picker. Any other icon can be
+// picked from its categories or typed by name, and is stored verbatim.
 static NSArray<NSDictionary *> *RCToastIconChoices(void) {
     return @[
         @{ @"name": @"Info", @"symbol": @"info.circle" },
@@ -81,47 +87,6 @@ static NSArray<NSDictionary *> *RCToastIconChoices(void) {
         @{ @"name": @"Star", @"symbol": @"star.fill" },
         @{ @"name": @"Heart", @"symbol": @"heart.fill" },
         @{ @"name": @"Music", @"symbol": @"music.note" }
-    ];
-}
-
-// A browsable list of common icon names. The picker also accepts any typed
-// name verbatim, so this list is for discovery, not a limit.
-static NSArray<NSString *> *RCToastIconCatalog(void) {
-    return @[
-        @"airplane", @"alarm.fill", @"antenna.radiowaves.left.and.right",
-        @"app.fill", @"archivebox.fill", @"arrow.counterclockwise", @"arrow.up.right.circle.fill",
-        @"bag.fill", @"battery.100", @"bell", @"bell.fill", @"bell.slash.fill",
-        @"binoculars.fill", @"bold", @"bolt.fill", @"book.fill", @"bookmark.fill",
-        @"briefcase.fill", @"bubble.left.fill", @"bubble.right.fill", @"building.2.fill",
-        @"calendar", @"calendar.circle.fill", @"camera.fill", @"car.fill",
-        @"cart.fill", @"checkmark", @"checkmark.circle", @"checkmark.circle.fill",
-        @"checkmark.seal.fill", @"clock.fill", @"cloud.fill", @"cloud.rain.fill",
-        @"cloud.sun.fill", @"compass.fill", @"creditcard.fill", @"crop",
-        @"cup.and.saucer.fill", @"desktopcomputer", @"doc.fill", @"doc.on.doc.fill",
-        @"dollarsign.circle.fill", @"drop.fill", @"ear.fill", @"envelope.fill",
-        @"exclamationmark.circle.fill", @"exclamationmark.triangle.fill",
-        @"eye.fill", @"eye.slash.fill", @"face.smiling.fill", @"film.fill",
-        @"flag.fill", @"flashlight.on.fill", @"folder.fill", @"gamecontroller.fill",
-        @"gear", @"gift.fill", @"globe", @"graduationcap.fill",
-        @"guitars.fill", @"hammer.fill", @"hand.thumbsup.fill", @"hare.fill",
-        @"headphones", @"heart", @"heart.fill", @"heart.circle.fill",
-        @"house.fill", @"hourglass", @"info.circle", @"info.circle.fill",
-        @"ipad", @"iphone", @"key.fill", @"keyboard.fill",
-        @"laptopcomputer", @"leaf.fill", @"lightbulb.fill", @"location.fill",
-        @"lock.fill", @"lock.open.fill", @"magnifyingglass", @"map.fill",
-        @"message.fill", @"mic.fill", @"moon.fill", @"music.note",
-        @"music.note.list", @"network", @"newspaper.fill", @"paintbrush.fill",
-        @"paperplane.fill", @"party.popper.fill", @"pawprint.fill", @"pencil",
-        @"person.2.fill", @"person.fill", @"phone.fill", @"photo.fill",
-        @"pin.fill", @"play.fill", @"plus.circle.fill", @"printer.fill",
-        @"puzzlepiece.fill", @"qrcode", @"quote.bubble.fill", @"radio.fill",
-        @"rosette", @"scissors", @"shield.fill", @"shippingbox.fill",
-        @"sparkles", @"speaker.wave.2.fill", @"sportscourt.fill", @"star",
-        @"star.fill", @"star.circle.fill", @"sun.max.fill", @"tag.fill",
-        @"thermometer", @"timer", @"tortoise.fill", @"trash.fill",
-        @"tray.fill", @"tv.fill", @"umbrella.fill", @"video.fill",
-        @"wallet.pass.fill", @"wand.and.stars", @"watch", @"wifi",
-        @"wind", @"wrench.fill", @"xmark.circle.fill", @"zzz"
     ];
 }
 
@@ -243,6 +208,9 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
 @property (nonatomic, strong) NSString *triggerKey;
 @property (nonatomic, strong) NSMutableArray *actions;
 @property (nonatomic, strong) UIBarButtonItem *moreButton;
+// The action picker while it's open for an action that leads to another screen; closed once
+// that action is added
+@property (nonatomic, weak) UINavigationController *addingNav;
 // While this trigger runs: the row of the action it's on (highlighted, like a debugger's current
 // line), or NSNotFound
 @property (nonatomic, assign) NSInteger runningIndex; // the longest run's (scrolled to)
@@ -272,244 +240,24 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
 @property (nonatomic, strong) UISelectionFeedbackGenerator *reorderTick;
 // The one toast editor. New toasts and edits both come through here,
 // so they always look and save the same way.
-- (void)pushToastEditorWithTitle:(NSString *)title
+- (void)showToastEditorWithTitle:(NSString *)title
                         message:(NSString *)message
                            icon:(NSString *)icon
                           isNew:(BOOL)isNew
                          onSave:(void (^)(NSString *cmd))onSave;
 @end
 
-// Searchable icon browser. Favorites on top, then every common icon.
-// Typing any name offers a "Use ..." row that saves it verbatim, with a
-// live preview so a typo simply shows as missing.
-@interface RCToastIconBrowserViewController : UITableViewController <UISearchResultsUpdating>
-- (instancetype)initWithCurrentIcon:(NSString *)icon;
-@property (nonatomic, copy) void (^onPick)(NSString *icon);
-@end
-
-@implementation RCToastIconBrowserViewController {
-    NSString *_currentIcon;
-    NSString *_searchText;
-    NSArray<NSString *> *_filtered;
-    UISearchController *_searchController;
-}
-
-- (instancetype)initWithCurrentIcon:(NSString *)icon {
-    self = [super initWithStyle:UITableViewStyleInsetGrouped];
-    if (self) {
-        _currentIcon = [icon copy] ?: @"";
-        _searchText = @"";
-        _filtered = @[];
-    }
-    return self;
-}
-
-- (void)viewDidLoad {
-    [super viewDidLoad];
-    self.title = @"Choose Icon";
-    _searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
-    _searchController.searchResultsUpdater = self;
-    _searchController.obscuresBackgroundDuringPresentation = NO;
-    _searchController.searchBar.placeholder = @"Search or type icon name";
-    _searchController.searchBar.autocapitalizationType = UITextAutocapitalizationTypeNone;
-    _searchController.searchBar.autocorrectionType = UITextAutocorrectionTypeNo;
-    self.navigationItem.searchController = _searchController;
-    self.navigationItem.hidesSearchBarWhenScrolling = NO;
-    self.definesPresentationContext = YES;
-}
-
-- (BOOL)isSearching {
-    return _searchText.length > 0;
-}
-
-- (BOOL)hasCustomRow {
-    if (_currentIcon.length == 0) return NO;
-    for (NSDictionary *c in RCToastIconChoices()) {
-        if ([c[@"symbol"] isEqualToString:_currentIcon]) return NO;
-    }
-    return ![RCToastIconCatalog() containsObject:_currentIcon];
-}
-
-- (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
-    NSString *t = [[searchController.searchBar.text ?: @"" stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] copy];
-    _searchText = t;
-    if (t.length == 0) {
-        _filtered = @[];
-    } else {
-        NSMutableArray *hits = [NSMutableArray array];
-        NSMutableSet *seen = [NSMutableSet set];
-        for (NSDictionary *c in RCToastIconChoices()) {
-            NSString *sym = c[@"symbol"];
-            NSString *name = c[@"name"];
-            if ([sym localizedCaseInsensitiveContainsString:t] || [name localizedCaseInsensitiveContainsString:t]) {
-                if (![seen containsObject:sym]) { [hits addObject:sym]; [seen addObject:sym]; }
-            }
-        }
-        for (NSString *sym in RCToastIconCatalog()) {
-            if ([sym localizedCaseInsensitiveContainsString:t]) {
-                if (![seen containsObject:sym]) { [hits addObject:sym]; [seen addObject:sym]; }
-            }
-        }
-        [hits sortUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
-        _filtered = hits;
-    }
-    [self.tableView reloadData];
-}
-
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    if ([self isSearching]) return 1;
-    return [self hasCustomRow] ? 3 : 2;
-}
-
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    if ([self isSearching]) return 1 + _filtered.count;
-    if ([self hasCustomRow]) {
-        if (section == 0) return 1;
-        if (section == 1) return 1 + RCToastIconChoices().count;
-        return RCToastIconCatalog().count;
-    }
-    if (section == 0) return 1 + RCToastIconChoices().count;
-    return RCToastIconCatalog().count;
-}
-
-- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    if ([self isSearching]) return @"Matches";
-    if ([self hasCustomRow]) {
-        if (section == 0) return @"Current";
-        if (section == 1) return @"Favorites";
-        return @"All Icons";
-    }
-    if (section == 0) return @"Favorites";
-    return @"All Icons";
-}
-
-- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    if ([self isSearching] && section == 0) return @"Type any name to use it, even if there is no preview.";
-    if (![self isSearching]) {
-        NSInteger last = [self numberOfSectionsInTableView:tableView] - 1;
-        if (section == last) return @"Type any name to use it, even if there is no preview.";
-    }
-    return nil;
-}
-
-- (UITableViewCell *)browserCellForTable:(UITableView *)tableView {
-    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"RCToastBrowserCell"];
-    if (!cell) {
-        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"RCToastBrowserCell"];
-    }
-    cell.imageView.tintColor = [UIColor secondaryLabelColor];
-    return cell;
-}
-
-- (void)configureCell:(UITableViewCell *)cell withSymbol:(NSString *)symbol displayName:(NSString *)display detail:(NSString *)detail checked:(BOOL)checked {
-    UIImage *img = RCToastIconImage(symbol);
-    if (symbol.length == 0) {
-        cell.textLabel.text = @"None";
-        cell.detailTextLabel.text = nil;
-        cell.imageView.image = nil;
-    } else if (img) {
-        cell.textLabel.text = display ?: symbol;
-        cell.detailTextLabel.text = detail;
-        cell.imageView.image = img;
-    } else {
-        cell.textLabel.text = display ?: symbol;
-        cell.detailTextLabel.text = @"No preview for this name";
-        cell.imageView.image = [UIImage systemImageNamed:@"questionmark.circle"];
-        cell.imageView.tintColor = [UIColor tertiaryLabelColor];
-    }
-    if (symbol.length > 0 && img) cell.imageView.tintColor = [UIColor secondaryLabelColor];
-    cell.accessoryType = checked ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
-}
-
-- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    UITableViewCell *cell = [self browserCellForTable:tableView];
-    if ([self isSearching]) {
-        if (indexPath.row == 0) {
-            NSString *typed = _searchText;
-            UIImage *img = RCToastIconImage(typed);
-            cell.textLabel.text = [NSString stringWithFormat:@"Use \"%@\"", typed];
-            if (img) {
-                cell.detailTextLabel.text = typed;
-                cell.imageView.image = img;
-                cell.imageView.tintColor = [UIColor secondaryLabelColor];
-            } else {
-                cell.detailTextLabel.text = @"No preview for this name";
-                cell.imageView.image = [UIImage systemImageNamed:@"questionmark.circle"];
-                cell.imageView.tintColor = [UIColor tertiaryLabelColor];
-            }
-            cell.accessoryType = [_currentIcon isEqualToString:typed] ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
-            return cell;
-        }
-        NSString *sym = _filtered[indexPath.row - 1];
-        [self configureCell:cell withSymbol:sym displayName:sym detail:nil checked:[_currentIcon isEqualToString:sym]];
-        return cell;
-    }
-    if ([self hasCustomRow]) {
-        if (indexPath.section == 0) {
-            [self configureCell:cell withSymbol:_currentIcon displayName:_currentIcon detail:nil checked:YES];
-            return cell;
-        }
-        if (indexPath.section == 1) {
-            if (indexPath.row == 0) {
-                [self configureCell:cell withSymbol:@"" displayName:nil detail:nil checked:(_currentIcon.length == 0)];
-                return cell;
-            }
-            NSDictionary *c = RCToastIconChoices()[indexPath.row - 1];
-            [self configureCell:cell withSymbol:c[@"symbol"] displayName:c[@"name"] detail:nil checked:[_currentIcon isEqualToString:c[@"symbol"]]];
-            return cell;
-        }
-        NSString *sym = RCToastIconCatalog()[indexPath.row];
-        [self configureCell:cell withSymbol:sym displayName:sym detail:nil checked:[_currentIcon isEqualToString:sym]];
-        return cell;
-    }
-    if (indexPath.section == 0) {
-        if (indexPath.row == 0) {
-            [self configureCell:cell withSymbol:@"" displayName:nil detail:nil checked:(_currentIcon.length == 0)];
-            return cell;
-        }
-        NSDictionary *c = RCToastIconChoices()[indexPath.row - 1];
-        [self configureCell:cell withSymbol:c[@"symbol"] displayName:c[@"name"] detail:nil checked:[_currentIcon isEqualToString:c[@"symbol"]]];
-        return cell;
-    }
-    NSString *sym = RCToastIconCatalog()[indexPath.row];
-    [self configureCell:cell withSymbol:sym displayName:sym detail:nil checked:[_currentIcon isEqualToString:sym]];
-    return cell;
-}
-
-- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
-    [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    NSString *picked = nil;
-    if ([self isSearching]) {
-        if (indexPath.row == 0) picked = _searchText;
-        else picked = _filtered[indexPath.row - 1];
-    } else if ([self hasCustomRow]) {
-        if (indexPath.section == 0) picked = _currentIcon;
-        else if (indexPath.section == 1) {
-            if (indexPath.row == 0) picked = @"";
-            else picked = RCToastIconChoices()[indexPath.row - 1][@"symbol"];
-        } else picked = RCToastIconCatalog()[indexPath.row];
-    } else {
-        if (indexPath.section == 0) {
-            if (indexPath.row == 0) picked = @"";
-            else picked = RCToastIconChoices()[indexPath.row - 1][@"symbol"];
-        } else picked = RCToastIconCatalog()[indexPath.row];
-    }
-    if (!picked) return;
-    _currentIcon = [picked copy];
-    if (self.onPick) self.onPick(picked);
-    [self.navigationController popViewControllerAnimated:YES];
-}
-
-@end
-
-// The one toast editor: grouped sections, plain words, live preview.
-// New toasts and edits share it, so they never diverge.
 @interface RCToastEditorViewController : UITableViewController <UITextFieldDelegate>
 - (instancetype)initWithToastTitle:(NSString *)title message:(NSString *)message icon:(NSString *)icon isNew:(BOOL)isNew;
 @property (nonatomic, copy) void (^onSave)(NSString *title, NSString *message, NSString *icon);
+// The trigger's actions: their Set Variable names go in the + menus on Title and Message
+@property (nonatomic, copy) NSArray *variableActions;
 @end
 
 @implementation RCToastEditorViewController {
+    NSArray<NSString *> *_runNames;          // This Run Only variables set by the trigger
+    NSArray<NSString *> *_triggerSavedNames; // saved variables set by the trigger
+    NSArray<NSString *> *_savedNames;        // those and the ones saved on the phone
     BOOL _isNew;
     NSString *_initialTitle;
     NSString *_initialMessage;
@@ -569,6 +317,65 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
     _messageField = messageField;
     [self buildPreviewCell];
     [self refreshToastPreview];
+    [self collectVariableNames];
+    [self rebuildVariableMenus];
+    [self loadSavedVariableNames];
+}
+
+#pragma mark Variables
+
+// The variables the trigger's Set Variable actions name, This Run Only apart from saved ones
+- (void)collectVariableNames {
+    NSMutableOrderedSet *run = [NSMutableOrderedSet orderedSet], *saved = [NSMutableOrderedSet orderedSet];
+    for (id item in self.variableActions ?: @[]) {
+        if (![item isKindOfClass:[NSDictionary class]] || ![[item[@"type"] description] isEqualToString:@"set_variable"]) continue;
+        NSString *name = [item[@"name"] description];
+        if (!RCSetVariableNameValid(name)) continue;
+        if ([[item[@"scope"] description] isEqualToString:@"run"]) [run addObject:name];
+        else [saved addObject:name];
+    }
+    _runNames = [run.array sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
+    _triggerSavedNames = saved.array;
+    _savedNames = [self mergedSavedNames:@[]];
+}
+
+- (NSArray<NSString *> *)mergedSavedNames:(NSArray<NSString *> *)phoneNames {
+    NSMutableOrderedSet *all = [NSMutableOrderedSet orderedSetWithArray:phoneNames];
+    [all addObjectsFromArray:_triggerSavedNames ?: @[]];
+    [all minusSet:[NSSet setWithArray:_runNames ?: @[]]];
+    return [all.array sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
+}
+
+// The ones saved on the phone, from other triggers too
+- (void)loadSavedVariableNames {
+    __weak typeof(self) weakSelf = self;
+    [[RCServerClient sharedClient] executeCommand:@"var list" completion:^(NSString *output, NSError *error) {
+        NSData *data = [output dataUsingEncoding:NSUTF8StringEncoding];
+        id parsed = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+        if (![parsed isKindOfClass:[NSDictionary class]] || ![parsed count]) return;
+        NSArray *phoneNames = [parsed allKeys];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf || !strongSelf.isViewLoaded) return;
+            strongSelf->_savedNames = [strongSelf mergedSavedNames:phoneNames];
+            [strongSelf rebuildVariableMenus];
+        });
+    }];
+}
+
+- (void)rebuildVariableMenus {
+    for (UITextField *field in @[_titleField ?: [UITextField new], _messageField ?: [UITextField new]]) {
+        if (![field.rightView isKindOfClass:[UIButton class]]) continue;
+        __weak UITextField *weakField = field;
+        __weak typeof(self) weakSelf = self;
+        ((UIButton *)field.rightView).menu = RCVariableInsertMenu(_runNames, _savedNames, ^(NSString *name) {
+            UITextField *f = weakField;
+            if (!f) return;
+            UITextRange *range = f.selectedTextRange ?: [f textRangeFromPosition:f.endOfDocument toPosition:f.endOfDocument];
+            [f replaceRange:range withText:[NSString stringWithFormat:@"{%@}", name]];
+            [weakSelf toastFieldChanged:f];
+        });
+    }
 }
 
 - (void)viewDidAppear:(BOOL)animated {
@@ -597,6 +404,14 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
     field.delegate = self;
     field.translatesAutoresizingMaskIntoConstraints = NO;
     [field addTarget:self action:@selector(toastFieldChanged:) forControlEvents:UIControlEventEditingChanged];
+    // + inserts a variable's {name} at the cursor (its menu is set in rebuildVariableMenus)
+    UIButton *insert = [UIButton buttonWithType:UIButtonTypeSystem];
+    [insert setImage:[UIImage systemImageNamed:@"plus.circle"] forState:UIControlStateNormal];
+    insert.frame = CGRectMake(0, 0, 32, 32);
+    insert.showsMenuAsPrimaryAction = YES;
+    insert.accessibilityLabel = @"Insert Variable";
+    field.rightView = insert;
+    field.rightViewMode = UITextFieldViewModeAlways;
     [cell.contentView addSubview:field];
     [NSLayoutConstraint activateConstraints:@[
         [label.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:20],
@@ -700,8 +515,17 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
     return YES;
 }
 
+// Opened as a card (its own navigation controller): it closes; pushed: it goes back
+- (void)closeEditor {
+    if (self.navigationController.viewControllers.firstObject == self && self.navigationController.presentingViewController) {
+        [self.navigationController dismissViewControllerAnimated:YES completion:nil];
+    } else {
+        [self.navigationController popViewControllerAnimated:YES];
+    }
+}
+
 - (void)cancelToast {
-    [self.navigationController popViewControllerAnimated:YES];
+    [self closeEditor];
 }
 
 - (void)saveToast {
@@ -710,22 +534,25 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
     NSString *message = _messageField.text ?: @"";
     NSString *icon = _selectedIcon ?: @"";
     if (self.onSave) self.onSave(title, message, icon);
-    [self.navigationController popViewControllerAnimated:YES];
+    [self closeEditor];
 }
 
 - (void)openIconPicker {
     [_titleField resignFirstResponder];
     [_messageField resignFirstResponder];
-    RCToastIconBrowserViewController *browser = [[RCToastIconBrowserViewController alloc] initWithCurrentIcon:_selectedIcon];
+    RCSymbolPickerViewController *picker = [[RCSymbolPickerViewController alloc] initWithSelectedSymbol:_selectedIcon allowsNone:YES];
+    NSMutableArray *favorites = [NSMutableArray array];
+    for (NSDictionary *choice in RCToastIconChoices()) [favorites addObject:choice[@"symbol"]];
+    picker.favoriteSymbols = favorites;
     __weak typeof(self) weakSelf = self;
-    browser.onPick = ^(NSString *picked) {
+    picker.onPick = ^(NSString *picked) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf) return;
         strongSelf->_selectedIcon = picked ?: @"";
         [strongSelf.tableView reloadRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:0 inSection:2]] withRowAnimation:UITableViewRowAnimationNone];
         [strongSelf refreshToastPreview];
     };
-    [self.navigationController pushViewController:browser animated:YES];
+    [self.navigationController pushViewController:picker animated:YES];
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
@@ -781,6 +608,7 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
 static UIImage *RCGrabberImage(void) {
     return [UIImage systemImageNamed:@"line.3.horizontal"] ?: [UIImage systemImageNamed:@"line.horizontal.3"];
 }
+
 
 @implementation RCActionsViewController
 
@@ -1323,7 +1151,7 @@ static void RCSetRunWatching(BOOL watching) {
     NSString *prompt = [NSString stringWithFormat:@"%@ for %ld s", [run[@"test"] boolValue] ? @"Testing" : @"Running", (long)seconds];
     NSDictionary *loop = [run[@"loop"] isKindOfClass:[NSDictionary class]] ? run[@"loop"] : nil;
     if (loop) {
-        NSInteger count = [loop[@"repeat"] isKindOfClass:[NSDictionary class]] ? [loop[@"repeat"][@"count"] integerValue] : 0;
+        NSInteger count = loop[@"count"] ? [loop[@"count"] integerValue] : [loop[@"repeat"] isKindOfClass:[NSDictionary class]] ? [loop[@"repeat"][@"count"] integerValue] : 0;
         prompt = count > 0 ? [prompt stringByAppendingFormat:@" · Round %ld of %ld", (long)[loop[@"round"] integerValue], (long)count]
                            : [prompt stringByAppendingFormat:@" · Round %ld", (long)[loop[@"round"] integerValue]];
     }
@@ -1804,7 +1632,14 @@ static void RCSetRunWatching(BOOL watching) {
 - (void)addAction {
 
     RCActionPickerViewController *picker = [[RCActionPickerViewController alloc] init];
+    __weak typeof(self) weakSelf = self;
+    BOOL (^staysOpen)(NSString *) = ^BOOL(NSString *action) {
+        // Placeholders this screen answers with a screen of its own (Exit Repeat is added as it is)
+        return [action hasPrefix:@"__"] && [action hasSuffix:@"__"] && ![action isEqualToString:@"__EXIT_REPEAT__"];
+    };
+    picker.staysOpenFor = staysOpen;
     picker.onActionSelected = ^(NSString *action) {
+        if (!staysOpen(action)) weakSelf.addingNav = nil; // the picker closes itself
         if ([action isEqualToString:@"__SHORTCUT_PICKER__"]) {
             // Present Shortcut Picker
             RCShortcutPickerViewController *vc = [[RCShortcutPickerViewController alloc] init];
@@ -1819,7 +1654,7 @@ static void RCSetRunWatching(BOOL watching) {
             };
             UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
             
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            dispatch_async(dispatch_get_main_queue(), ^{
                 [self presentViewController:nav animated:YES completion:nil];
             });
             
@@ -1829,6 +1664,7 @@ static void RCSetRunWatching(BOOL watching) {
             inputVC.promptTitle = @"Terminal Command";
             inputVC.promptMessage = @"Enter terminal command";
             inputVC.showRootToggle = YES;
+            inputVC.variableActions = self.actions;
             inputVC.initialText = @"";
             
             __weak typeof(inputVC) weakInputVC = inputVC;
@@ -1843,7 +1679,7 @@ static void RCSetRunWatching(BOOL watching) {
             
             UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:inputVC];
             
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            dispatch_async(dispatch_get_main_queue(), ^{
                 [self presentViewController:nav animated:YES completion:nil];
             });
 
@@ -1869,7 +1705,7 @@ static void RCSetRunWatching(BOOL watching) {
                 }
             }]];
             
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            dispatch_async(dispatch_get_main_queue(), ^{
                 [self presentViewController:alert animated:YES completion:nil];
             });
 
@@ -1907,7 +1743,7 @@ static void RCSetRunWatching(BOOL watching) {
                 }
             }]];
             
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            dispatch_async(dispatch_get_main_queue(), ^{
                 [self presentViewController:alert animated:YES completion:nil];
             });
 
@@ -1920,29 +1756,7 @@ static void RCSetRunWatching(BOOL watching) {
                 }];
             });
         } else if ([action isEqualToString:@"__DELAY__"]) {
-            // Show alert for delay
-            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Add Delay" 
-                message:@"Enter delay in seconds" 
-                preferredStyle:UIAlertControllerStyleAlert];
-                
-            [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-                textField.placeholder = @"1.0";
-                textField.keyboardType = UIKeyboardTypeDecimalPad;
-            }];
-            
-            [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-            [alert addAction:[UIAlertAction actionWithTitle:@"Add" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull alertAction) {
-                NSString *input = alert.textFields.firstObject.text;
-                if (input.length > 0) {
-                    [self.actions addObject:[NSString stringWithFormat:@"delay %@", input]];
-                    [self saveActions];
-                    [self.tableView reloadData];
-                }
-            }]];
-            
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                [self presentViewController:alert animated:YES completion:nil];
-            });
+            [self presentDelayForIndex:NSNotFound current:nil after:0];
         } else if ([action isEqualToString:@"__OPEN_APP__"]) {
             RCAppPickerViewController *appPicker = [[RCAppPickerViewController alloc] init];
             appPicker.onAppSelected = ^(NSString *name, NSString *bundleId) {
@@ -1953,7 +1767,7 @@ static void RCSetRunWatching(BOOL watching) {
             };
             
             UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:appPicker];
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            dispatch_async(dispatch_get_main_queue(), ^{
                 [self presentViewController:nav animated:YES completion:nil];
             });
         } else if ([action isEqualToString:@"__KILL_APP__"]) {
@@ -1966,15 +1780,15 @@ static void RCSetRunWatching(BOOL watching) {
             };
             
             UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:appPicker];
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            dispatch_async(dispatch_get_main_queue(), ^{
                 [self presentViewController:nav animated:YES completion:nil];
             });
         } else if ([action isEqualToString:@"__IF_CONDITION__"]) {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            dispatch_async(dispatch_get_main_queue(), ^{
                 [self presentIfConditionPickerForIndex:NSNotFound];
             });
         } else if ([action isEqualToString:@"__REPEAT__"]) {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            dispatch_async(dispatch_get_main_queue(), ^{
                 [self presentRepeatCountForIndex:NSNotFound];
             });
         } else if ([action isEqualToString:@"__EXIT_REPEAT__"]) {
@@ -1982,11 +1796,15 @@ static void RCSetRunWatching(BOOL watching) {
             [self saveActions];
             [self.tableView reloadData];
         } else if ([action isEqualToString:@"__WAIT_UNTIL__"]) {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            dispatch_async(dispatch_get_main_queue(), ^{
                 [self presentIfConditionPickerForIndex:NSNotFound insertIndex:NSNotFound type:@"wait_until"];
             });
+        } else if ([action isEqualToString:@"__SET_VARIABLE__"]) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self presentSetVariable:nil existingIndex:NSNotFound];
+            });
         } else if ([action isEqualToString:@"__REPEAT_WHILE__"]) {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            dispatch_async(dispatch_get_main_queue(), ^{
                 [self presentIfConditionPickerForIndex:NSNotFound insertIndex:NSNotFound type:@"repeat_while"];
             });
         } else if ([action isEqualToString:@"__LUA_SCRIPT__"]) {
@@ -2004,21 +1822,21 @@ static void RCSetRunWatching(BOOL watching) {
             
             UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:inputVC];
             
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            dispatch_async(dispatch_get_main_queue(), ^{
                 [self presentViewController:nav animated:YES completion:nil];
             });
         } else if ([action isEqualToString:@"__TOAST__"]) {
-            // New toast: same editor as edits, pushed once the picker is gone
+            // New toast: same editor as edits, opened on the action picker (which stays open)
             __weak typeof(self) weakSelf = self;
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            dispatch_async(dispatch_get_main_queue(), ^{
                 __strong typeof(weakSelf) strongSelf = weakSelf;
                 if (!strongSelf) return;
-                [strongSelf pushToastEditorWithTitle:@"" message:@"" icon:@"" isNew:YES onSave:^(NSString *cmd) {
-                    [strongSelf.actions addObject:cmd];
-                    [strongSelf saveActions];
-                    [strongSelf.tableView reloadData];
+                [strongSelf showToastEditorWithTitle:@"" message:@"" icon:@"" isNew:YES onSave:^(NSString *cmd) {
+                    [weakSelf storeCommand:cmd atIndex:NSNotFound];
                 }];
             });
+        } else if ([self levelPrefixForCommand:action]) {
+            [self presentLevelActionForCommand:action index:NSNotFound after:0];
         } else {
             [self.actions addObject:action];
             [self saveActions];
@@ -2027,10 +1845,54 @@ static void RCSetRunWatching(BOOL watching) {
     };
     
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:picker];
+    self.addingNav = nav;
     [self presentViewController:nav animated:YES completion:nil];
 }
 
+// A screen opened while another is up (the action picker, during an add) opens on top of it,
+// so closing it goes back there
+- (void)presentViewController:(UIViewController *)controller animated:(BOOL)animated completion:(void (^)(void))completion {
+    UIViewController *top = self.presentedViewController;
+    if (!top || top.isBeingDismissed) {
+        [super presentViewController:controller animated:animated completion:completion];
+        return;
+    }
+    while (top.presentedViewController && !top.presentedViewController.isBeingDismissed) top = top.presentedViewController;
+    [top presentViewController:controller animated:animated completion:completion];
+}
+
+// Where a screen is pushed: inside the action picker during an add, otherwise here
+- (UINavigationController *)flowNavigationController {
+    UINavigationController *adding = self.addingNav;
+    return adding && adding.presentingViewController && !adding.isBeingDismissed ? adding : self.navigationController;
+}
+
+// The action is added: the picker (and anything still on it) closes
+- (void)finishAdding {
+    UINavigationController *nav = self.addingNav;
+    if (!nav) return;
+    self.addingNav = nil;
+    // After the screen that saved has started closing itself
+    dispatch_async(dispatch_get_main_queue(), ^{ [self closeAddingNav:nav]; });
+}
+
+- (void)closeAddingNav:(UINavigationController *)nav {
+    if (self.presentedViewController != nav || nav.isBeingDismissed) return;
+    UIViewController *top = nav;
+    while (top.presentedViewController) top = top.presentedViewController;
+    id<UIViewControllerTransitionCoordinator> coordinator = top.transitionCoordinator ?: nav.transitionCoordinator;
+    if (coordinator) {
+        // Something on it is still moving: close once that's done
+        [coordinator animateAlongsideTransition:nil completion:^(__unused id<UIViewControllerTransitionCoordinatorContext> context) {
+            [self closeAddingNav:nav];
+        }];
+        return;
+    }
+    [self dismissViewControllerAnimated:YES completion:nil];
+}
+
 - (void)saveActions {
+    [self finishAdding]; // closes the picker once this save is done
     [[RCConfigManager sharedManager] setActions:_actions forTrigger:_triggerKey];
 }
 
@@ -2510,6 +2372,15 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
                 @{ @"value": @"OFF", @"title": @"Off" }
             ]
         }
+   ,
+        @{
+            // A variable from Set Variable: name, comparison and value (the editor's prompts)
+            @"key": @"variable",
+            @"title": @"Variable",
+            @"icon": @"x.squareroot",
+            @"section": @"Variables",
+            @"input": @"variable"
+        }
     ]);
 }
 
@@ -2534,6 +2405,15 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 // at insertIndex or the end. Only a new top-level If owns an End If marker; an
 // Else If belongs to the existing block and must not create another terminator.
 - (void)applyIfAction:(NSDictionary *)ifAction existingIndex:(NSInteger)existingIndex insertIndex:(NSInteger)insertIndex {
+    // An edited condition stays disabled if it was
+    if (existingIndex != NSNotFound && existingIndex >= 0 && existingIndex < (NSInteger)self.actions.count) {
+        id old = self.actions[existingIndex];
+        if ([old isKindOfClass:[NSDictionary class]] && old[@"disabled"]) {
+            NSMutableDictionary *kept = [ifAction mutableCopy];
+            kept[@"disabled"] = old[@"disabled"];
+            ifAction = kept;
+        }
+    }
     // Wait Until: one row, no End; a new one asks for its time limit, an edited one keeps it
     if ([[ifAction[@"type"] description].lowercaseString isEqualToString:@"wait_until"]) {
         BOOL editing = existingIndex != NSNotFound && existingIndex >= 0 && existingIndex < (NSInteger)self.actions.count;
@@ -2607,94 +2487,61 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         return;
     }
 
+    // Variable: how to compare, then the name (and the value to compare with)
+    if ([condition[@"input"] isEqualToString:@"variable"]) {
+        [self presentVariableConditionForType:actionType existingIndex:existingIndex insertIndex:insertIndex];
+        return;
+    }
+
     // Threshold: above / below a percentage (battery, volume)
     if ([condition[@"input"] isEqualToString:@"threshold"]) {
-        UIAlertController *direction = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"%@ is...", condition[@"title"]]
-                                                                           message:nil
-                                                                    preferredStyle:UIAlertControllerStyleActionSheet];
-        __weak typeof(self) weakSelf = self;
-        for (NSString *word in @[@"Above", @"Below"]) {
-            [direction addAction:[UIAlertAction actionWithTitle:word style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-                UIAlertController *amount = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"%@ %@", condition[@"title"], word.lowercaseString]
-                                                                                message:@"Percentage (0-100)"
-                                                                         preferredStyle:UIAlertControllerStyleAlert];
-                [amount addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-                    textField.placeholder = @"50";
-                    textField.keyboardType = UIKeyboardTypeNumberPad;
-                }];
-                [amount addAction:[UIAlertAction actionWithTitle:@"Save" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
-                    NSInteger value = MAX(0, MIN(100, [amount.textFields[0].text integerValue]));
-                    [weakSelf applyIfAction:@{ @"type": actionType, @"conditionKey": condition[@"key"], @"conditionTitle": condition[@"title"],
-                                               @"expectedValue": [NSString stringWithFormat:@"%@ %ld", word.uppercaseString, (long)value],
-                                               @"expectedTitle": [NSString stringWithFormat:@"%@ %ld%%", word.lowercaseString, (long)value] }
-                              existingIndex:existingIndex insertIndex:insertIndex];
-                }]];
-                [amount addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-                [weakSelf configurePopoverSourceForAlert:amount];
-                [weakSelf presentViewController:amount animated:YES completion:nil];
-            }]];
+        // The one being edited, when it's the same condition: its direction and number
+        NSString *current = nil;
+        NSInteger choice = 0;
+        if (existingIndex != NSNotFound && existingIndex >= 0 && existingIndex < (NSInteger)self.actions.count) {
+            id item = self.actions[existingIndex];
+            if ([item isKindOfClass:[NSDictionary class]] && [[item[@"conditionKey"] description] isEqualToString:condition[@"key"]]) {
+                NSString *raw = [[item[@"expectedValue"] description] uppercaseString];
+                if ([raw hasPrefix:@"BELOW "]) choice = 1;
+                NSRange space = [raw rangeOfString:@" "];
+                if (space.location != NSNotFound) current = [[item[@"expectedValue"] description] substringFromIndex:space.location + 1];
+            }
         }
-        [direction addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-        [self configurePopoverSourceForAlert:direction];
-        [self presentViewController:direction animated:YES completion:nil];
+        RCNumberSettingViewController *editor = [[RCNumberSettingViewController alloc] initWithTitle:condition[@"title"] label:@"Percent" value:current otherActions:self.actions];
+        editor.choices = @[@"Above", @"Below"];
+        editor.selectedChoice = choice;
+        editor.placeholder = @"50";
+        editor.maximum = 100;
+        editor.note = @"True when the level is above or below this percentage.";
+        editor.allowsRound = [self roundAvailableAtIndex:existingIndex != NSNotFound ? existingIndex : insertIndex];
+        __weak typeof(self) weakSelf = self;
+        editor.onSave = ^(id typed, NSInteger picked) {
+            // A variable stays as typed ("ABOVE {limit}"); the tweak fills it in when it checks
+            NSString *word = picked == 1 ? @"Below" : @"Above";
+            NSString *value = [typed description];
+            [weakSelf applyIfAction:@{ @"type": actionType, @"conditionKey": condition[@"key"], @"conditionTitle": condition[@"title"],
+                                       @"expectedValue": [NSString stringWithFormat:@"%@ %@", word.uppercaseString, value],
+                                       @"expectedTitle": [NSString stringWithFormat:@"%@ %@%%", word.lowercaseString, value] }
+                      existingIndex:existingIndex insertIndex:insertIndex];
+        };
+        [self presentNumberSetting:editor after:0.35];
         return;
     }
     
     if ([condition[@"key"] isEqualToString:@"time_between"]) {
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Time of Day Condition"
-                                                                       message:@"Enter start and end time (e.g. 09:00 - 17:00 or 9:00 AM - 5:00 PM):"
-                                                                preferredStyle:UIAlertControllerStyleAlert];
-        [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-            textField.placeholder = @"Start Time (e.g. 09:00)";
-            textField.keyboardType = UIKeyboardTypeDefault;
-            if (existingIndex != NSNotFound && existingIndex >= 0 && existingIndex < (NSInteger)self.actions.count) {
-                NSDictionary *act = self.actions[existingIndex];
-                if ([act isKindOfClass:[NSDictionary class]]) {
-                    NSString *val = act[@"expectedValue"] ?: @"";
-                    NSArray *p = [val componentsSeparatedByString:@"-"];
-                    if (p.count > 0) textField.text = [p[0] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-                }
-            } else {
-                textField.text = @"09:00";
-            }
-        }];
-        [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-            textField.placeholder = @"End Time (e.g. 17:00)";
-            textField.keyboardType = UIKeyboardTypeDefault;
-            if (existingIndex != NSNotFound && existingIndex >= 0 && existingIndex < (NSInteger)self.actions.count) {
-                NSDictionary *act = self.actions[existingIndex];
-                if ([act isKindOfClass:[NSDictionary class]]) {
-                    NSString *val = act[@"expectedValue"] ?: @"";
-                    NSArray *p = [val componentsSeparatedByString:@"-"];
-                    if (p.count > 1) textField.text = [p[1] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-                }
-            } else {
-                textField.text = @"17:00";
-            }
-        }];
+        NSString *current = nil;
+        if (existingIndex != NSNotFound && existingIndex >= 0 && existingIndex < (NSInteger)self.actions.count) {
+            id item = self.actions[existingIndex];
+            if ([item isKindOfClass:[NSDictionary class]] && [[item[@"conditionKey"] description] isEqualToString:@"time_between"]) current = [item[@"expectedValue"] description];
+        }
+        RCTimeRangeViewController *editor = [[RCTimeRangeViewController alloc] initWithRange:current];
         __weak typeof(self) weakSelf = self;
-        [alert addAction:[UIAlertAction actionWithTitle:@"Save" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
-            __strong typeof(weakSelf) strongSelf = weakSelf;
-            if (!strongSelf) return;
-            NSString *start = [alert.textFields[0].text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-            NSString *end = [alert.textFields[1].text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-            if (start.length == 0) start = @"09:00";
-            if (end.length == 0) end = @"17:00";
-            NSString *rangeVal = [NSString stringWithFormat:@"%@ - %@", start, end];
-            
-            NSDictionary *ifAction = @{
-                @"type": actionType,
-                @"conditionKey": @"time_between",
-                @"conditionTitle": @"Time of Day",
-                @"expectedValue": rangeVal,
-                @"expectedTitle": rangeVal
-            };
-            
-            [strongSelf applyIfAction:ifAction existingIndex:existingIndex insertIndex:insertIndex];
-        }]];
-        [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-        [self configurePopoverSourceForAlert:alert];
-        [self presentViewController:alert animated:YES completion:nil];
+        editor.onSave = ^(NSString *value, NSString *title) {
+            [weakSelf applyIfAction:@{ @"type": actionType, @"conditionKey": @"time_between", @"conditionTitle": @"Time of Day",
+                                       @"expectedValue": value, @"expectedTitle": title }
+                      existingIndex:existingIndex insertIndex:insertIndex];
+        };
+        [self presentNumberSetting:editor after:0.35];
         return;
     }
     
@@ -2717,7 +2564,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             [strongSelf.navigationController popToViewController:strongSelf animated:YES];
         };
         appPicker.suppressAutoPop = YES; // back to this editor, past the condition picker
-        [self.navigationController pushViewController:appPicker animated:YES];
+        [[self flowNavigationController] pushViewController:appPicker animated:YES];
         return;
     }
 
@@ -2773,27 +2620,25 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     picker.onInputRequested = ^(NSDictionary *condition) {
         [weakSelf presentIfValuePickerForCondition:condition existingIndex:existingIndex insertIndex:insertIndex type:type];
     };
-    [self.navigationController pushViewController:picker animated:YES];
+    [[self flowNavigationController] pushViewController:picker animated:YES];
 }
 
 // Wait Until's time limit, in seconds: for a new Wait Until (then added) or the one at existingIndex
 - (void)presentWaitLimitForAction:(NSDictionary *)waitAction existingIndex:(NSInteger)existingIndex insertIndex:(NSInteger)insertIndex {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Time Limit"
-                                                                   message:@"Seconds to wait at most before the actions go on anyway (up to a day)."
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    NSString *current = [waitAction[@"timeout"] description] ?: @"60";
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-        textField.placeholder = @"60";
-        textField.text = current;
-        textField.keyboardType = UIKeyboardTypeNumberPad;
-    }];
+    RCNumberSettingViewController *editor = [[RCNumberSettingViewController alloc] initWithTitle:@"Time Limit" label:@"Seconds"
+                                                                                             value:[waitAction[@"timeout"] description] ?: @"60" otherActions:self.actions];
+    editor.placeholder = @"60";
+    editor.minimum = 1;
+    editor.maximum = 86400;
+    editor.note = @"The longest to wait, up to a day. Then the actions go on anyway.";
+    editor.allowsRound = [self roundAvailableAtIndex:existingIndex != NSNotFound ? existingIndex : insertIndex];
+    editor.saveTitle = existingIndex == NSNotFound ? @"Add" : @"Save";
     __weak typeof(self) weakSelf = self;
-    [alert addAction:[UIAlertAction actionWithTitle:@"Save" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+    editor.onSave = ^(id seconds, __unused NSInteger choice) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf) return;
-        NSInteger seconds = MAX(1, MIN(86400, [alert.textFields[0].text integerValue] ?: 60));
         NSMutableDictionary *item = [waitAction mutableCopy];
-        item[@"timeout"] = @(seconds);
+        item[@"timeout"] = seconds;
         if (existingIndex != NSNotFound && existingIndex >= 0 && existingIndex < (NSInteger)strongSelf.actions.count) {
             strongSelf.actions[existingIndex] = item;
         } else if (insertIndex != NSNotFound && insertIndex >= 0 && insertIndex <= (NSInteger)strongSelf.actions.count) {
@@ -2803,34 +2648,180 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         }
         [strongSelf saveActions];
         [strongSelf.tableView reloadData];
-    }]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [self configurePopoverSourceForAlert:alert];
+    };
+    // After the condition picker has closed (it may still be going back)
+    [self presentNumberSetting:editor after:0.35];
+}
+
+// A number setting's screen, as a half-height sheet where it can be
+- (void)presentNumberSetting:(UIViewController *)editor after:(NSTimeInterval)delay {
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:editor];
+    if (@available(iOS 15.0, *)) {
+        UISheetPresentationController *sheet = nav.sheetPresentationController;
+        sheet.detents = @[[UISheetPresentationControllerDetent mediumDetent], [UISheetPresentationControllerDetent largeDetent]];
+        sheet.prefersGrabberVisible = YES;
+    }
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [weakSelf presentViewController:nav animated:YES completion:nil];
+    });
+}
+
+// Whether an action at index (NSNotFound: the end) sits inside a Repeat or Repeat While, where {round} has a value
+- (BOOL)roundAvailableAtIndex:(NSInteger)index {
+    NSInteger end = index == NSNotFound ? (NSInteger)self.actions.count : MAX(0, MIN(index, (NSInteger)self.actions.count));
+    NSInteger depth = 0;
+    for (NSInteger i = 0; i < end; i++) {
+        id item = self.actions[i];
+        if ([self isRepeatActionItem:item]) depth++;
+        else if ([[self actionTypeForItem:item] isEqualToString:@"end_repeat"]) depth = MAX(0, depth - 1);
+    }
+    return depth > 0;
+}
+
+// Puts a command at index (keeping any settings around it), or adds it at the end
+- (void)storeCommand:(NSString *)command atIndex:(NSInteger)index {
+    if (index != NSNotFound && index >= 0 && index < (NSInteger)self.actions.count) {
+        id original = self.actions[index];
+        if ([original isKindOfClass:[NSDictionary class]] && [original[@"command"] isKindOfClass:[NSString class]]) {
+            NSMutableDictionary *d = [original mutableCopy];
+            d[@"command"] = command;
+            self.actions[index] = d;
+        } else {
+            self.actions[index] = command;
+        }
+    } else {
+        [self.actions addObject:command];
+    }
+    [self saveActions];
+    [self.tableView reloadData];
+}
+
+// Volume, Ringer Volume and Brightness: their command's prefix, for the picker's item or a stored command
+- (NSString *)levelPrefixForCommand:(NSString *)command {
+    if (![command isKindOfClass:[NSString class]]) return nil;
+    NSDictionary *placeholders = @{ @"__SET_VOLUME__": @"set-vol ", @"__SET_RINGER_VOLUME__": @"ringer volume ", @"__SET_BRIGHTNESS__": @"brightness " };
+    if (placeholders[command]) return placeholders[command];
+    // A stored command: the prefix, then a number or a variable
+    static NSRegularExpression *value;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ value = [NSRegularExpression regularExpressionWithPattern:@"^(\\d+(\\.\\d+)?|\\{[A-Za-z_][A-Za-z0-9_]*\\})$" options:0 error:nil]; });
+    for (NSString *prefix in placeholders.allValues) {
+        if (![command hasPrefix:prefix]) continue;
+        NSString *rest = [[command substringFromIndex:prefix.length] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        if ([value firstMatchInString:rest options:0 range:NSMakeRange(0, rest.length)]) return prefix;
+    }
+    return nil;
+}
+
+// A level action on the number panel: 0 to 100, or a variable. Edits the action at index, or adds one at the end.
+- (void)presentLevelActionForCommand:(NSString *)command index:(NSInteger)index after:(NSTimeInterval)delay {
+    NSString *prefix = [self levelPrefixForCommand:command];
+    if (!prefix) return;
+    BOOL editing = index != NSNotFound && index >= 0 && index < (NSInteger)self.actions.count;
+    NSString *current = [command hasPrefix:prefix] ? [[command substringFromIndex:prefix.length] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]] : nil;
+    NSString *title = [prefix isEqualToString:@"set-vol "] ? @"Volume" : [prefix isEqualToString:@"ringer volume "] ? @"Ringer Volume" : @"Brightness";
+    NSString *note = [prefix isEqualToString:@"set-vol "] ? @"The media volume to set, from 0 to 100."
+                   : [prefix isEqualToString:@"ringer volume "] ? @"The ringer and alerts volume to set, from 0 to 100."
+                   : @"The screen brightness to set, from 0 to 100.";
+    RCNumberSettingViewController *editor = [[RCNumberSettingViewController alloc] initWithTitle:title label:@"Percent" value:current otherActions:self.actions];
+    editor.placeholder = @"50";
+    editor.maximum = 100;
+    editor.note = note;
+    editor.allowsRound = [self roundAvailableAtIndex:editing ? index : NSNotFound];
+    editor.saveTitle = editing ? @"Save" : @"Add";
+    __weak typeof(self) weakSelf = self;
+    editor.onSave = ^(id value, __unused NSInteger choice) {
+        NSString *text = [value isKindOfClass:[NSNumber class]] ? [NSString stringWithFormat:@"%ld", (long)[value integerValue]] : [value description];
+        [weakSelf storeCommand:[prefix stringByAppendingString:text] atIndex:editing ? index : NSNotFound];
+    };
+    [self presentNumberSetting:editor after:delay];
+}
+
+// Delay: seconds, or a variable. Edits the delay at index, or adds one at the end.
+- (void)presentDelayForIndex:(NSInteger)index current:(NSString *)current after:(NSTimeInterval)delay {
+    BOOL editing = index != NSNotFound && index >= 0 && index < (NSInteger)self.actions.count;
+    RCNumberSettingViewController *editor = [[RCNumberSettingViewController alloc] initWithTitle:@"Delay" label:@"Seconds" value:current otherActions:self.actions];
+    editor.placeholder = @"1";
+    editor.allowsDecimals = YES;
+    editor.maximum = 86400;
+    editor.note = @"How long to wait before the next action, up to a day.";
+    editor.allowsRound = [self roundAvailableAtIndex:editing ? index : NSNotFound];
+    editor.saveTitle = editing ? @"Save" : @"Add";
+    __weak typeof(self) weakSelf = self;
+    editor.onSave = ^(id seconds, __unused NSInteger choice) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        NSString *text = [seconds isKindOfClass:[NSNumber class]] ? [NSString stringWithFormat:@"%g", [seconds doubleValue]] : seconds;
+        [strongSelf storeCommand:[@"delay " stringByAppendingString:text] atIndex:editing ? index : NSNotFound];
+    };
+    [self presentNumberSetting:editor after:delay];
+}
+
+// The Variable condition for an If, Else If, Repeat While or Wait Until: its own screen
+- (void)presentVariableConditionForType:(NSString *)actionType existingIndex:(NSInteger)existingIndex insertIndex:(NSInteger)insertIndex {
+    NSDictionary *existing = nil;
+    if (existingIndex != NSNotFound && existingIndex >= 0 && existingIndex < (NSInteger)self.actions.count) {
+        id item = self.actions[existingIndex];
+        if ([item isKindOfClass:[NSDictionary class]] && [[item[@"conditionKey"] description] isEqualToString:@"variable"]) existing = item;
+    }
+    RCVariableConditionViewController *editor = [[RCVariableConditionViewController alloc] initWithCondition:existing otherActions:self.actions];
+    __weak typeof(self) weakSelf = self;
+    editor.onSave = ^(NSString *name, NSString *comparison, NSString *value) {
+        NSString *title = [RCVariableConditionViewController titleForComparison:comparison].lowercaseString;
+        NSString *phrase = value.length ? [NSString stringWithFormat:@"%@ %@", title, value] : title;
+        [weakSelf applyIfAction:@{ @"type": actionType, @"conditionKey": @"variable", @"conditionTitle": name,
+                                   @"variable": name, @"comparison": comparison, @"expectedValue": value, @"expectedTitle": phrase }
+                  existingIndex:existingIndex insertIndex:insertIndex];
+    };
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:editor];
     // After the condition picker has closed (it may still be going back)
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [weakSelf presentViewController:alert animated:YES completion:nil];
+        [weakSelf presentViewController:nav animated:YES completion:nil];
     });
+}
+
+// Set Variable: its own screen. Edits the one at existingIndex, or adds one at the end.
+- (void)presentSetVariable:(NSDictionary *)draft existingIndex:(NSInteger)existingIndex {
+    BOOL editing = existingIndex != NSNotFound && existingIndex >= 0 && existingIndex < (NSInteger)self.actions.count;
+    NSMutableArray *others = [self.actions mutableCopy];
+    if (editing) [others removeObjectAtIndex:existingIndex];
+    RCSetVariableViewController *editor = [[RCSetVariableViewController alloc] initWithAction:editing ? draft : nil otherActions:others];
+    __weak typeof(self) weakSelf = self;
+    editor.onSave = ^(NSDictionary *item) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        if (editing && existingIndex < (NSInteger)strongSelf.actions.count) {
+            strongSelf.actions[existingIndex] = item;
+        } else {
+            [strongSelf.actions addObject:item];
+        }
+        [strongSelf saveActions];
+        [strongSelf.tableView reloadData];
+    };
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:editor];
+    [self presentViewController:nav animated:YES completion:nil];
 }
 
 // Repeat: how many times. Edits the Repeat at existingIndex, or adds a Repeat block at the end.
 - (void)presentRepeatCountForIndex:(NSInteger)existingIndex {
     BOOL editing = existingIndex != NSNotFound && existingIndex >= 0 && existingIndex < (NSInteger)self.actions.count;
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Repeat"
-                                                                   message:@"Runs the actions inside this many times (up to 1,000). In their text, {round} becomes the round number."
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    NSString *current = editing ? [self.actions[existingIndex][@"count"] description] : @"";
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-        textField.placeholder = @"Times";
-        textField.text = current;
-        textField.keyboardType = UIKeyboardTypeNumberPad;
-    }];
+    RCNumberSettingViewController *editor = [[RCNumberSettingViewController alloc] initWithTitle:@"Repeat" label:@"Times"
+                                                                                             value:editing ? [self.actions[existingIndex][@"count"] description] : nil otherActions:self.actions];
+    editor.placeholder = @"3";
+    editor.minimum = 1;
+    editor.maximum = 1000;
+    editor.note = @"Runs the actions inside this many times, up to 1,000. In their text, {round} becomes the current round.";
+    editor.allowsRound = [self roundAvailableAtIndex:editing ? existingIndex : NSNotFound];
+    editor.saveTitle = editing ? @"Save" : @"Add";
     __weak typeof(self) weakSelf = self;
-    [alert addAction:[UIAlertAction actionWithTitle:@"Save" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-        if ([alert.textFields[0].text integerValue] <= 0) return; // left empty: nothing added or changed
-        NSInteger count = MIN(1000, [alert.textFields[0].text integerValue]);
-        NSDictionary *repeat = @{ @"type": @"repeat", @"count": @(count) };
+    editor.onSave = ^(id count, __unused NSInteger choice) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf) return;
+        // An edited Repeat keeps its other keys, such as disabled
+        id old = editing && existingIndex < (NSInteger)strongSelf.actions.count ? strongSelf.actions[existingIndex] : nil;
+        NSMutableDictionary *repeat = [old isKindOfClass:[NSDictionary class]] ? [old mutableCopy] : [@{ @"type": @"repeat" } mutableCopy];
+        repeat[@"count"] = count;
         if (editing) {
             strongSelf.actions[existingIndex] = repeat;
         } else {
@@ -2840,10 +2831,8 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         [strongSelf saveActions];
         if (!editing) [strongSelf defaultToRestartForLoop];
         [strongSelf.tableView reloadData];
-    }]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [self configurePopoverSourceForAlert:alert];
-    [self presentViewController:alert animated:YES completion:nil];
+    };
+    [self presentNumberSetting:editor after:0];
 }
 
 - (void)presentIfConditionPickerForIndex:(NSInteger)index {
@@ -3167,6 +3156,8 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
                 [self presentIfConditionPickerForIndex:indexPath.row];
             } else if ([self isRepeatActionItem:actionData]) {
                 [self presentRepeatCountForIndex:indexPath.row];
+            } else if ([[self actionTypeForItem:actionData] isEqualToString:@"set_variable"]) {
+                [self presentSetVariable:actionData existingIndex:indexPath.row];
             }
             return;
         }
@@ -3240,49 +3231,20 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         inputVC.initialText = currentCommand;
         inputVC.showRootToggle = YES;
         inputVC.isRootToggled = isRoot;
+        inputVC.variableActions = self.actions;
         
         __weak typeof(inputVC) weakInputVC = inputVC;
         inputVC.onComplete = ^(NSString *text) {
             if (text.length > 0) {
                 NSString *prefix = weakInputVC.isRootToggled ? @"root" : @"exec";
-                self.actions[indexPath.row] = [NSString stringWithFormat:@"%@ %@", prefix, text];
-                [self saveActions];
-                [self.tableView reloadData];
+                [self storeCommand:[NSString stringWithFormat:@"%@ %@", prefix, text] atIndex:indexPath.row];
             }
         };
         
         UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:inputVC];
         [self presentViewController:nav animated:YES completion:nil];
-    } else if ([currentAction hasPrefix:@"set-vol "] || [currentAction hasPrefix:@"ringer volume "] || [currentAction hasPrefix:@"brightness "]) {
-        // Edit Volume/Ringer Volume/Brightness
-        BOOL isVolume = [currentAction hasPrefix:@"set-vol "], isRinger = [currentAction hasPrefix:@"ringer volume "];
-        NSString *title = isVolume ? @"Edit Volume" : isRinger ? @"Edit Ringer Volume" : @"Edit Brightness";
-        NSString *prefix = isVolume ? @"set-vol " : isRinger ? @"ringer volume " : @"brightness ";
-        NSString *currentValue = [currentAction substringFromIndex:prefix.length];
-        
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:title 
-                                                                       message:@"Enter a value (0-100)" 
-                                                                preferredStyle:UIAlertControllerStyleAlert];
-        
-        [alert addTextFieldWithConfigurationHandler:^(UITextField * _Nonnull textField) {
-            textField.keyboardType = UIKeyboardTypeNumberPad;
-            textField.text = currentValue;
-            textField.textAlignment = NSTextAlignmentCenter;
-        }];
-        
-        [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-        [alert addAction:[UIAlertAction actionWithTitle:@"Update" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
-            UITextField *textField = alert.textFields.firstObject;
-            int val = [textField.text intValue];
-            if (val < 0) val = 0;
-            if (val > 100) val = 100;
-            
-            self.actions[indexPath.row] = [NSString stringWithFormat:@"%@%d", prefix, val];
-            [self saveActions];
-            [self.tableView reloadData];
-        }]];
-        
-        [self presentViewController:alert animated:YES completion:nil];
+    } else if ([self levelPrefixForCommand:currentAction]) {
+        [self presentLevelActionForCommand:currentAction index:indexPath.row after:0];
     } else if ([currentAction hasPrefix:@"Lua "] || [currentAction hasPrefix:@"lua_eval "] || [currentAction hasPrefix:@"lua "]) {
         // Edit Lua Script
         int prefixLength = [currentAction hasPrefix:@"lua_eval "] ? 9 : 4;
@@ -3311,29 +3273,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             [self.tableView reloadData];
         }];
     } else if ([currentAction hasPrefix:@"delay "]) {
-        // Edit Delay
-        NSString *currentDelay = [currentAction substringFromIndex:6];
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Edit Delay"
-            message:@"Update delay in seconds"
-            preferredStyle:UIAlertControllerStyleAlert];
-
-        [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-            textField.text = currentDelay;
-            textField.placeholder = @"1.0";
-            textField.keyboardType = UIKeyboardTypeDecimalPad;
-        }];
-
-        [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-        [alert addAction:[UIAlertAction actionWithTitle:@"Update" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
-            NSString *input = alert.textFields.firstObject.text;
-            if (input.length > 0) {
-                self.actions[indexPath.row] = [NSString stringWithFormat:@"delay %@", input];
-                [self saveActions];
-                [self.tableView reloadData];
-            }
-        }]];
-
-        [self presentViewController:alert animated:YES completion:nil];
+        [self presentDelayForIndex:indexPath.row current:[currentAction substringFromIndex:6] after:0];
     } else if ([currentAction hasPrefix:@"shortcut:"]) {
         // Change the shortcut, or whether it runs silently (keeping its input)
         BOOL silent = NO;
@@ -3474,39 +3414,24 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         NSString *toastTitle = nil, *toastSub = nil, *toastIcon = nil;
         rc_parse_toast_cmd(currentAction, &toastTitle, &toastSub, &toastIcon);
         __weak typeof(self) weakSelf = self;
-        [self pushToastEditorWithTitle:toastTitle message:toastSub icon:toastIcon isNew:NO onSave:^(NSString *cmd) {
-            __strong typeof(weakSelf) strongSelf = weakSelf;
-            if (!strongSelf) return;
-            strongSelf.actions[indexPath.row] = cmd;
-            [strongSelf saveActions];
-            [strongSelf.tableView reloadData];
+        NSInteger index = indexPath.row;
+        [self showToastEditorWithTitle:toastTitle message:toastSub icon:toastIcon isNew:NO onSave:^(NSString *cmd) {
+            [weakSelf storeCommand:cmd atIndex:index]; // keeps any settings around the command
         }];
     } else if ([currentAction hasPrefix:@"ssh-run "]) {
         [self promptEditSSHRunActionAtIndex:indexPath.row];
         return;
     } else {
-        // Generic edit for other commands - show alert with current command
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Edit Action"
-            message:@"Modify the command"
-            preferredStyle:UIAlertControllerStyleAlert];
-
-        [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-            textField.text = currentAction;
-            textField.autocorrectionType = UITextAutocorrectionTypeNo;
-            textField.autocapitalizationType = UITextAutocapitalizationTypeNone;
-        }];
-
-        [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-        [alert addAction:[UIAlertAction actionWithTitle:@"Save" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
-            NSString *input = alert.textFields.firstObject.text;
-            if (input.length > 0) {
-                self.actions[indexPath.row] = input;
-                [self saveActions];
-                [self.tableView reloadData];
-            }
-        }]];
-
-        [self presentViewController:alert animated:YES completion:nil];
+        // Any other command: the command editor, with the variable menu
+        RCTextInputViewController *inputVC = [[RCTextInputViewController alloc] init];
+        inputVC.promptTitle = @"Edit Action";
+        inputVC.initialText = currentAction;
+        inputVC.variableActions = self.actions;
+        inputVC.onComplete = ^(NSString *text) {
+            if (text.length > 0) [self storeCommand:text atIndex:indexPath.row];
+        };
+        UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:inputVC];
+        [self presentViewController:nav animated:YES completion:nil];
     }
 }
 
@@ -3560,7 +3485,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 
 // The one toast editor. New toasts and edits both come through here,
 // so they always look and save the same way.
-- (void)pushToastEditorWithTitle:(NSString *)title
+- (void)showToastEditorWithTitle:(NSString *)title
                         message:(NSString *)message
                            icon:(NSString *)icon
                           isNew:(BOOL)isNew
@@ -3569,10 +3494,14 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
                                                                                          message:message
                                                                                             icon:icon
                                                                                            isNew:isNew];
+    editor.variableActions = self.actions;
     editor.onSave = ^(NSString *t, NSString *m, NSString *i) {
         if (onSave) onSave(rc_build_toast_command(t, m, i));
     };
-    [self.navigationController pushViewController:editor animated:YES];
+    // A card like the other editors: swiping it down cancels. During an add it opens over the
+    // action picker, and saving closes both.
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:editor];
+    [self presentViewController:nav animated:YES completion:nil];
 }
 
 - (void)promptEditUnlockActionAtIndex:(NSInteger)index {

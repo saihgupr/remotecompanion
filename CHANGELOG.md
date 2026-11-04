@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Variables**: the Set Variable action saves a value, changes it with math or an RC command, or keeps it for one run only. `{name}` in action text becomes its value, a Variable condition compares it, and Settings > Advanced Settings > Variables lists saved values. The number, time, command and Toast editors have a + menu to insert one.
 - **Two-finger edge slide gestures**: edge swipe triggers now recognize a second finger, with distance-based firing, a widened landing zone, Control Center suppression mid-gesture, and a Lock Scrolling During Gestures toggle (off by default) that keeps lists still while gesturing.
 - **New SSH host editor**: adding or editing a host now opens a proper Settings-style screen (Server details plus a Password / Private Key picker) instead of a cramped popup. The password field is masked with a show/hide eye button and never displays the saved password: leave it blank to keep the current one.
 - **New SSH command editor**: creating or editing an `ssh-run` action now shows a host picker plus a full command editor, instead of a one-line popup with the raw `ssh-run <id> ...` string.

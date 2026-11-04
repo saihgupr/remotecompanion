@@ -6,6 +6,7 @@
 #import "RCTestKitViewController.h"
 #import "RCRunningViewController.h"
 #import "RCWebUIAccessViewController.h"
+#import "RCVariablesViewController.h"
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #include <ifaddrs.h>
 #include <arpa/inet.h>
@@ -227,7 +228,7 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     } else if (section == RCSettingsSectionIntegrations) {
         return @"Configure connections to external services and automations.";
     } else if (section == RCSettingsSectionAdvanced) {
-        return @"NFC, banners, logging, and display options.";
+        return @"NFC, banners, logging, and display options, and the variables that Set Variable actions save.";
     } else if (section == RCSettingsSectionDiagnostics) {
         return @"See what's running on this device, and run tests that share their results.";
     } else if (section == RCSettingsSectionBackup) {
@@ -240,13 +241,13 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     if (section == RCSettingsSectionGeneral) {
         return [RCConfigManager sharedManager].webUIEnabled ? 4 : 2; // with Access and Open Web UI
     }
-    if (section == RCSettingsSectionBackup) {
-        return 2;
+    if (section == RCSettingsSectionBackup || section == RCSettingsSectionAdvanced) {
+        return 2; // Export / Import; Advanced Settings / Variables
     }
     if (section == RCSettingsSectionDiagnostics) {
         return 2; // Running, Test Kit
     }
-    return 1; // Integrations, Advanced Settings
+    return 1; // Integrations
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -303,6 +304,11 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
         cell.imageView.image = puzzleImg;
         cell.imageView.tintColor = [UIColor systemIndigoColor];
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    } else if (indexPath.section == RCSettingsSectionAdvanced && indexPath.row == 1) {
+        cell.textLabel.text = @"Variables";
+        cell.imageView.image = [UIImage systemImageNamed:@"x.squareroot"];
+        cell.imageView.tintColor = [UIColor systemOrangeColor];
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     } else if (indexPath.section == RCSettingsSectionAdvanced) {
         cell.textLabel.text = @"Advanced Settings";
         UIImage *img = [UIImage systemImageNamed:@"gearshape.2.fill"];
@@ -348,6 +354,8 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     } else if (indexPath.section == RCSettingsSectionIntegrations) {
         RCIntegrationsViewController *integrationsVC = [[RCIntegrationsViewController alloc] init];
         [self.navigationController pushViewController:integrationsVC animated:YES];
+    } else if (indexPath.section == RCSettingsSectionAdvanced && indexPath.row == 1) {
+        [self.navigationController pushViewController:[[RCVariablesViewController alloc] init] animated:YES];
     } else if (indexPath.section == RCSettingsSectionAdvanced) {
         [self.navigationController pushViewController:[[RCAdvancedSettingsViewController alloc] init] animated:YES];
     } else if (indexPath.section == RCSettingsSectionDiagnostics) {

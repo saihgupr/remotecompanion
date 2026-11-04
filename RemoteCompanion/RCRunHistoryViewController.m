@@ -175,7 +175,7 @@
     return nil;
 }
 
-// What happened at one action, from the run's trace: "True", "4 rounds", "Met after 3.5 s"...
+// What happened at one action, from the run's trace: "True", "4 rounds", "Met after 3.5 s", "Set to “5”"...
 + (NSString *)traceText:(NSDictionary *)entry {
     if (![entry isKindOfClass:[NSDictionary class]]) return @"";
     NSMutableArray *parts = [NSMutableArray array];
@@ -188,6 +188,13 @@
     }
     if ([entry[@"cap"] boolValue]) [parts addObject:@"Stopped at the 1,000-round limit"];
     if (entry[@"exit"]) [parts addObject:[entry[@"exit"] integerValue] == 1 ? @"Left the loop" : [NSString stringWithFormat:@"Left the loop %@×", entry[@"exit"]]];
+    if (entry[@"problem"]) [parts addObject:[NSString stringWithFormat:@"Not changed: %@", entry[@"problem"]]];
+    if (entry[@"value"]) {
+        NSInteger sets = [entry[@"sets"] integerValue];
+        NSString *value = [entry[@"value"] description];
+        NSString *shown = value.length ? [NSString stringWithFormat:@"“%@”", value] : @"no text";
+        [parts addObject:sets > 1 ? [NSString stringWithFormat:@"Set %ld×, last to %@", (long)sets, shown] : [NSString stringWithFormat:@"Set to %@", shown]];
+    }
     if (entry[@"met"]) [parts addObject:[NSString stringWithFormat:@"%@ after %@", [entry[@"met"] boolValue] ? @"Met" : @"Time limit reached", [self durationText:[entry[@"seconds"] doubleValue]]]];
     return [parts componentsJoinedByString:@" · "];
 }

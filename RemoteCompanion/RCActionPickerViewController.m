@@ -23,13 +23,16 @@
 @implementation RCActionPickerViewController
 
 // One pick per opening: a second tap while the list is closing (easy on a slower iPhone) would
-// otherwise add the action twice, or ask for its details twice
+// otherwise add the action twice, or ask for its details twice. A pick that keeps the list open
+// (its screen opens on top, and Cancel there comes back here) doesn't use it up.
 - (void)setOnActionSelected:(void (^)(NSString *))onActionSelected {
     if (!onActionSelected) { _onActionSelected = nil; return; }
     __block BOOL picked = NO;
+    __weak typeof(self) weakSelf = self;
     void (^once)(NSString *) = ^(NSString *action) {
         if (picked) return;
-        picked = YES;
+        BOOL (^staysOpen)(NSString *) = weakSelf.staysOpenFor;
+        if (!staysOpen || !staysOpen(action)) picked = YES;
         onActionSelected(action);
     };
     _onActionSelected = [once copy];
@@ -322,6 +325,7 @@
             @{ @"name": @"Repeat While...", @"command": @"__REPEAT_WHILE__", @"icon": @"repeat" },
             @{ @"name": @"Exit Repeat", @"command": @"__EXIT_REPEAT__", @"icon": @"arrow.right.to.line" },
             @{ @"name": @"Wait Until...", @"command": @"__WAIT_UNTIL__", @"icon": @"hourglass" },
+            @{ @"name": @"Set Variable...", @"command": @"__SET_VARIABLE__", @"icon": @"x.squareroot" },
             @{ @"name": @"Delay", @"command": @"__DELAY__", @"icon": @"hourglass" },
             @{ @"name": @"Stop Trigger...", @"command": @"__STOP_TRIGGER__", @"icon": @"stop.circle" },
             @{ @"name": @"Terminal Command", @"command": @"__CUSTOM__", @"icon": @"terminal.fill" },
@@ -557,11 +561,6 @@
         return;
     }
 
-    if ([command isEqualToString:@"__SET_VOLUME__"] || [command isEqualToString:@"__SET_RINGER_VOLUME__"] || [command isEqualToString:@"__SET_BRIGHTNESS__"] || [command isEqualToString:@"__SET_FLASHLIGHT__"]) {
-        [self handleValueInputForCommand:command];
-        return;
-    }
-    
     // Touch gesture handlers
     if ([command isEqualToString:@"__TAP__"]) {
         [self handleTouchCoordInputWithTitle:@"Tap" placeholder:@"x y  (e.g. 195 422)" build:^NSString *(NSString *v) {
@@ -638,6 +637,7 @@
     if (self.onActionSelected) {
         self.onActionSelected(command);
     }
+    if (self.staysOpenFor && self.staysOpenFor(command)) return; // its screen opens on top of this one
     
     if (self.searchController.isActive) {
         // Dismiss search first, then self (or just self which now dismisses search? No, we need self gone.)
