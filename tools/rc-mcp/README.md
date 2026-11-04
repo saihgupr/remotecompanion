@@ -28,7 +28,7 @@ the phone. One file, Python 3.8 or later, nothing to install.
 
 | Tool | What it does |
 |---|---|
-| `screen` | The app in front and each element on screen: number, kind, label, value, center point |
+| `screen` | The screen as an outline: alerts and keyboard first, top bar, sections, rows, bottom bar (or `format` list / json) |
 | `find` | Elements whose label or value contains some text |
 | `press` | Activates an element, as VoiceOver does |
 | `tap`, `hold` | A real touch on an element or at x, y |

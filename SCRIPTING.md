@@ -141,7 +141,7 @@ text and links of a web page. Scripts can use it to find and act on what's there
 
 | Command | What it does |
 |---|---|
-| `rc-screen` | The app in front (name and bundle ID) and what's on screen (`--json` for JSON) |
+| `rc-screen` | The app in front (name and bundle ID) and what's on screen (`--outline` laid out for reading, `--json` for JSON) |
 | `rc-screen find "Wi-Fi"` | The elements whose label or value contains the text |
 | `rc-screen press "Bluetooth"` | Activates an element by its label, or by number: `press "#7"` |
 | `rc-screen tap "Search"` | A real touch on an element (`hold "Text" 1` holds it) |

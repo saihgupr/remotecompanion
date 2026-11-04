@@ -2,7 +2,9 @@
 // For scripts and assistants that drive the phone: read the screen, find an element, press it,
 // wait for something to appear.
 //
-//   rc-screen [--json]              the app in front and the elements on screen
+//   rc-screen [--json|--outline]    the app in front and the elements on screen; --outline lays
+//                                   them out for reading: alerts and keyboard first, top bar,
+//                                   sections, side-by-side elements on one row, bottom bar
 //   rc-screen find TEXT [--json]    elements whose label or value contains TEXT
 //   rc-screen press TEXT|#N         presses the element (exact label first, then contains; #N by
 //                                   its number in the list)
@@ -113,6 +115,7 @@ static NSString *rc_kind(uint64_t traits) {
 @property (nonatomic) CGRect frame;
 @property (nonatomic) uint64_t traits;
 @property (nonatomic) NSUInteger number;
+@property (nonatomic) BOOL web; // from a web page (rc_web_elements)
 @end
 @implementation RCScreenElement
 @end
@@ -196,6 +199,7 @@ static NSArray<RCScreenElement *> *rc_elements(id app) {
         [list addObject:e];
     }
     for (RCScreenElement *e in rc_web_elements(app)) {
+        e.web = YES;
         e.number = ++number;
         [list addObject:e];
     }
@@ -306,7 +310,7 @@ static void rc_quit(int sig) {
 }
 
 static int rc_usage(void) {
-    fprintf(stderr, "Usage: rc-screen [--json] | find TEXT [--json] | press TEXT|#N | wait TEXT [SECONDS] | tap TEXT|#N | hold TEXT|#N [SECONDS] | menu TEXT|#N | type TEXT | scroll-to TEXT [up|left|right] | adjust TEXT|#N up|down [STEPS] | adjust TEXT|#N PERCENT%% | set TEXT|#N on|off | clear | pinch TEXT|#N SCALE | rotate TEXT|#N DEGREES\n");
+    fprintf(stderr, "Usage: rc-screen [--json|--outline] | find TEXT [--json] | press TEXT|#N | wait TEXT [SECONDS] | tap TEXT|#N | hold TEXT|#N [SECONDS] | menu TEXT|#N | type TEXT | scroll-to TEXT [up|left|right] | adjust TEXT|#N up|down [STEPS] | adjust TEXT|#N PERCENT%% | set TEXT|#N on|off | clear | pinch TEXT|#N SCALE | rotate TEXT|#N DEGREES\n");
     return 2;
 }
 
@@ -326,6 +330,237 @@ static int rc_command(NSString *command) {
     return 0;
 }
 
+#pragma mark - Outline
+
+// The screen as an outline an assistant can read at a glance: what's in the way first (an alert,
+// the keyboard), then the top bar, the content by section, with side-by-side elements on one
+// row, and the bottom bar. Elements keep their #N for press/tap/set. No positions: actions go by
+// #N or text.
+
+static NSString *rc_ol_text(RCScreenElement *e) {
+    NSString *label = e.label.length ? e.label : @"";
+    if ([e.kind isEqualToString:@"switch"]) {
+        NSString *state = [e.value isEqualToString:@"1"] ? @"on" : [e.value isEqualToString:@"0"] ? @"off" : e.value;
+        return [NSString stringWithFormat:@"%@: %@", label, state];
+    }
+    if ([e.kind isEqualToString:@"adjustable"]) return [NSString stringWithFormat:@"%@: %@ (adjustable)", label, e.value.length ? e.value : @"?"];
+    if ([e.kind isEqualToString:@"search"] || (e.traits & 0x40000)) return [NSString stringWithFormat:@"<%@%@>", label.length ? label : @"field", e.value.length && ![e.value isEqualToString:label] ? [NSString stringWithFormat:@": %@", e.value] : @""];
+    if ([e.kind isEqualToString:@"button"] || [e.kind isEqualToString:@"link"] || [e.kind isEqualToString:@"key"]) {
+        NSString *inner = label.length ? label : @"unlabeled";
+        if (e.value.length) inner = [inner stringByAppendingFormat:@" › %@", e.value];
+        return [e.kind isEqualToString:@"link"] ? [NSString stringWithFormat:@"[%@](link)", inner] : [NSString stringWithFormat:@"[%@]", inner];
+    }
+    if ([e.kind isEqualToString:@"image"]) return [NSString stringWithFormat:@"(image%@)", label.length ? [@" " stringByAppendingString:label] : @""];
+    if (e.value.length && label.length) return [NSString stringWithFormat:@"%@: %@", label, e.value];
+    return label.length ? label : e.value;
+}
+
+static NSString *rc_ol_item(RCScreenElement *e) {
+    NSMutableString *s = [NSMutableString stringWithString:rc_ol_text(e)];
+    if (e.traits & 0x100) [s appendString:@" (dimmed)"];
+    if (e.traits & 0x8) [s appendString:@" ✓"];
+    [s appendFormat:@" #%lu", (unsigned long)e.number];
+    return s;
+}
+
+static BOOL rc_ol_shown(RCScreenElement *e) {
+    if (CGRectIsEmpty(e.frame)) return NO;
+    // Unlabeled plain elements are layout, not content
+    if (!e.label.length && !e.value.length && ([e.kind isEqualToString:@"element"] || [e.kind isEqualToString:@"text"])) return NO;
+    return YES;
+}
+
+// A switch is listed twice (its row, then the switch itself); a link's text often again as text
+static NSArray<RCScreenElement *> *rc_ol_merge(NSArray<RCScreenElement *> *list) {
+    NSMutableArray *out = [NSMutableArray array];
+    for (RCScreenElement *e in list) {
+        RCScreenElement *last = out.lastObject;
+        if (last && [last.label isEqualToString:e.label] && [last.value isEqualToString:e.value] && (CGRectContainsRect(last.frame, e.frame) || CGRectContainsRect(e.frame, last.frame))) {
+            // Keep the one to act on (the switch, the button), with its number, laid out as the
+            // whole row (the switch alone is small, and would look like a bar button)
+            BOOL eActs = (e.traits & 0x1) != 0, lastActs = (last.traits & 0x1) != 0;
+            CGRect row = CGRectUnion(last.frame, e.frame);
+            RCScreenElement *keep = (eActs && !lastActs) ? e : last;
+            keep.frame = row;
+            [out replaceObjectAtIndex:out.count - 1 withObject:keep];
+            continue;
+        }
+        [out addObject:e];
+    }
+    return out;
+}
+
+// Rows: elements whose vertical middles fall within each other's height, left to right
+static NSArray<NSArray<RCScreenElement *> *> *rc_ol_rows(NSArray<RCScreenElement *> *list) {
+    NSArray *sorted = [list sortedArrayUsingComparator:^NSComparisonResult(RCScreenElement *a, RCScreenElement *b) {
+        if (CGRectGetMidY(a.frame) == CGRectGetMidY(b.frame)) return CGRectGetMinX(a.frame) < CGRectGetMinX(b.frame) ? NSOrderedAscending : NSOrderedDescending;
+        return CGRectGetMidY(a.frame) < CGRectGetMidY(b.frame) ? NSOrderedAscending : NSOrderedDescending;
+    }];
+    NSMutableArray *rows = [NSMutableArray array];
+    for (RCScreenElement *e in sorted) {
+        NSMutableArray *row = rows.lastObject;
+        RCScreenElement *first = row.firstObject;
+        double band = MIN(first.frame.size.height, e.frame.size.height) / 2;
+        if (row && fabs(CGRectGetMidY(first.frame) - CGRectGetMidY(e.frame)) <= MAX(band, 4)) [row addObject:e];
+        else [rows addObject:[NSMutableArray arrayWithObject:e]];
+    }
+    for (NSMutableArray *row in rows) [row sortUsingComparator:^NSComparisonResult(RCScreenElement *a, RCScreenElement *b) {
+        return CGRectGetMinX(a.frame) < CGRectGetMinX(b.frame) ? NSOrderedAscending : NSOrderedDescending;
+    }];
+    return rows;
+}
+
+static NSString *rc_ol_row(NSArray<RCScreenElement *> *row) {
+    NSMutableArray *items = [NSMutableArray array];
+    for (RCScreenElement *e in row) [items addObject:rc_ol_item(e)];
+    return [items componentsJoinedByString:@"   "];
+}
+
+// Web text reads as paragraphs: runs of text and links on the page, links marked where they are
+static NSArray<NSString *> *rc_ol_web(NSArray<RCScreenElement *> *list) {
+    NSMutableArray *lines = [NSMutableArray array];
+    NSMutableString *para = nil;
+    CGFloat lastBottom = -1000;
+    for (RCScreenElement *e in list) {
+        BOOL flows = [e.kind isEqualToString:@"text"] || [e.kind isEqualToString:@"link"] || [e.kind isEqualToString:@"element"];
+        BOOL near = CGRectGetMinY(e.frame) - lastBottom < 30;
+        if (flows && para && near) {
+            [para appendFormat:@" %@", [e.kind isEqualToString:@"link"] ? rc_ol_item(e) : (e.label.length ? e.label : e.value)];
+        } else {
+            if (para) [lines addObject:para];
+            para = nil;
+            if ([e.kind isEqualToString:@"header"]) [lines addObject:[NSString stringWithFormat:@"## %@ #%lu", e.label, (unsigned long)e.number]];
+            else if (flows) para = [NSMutableString stringWithString:[e.kind isEqualToString:@"link"] ? rc_ol_item(e) : (e.label.length ? e.label : e.value)];
+            else [lines addObject:rc_ol_item(e)];
+        }
+        lastBottom = MAX(lastBottom, CGRectGetMaxY(e.frame));
+        if (!near) lastBottom = CGRectGetMaxY(e.frame);
+    }
+    if (para) [lines addObject:para];
+    return lines;
+}
+
+static NSString *rc_outline(id app, NSString *appName, NSString *bundleID, NSArray<RCScreenElement *> *all) {
+    CGRect screen = rc_frame(app);
+    if (CGRectIsEmpty(screen)) screen = CGRectMake(0, 0, 390, 844);
+    double h = screen.size.height, top = screen.origin.y + h * 0.12, bottom = screen.origin.y + h * 0.86;
+    NSMutableArray<NSString *> *out = [NSMutableArray array];
+
+    NSMutableArray<RCScreenElement *> *keys = [NSMutableArray array], *web = [NSMutableArray array], *native = [NSMutableArray array];
+    // A keyboard (26 keys or more) is one line; a keypad (a phone's, a PIN pad) is laid out
+    NSUInteger keyCount = 0;
+    for (RCScreenElement *e in all) if ([e.kind isEqualToString:@"key"]) keyCount++;
+    BOOL keyboard = keyCount >= 20;
+    for (RCScreenElement *e in all) {
+        if (keyboard && [e.kind isEqualToString:@"key"]) [keys addObject:e];
+        else if (!rc_ol_shown(e)) continue;
+        else if (e.web) [web addObject:e];
+        else [native addObject:e];
+    }
+    native = [rc_ol_merge(native) mutableCopy];
+
+    // The page title: the top bar's header, or a large header near the top
+    NSString *title = nil;
+    for (RCScreenElement *e in native) {
+        if ([e.kind isEqualToString:@"header"] && CGRectGetMidY(e.frame) < screen.origin.y + h * 0.2) { title = e.label; break; }
+    }
+    NSMutableString *head = [NSMutableString stringWithString:appName];
+    if (title.length && ![title isEqualToString:appName]) [head appendFormat:@" › %@", title];
+    if (bundleID.length) [head appendFormat:@"   [%@]", bundleID];
+    [out addObject:head];
+
+    // What's in the way: a modal view (alert, sheet) is all that can be used
+    SEL modalSel = NSSelectorFromString(@"applicationIsModal");
+    BOOL modal = [app respondsToSelector:modalSel] && ((BOOL (*)(id, SEL))objc_msgSend)(app, modalSel);
+    // An alert hides everything else from accessibility, leaving one box centered on the screen,
+    // narrower than it, with a button
+    if (!modal && native.count && native.count <= 14) {
+        CGRect box = CGRectNull;
+        BOOL button = NO;
+        for (RCScreenElement *e in native) { box = CGRectUnion(box, e.frame); if (e.traits & 0x1) button = YES; }
+        modal = button && box.size.width < screen.size.width * 0.8 && box.size.height < h * 0.7 &&
+                fabs(CGRectGetMidX(box) - CGRectGetMidX(screen)) < 24;
+    }
+    if (modal) {
+        NSMutableArray *texts = [NSMutableArray array], *controls = [NSMutableArray array];
+        for (RCScreenElement *e in native) {
+            if ([e.kind isEqualToString:@"text"] && e.label.length) [texts addObject:e.label];
+            else [controls addObject:rc_ol_item(e)];
+        }
+        [out addObject:[NSString stringWithFormat:@"ALERT%@: %@", texts.count ? [NSString stringWithFormat:@" “%@”", texts.firstObject] : @"",
+                        [[(texts.count > 1 ? @[[[texts subarrayWithRange:NSMakeRange(1, texts.count - 1)] componentsJoinedByString:@" "]] : @[]) arrayByAddingObjectsFromArray:controls] componentsJoinedByString:@"   "]]];
+    }
+    if (keys.count) {
+        NSString *ret = nil;
+        for (RCScreenElement *k in keys) {
+            if ([@[@"return", @"search", @"go", @"done", @"send", @"next", @"join", @"route", @"continue"] containsObject:k.label.lowercaseString]) ret = k.label;
+        }
+        [out addObject:[NSString stringWithFormat:@"keyboard: up%@ (press its keys by name, or type)", ret ? [NSString stringWithFormat:@", return key “%@”", ret] : @""]];
+    }
+    if (modal) return [out componentsJoinedByString:@"\n"];
+
+    // Bars: rows wholly at the top or bottom that aren't list rows (a list row is nearly as wide
+    // as the screen and alone on its line); a tab bar or toolbar has several items side by side
+    NSMutableArray *topBar = [NSMutableArray array], *bottomBar = [NSMutableArray array], *content = [NSMutableArray array];
+    BOOL above = NO, below = NO;
+    for (RCScreenElement *e in native) {
+        if (CGRectGetMaxY(e.frame) > CGRectGetMaxY(screen) + 1) below = YES;
+        if (CGRectGetMinY(e.frame) < screen.origin.y - 1) above = YES;
+    }
+    for (NSArray<RCScreenElement *> *row in rc_ol_rows(native)) {
+        // A list row (nearly screen-wide) and what sits on it (an info button) stay content, even
+        // under a see-through bar; the rest of a band at the very top or bottom is a bar
+        NSMutableArray<RCScreenElement *> *wide = [NSMutableArray array], *rest = [NSMutableArray array];
+        for (RCScreenElement *e in row) {
+            if (e.frame.size.width > screen.size.width * 0.85) [wide addObject:e];
+            else [rest addObject:e];
+        }
+        // One small item on a list row is its accessory; three or more side by side are a bar
+        if (wide.count && rest.count < 3) {
+            for (RCScreenElement *e in [rest copy]) {
+                for (RCScreenElement *w in [wide copy]) {
+                    if (CGRectIntersectsRect(w.frame, e.frame)) { [wide addObject:e]; [rest removeObject:e]; break; }
+                }
+            }
+        }
+        // By the band's middle, so a bar a little taller than the edge region still counts
+        double mid = 0, tallest = 0;
+        for (RCScreenElement *e in rest) { mid += CGRectGetMidY(e.frame); tallest = MAX(tallest, e.frame.size.height); }
+        if (rest.count) mid /= rest.count;
+        [content addObjectsFromArray:wide];
+        if (rest.count && mid <= top && tallest < h * 0.12) [topBar addObjectsFromArray:rest];
+        else if (rest.count && mid >= bottom && tallest < h * 0.12) [bottomBar addObjectsFromArray:rest];
+        else [content addObjectsFromArray:rest];
+    }
+    for (RCScreenElement *e in web) if (CGRectGetMaxY(e.frame) > CGRectGetMaxY(screen) + 1) below = YES;
+
+    for (NSArray *row in rc_ol_rows(topBar)) [out addObject:[@"top: " stringByAppendingString:rc_ol_row(row)]];
+    if (above) [out addObject:@"↑ more above"];
+    for (NSArray<RCScreenElement *> *row in rc_ol_rows(content)) {
+        if (row.count == 1 && [row[0].kind isEqualToString:@"header"]) {
+            if ([row[0].label isEqualToString:title]) continue; // already the page title
+            [out addObject:[NSString stringWithFormat:@"## %@", row[0].label]];
+        } else {
+            [out addObject:[@"  " stringByAppendingString:rc_ol_row(row)]];
+        }
+    }
+    if (web.count) {
+        [out addObject:@"web page:"];
+        for (NSString *line in rc_ol_web(web)) [out addObject:[@"  " stringByAppendingString:line]];
+    }
+    if (below) [out addObject:@"↓ more below"];
+    for (NSArray *row in rc_ol_rows(bottomBar)) [out addObject:[@"bottom: " stringByAppendingString:rc_ol_row(row)]];
+    // A big area with nothing readable (a map, a game, a camera, a canvas)
+    for (RCScreenElement *e in all) {
+        if (!e.label.length && !e.value.length && e.frame.size.width * e.frame.size.height > screen.size.width * h * 0.35 && ![e.kind isEqualToString:@"key"]) {
+            [out addObject:[NSString stringWithFormat:@"(an area of %.0fx%.0f with nothing readable at %.0f,%.0f: a map, game or canvas? Use touches there, or a screenshot)",
+                            e.frame.size.width, e.frame.size.height, CGRectGetMidX(e.frame), CGRectGetMidY(e.frame)]];
+            break;
+        }
+    }
+    return [out componentsJoinedByString:@"\n"];
+}
+
 int main(int argc, char **argv) {
     @autoreleasepool {
         setvbuf(stdout, NULL, _IOLBF, 0);
@@ -334,11 +569,12 @@ int main(int argc, char **argv) {
         signal(SIGINT, rc_quit);
         signal(SIGTERM, rc_quit);
         NSMutableArray<NSString *> *args = [NSMutableArray array];
-        BOOL json = NO, replace = NO;
+        BOOL json = NO, replace = NO, outline = NO;
         for (int i = 1; i < argc; i++) {
             NSString *a = @(argv[i]);
             if ([a isEqualToString:@"--json"]) json = YES;
             else if ([a isEqualToString:@"--replace"]) replace = YES;
+            else if ([a isEqualToString:@"--outline"]) outline = YES;
             else if ([a isEqualToString:@"-h"] || [a isEqualToString:@"--help"]) return rc_usage();
             else [args addObject:a];
         }
@@ -669,7 +905,9 @@ int main(int argc, char **argv) {
             return found.count ? 0 : 1;
         }
 
-        if (json) {
+        if (outline) {
+            printf("%s\n", rc_outline(app, appName, bundleID, list).UTF8String);
+        } else if (json) {
             NSMutableArray *out = [NSMutableArray array];
             for (RCScreenElement *e in list) [out addObject:rc_json(e)];
             rc_print_json(@{ @"app": appName, @"bundleID": bundleID, @"elements": out });

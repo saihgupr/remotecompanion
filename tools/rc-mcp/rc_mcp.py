@@ -95,7 +95,7 @@ def run(host, command, timeout=60, ok_codes=(0,)):
 def with_screen(host, text, args):
     if args.get("show_screen"):
         # A moment for the screen to change before reading it
-        _, screen, _ = ssh(host, "sleep 0.8; " + screen_cmd())
+        _, screen, _ = ssh(host, "sleep 0.8; " + screen_cmd("--outline"))
         text += "\n\nScreen now:\n" + screen
     return text
 
@@ -125,7 +125,10 @@ def t_list_phones(args):
 
 def t_screen(args):
     host = host_for(args.get("phone"))
-    words = ["--json"] if args.get("json") else []
+    fmt = (args.get("format") or ("json" if args.get("json") else "outline")).lower()
+    words = {"outline": ["--outline"], "json": ["--json"], "list": []}.get(fmt)
+    if words is None:
+        raise ToolError("format is outline, list or json")
     return run(host, screen_cmd(*words))
 
 
@@ -321,12 +324,14 @@ def t_log(args):
 TOOLS = [
     ("list_phones", t_list_phones, "The phones this server can reach.", {}, []),
     ("screen", t_screen,
-     "What's on the phone's screen now, as text: the app in front (SpringBoard for the home or lock screen), then "
-     "each element on screen with its number, kind (button, text, header, search, key, link, image, adjustable), "
-     "label, value (a switch reads 0 or 1) and center point in screen points. Web pages (Safari, in-app browsers) "
-     "are included: their text, links and buttons follow the app's own elements, in reading order. Only what's "
-     "visible: swipe or scroll_to to see more.",
-     {"json": {"type": "boolean", "description": "JSON instead of text."}}, []),
+     "What's on the phone's screen now. The default outline: the app and page title, then anything in the way "
+     "(ALERT …, keyboard: up), the top bar (top:), the content by section (## Header) with side-by-side elements "
+     "on one line, a web page's text with its links inline, scroll hints (↑ more above, ↓ more below) and the "
+     "bottom bar (bottom:). Notation: [Button] or [Row › Value], [Link](link), <Field: text>, Name: on/off for a "
+     "switch, Name: 52% (adjustable), ✓ selected, (dimmed) disabled; #N is the number to act on it with "
+     "(press, tap, set …). format 'list' gives one line per element with positions; 'json' everything.",
+     {"format": {"type": "string", "enum": ["outline", "list", "json"], "description": "Default outline."},
+      "json": {"type": "boolean", "description": "Same as format json."}}, []),
     ("find", t_find, "Elements on screen whose label or value contains the text.",
      {"text": {"type": "string"}}, ["text"]),
     ("press", t_press,
