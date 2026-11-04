@@ -52,4 +52,5 @@ include $(THEOS_MAKE_PATH)/tweak.mk
 
 SUBPROJECTS += rc-root
 SUBPROJECTS += rc-client
+SUBPROJECTS += rc-screen
 include $(THEOS_MAKE_PATH)/aggregate.mk
