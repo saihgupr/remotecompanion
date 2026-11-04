@@ -3640,6 +3640,9 @@ function nameForCmd(cmd) {
       const text = setVariableText(cmd);
       return cmd.scope === 'run' ? `${text} (this run)` : text;
     }
+    if ((t === 'if' || t === 'else_if') && cmd.conditionKey === 'screen_text') {
+      return `${t === 'if' ? 'If' : 'Else If'} the Screen Shows \u201C${cmd.expectedTitle || cmd.expectedValue || ''}\u201D`;
+    }
     if (t === 'if') return isTime ? `If Time is Between ${cmd.expectedTitle||cmd.expectedValue||'Time Range'}` : `If ${cmd.conditionTitle||'Condition'} is ${cmd.expectedTitle||'Value'}`;
     if (t === 'else_if') return isTime ? `Else If Time is Between ${cmd.expectedTitle||cmd.expectedValue||'Time Range'}` : `Else If ${cmd.conditionTitle||'Condition'} is ${cmd.expectedTitle||'Value'}`;
     if (t === 'else') return 'Else';
@@ -3725,6 +3728,9 @@ function nameForCmd(cmd) {
   if (lowCmd.startsWith('ha ') || lowCmd === 'ha') return formatHACommandName(cmd);
   if (lowCmd.startsWith('km ') || lowCmd === 'km') return formatKMCommandName(cmd);
   if (lowCmd.startsWith('mqtt ') || lowCmd === 'mqtt') return formatMQTTCommandName(cmd);
+  // Screen actions: screen tap|wait|scroll-to "Text"
+  const onScreen = parseScreenCommand(cmd);
+  if (onScreen) return `${{ tap: 'Tap', wait: 'Wait for', 'scroll-to': 'Scroll to' }[onScreen.verb]} \u201C${onScreen.text}\u201D`;
   // Recorded gestures
   if (lowCmd === 'gesture record-toggle' || lowCmd.startsWith('gesture record-toggle ')) return 'Record Gesture';
   const played = parseGestureCommand(cmd);
@@ -3913,6 +3919,8 @@ function iconForCmd(cmd) {
   // Recorded gestures
   if (lowCmd.startsWith('gesture record-toggle')) return { icon:'record_circle_fill', cls:'icon-red' };
   if (lowCmd.startsWith('gesture play')) return { icon:'hand_draw', cls:'icon-teal' };
+  const onScreen = parseScreenCommand(cmd);
+  if (onScreen) return { icon: SCREEN_VERBS[onScreen.verb].icon, cls:'icon-blue' };
   // Touch gestures
   if (lowCmd.startsWith('tap '))   return { icon:'hand_tap',         cls:'icon-teal' };
   if (lowCmd.startsWith('hold '))  return { icon:'hand_tap_fill',    cls:'icon-teal' };
@@ -3964,6 +3972,9 @@ const ACTION_SECTIONS = [
     { name:'Activate Siri',     cmd:'siri',          icon:'mic_fill' },
     { name:'Play Gesture…',     cmd:'__PLAY_GESTURE__', icon:'hand_draw', needs_input:true },
     { name:'Record Gesture',    cmd:'gesture record-toggle', icon:'record_circle_fill' },
+    { name:'Tap Text on Screen…', cmd:'__SCREEN_TAP__', icon:'hand_point_right_fill', needs_input:true },
+    { name:'Wait for Text…',    cmd:'__SCREEN_WAIT__', icon:'hourglass', needs_input:true },
+    { name:'Scroll to Text…',   cmd:'__SCREEN_SCROLL__', icon:'arrow_up_arrow_down', needs_input:true },
     { name:'Accessibility Shortcut', cmd:'accessibility shortcut', icon:'person_crop_circle' },
   ]},
   { title:'Device Controls', actions:[
@@ -4040,6 +4051,7 @@ const CONDITION_DEFS = [
   { key:'front_app',   title:'Front Application', icon:'square_grid_2x2_fill', section:'Device' },
   { key:'proximity', title:'Proximity Sensor', icon:'ear', section:'Device', values:[{value:'NEAR',title:'Near'},{value:'FAR',title:'Far'}] },
   { key:'screen',     title:'Screen', icon:'iphone', section:'Device', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
+  { key:'screen_text', title:'Text on Screen', icon:'viewfinder', section:'Device', inputPrompt:'Enter Text…', hint:"True when something on the screen has this text (case doesn't matter):" },
   { key:'lpm',        title:'Low Power Mode', icon:'battery_25', section:'Power', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
   { key:'charging',   title:'Charging', icon:'bolt_fill', section:'Power', values:[{value:'CHARGING',title:'Charging'},{value:'NOT_CHARGING',title:'Not Charging'}] },
   { key:'battery',    title:'Battery Level', icon:'battery_100', section:'Power', threshold:true },
@@ -5930,6 +5942,11 @@ function editAction(idx) {
         actions[idx] = cmd;
         saveConfig(); renderActionList();
       });
+    } else if (parseScreenCommand(act)) {
+      promptScreenAction(parseScreenCommand(act).verb, act, cmd => {
+        actions[idx] = cmd;
+        saveConfig(); renderActionList();
+      });
     } else if (low.startsWith('toast ')) {
       promptToastModal(act, idx);
     } else if (low.startsWith('exec ') || low.startsWith('root ')) {
@@ -6233,6 +6250,8 @@ function selectPickerAction(act) {
     });
   } else if (c === '__PLAY_GESTURE__') {
     promptPlayGesture(null, cmd => addActionToCurrent(cmd));
+  } else if (SCREEN_PICKER_VERBS[c]) {
+    promptScreenAction(SCREEN_PICKER_VERBS[c], null, cmd => addActionToCurrent(cmd));
   } else if (c === '__FOCUS__') {
     showDialog('Set Focus', 'Focus name, or Off:', '', 'Next', val => {
       const name = (val || '').trim();
@@ -7363,7 +7382,7 @@ function condOptionsFor(d, exKey, exValue, exTitle) {
     d.values.forEach(v => rows.push(condValueRow(d, v, exKey, exValue)));
     return rows;
   }
-  rows.push(condOptionRow(`Enter Name…${condNowSuffix(d, exKey, exTitle)}`, 'blue', '', () => promptCondText(d)));
+  rows.push(condOptionRow(`${d.inputPrompt || 'Enter Name…'}${condNowSuffix(d, exKey, exTitle)}`, 'blue', '', () => promptCondText(d)));
   return rows;
 }
 
@@ -8565,6 +8584,9 @@ const BANNER_PLACEHOLDERS = {
   '__AIRPLAY_CONNECT__': ['airplay connect '],
   '__FOCUS__': ['focus on ', 'focus toggle ', 'focus off'],
   '__PLAY_GESTURE__': ['gesture play ', 'gesture play-latest'],
+  '__SCREEN_TAP__': ['screen tap '],
+  '__SCREEN_WAIT__': ['screen wait '],
+  '__SCREEN_SCROLL__': ['screen scroll-to '],
   '__OPEN_APP__': ['uiopen '],
   '__KILL_APP__': ['kill '],
   '__HA_PICKER__': ['ha '],
@@ -9226,6 +9248,39 @@ function showSheet(title, buttons) {
   });
   document.getElementById('sheet-backdrop').classList.add('visible');
   document.getElementById('sheet').classList.add('open');
+}
+
+// ── Screen actions ────────────────────────────────────────────────────────────
+// screen tap "Text" | screen wait "Text" 10 | screen scroll-to "Text"
+const SCREEN_VERBS = {
+  tap: { title: 'Tap Text on Screen', icon: 'hand_point_right_fill', msg: 'Taps the button, link or row with this text on the screen:' },
+  wait: { title: 'Wait for Text', icon: 'hourglass', msg: 'Waits until this text is on the screen, then goes on:' },
+  'scroll-to': { title: 'Scroll to Text', icon: 'arrow_up_arrow_down', msg: 'Scrolls the list on the screen until this text shows:' },
+};
+const SCREEN_PICKER_VERBS = { '__SCREEN_TAP__': 'tap', '__SCREEN_WAIT__': 'wait', '__SCREEN_SCROLL__': 'scroll-to' };
+
+function parseScreenCommand(cmd) {
+  if (typeof cmd !== 'string') return null;
+  const m = cmd.match(/^screen (tap|wait|scroll-to) "(.*)"(?:\s+([\d.]+))?\s*$/);
+  return m ? { verb: m[1], text: m[2], seconds: m[3] ? parseFloat(m[3]) : null } : null;
+}
+
+// Asks for the text (and, to wait, how long), then onDone(command); `current` is the command
+// being edited, or null
+function promptScreenAction(verb, current, onDone) {
+  const info = SCREEN_VERBS[verb];
+  const old = parseScreenCommand(current);
+  showDialog(info.title, info.msg, old ? old.text : '', verb === 'wait' ? 'Next' : (current ? 'Save' : 'Add'), val => {
+    const text = (val || '').trim();
+    if (!text) return;
+    if (verb !== 'wait') { onDone(`screen ${verb} "${text}"`); return; }
+    const oldSeconds = old && old.seconds ? old.seconds : 10;
+    showDialog(info.title, 'Seconds to wait (up to 120):', String(oldSeconds), current ? 'Save' : 'Add', secs => {
+      let seconds = parseFloat(secs);
+      if (!(seconds > 0)) seconds = 10;
+      onDone(`screen wait "${text}" ${Math.min(seconds, 120)}`);
+    }, true);
+  });
 }
 
 // ── Recorded gestures ─────────────────────────────────────────────────────────

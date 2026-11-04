@@ -1,5 +1,6 @@
 #include <poll.h>
 #import <Foundation/Foundation.h>
+#import "RCScreen.h" // Screen actions and the Screen Shows Text condition
 #import <UIKit/UIKit.h>
 #import <netinet/in.h>
 #import <sys/socket.h>
@@ -3009,6 +3010,12 @@ static BOOL rc_evaluate_if_condition(NSDictionary *ifAction) {
         return rc_is_current_time_in_range(rawRange);
     }
     
+    // Screen Shows Text: something on screen has this text (rc-screen, see RCScreen.m)
+    if ([conditionKey isEqualToString:@"screen_text"]) {
+        NSString *text = ifAction[@"expectedValue"] ?: ifAction[@"expected"];
+        return [text isKindOfClass:[NSString class]] && RCScreenShowsText(text);
+    }
+
     if ([conditionKey isEqualToString:@"front_app"]) {
         NSString *expectedValue = ifAction[@"expectedValue"] ?: ifAction[@"expected"];
         if (expectedValue.length == 0) return NO;
@@ -11468,6 +11475,10 @@ static NSString *handle_command(NSString *cmd) {
     // gesture record|play|list|delete|rename ... (RCGestures.m)
     } else if ([cleanCmd hasPrefix:@"gesture "]) {
         return RCGestureCommand(cleanCmd);
+
+    // screen tap|wait|scroll-to "Text" (RCScreen.m): acts on what's on the screen, by its text
+    } else if ([cleanCmd hasPrefix:@"screen "]) {
+        return RCScreenCommand(cleanCmd);
 
     // taprecord
     } else if ([cleanCmd isEqualToString:@"taprecord"]) {

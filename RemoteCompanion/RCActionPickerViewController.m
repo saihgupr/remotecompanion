@@ -1,3 +1,4 @@
+#import "RCScreenActions.h"
 #import "RCActionPickerViewController.h"
 #import "RCServerClient.h"
 #import "RCDevicePickerViewController.h"
@@ -186,6 +187,9 @@
             @{ @"name": @"Activate Siri", @"command": @"siri", @"icon": @"mic.circle.fill" },
             @{ @"name": @"Play Gesture...", @"command": @"__PLAY_GESTURE__", @"icon": @"hand.draw.fill" },
             @{ @"name": @"Record Gesture", @"command": @"__RECORD_GESTURE__", @"icon": @"record.circle" },
+            @{ @"name": @"Tap Text on Screen...", @"command": @"__SCREEN_TAP__", @"icon": [RCScreenActions iconForVerb:@"tap"] },
+            @{ @"name": @"Wait for Text...", @"command": @"__SCREEN_WAIT__", @"icon": [RCScreenActions iconForVerb:@"wait"] },
+            @{ @"name": @"Scroll to Text...", @"command": @"__SCREEN_SCROLL__", @"icon": [RCScreenActions iconForVerb:@"scroll-to"] },
             @{ @"name": @"Accessibility Shortcut", @"command": @"accessibility shortcut", @"icon": ([UIImage systemImageNamed:@"accessibility"] ? @"accessibility" : @"figure.stand") }
         ],
         // Device Controls
@@ -536,6 +540,7 @@
         [cmd isEqualToString:@"__HA_PICKER__"] ||
         [cmd isEqualToString:@"__KM_TRIGGER__"] ||
         [cmd isEqualToString:@"__TAP__"] ||
+        [cmd hasPrefix:@"__SCREEN_"] ||
         [cmd isEqualToString:@"__HOLD__"] ||
         [cmd isEqualToString:@"__SWIPE__"] ||
         [cmd isEqualToString:@"__UNLOCK_DEVICE__"] ||
@@ -589,6 +594,15 @@
     
     if ([command isEqualToString:@"__PLAY_GESTURE__"]) {
         [self handlePlayGesture];
+        return;
+    }
+    // Screen actions: the text to find (and, to wait, how long)
+    NSDictionary *screenVerbs = @{ @"__SCREEN_TAP__": @"tap", @"__SCREEN_WAIT__": @"wait", @"__SCREEN_SCROLL__": @"scroll-to" };
+    if (screenVerbs[command]) {
+        __weak typeof(self) weakSelf = self;
+        [RCScreenActions promptForVerb:screenVerbs[command] existing:nil from:self done:^(NSString *screenCommand) {
+            [weakSelf finishWithFocusCommand:screenCommand];
+        }];
         return;
     }
     if ([command isEqualToString:@"__RECORD_GESTURE__"]) {
