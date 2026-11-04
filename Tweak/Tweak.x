@@ -12330,6 +12330,12 @@ static BOOL g_volUpHeldOnHID = NO;
 // phone, and if iOS doesn't take the screenshot itself, the tweak does - stock iOS sleeps
 // and then wakes again for a chord it doesn't recognize as one.
 static BOOL g_homeHeldOnHID = NO, g_powerHeldOnHID = NO;
+static volatile CFAbsoluteTime g_hidPowerDownAt = 0; // the HID listener's last Power press-down (every one, unlike g_lastPowerDownAt)
+// A press another tweak made in software (SpringBoard's _simulateLockButtonPress: DoubleTapToLock,
+// GetDown and the like) - no Power button behind it. It's left to iOS, from down to up: holding it
+// back for a multi-click and replaying it only when iOS fires its own singlePress: lost it, since
+// iOS fires that only for real presses (the phone locked once after a respring, then never).
+static BOOL g_powerSoftwarePress = NO;
 static BOOL g_powerPressIsHomeChord = NO;
 static BOOL g_homePowerChordOpen = NO;          // both have been down together, not both up yet
 static NSTimeInterval g_homePowerChordTime = 0;
@@ -14152,6 +14158,7 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
             NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
             static NSTimeInterval lastPowerDownTime = 0;
             g_powerHeldOnHID = !!down;
+            if (down) g_hidPowerDownAt = CFAbsoluteTimeGetCurrent();
             if (down) {
                 g_powerPressIsHomeChord = NO;
                 if (g_homeHeldOnHID) RC_NoteHomePowerChord();
@@ -14506,6 +14513,21 @@ static void setup_background_hid_listener() {
     }
     SRLog(@"performInitialButtonDownActions on %@", [self class]);
 
+    // A real press reaches the HID listener too, normally first but sometimes a few ms after this
+    // call; a software press never does. Without the listener every press counts as real.
+    BOOL hardware = (g_hidClient == NULL);
+    for (int i = 0; i < 25 && !hardware; i++) {
+        hardware = g_powerHeldOnHID || CFAbsoluteTimeGetCurrent() - g_hidPowerDownAt < 0.5;
+        if (!hardware) usleep(2000);
+    }
+    g_powerSoftwarePress = !hardware;
+    if (g_powerSoftwarePress) {
+        SRLog(@"[Power] A press with no Power button behind it (another tweak's) - left to iOS");
+        RCTKEvent(@"power.software", nil);
+        %orig;
+        return;
+    }
+
     g_powerSuppressPostUp = NO; // fresh press
     g_powerIsDown = YES;
     if (g_powerDownsAwaitingUp < 1) g_powerDownsAwaitingUp = 1; // the HID listener normally armed it already
@@ -14670,6 +14692,14 @@ static void setup_background_hid_listener() {
         return;
     }
 
+    // A real press since then (iOS can skip the down call) takes over
+    if (g_powerSoftwarePress && (g_powerHeldOnHID || CFAbsoluteTimeGetCurrent() - g_hidPowerDownAt < 0.5)) g_powerSoftwarePress = NO;
+    if (g_powerSoftwarePress) {
+        SRLog(@"[Power] Release of a software press - left to iOS");
+        %orig;
+        return;
+    }
+
     SRLog(@"performButtonUpPreActions on %@", [self class]);
     SRLog(@"Power Button UP (Actions)");
     g_powerIsDown = NO;
@@ -14778,6 +14808,12 @@ static void setup_background_hid_listener() {
     }
 
     if (RC_IsForegroundAppExcluded()) {
+        %orig;
+        return;
+    }
+
+    if (g_powerSoftwarePress) {
+        g_powerSoftwarePress = NO;
         %orig;
         return;
     }
