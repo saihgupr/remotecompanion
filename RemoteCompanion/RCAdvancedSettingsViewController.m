@@ -124,7 +124,7 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == RCAdvancedSettingsSectionBanners) {
-        return @"Actions that show a banner when a trigger runs them.";
+        return @"Actions that show a banner when a trigger runs them. A banner that comes while the screen is off waits until it turns on, unless Wake Screen is on.";
     } else if (section == RCAdvancedSettingsSectionNFC) {
         if (![RCConfigManager nfcBackgroundReadingSupported]) return @"Experimental NFC requires iPhone XS or later.";
         if ([RCConfigManager sharedManager].nfcBackgroundReading) {
@@ -142,7 +142,7 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    if (section == RCAdvancedSettingsSectionBanners) return 1;
+    if (section == RCAdvancedSettingsSectionBanners) return 2; // Banners, Wake Screen
     if (section == RCAdvancedSettingsSectionNFC) return 3;
     if (section == RCAdvancedSettingsSectionButtons) return (NSInteger)[self timingRows].count;
     if (section == RCAdvancedSettingsSectionSecurity) return 1;
@@ -172,7 +172,14 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
         cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
     }
     
-    if (indexPath.section == RCAdvancedSettingsSectionBanners) {
+    if (indexPath.section == RCAdvancedSettingsSectionBanners && indexPath.row == 1) {
+        cell.textLabel.text = @"Wake Screen";
+        UISwitch *wakeSwitch = [[UISwitch alloc] init];
+        wakeSwitch.on = cm.toastsWakeScreen;
+        [wakeSwitch addTarget:self action:@selector(toastsWakeScreenChanged:) forControlEvents:UIControlEventValueChanged];
+        cell.accessoryView = wakeSwitch;
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+    } else if (indexPath.section == RCAdvancedSettingsSectionBanners) {
         cell.textLabel.text = @"Banners";
         NSUInteger count = [RCBannersViewController checkedCount];
         cell.detailTextLabel.text = count ? [NSString stringWithFormat:@"%lu", (unsigned long)count] : @"Off";
@@ -239,7 +246,7 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
 
-    if (indexPath.section == RCAdvancedSettingsSectionBanners) {
+    if (indexPath.section == RCAdvancedSettingsSectionBanners && indexPath.row == 0) {
         [self.navigationController pushViewController:[[RCBannersViewController alloc] init] animated:YES];
     } else if (indexPath.section == RCAdvancedSettingsSectionNFC && indexPath.row == 2) {
         [self chooseNFCWindowFromView:[tableView cellForRowAtIndexPath:indexPath]];
@@ -320,6 +327,10 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
 
 - (void)directRootToggleChanged:(UISwitch *)sender {
     [RCConfigManager sharedManager].allowDirectRootHelper = sender.on;
+}
+- (void)toastsWakeScreenChanged:(UISwitch *)sender {
+    [RCConfigManager sharedManager].toastsWakeScreen = sender.on;
+}
 }
 
 - (void)chooseLogLevelFromView:(UIView *)sourceView {

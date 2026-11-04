@@ -1093,7 +1093,65 @@ static BOOL set_cellular_state(BOOL state) {
     return success;
 }
 
+// While the phone is locked, only secure windows are drawn; this lets a toast show on the lock screen
+@interface RCToastWindow : UIWindow
+@end
+@implementation RCToastWindow
+- (BOOL)_shouldCreateContextAsSecure { return YES; }
+@end
+
 static UIWindow *g_rcHUDWindow = nil;
+
+// Toasts while the screen is off: one shown then would slide in and out on a dark screen,
+// so it waits and shows when the screen next turns on. Settings > Banners > Wake Screen
+// turns the screen on for it instead. The newest three wait; ones older than 30 minutes
+// are dropped.
+static NSMutableArray<NSDictionary *> *g_rcPendingToasts = nil;
+static int g_rcBlankedToken = -1;
+static void rc_show_hud_toast_ex(NSString *title, NSString *subtitle, NSString *iconSymbol, NSTimeInterval hold, BOOL passThrough);
+static void rc_toast_wake_screen_if_set(void);
+
+static void rc_show_pending_toasts(void) {
+    NSArray<NSDictionary *> *pending = [g_rcPendingToasts copy];
+    [g_rcPendingToasts removeAllObjects];
+    NSDate *now = [NSDate date];
+    NSUInteger shown = 0;
+    for (NSDictionary *toast in pending) {
+        if ([now timeIntervalSinceDate:toast[@"date"]] > 30 * 60) continue;
+        // One after another, each held a little longer than usual; a toast that comes due
+        // after the screen went off again waits for the next wake
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((0.5 + shown * 4.0) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            rc_show_hud_toast_ex(toast[@"title"], toast[@"subtitle"], toast[@"icon"], 3.0, NO);
+        });
+        shown++;
+    }
+    if (pending.count) SRLog(@"[RCToast] Screen on: showing %lu waiting toast(s)", (unsigned long)shown);
+}
+
+// YES while the screen is off. The first call starts watching for it to turn back on.
+static BOOL rc_screen_is_blanked(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        notify_register_dispatch("com.apple.springboard.hasBlankedScreen", &g_rcBlankedToken, dispatch_get_main_queue(), ^(int token) {
+            uint64_t blanked = 0;
+            if (notify_get_state(token, &blanked) == NOTIFY_STATUS_OK && !blanked && g_rcPendingToasts.count) rc_show_pending_toasts();
+        });
+    });
+    uint64_t blanked = 0;
+    if (g_rcBlankedToken == -1 || notify_get_state(g_rcBlankedToken, &blanked) != NOTIFY_STATUS_OK) return NO;
+    return blanked != 0;
+}
+
+static void rc_queue_toast(NSString *title, NSString *subtitle, NSString *iconSymbol) {
+    if (!g_rcPendingToasts) g_rcPendingToasts = [NSMutableArray array];
+    NSMutableDictionary *toast = [NSMutableDictionary dictionaryWithObject:[NSDate date] forKey:@"date"];
+    toast[@"title"] = title;
+    toast[@"subtitle"] = subtitle;
+    toast[@"icon"] = iconSymbol;
+    [g_rcPendingToasts addObject:toast];
+    while (g_rcPendingToasts.count > 3) [g_rcPendingToasts removeObjectAtIndex:0];
+    SRLog(@"[RCToast] Screen off: '%@' waits for the screen to turn on", title ?: @"");
+}
 
 static NSArray<NSString *> *rc_parse_quoted_arguments(NSString *argString) {
     NSMutableArray *arguments = [NSMutableArray array];
@@ -1134,6 +1192,12 @@ static void rc_show_hud_toast_ex(NSString *title, NSString *subtitle, NSString *
         }
     }
     dispatch_async(dispatch_get_main_queue(), ^{
+        // Test kit prompts are for someone watching, so they never wait
+        if (!passThrough && rc_screen_is_blanked()) {
+            rc_queue_toast(title, subtitle, iconSymbol);
+            rc_toast_wake_screen_if_set(); // the waiting toast shows once the screen is on
+            return;
+        }
         if (g_rcHUDWindow) {
             [g_rcHUDWindow.layer removeAllAnimations];
             g_rcHUDWindow.hidden = YES;
@@ -1188,7 +1252,7 @@ static void rc_show_hud_toast_ex(NSString *title, NSString *subtitle, NSString *
         BOOL landscape = UIInterfaceOrientationIsLandscape(orientation);
         CGFloat targetY = (!landscape && topInset > 24.0) ? topInset : 12.0;
 
-        UIWindow *hudWindow = hudScene ? [[UIWindow alloc] initWithWindowScene:hudScene] : [[UIWindow alloc] init];
+        UIWindow *hudWindow = hudScene ? [[RCToastWindow alloc] initWithWindowScene:hudScene] : [[RCToastWindow alloc] init];
         hudWindow.userInteractionEnabled = !passThrough;
         hudWindow.frame = CGRectMake(pillX, startY, pillWidth, pillHeight);
         g_rcHUDWindow = hudWindow;
@@ -2834,6 +2898,19 @@ static BOOL rc_own_banner_enabled(NSString *bannerId) {
     load_trigger_config();
     NSArray *off = g_triggerConfig[@"bannerOptOut"];
     return !([off isKindOfClass:[NSArray class]] && [off containsObject:bannerId]);
+}
+
+// Settings > Banners > Wake Screen: a toast that comes while the screen is off turns it on,
+// the way a press of the Power button would (the phone stays locked). One press for toasts
+// that come close together, so a second press can't turn the screen back off.
+static void rc_toast_wake_screen_if_set(void) {
+    static NSDate *lastWake = nil;
+    load_trigger_config();
+    if (![g_triggerConfig[@"toastsWakeScreen"] boolValue]) return;
+    if (lastWake && [[NSDate date] timeIntervalSinceDate:lastWake] < 3.0) return;
+    lastWake = [NSDate date];
+    SRLog(@"[RCToast] Waking the screen for a toast");
+    inject_hid_event(kHIDPage_Consumer, kHIDUsage_Csmr_Power, 0, 0);
 }
 
 // Actions that already show a banner of their own (Camera, Home Assistant, Keyboard
