@@ -182,6 +182,13 @@ def t_scroll_to(args):
     return with_screen(host, out, args)
 
 
+def t_adjust(args):
+    host = host_for(args.get("phone"))
+    to = str(args["to"]).strip().lower()
+    words = ["adjust", args["target"]] + (to.split() if to.split()[0] in ("up", "down") else [to if to.endswith("%") else to + "%"])
+    return with_screen(host, run(host, screen_cmd(*words)), args)
+
+
 def t_type(args):
     host = host_for(args.get("phone"))
     return with_screen(host, run(host, screen_cmd("type", args["text"])), args)
@@ -283,6 +290,12 @@ TOOLS = [
      "Scrolls the list on screen until an element with this text shows, searching down first (or up), then the "
      "other way. Returns the element. Slow when the text isn't there at all (a long list is searched to its end).",
      {"text": {"type": "string"}, "up": {"type": "boolean", "description": "Search up first."}, "show_screen": SHOW}, ["text"]),
+    ("adjust", t_adjust,
+     "Moves an adjustable element (slider, stepper, picker; kind 'adjustable' in the screen list) the way "
+     "VoiceOver does: to 'up' or 'down' (optionally 'up 3' for steps), or to a percentage like '30%' "
+     "(as close as its steps allow).",
+     {"target": TARGET, "to": {"type": "string", "description": "up, down, 'up 3', or a percentage like 30%."},
+      "show_screen": SHOW}, ["target", "to"]),
     ("type", t_type, "Types text into the field being edited (tap or press a text field first). Any characters.",
      {"text": {"type": "string"}, "show_screen": SHOW}, ["text"]),
     ("menu", t_menu, "Opens an element's menu, as a long press would (e.g. an app icon's quick actions).",

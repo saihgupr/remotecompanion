@@ -143,6 +143,7 @@ use it to find and act on what's there.
 | `rc-screen press "Bluetooth"` | Activates an element by its label, or by number: `press "#7"` |
 | `rc-screen tap "Search"` | A real touch on an element (`hold "Text" 1` holds it) |
 | `rc-screen type "Hello"` | Types into the field being edited |
+| `rc-screen adjust "Sound volume" up` | Moves a slider, stepper or picker a step (`down 2`, or `30%` for a percentage) |
 | `rc-screen menu "Settings"` | Opens an element's menu, like a long press |
 | `rc-screen wait "Done" 10` | Waits until the text is on screen and the screen has settled |
 | `rc-screen scroll-to "Privacy"` | Scrolls the list until the text is on screen (add `up` to search up first) |

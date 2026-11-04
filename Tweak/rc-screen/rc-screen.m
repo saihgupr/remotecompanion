@@ -13,6 +13,9 @@
 //   rc-screen hold TEXT|#N [SECONDS] touches and holds it (default 1 s)
 //   rc-screen menu TEXT|#N          opens the element's menu (as a long press does, without the touch)
 //   rc-screen type TEXT             types into the text field being edited
+//   rc-screen adjust TEXT|#N up|down [STEPS] | adjust TEXT|#N 30%
+//                                   moves a slider, stepper or picker a step at a time (as
+//                                   VoiceOver's swipe up/down does), or toward a percentage
 //
 // Exit status: 0 done, 1 not found or timed out, 2 error.
 //
@@ -218,7 +221,7 @@ static void rc_quit(int sig) {
 }
 
 static int rc_usage(void) {
-    fprintf(stderr, "Usage: rc-screen [--json] | find TEXT [--json] | press TEXT|#N | wait TEXT [SECONDS] | tap TEXT|#N | hold TEXT|#N [SECONDS] | menu TEXT|#N | type TEXT | scroll-to TEXT [up]\n");
+    fprintf(stderr, "Usage: rc-screen [--json] | find TEXT [--json] | press TEXT|#N | wait TEXT [SECONDS] | tap TEXT|#N | hold TEXT|#N [SECONDS] | menu TEXT|#N | type TEXT | scroll-to TEXT [up] | adjust TEXT|#N up|down [STEPS] | adjust TEXT|#N PERCENT%%\n");
     return 2;
 }
 
@@ -273,7 +276,7 @@ int main(int argc, char **argv) {
             else [args addObject:a];
         }
         NSString *verb = args.count ? args[0] : @"list";
-        if (![@[@"list", @"find", @"press", @"wait", @"tap", @"hold", @"menu", @"type", @"scroll-to"] containsObject:verb]) return rc_usage();
+        if (![@[@"list", @"find", @"press", @"wait", @"tap", @"hold", @"menu", @"type", @"scroll-to", @"adjust"] containsObject:verb]) return rc_usage();
         if (![verb isEqualToString:@"list"] && args.count < 2) return rc_usage();
 
         void *lib = dlopen("/usr/lib/libAccessibility.dylib", RTLD_NOW);
@@ -392,6 +395,78 @@ int main(int argc, char **argv) {
         }
 
         NSArray<RCScreenElement *> *list = rc_elements(app);
+
+        if ([verb isEqualToString:@"adjust"]) {
+            // Accessibility's increment (2004) and decrement (2005) actions: the step is the
+            // element's own (a volume slider moves 10%)
+            if (args.count < 3) return rc_usage();
+            RCScreenElement *e = rc_pick(list, args[1]);
+            if (!e) {
+                fprintf(stderr, "Not on screen: %s\n", args[1].UTF8String);
+                return 1;
+            }
+            if (!(e.traits & 0x1000)) {
+                fprintf(stderr, "Not adjustable (a slider, stepper or picker is): %s\n", rc_line(e).UTF8String);
+                return 1;
+            }
+            NSString *how = args[2].lowercaseString;
+            SEL perform = NSSelectorFromString(@"performAction:");
+            BOOL (*act)(id, SEL, int) = (BOOL (*)(id, SEL, int))objc_msgSend;
+            // Re-reads the element (its value changes; the object may not)
+            RCScreenElement *(^again)(void) = ^RCScreenElement *{
+                NSArray<RCScreenElement *> *now = rc_elements(rc_primary_app());
+                for (RCScreenElement *n in now) {
+                    if ([n.label isEqualToString:e.label] && CGRectEqualToRect(n.frame, e.frame)) return n;
+                }
+                return rc_pick(now, args[1]);
+            };
+            if ([how isEqualToString:@"up"] || [how isEqualToString:@"down"]) {
+                int steps = args.count > 3 ? MAX(1, MIN([args[3] intValue], 100)) : 1;
+                int code = [how isEqualToString:@"up"] ? 2004 : 2005;
+                for (int i = 0; i < steps; i++) {
+                    if (!act(e.element, perform, code)) {
+                        fprintf(stderr, "Couldn't adjust: %s\n", rc_line(e).UTF8String);
+                        return 2;
+                    }
+                    [NSThread sleepForTimeInterval:0.08];
+                }
+                [NSThread sleepForTimeInterval:0.2];
+                printf("Adjusted %s\n", rc_line(again() ?: e).UTF8String);
+                return 0;
+            }
+            if (![how hasSuffix:@"%"]) return rc_usage();
+            // Toward a percentage: a step at a time while that gets closer
+            double target = [[how substringToIndex:how.length - 1] doubleValue];
+            double (^percent)(RCScreenElement *) = ^double(RCScreenElement *x) {
+                NSScanner *scan = [NSScanner scannerWithString:x.value ?: @""];
+                [scan scanUpToCharactersFromSet:[NSCharacterSet decimalDigitCharacterSet] intoString:NULL];
+                double v = -1;
+                return [scan scanDouble:&v] ? v : -1;
+            };
+            double value = percent(e);
+            if (value < 0) {
+                fprintf(stderr, "Its value isn't a percentage (%s); use up or down\n", e.value.UTF8String);
+                return 1;
+            }
+            for (int i = 0; i < 100; i++) {
+                if (fabs(value - target) < 0.5) break;
+                int code = value < target ? 2004 : 2005;
+                if (!act(e.element, perform, code)) break;
+                [NSThread sleepForTimeInterval:0.12];
+                RCScreenElement *now = again();
+                double next = now ? percent(now) : -1;
+                if (next < 0 || fabs(next - target) >= fabs(value - target)) {
+                    // Overshot or stuck: go back if that was closer, and stop
+                    if (next >= 0 && fabs(next - target) > fabs(value - target)) act(e.element, perform, code == 2004 ? 2005 : 2004);
+                    break;
+                }
+                value = next;
+                if (now) e = now;
+            }
+            [NSThread sleepForTimeInterval:0.15];
+            printf("Adjusted %s\n", rc_line(again() ?: e).UTF8String);
+            return 0;
+        }
 
         if ([verb isEqualToString:@"tap"] || [verb isEqualToString:@"hold"]) {
             RCScreenElement *e = rc_pick(list, args[1]);
