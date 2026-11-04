@@ -136,8 +136,8 @@ The next action starts once the touch is done.
 
 ### Reading the Screen (rc-screen)
 On the phone (over SSH, or from a `terminal` action), `rc-screen` lists what's on the screen as
-text: the app in front, then each element's number, kind, label, value and position. Scripts can
-use it to find and act on what's there.
+text: the app in front, then each element's number, kind, label, value and position, including the
+text and links of a web page. Scripts can use it to find and act on what's there.
 
 | Command | What it does |
 |---|---|

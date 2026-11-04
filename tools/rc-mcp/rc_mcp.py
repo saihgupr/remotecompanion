@@ -302,7 +302,9 @@ TOOLS = [
     ("screen", t_screen,
      "What's on the phone's screen now, as text: the app in front (SpringBoard for the home or lock screen), then "
      "each element on screen with its number, kind (button, text, header, search, key, link, image, adjustable), "
-     "label, value (a switch reads 0 or 1) and center point in screen points. Only what's visible: swipe to scroll.",
+     "label, value (a switch reads 0 or 1) and center point in screen points. Web pages (Safari, in-app browsers) "
+     "are included: their text, links and buttons follow the app's own elements, in reading order. Only what's "
+     "visible: swipe or scroll_to to see more.",
      {"json": {"type": "boolean", "description": "JSON instead of text."}}, []),
     ("find", t_find, "Elements on screen whose label or value contains the text.",
      {"text": {"type": "string"}}, ["text"]),

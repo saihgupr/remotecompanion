@@ -21,6 +21,9 @@
 //                                   moves a slider, stepper or picker a step at a time (as
 //                                   VoiceOver's swipe up/down does), or toward a percentage
 //
+// Web pages (Safari, in-app browsers) are read too: their text, links and buttons follow the
+// app's own elements, in reading order.
+//
 // Exit status: 0 done, 1 not found or timed out, 2 error.
 //
 // Apps answer accessibility questions only once they've loaded their accessibility support,
@@ -121,17 +124,76 @@ static id rc_primary_app(void) {
     return system ?: app;
 }
 
+static RCScreenElement *rc_element_from(id element) {
+    RCScreenElement *e = [RCScreenElement new];
+    e.element = element;
+    e.label = rc_text(rc_call(element, @"label"));
+    e.value = rc_text(rc_call(element, @"value"));
+    e.traits = rc_traits(element);
+    e.kind = rc_is_switch(e.traits, e.value) ? @"switch" : rc_kind(e.traits);
+    e.frame = rc_frame(element);
+    return e;
+}
+
+// Web content (Safari, in-app browsers) lives in another process, so the app's own list stops at
+// the browser's buttons. Hit-testing a point reaches into it; from there the page's root (the
+// highest ancestor still marked as web content, trait 0x20000) lists the whole page.
+static const uint64_t kRCWebTrait = 0x20000;
+
+static void rc_web_collect(id node, int depth, CGRect screen, NSMutableArray<RCScreenElement *> *out, int *budget) {
+    if (!node || depth > 40 || *budget <= 0) return;
+    (*budget)--;
+    RCScreenElement *e = rc_element_from(node);
+    NSArray *kids = rc_call(node, @"children");
+    BOOL hasText = e.label.length || e.value.length;
+    BOOL actionable = (e.traits & (0x1 | 0x2 | 0x400 | 0x1000)) != 0 || (e.traits & 0x40000); // button, link, search, adjustable, text entry
+    // A leaf with text, or anything that can be acted on (a link keeps its text, its parts aren't listed)
+    if ((hasText && kids.count == 0) || (actionable && (hasText || kids.count == 0))) {
+        if (CGRectIntersectsRect(e.frame, screen) && !CGRectIsEmpty(e.frame)) [out addObject:e];
+        if (actionable) return;
+    }
+    for (id kid in kids) rc_web_collect(kid, depth + 1, screen, out, budget);
+}
+
+static NSArray<RCScreenElement *> *rc_web_elements(id app) {
+    CGRect screen = rc_frame(app);
+    if (CGRectIsEmpty(screen)) return @[];
+    Class AXElement = NSClassFromString(@"AXElement");
+    SEL hitSel = NSSelectorFromString(@"elementAtCoordinate:withVisualPadding:");
+    if (![AXElement respondsToSelector:hitSel]) return @[];
+    NSMutableArray<RCScreenElement *> *out = [NSMutableArray array];
+    NSMutableSet<NSString *> *roots = [NSMutableSet set];
+    int budget = 600;
+    for (int row = 1; row <= 6; row++) {
+        CGPoint pt = CGPointMake(CGRectGetMidX(screen), screen.origin.y + screen.size.height * row / 7.0);
+        id hit = ((id (*)(id, SEL, CGPoint, BOOL))objc_msgSend)(AXElement, hitSel, pt, NO);
+        if (!hit || !(rc_traits(hit) & kRCWebTrait)) continue;
+        id root = hit;
+        for (int k = 0; k < 40; k++) {
+            id parent = rc_call(root, @"elementParent");
+            if (!parent || !(rc_traits(parent) & kRCWebTrait)) break;
+            root = parent;
+        }
+        CGRect rf = rc_frame(root);
+        NSString *key = [NSString stringWithFormat:@"%.0f,%.0f,%.0f,%.0f", rf.origin.x, rf.origin.y, rf.size.width, rf.size.height];
+        if ([roots containsObject:key]) continue;
+        [roots addObject:key];
+        rc_web_collect(root, 0, screen, out, &budget);
+    }
+    // In the page's own order, which is the reading order (a phrase wrapping over two lines has a
+    // box covering both, so sorting by position jumbles sentences)
+    return out;
+}
+
 static NSArray<RCScreenElement *> *rc_elements(id app) {
     NSMutableArray *list = [NSMutableArray array];
     NSUInteger number = 0;
     for (id element in rc_call(app, @"explorerElements")) {
-        RCScreenElement *e = [RCScreenElement new];
-        e.element = element;
-        e.label = rc_text(rc_call(element, @"label"));
-        e.value = rc_text(rc_call(element, @"value"));
-        e.traits = rc_traits(element);
-        e.kind = rc_is_switch(e.traits, e.value) ? @"switch" : rc_kind(e.traits);
-        e.frame = rc_frame(element);
+        RCScreenElement *e = rc_element_from(element);
+        e.number = ++number;
+        [list addObject:e];
+    }
+    for (RCScreenElement *e in rc_web_elements(app)) {
         e.number = ++number;
         [list addObject:e];
     }
@@ -212,10 +274,17 @@ static RCScreenElement *rc_pick(NSArray<RCScreenElement *> *list, NSString *text
         NSInteger n = [[text substringFromIndex:1] integerValue];
         return n >= 1 && n <= (NSInteger)list.count ? list[n - 1] : nil;
     }
-    for (RCScreenElement *e in list) {
-        if ([e.label compare:text options:NSCaseInsensitiveSearch | NSDiacriticInsensitiveSearch] == NSOrderedSame) return e;
+    // An exact label, then a partial match; something that can be acted on (a link, button,
+    // switch, field) before plain text
+    NSSet *acting = [NSSet setWithArray:@[@"button", @"link", @"switch", @"key", @"search", @"adjustable"]];
+    for (int pass = 0; pass < 4; pass++) {
+        BOOL exact = pass < 2, needsActing = pass % 2 == 0;
+        for (RCScreenElement *e in list) {
+            if (needsActing && ![acting containsObject:e.kind]) continue;
+            BOOL match = exact ? [e.label compare:text options:NSCaseInsensitiveSearch | NSDiacriticInsensitiveSearch] == NSOrderedSame : rc_matches(e, text);
+            if (match) return e;
+        }
     }
-    for (RCScreenElement *e in list) if (rc_matches(e, text)) return e;
     return nil;
 }
 
@@ -385,8 +454,15 @@ int main(int argc, char **argv) {
             double x = CGRectGetMidX(screen), high = screen.origin.y + screen.size.height * 0.2, low = screen.origin.y + screen.size.height * 0.8;
             NSArray<RCScreenElement *> *list = rc_settled_elements(2);
             int turns = 0, swipes = 0;
+            NSString *mention = nil; // text that only mentions it, kept scrolling past
+            NSSet *acting = [NSSet setWithArray:@[@"button", @"link", @"switch", @"key", @"search", @"adjustable"]];
             while (swipes < 24) {
                 RCScreenElement *found = rc_pick(list, text); // an exact label first, as press does
+                // Only an exact label or something to act on ends the search
+                if (found && [found.label compare:rc_text(text) options:NSCaseInsensitiveSearch | NSDiacriticInsensitiveSearch] != NSOrderedSame && ![acting containsObject:found.kind]) {
+                    if (!mention) mention = rc_line(found);
+                    found = nil;
+                }
                 if (found) {
                     // Fully on screen, if it's cut off at an edge
                     CGRect f = found.frame;
@@ -411,7 +487,8 @@ int main(int argc, char **argv) {
                     down = !down;
                 }
             }
-            fprintf(stderr, "Not found after scrolling: %s\n", text.UTF8String);
+            if (mention) fprintf(stderr, "Not found after scrolling: %s (only mentioned in: %s)\n", text.UTF8String, mention.UTF8String);
+            else fprintf(stderr, "Not found after scrolling: %s\n", text.UTF8String);
             return 1;
         }
 
