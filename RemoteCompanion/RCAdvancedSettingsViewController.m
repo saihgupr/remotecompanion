@@ -331,7 +331,6 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
 - (void)toastsWakeScreenChanged:(UISwitch *)sender {
     [RCConfigManager sharedManager].toastsWakeScreen = sender.on;
 }
-}
 
 - (void)chooseLogLevelFromView:(UIView *)sourceView {
     UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Logging"
