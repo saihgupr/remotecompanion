@@ -7,6 +7,8 @@
 //   rc-screen press TEXT|#N         presses the element (exact label first, then contains; #N by
 //                                   its number in the list)
 //   rc-screen wait TEXT [SECONDS]   waits until TEXT is on screen and settled (default 10 s)
+//   rc-screen scroll-to TEXT [up]   scrolls until TEXT is on screen: down first (or up), then the
+//                                   other way once the list ends
 //   rc-screen tap TEXT|#N           a real touch on the element's center (for what press can't reach)
 //   rc-screen hold TEXT|#N [SECONDS] touches and holds it (default 1 s)
 //   rc-screen menu TEXT|#N          opens the element's menu (as a long press does, without the touch)
@@ -122,6 +124,32 @@ static NSArray<RCScreenElement *> *rc_elements(id app) {
     return list;
 }
 
+static NSString *rc_line(RCScreenElement *e);
+
+// The screen once it has stopped changing (the same on two reads in a row), or as it is after
+// `seconds`
+static NSArray<RCScreenElement *> *rc_settled_elements(double seconds) {
+    NSString *last = nil;
+    NSArray<RCScreenElement *> *list = @[];
+    NSDate *until = [NSDate dateWithTimeIntervalSinceNow:seconds];
+    do {
+        list = rc_elements(rc_primary_app());
+        NSMutableString *screen = [NSMutableString string];
+        for (RCScreenElement *e in list) [screen appendFormat:@"%@\n", rc_line(e)];
+        if ([screen isEqualToString:last]) return list;
+        last = screen;
+        [NSThread sleepForTimeInterval:0.15];
+    } while ([until timeIntervalSinceNow] > 0);
+    return list;
+}
+
+// What's on screen, ignoring where: a list bouncing at its end moves but shows nothing new
+static NSSet<NSString *> *rc_screen_items(NSArray<RCScreenElement *> *list) {
+    NSMutableSet *items = [NSMutableSet set];
+    for (RCScreenElement *e in list) [items addObject:[NSString stringWithFormat:@"%@|%@|%@", e.kind, e.label, e.value]];
+    return items;
+}
+
 static NSString *rc_quote(NSString *text) {
     return [NSString stringWithFormat:@"\"%@\"", [text stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""]];
 }
@@ -190,7 +218,7 @@ static void rc_quit(int sig) {
 }
 
 static int rc_usage(void) {
-    fprintf(stderr, "Usage: rc-screen [--json] | find TEXT [--json] | press TEXT|#N | wait TEXT [SECONDS] | tap TEXT|#N | hold TEXT|#N [SECONDS] | menu TEXT|#N | type TEXT\n");
+    fprintf(stderr, "Usage: rc-screen [--json] | find TEXT [--json] | press TEXT|#N | wait TEXT [SECONDS] | tap TEXT|#N | hold TEXT|#N [SECONDS] | menu TEXT|#N | type TEXT | scroll-to TEXT [up]\n");
     return 2;
 }
 
@@ -245,7 +273,7 @@ int main(int argc, char **argv) {
             else [args addObject:a];
         }
         NSString *verb = args.count ? args[0] : @"list";
-        if (![@[@"list", @"find", @"press", @"wait", @"tap", @"hold", @"menu", @"type"] containsObject:verb]) return rc_usage();
+        if (![@[@"list", @"find", @"press", @"wait", @"tap", @"hold", @"menu", @"type", @"scroll-to"] containsObject:verb]) return rc_usage();
         if (![verb isEqualToString:@"list"] && args.count < 2) return rc_usage();
 
         void *lib = dlopen("/usr/lib/libAccessibility.dylib", RTLD_NOW);
@@ -270,6 +298,8 @@ int main(int argc, char **argv) {
         SEL systemSel = NSSelectorFromString(@"isSystemApplication");
         BOOL system = [app respondsToSelector:systemSel] && ((BOOL (*)(id, SEL))objc_msgSend)(app, systemSel);
         if (system || !appName.length) appName = @"SpringBoard";
+        NSString *bundleID = rc_text(rc_call(app, @"bundleId"));
+        if (!bundleID.length && [appName isEqualToString:@"SpringBoard"]) bundleID = @"com.apple.springboard";
 
         if ([verb isEqualToString:@"wait"]) {
             NSString *text = args[1];
@@ -318,6 +348,47 @@ int main(int argc, char **argv) {
             }
             printf("Typed into %s: now %s\n", rc_quote(rc_text(rc_call(field, @"label"))).UTF8String, rc_quote(now).UTF8String);
             return 0;
+        }
+
+        if ([verb isEqualToString:@"scroll-to"]) {
+            // Swipes the list in the middle of the screen, gently enough not to fling past, until
+            // the text shows; a swipe that brings in nothing new is the end of the list
+            NSString *text = args[1];
+            BOOL down = !(args.count > 2 && [args[2].lowercaseString isEqualToString:@"up"]);
+            CGRect screen = rc_frame(app);
+            if (CGRectIsEmpty(screen)) screen = CGRectMake(0, 0, 390, 844);
+            // 60% of the screen per swipe: less than a screen, so nothing is skipped
+            double x = CGRectGetMidX(screen), high = screen.origin.y + screen.size.height * 0.2, low = screen.origin.y + screen.size.height * 0.8;
+            NSArray<RCScreenElement *> *list = rc_settled_elements(2);
+            int turns = 0, swipes = 0;
+            while (swipes < 24) {
+                RCScreenElement *found = rc_pick(list, text); // an exact label first, as press does
+                if (found) {
+                    // Fully on screen, if it's cut off at an edge
+                    CGRect f = found.frame;
+                    if (CGRectGetMinY(f) < CGRectGetMinY(screen) || CGRectGetMaxY(f) > CGRectGetMaxY(screen)) {
+                        ((void (*)(id, SEL))objc_msgSend)(found.element, NSSelectorFromString(@"scrollToVisible"));
+                        list = rc_settled_elements(2);
+                        found = rc_pick(list, text) ?: found;
+                    }
+                    if (json) rc_print_json(rc_json(found));
+                    else printf("%s\n", rc_line(found).UTF8String);
+                    return 0;
+                }
+                NSSet<NSString *> *before = rc_screen_items(list);
+                NSString *swipe = down ? [NSString stringWithFormat:@"gesture swipe %.0f %.0f %.0f %.0f 0.5", x, low, x, high]
+                                       : [NSString stringWithFormat:@"gesture swipe %.0f %.0f %.0f %.0f 0.5", x, high, x, low];
+                if (rc_command(swipe) != 0) return 2;
+                swipes++;
+                list = rc_settled_elements(2);
+                if ([rc_screen_items(list) isSubsetOfSet:before]) {
+                    // The end of the list: the other way, once
+                    if (++turns > 1) break;
+                    down = !down;
+                }
+            }
+            fprintf(stderr, "Not found after scrolling: %s\n", text.UTF8String);
+            return 1;
         }
 
         NSArray<RCScreenElement *> *list = rc_elements(app);
@@ -370,9 +441,10 @@ int main(int argc, char **argv) {
         if (json) {
             NSMutableArray *out = [NSMutableArray array];
             for (RCScreenElement *e in list) [out addObject:rc_json(e)];
-            rc_print_json(@{ @"app": appName, @"elements": out });
+            rc_print_json(@{ @"app": appName, @"bundleID": bundleID, @"elements": out });
         } else {
-            printf("%s\n", appName.UTF8String);
+            if (bundleID.length) printf("%s (%s)\n", appName.UTF8String, bundleID.UTF8String);
+            else printf("%s\n", appName.UTF8String);
             for (RCScreenElement *e in list) printf("%s\n", rc_line(e).UTF8String);
         }
         return 0;

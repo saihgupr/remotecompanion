@@ -173,6 +173,15 @@ def t_swipe(args):
     return with_screen(host, text, args)
 
 
+def t_scroll_to(args):
+    host = host_for(args.get("phone"))
+    words = ["scroll-to", args["text"]] + (["up"] if args.get("up") else [])
+    code, out, err = ssh(host, screen_cmd(*words), timeout=120)
+    if code != 0:
+        raise ToolError(err or out or "Not found after scrolling")
+    return with_screen(host, out, args)
+
+
 def t_type(args):
     host = host_for(args.get("phone"))
     return with_screen(host, run(host, screen_cmd("type", args["text"])), args)
@@ -270,6 +279,10 @@ TOOLS = [
      {"x1": {"type": "number"}, "y1": {"type": "number"}, "x2": {"type": "number"}, "y2": {"type": "number"},
       "seconds": {"type": "number", "description": "Duration (default 0.3)."}, "show_screen": SHOW},
      ["x1", "y1", "x2", "y2"]),
+    ("scroll_to", t_scroll_to,
+     "Scrolls the list on screen until an element with this text shows, searching down first (or up), then the "
+     "other way. Returns the element. Slow when the text isn't there at all (a long list is searched to its end).",
+     {"text": {"type": "string"}, "up": {"type": "boolean", "description": "Search up first."}, "show_screen": SHOW}, ["text"]),
     ("type", t_type, "Types text into the field being edited (tap or press a text field first). Any characters.",
      {"text": {"type": "string"}, "show_screen": SHOW}, ["text"]),
     ("menu", t_menu, "Opens an element's menu, as a long press would (e.g. an app icon's quick actions).",

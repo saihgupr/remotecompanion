@@ -138,13 +138,14 @@ use it to find and act on what's there.
 
 | Command | What it does |
 |---|---|
-| `rc-screen` | What's on screen (`--json` for JSON) |
+| `rc-screen` | The app in front (name and bundle ID) and what's on screen (`--json` for JSON) |
 | `rc-screen find "Wi-Fi"` | The elements whose label or value contains the text |
 | `rc-screen press "Bluetooth"` | Activates an element by its label, or by number: `press "#7"` |
 | `rc-screen tap "Search"` | A real touch on an element (`hold "Text" 1` holds it) |
 | `rc-screen type "Hello"` | Types into the field being edited |
 | `rc-screen menu "Settings"` | Opens an element's menu, like a long press |
 | `rc-screen wait "Done" 10` | Waits until the text is on screen and the screen has settled |
+| `rc-screen scroll-to "Privacy"` | Scrolls the list until the text is on screen (add `up` to search up first) |
 
 For an AI assistant on your computer, `tools/rc-mcp` offers all of this as MCP tools.
 

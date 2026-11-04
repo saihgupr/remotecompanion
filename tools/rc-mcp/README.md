@@ -36,6 +36,7 @@ the phone. One file, Python 3.8 or later, nothing to install.
 | `type` | Types into the field being edited |
 | `menu` | Opens an element's menu (like a long press) |
 | `wait` | Waits until some text is on screen and the screen has settled |
+| `scroll_to` | Scrolls the list until some text is on screen |
 | `open_app`, `home`, `wake` | Opens an app, goes home, turns the screen on |
 | `rc_command` | Any RemoteCompanion command, with its reply |
 | `log` | The end of RemoteCompanion's log |
