@@ -1,6 +1,7 @@
 #import "RCGesturesViewController.h"
 #import "RCConfigManager.h"
 #import "RCServerClient.h"
+#import "RCGestureDetailViewController.h"
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 // Top: Record New Gesture. Then the recording tab's options (Show Stop After, Tab Size),
@@ -22,6 +23,7 @@ typedef NS_ENUM(NSInteger, RCGestureSection) {
 @property (nonatomic, strong) UIBarButtonItem *selectAllButton; // and Select All, bottom left
 @property (nonatomic, strong) UIBarButtonItem *exportButton;    // and Export, in the middle
 @property (nonatomic, strong) UIBarButtonItem *moreButton;      // the ⋯ menu, top right
+@property (nonatomic, weak) RCGestureDetailViewController *detail; // a gesture's page, when open
 @end
 
 @implementation RCGesturesViewController
@@ -267,6 +269,7 @@ typedef NS_ENUM(NSInteger, RCGestureSection) {
     }
     cell.textLabel.text = g[@"name"];
     cell.imageView.image = [UIImage systemImageNamed:@"hand.draw.fill"];
+    cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     NSInteger strokes = [g[@"strokes"] integerValue];
     cell.detailTextLabel.text = [NSString stringWithFormat:@"%ld %@, %.1f s", (long)strokes, strokes == 1 ? @"Touch" : @"Touches", [g[@"duration"] doubleValue]];
     return cell;
@@ -314,7 +317,30 @@ typedef NS_ENUM(NSInteger, RCGestureSection) {
     }
     NSDictionary *g = [self gestureAtRow:indexPath.row];
     if (!g) return;
-    [self showOptionsForGesture:g[@"name"] fromView:[tableView cellForRowAtIndexPath:indexPath]];
+    [self openGesture:g[@"name"]];
+}
+
+// Alerts and sheets show over a gesture's page when it's open
+- (UIViewController *)presenter {
+    UIViewController *top = self.navigationController.topViewController;
+    return top.view.window ? top : self;
+}
+
+- (void)openGesture:(NSString *)name {
+    RCGestureDetailViewController *detail = [[RCGestureDetailViewController alloc] init];
+    detail.name = name;
+    __weak typeof(self) weakSelf = self;
+    __weak RCGestureDetailViewController *weakDetail = detail;
+    detail.onAction = ^(NSString *action, UIView *source) {
+        NSString *current = weakDetail.name;
+        if ([action isEqualToString:@"play"]) [weakSelf play:current];
+        else if ([action isEqualToString:@"record"]) [weakSelf record:current];
+        else if ([action isEqualToString:@"rename"]) [weakSelf askRename:current];
+        else if ([action isEqualToString:@"export"]) [weakSelf exportGestures:@[current] fromView:source];
+        else if ([action isEqualToString:@"delete"]) [weakSelf confirmDelete:current];
+    };
+    self.detail = detail;
+    [self.navigationController pushViewController:detail animated:YES];
 }
 
 - (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -445,7 +471,7 @@ typedef NS_ENUM(NSInteger, RCGestureSection) {
     [alert addAction:[UIAlertAction actionWithTitle:@"Clear" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
         [weakSelf deleteGestures:names];
     }]];
-    [self presentViewController:alert animated:YES completion:nil];
+    [[self presenter] presentViewController:alert animated:YES completion:nil];
 }
 
 // One at a time, then the list again
@@ -498,7 +524,7 @@ typedef NS_ENUM(NSInteger, RCGestureSection) {
         share.completionWithItemsHandler = ^(UIActivityType type, BOOL completed, NSArray *items, NSError *shareError) {
             if (completed && strongSelf.tableView.editing) [strongSelf endSelecting];
         };
-        [strongSelf presentViewController:share animated:YES completion:nil];
+        [[strongSelf presenter] presentViewController:share animated:YES completion:nil];
     }];
 }
 
@@ -506,7 +532,7 @@ typedef NS_ENUM(NSInteger, RCGestureSection) {
     UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeJSON]];
     picker.delegate = self;
     picker.allowsMultipleSelection = YES;
-    [self presentViewController:picker animated:YES completion:nil];
+    [[self presenter] presentViewController:picker animated:YES completion:nil];
 }
 
 // Each file is copied where the tweak can read it, then added one after another
@@ -576,7 +602,7 @@ typedef NS_ENUM(NSInteger, RCGestureSection) {
     [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     sheet.popoverPresentationController.sourceView = source ?: self.view;
     sheet.popoverPresentationController.sourceRect = source ? source.bounds : CGRectMake(CGRectGetMidX(self.view.bounds), CGRectGetMidY(self.view.bounds), 1, 1);
-    [self presentViewController:sheet animated:YES completion:nil];
+    [[self presenter] presentViewController:sheet animated:YES completion:nil];
 }
 
 #pragma mark - Tab Size
@@ -610,7 +636,7 @@ typedef NS_ENUM(NSInteger, RCGestureSection) {
     [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     sheet.popoverPresentationController.sourceView = source ?: self.view;
     sheet.popoverPresentationController.sourceRect = source ? source.bounds : CGRectMake(CGRectGetMidX(self.view.bounds), CGRectGetMidY(self.view.bounds), 1, 1);
-    [self presentViewController:sheet animated:YES completion:nil];
+    [[self presenter] presentViewController:sheet animated:YES completion:nil];
 }
 
 #pragma mark - Gesture options
@@ -631,7 +657,7 @@ typedef NS_ENUM(NSInteger, RCGestureSection) {
     [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     sheet.popoverPresentationController.sourceView = source ?: self.view;
     sheet.popoverPresentationController.sourceRect = source ? source.bounds : CGRectMake(CGRectGetMidX(self.view.bounds), CGRectGetMidY(self.view.bounds), 1, 1);
-    [self presentViewController:sheet animated:YES completion:nil];
+    [[self presenter] presentViewController:sheet animated:YES completion:nil];
 }
 
 // A name without double quotes (they mark the name in the action)
@@ -667,7 +693,7 @@ typedef NS_ENUM(NSInteger, RCGestureSection) {
         }
         [strongSelf record:name];
     }]];
-    [self presentViewController:alert animated:YES completion:nil];
+    [[self presenter] presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)confirmReplace:(NSString *)name {
@@ -677,7 +703,7 @@ typedef NS_ENUM(NSInteger, RCGestureSection) {
     __weak typeof(self) weakSelf = self;
     [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     [alert addAction:[UIAlertAction actionWithTitle:@"Replace" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) { [weakSelf record:name]; }]];
-    [self presentViewController:alert animated:YES completion:nil];
+    [[self presenter] presentViewController:alert animated:YES completion:nil];
 }
 
 // The app steps aside; the tweak counts down, records until Stop and opens the app again
@@ -762,10 +788,11 @@ typedef NS_ENUM(NSInteger, RCGestureSection) {
                 return;
             }
             [strongSelf renameInActionsFrom:name to:to];
+            if ([strongSelf.detail.name isEqualToString:name]) strongSelf.detail.name = to;
             [strongSelf reload];
         }];
     }]];
-    [self presentViewController:alert animated:YES completion:nil];
+    [[self presenter] presentViewController:alert animated:YES completion:nil];
 }
 
 // Actions that play the gesture follow it to its new name
@@ -812,16 +839,18 @@ typedef NS_ENUM(NSInteger, RCGestureSection) {
     [alert addAction:[UIAlertAction actionWithTitle:@"Delete" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
         NSString *command = [NSString stringWithFormat:@"gesture delete \"%@\"", name];
         [[RCServerClient sharedClient] executeCommand:command completion:^(NSString *output, NSError *error) {
-            [weakSelf reload];
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (strongSelf.detail && [strongSelf.detail.name isEqualToString:name]) [strongSelf.navigationController popToViewController:strongSelf animated:YES];
+            [strongSelf reload];
         }];
     }]];
-    [self presentViewController:alert animated:YES completion:nil];
+    [[self presenter] presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)showMessage:(NSString *)title detail:(NSString *)detail {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:title message:detail preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
-    [self presentViewController:alert animated:YES completion:nil];
+    [[self presenter] presentViewController:alert animated:YES completion:nil];
 }
 
 @end
