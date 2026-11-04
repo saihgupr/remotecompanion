@@ -123,9 +123,30 @@ A sequence is a **JSON array** of actions. Each action is either:
 ### Touch Gestures
 | Command | What it does |
 |---|---|
-| `tap 195 422` | Tap at x=195, y=422 |
-| `hold 195 422 800` | Hold at x=195, y=422 for 800ms |
-| `swipe 195 700 195 200` | Swipe from (195,700) to (195,200) |
+| `gesture tap 195 422` | Tap at x=195, y=422 (screen points) |
+| `gesture hold 195 422 0.8` | Hold at x=195, y=422 for 0.8 seconds |
+| `gesture swipe 195 700 195 200` | Swipe from (195,700) to (195,200); add seconds to set the speed (default 0.3) |
+| `gesture swipe 195 852 195 450` | A swipe that starts on a screen edge is an edge swipe (this one goes home) |
+| `gesture play "Name"` | Play a recorded gesture (Settings > Gestures); add a speed like `2x` |
+
+The next action starts once the touch is done.
+
+### Reading the Screen (rc-screen)
+On the phone (over SSH, or from a `terminal` action), `rc-screen` lists what's on the screen as
+text: the app in front, then each element's number, kind, label, value and position. Scripts can
+use it to find and act on what's there.
+
+| Command | What it does |
+|---|---|
+| `rc-screen` | What's on screen (`--json` for JSON) |
+| `rc-screen find "Wi-Fi"` | The elements whose label or value contains the text |
+| `rc-screen press "Bluetooth"` | Activates an element by its label, or by number: `press "#7"` |
+| `rc-screen tap "Search"` | A real touch on an element (`hold "Text" 1` holds it) |
+| `rc-screen type "Hello"` | Types into the field being edited |
+| `rc-screen menu "Settings"` | Opens an element's menu, like a long press |
+| `rc-screen wait "Done" 10` | Waits until the text is on screen and the screen has settled |
+
+For an AI assistant on your computer, `tools/rc-mcp` offers all of this as MCP tools.
 
 ### Timing
 | Command | What it does |
