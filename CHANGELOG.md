@@ -2,9 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
-## [4.1.0] - 2026-11-03
+## [Unreleased]
 
 ### Added
+- **Two-finger edge slide gestures**: edge swipe triggers now recognize a second finger, with distance-based firing, a widened landing zone, Control Center suppression mid-gesture, and a Lock Scrolling During Gestures toggle (off by default) that keeps lists still while gesturing.
 - **New SSH host editor**: adding or editing a host now opens a proper Settings-style screen (Server details plus a Password / Private Key picker) instead of a cramped popup. The password field is masked with a show/hide eye button and never displays the saved password: leave it blank to keep the current one.
 - **New SSH command editor**: creating or editing an `ssh-run` action now shows a host picker plus a full command editor, instead of a one-line popup with the raw `ssh-run <id> ...` string.
 
@@ -25,6 +26,9 @@ All notable changes to this project will be documented in this file.
 - **Deep Linking URL Scheme & CLI Navigation**: added `remotecompanion://` URL scheme support and `rc nav <panel>` CLI command to jump directly into Settings, Integrations (Home Assistant, Keyboard Maestro, MQTT), New Trigger picker, or Triggers list from Siri Shortcuts, automation scripts, or terminal.
 
 ### Fixed
+- **SSH banner toggle never fired**: ticking SSH in Settings > Banners saved the picker's internal id as the match pattern, which no real `ssh-run` command could match. It now matches the `ssh-run ` prefix, so enabled SSH actions banner like everything else (re-tick SSH once to pick up the fix).
+- **SSH action editor stranded on Save**: creating an SSH action via + left you on the picker instead of returning to the actions list like other editors. Save now dismisses both and lands back on the actions sequence.
+- **Top-button Touch ID triggers died after lock**: on Touch ID power-button devices (iPad mini 6, iPad Air) the sensor sleeps with the screen, so triggers only worked while Settings was open. The tweak now holds a finger-detection assertion so the sensor stays awake (#99).
 - **Terminal command hangs as its waiting for a response**: `rc wifi off` (and toggle-to-off) now returns `WiFi Disabled` immediately and performs the actual shutoff 0.5s later, so a remote call over WiFi SSH gets its reply before the transport drops; redundant `wifi on`/`off` calls short-circuit with `Already ON/OFF` without touching the radio. Remote `rc` ssh also has a dead-connection bound so killing WiFi mid-session can't hang automations.
 - **Trigger options retrigger mode presentation**: Present "When Triggered Again" as a clean row with current mode subtitle in the trigger options menu (`...`) that opens a native action sheet dropdown on tap, eliminating iOS nested submenu bleed-through.
 
