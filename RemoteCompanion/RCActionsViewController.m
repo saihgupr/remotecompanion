@@ -25,6 +25,7 @@
 #import "RCNFCTriggerViewController.h"
 #import "RCDevicePickerViewController.h"
 #import "RCGesturesViewController.h"
+#import "RCPlayGestureViewController.h"
 #import "RCFocusPickerViewController.h"
 #import "RCTriggerPickerViewController.h"
 #import "RCKMMacroPickerViewController.h"
@@ -3405,20 +3406,20 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         [self presentViewController:sheet animated:YES completion:nil];
         return;
     } else if ([RCGesturesViewController gestureForCommand:currentAction]) {
-        // Play Gesture: the library, with this action's gesture ticked
-        RCGesturesViewController *gestures = [[RCGesturesViewController alloc] init];
-        gestures.currentName = [RCGesturesViewController gestureForCommand:currentAction];
+        // Play Gesture: its own page, with this action's gesture and speed
+        RCPlayGestureViewController *page = [[RCPlayGestureViewController alloc] init];
+        page.command = currentAction;
         __weak typeof(self) weakSelf = self;
-        __weak RCGesturesViewController *weakGestures = gestures;
-        gestures.onSelected = ^(NSString *name) {
+        __weak RCPlayGestureViewController *weakPage = page;
+        page.onSave = ^(NSString *command) {
             __strong typeof(weakSelf) strongSelf = weakSelf;
             if (!strongSelf) return;
-            strongSelf.actions[indexPath.row] = [RCGesturesViewController commandForGesture:name];
+            strongSelf.actions[indexPath.row] = command;
             [strongSelf saveActions];
             [strongSelf.tableView reloadData];
-            [weakGestures.navigationController popViewControllerAnimated:YES];
+            [weakPage.navigationController popViewControllerAnimated:YES];
         };
-        [self.navigationController pushViewController:gestures animated:YES];
+        [self.navigationController pushViewController:page animated:YES];
         return;
     } else if ([currentAction isEqualToString:@"unlock"] || [currentAction hasPrefix:@"unlock "]) {
         [self promptEditUnlockActionAtIndex:indexPath.row];

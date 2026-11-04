@@ -1,4 +1,5 @@
 #import "RCConfigManager.h"
+#import "RCGesturesViewController.h"
 #import <sys/sysctl.h>
 #import <LocalAuthentication/LocalAuthentication.h>
 #import <notify.h>
@@ -1695,12 +1696,11 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         // Touch gestures with coordinates
         } else if ([cmd hasPrefix:@"gesture record-toggle"]) {
             result = @"Record Gesture";
-        } else if ([cmd isEqualToString:@"gesture play-latest"]) {
-            result = @"Gesture: Latest Recording";
-        } else if ([cmd hasPrefix:@"gesture play "]) {
-            NSString *name = [[cmd substringFromIndex:13] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-            name = [name stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"\""]];
-            result = [NSString stringWithFormat:@"Gesture: %@", name];
+        } else if ([RCGesturesViewController gestureForCommand:cmd]) {
+            NSString *name = [RCGesturesViewController gestureForCommand:cmd];
+            double speed = [RCGesturesViewController speedForCommand:cmd];
+            result = [NSString stringWithFormat:@"Gesture: %@", name.length ? name : @"Latest Recording"];
+            if (fabs(speed - 1) > 0.01) result = [result stringByAppendingFormat:@" at %@", [RCGesturesViewController titleForSpeed:speed]];
         } else if ([cmd hasPrefix:@"tap "]) {
             NSString *coords = [[cmd substringFromIndex:4] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
             result = [NSString stringWithFormat:@"Tap at %@", coords];

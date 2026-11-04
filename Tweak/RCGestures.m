@@ -931,19 +931,26 @@ static void rc_gesture_send_frame(const RCGestureFrame *frame, uint32_t *down, C
     CFRelease(parent);
 }
 
-static void rc_gesture_play(NSString *name, const RCGestureFrame *frames, NSUInteger count, uint64_t sender) {
+// Playback speed from "2x", "0.5x" or "1.5": 1 when missing, kept between 0.25 and 4
+static double rc_gesture_speed(NSString *word) {
+    NSString *text = [word.lowercaseString stringByReplacingOccurrencesOfString:@"x" withString:@""];
+    double speed = text.length ? text.doubleValue : 1;
+    return speed > 0 ? MIN(MAX(speed, 0.25), 4) : 1;
+}
+
+static void rc_gesture_play(NSString *name, const RCGestureFrame *frames, NSUInteger count, uint64_t sender, double speed) {
     g_playing = YES;
     g_playCancel = NO;
     __block CGSize screen = CGSizeZero;
     rc_on_main_sync(^{ screen = [UIScreen mainScreen].fixedCoordinateSpace.bounds.size; });
     NSUInteger edgeFrames = 0;
     for (NSUInteger k = 0; k < count; k++) for (int j = 0; j < frames[k].count; j++) if (frames[k].fingers[j].edge) { edgeFrames++; break; }
-    SRLog(@"[Gesture] playing '%@' (%lu frames, %lu on the bottom edge)", name, (unsigned long)count, (unsigned long)edgeFrames);
+    SRLog(@"[Gesture] playing '%@' at %gx (%lu frames, %lu on an edge)", name, speed, (unsigned long)count, (unsigned long)edgeFrames);
     uint64_t start = mach_absolute_time();
     uint32_t down = 0;
     NSUInteger i = 0;
     for (; i < count; i++) {
-        if (!rc_gesture_wait_until(start + rc_mach_from_seconds(MAX(0, frames[i].t)))) break;
+        if (!rc_gesture_wait_until(start + rc_mach_from_seconds(MAX(0, frames[i].t) / speed))) break;
         rc_gesture_send_frame(&frames[i], &down, screen, sender);
     }
     if (down) {
@@ -1040,9 +1047,13 @@ NSString *RCGestureCommand(NSString *cmd) {
     }
 
     if ([verb isEqualToString:@"play"] || [verb isEqualToString:@"play-soon"] || [verb isEqualToString:@"play-latest"]) {
+        // gesture play "Name" [SPEED] | play-latest [SPEED], with SPEED like 2x or 0.5x
+        BOOL latest = [verb isEqualToString:@"play-latest"];
+        NSUInteger speedWord = latest ? 2 : 3;
+        double speed = words.count > speedWord ? rc_gesture_speed(words[speedWord]) : 1;
         NSArray *list = rc_gestures_load();
         NSDictionary *g = nil;
-        if ([verb isEqualToString:@"play-latest"]) {
+        if (latest) {
             // The newest recording (a recording again replaces the old one, so it's newest too)
             for (NSDictionary *each in list) {
                 if (!g || [each[@"created"] compare:g[@"created"]] == NSOrderedDescending) g = each;
@@ -1059,7 +1070,7 @@ NSString *RCGestureCommand(NSString *cmd) {
         NSData *frames = rc_gesture_unpack(g[@"frames"], &count);
         if (!count) return @"Error: The gesture is empty\n";
         NSString *name = g[@"name"];
-        dispatch_block_t play = ^{ rc_gesture_play(name, frames.bytes, count, sender); };
+        dispatch_block_t play = ^{ rc_gesture_play(name, frames.bytes, count, sender, speed); };
         if ([verb isEqualToString:@"play-soon"]) {
             // From the app's Gestures screen: a second for the app to step aside first
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), rc_gesture_play_queue(), play);
@@ -1076,6 +1087,70 @@ NSString *RCGestureCommand(NSString *cmd) {
         return g_playing ? @"Stopping\n" : @"Nothing playing\n";
     }
 
+    if ([verb isEqualToString:@"export"]) {
+        // gesture export PATH ["Name" ...]: the named gestures (all without names) as a JSON file
+        if (!arg.length) return @"Error: File path needed\n";
+        NSArray *list = rc_gestures_load();
+        NSMutableArray *chosen = [NSMutableArray array];
+        if (words.count > 3) {
+            for (NSString *name in [words subarrayWithRange:NSMakeRange(3, words.count - 3)]) {
+                NSDictionary *g = rc_gesture_named(list, name);
+                if (!g) return [NSString stringWithFormat:@"Error: No gesture named '%@'\n", name];
+                [chosen addObject:g];
+            }
+        } else {
+            [chosen addObjectsFromArray:list];
+        }
+        if (!chosen.count) return @"Error: No gestures to export\n";
+        NSMutableArray *out = [NSMutableArray array];
+        for (NSDictionary *g in chosen) {
+            NSMutableDictionary *entry = [NSMutableDictionary dictionary];
+            entry[@"name"] = g[@"name"];
+            entry[@"created"] = @([g[@"created"] isKindOfClass:[NSDate class]] ? [g[@"created"] timeIntervalSince1970] : 0);
+            entry[@"duration"] = g[@"duration"] ?: @0;
+            entry[@"strokes"] = g[@"strokes"] ?: @0;
+            if ([g[@"screen"] isKindOfClass:[NSArray class]]) entry[@"screen"] = g[@"screen"];
+            entry[@"frames"] = [g[@"frames"] isKindOfClass:[NSData class]] ? [g[@"frames"] base64EncodedStringWithOptions:0] : @"";
+            [out addObject:entry];
+        }
+        NSDictionary *file = @{ @"type": @"RemoteCompanion Gestures", @"version": @1, @"gestures": out };
+        NSData *json = [NSJSONSerialization dataWithJSONObject:file options:NSJSONWritingPrettyPrinted error:NULL];
+        if (![json writeToFile:arg atomically:YES]) return @"Error: The file couldn't be written\n";
+        return [NSString stringWithFormat:@"Exported %lu\n", (unsigned long)out.count];
+    }
+    if ([verb isEqualToString:@"import"]) {
+        // gesture import PATH: adds the file's gestures; a name already in use gets a number
+        NSData *data = arg.length ? [NSData dataWithContentsOfFile:arg] : nil;
+        if (!data) return @"Error: The file couldn't be read\n";
+        NSDictionary *file = [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
+        NSArray *entries = [file isKindOfClass:[NSDictionary class]] ? file[@"gestures"] : nil;
+        if (![entries isKindOfClass:[NSArray class]]) return @"Error: Not a gestures file\n";
+        NSMutableArray *list = rc_gestures_load();
+        NSUInteger added = 0;
+        for (NSDictionary *entry in entries) {
+            if (![entry isKindOfClass:[NSDictionary class]] || ![entry[@"name"] isKindOfClass:[NSString class]] || ![entry[@"frames"] isKindOfClass:[NSString class]]) continue;
+            NSData *frames = [[NSData alloc] initWithBase64EncodedString:entry[@"frames"] options:0];
+            NSUInteger count = 0;
+            if (!frames.length || !rc_gesture_unpack(frames, &count) || !count) continue;
+            NSString *base = [[entry[@"name"] stringByReplacingOccurrencesOfString:@"\"" withString:@""] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            if (!base.length) base = @"Gesture";
+            NSString *name = base;
+            for (NSInteger n = 2; rc_gesture_named(list, name); n++) name = [NSString stringWithFormat:@"%@ %ld", base, (long)n];
+            NSMutableDictionary *g = [NSMutableDictionary dictionary];
+            g[@"name"] = name;
+            double created = [entry[@"created"] doubleValue];
+            g[@"created"] = created > 0 ? [NSDate dateWithTimeIntervalSince1970:created] : [NSDate date];
+            g[@"duration"] = @([entry[@"duration"] doubleValue]);
+            g[@"strokes"] = @([entry[@"strokes"] integerValue]);
+            if ([entry[@"screen"] isKindOfClass:[NSArray class]]) g[@"screen"] = entry[@"screen"];
+            g[@"frames"] = frames;
+            [list addObject:g];
+            added++;
+        }
+        if (!added) return @"Error: No gestures found in the file\n";
+        if (!rc_gestures_save(list)) return @"Error: The gestures couldn't be saved\n";
+        return [NSString stringWithFormat:@"Imported %lu\n", (unsigned long)added];
+    }
     if ([verb isEqualToString:@"delete"]) {
         NSMutableArray *list = rc_gestures_load();
         NSMutableDictionary *g = rc_gesture_named(list, arg);
@@ -1097,5 +1172,5 @@ NSString *RCGestureCommand(NSString *cmd) {
         return [NSString stringWithFormat:@"Renamed to '%@'\n", to];
     }
 
-    return @"Usage: gesture list | record \"Name\" | record-toggle [\"Name\"] | record-stop | record-cancel | record-status | play \"Name\" | play-soon \"Name\" | play-latest | stop | idle-stop [SECONDS] | tab-size [small|medium|large] | delete \"Name\" | rename \"Old\" \"New\"\n";
+    return @"Usage: gesture list | record \"Name\" | record-toggle [\"Name\"] | record-stop | record-cancel | record-status | play \"Name\" [SPEED] | play-soon \"Name\" [SPEED] | play-latest [SPEED] | stop | idle-stop [SECONDS] | tab-size [small|medium|large] | export PATH [\"Name\" ...] | import PATH | delete \"Name\" | rename \"Old\" \"New\"\n";
 }

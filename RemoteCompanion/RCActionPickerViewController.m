@@ -3,6 +3,7 @@
 #import "RCDevicePickerViewController.h"
 #import "RCFocusPickerViewController.h"
 #import "RCGesturesViewController.h"
+#import "RCPlayGestureViewController.h"
 #import "RCConfigManager.h"
 #import "RCHAEntityPickerViewController.h"
 #import "RCKMMacroPickerViewController.h"
@@ -1019,14 +1020,14 @@
     }
 }
 
-// The gesture library, picking the gesture the new action plays (or recording one there)
+// A new Play Gesture action: its own page, which gesture and how fast
 - (void)handlePlayGesture {
-    RCGesturesViewController *gestures = [[RCGesturesViewController alloc] init];
+    RCPlayGestureViewController *page = [[RCPlayGestureViewController alloc] init];
     __weak typeof(self) weakSelf = self;
-    gestures.onSelected = ^(NSString *name) {
-        [weakSelf finishWithFocusCommand:[RCGesturesViewController commandForGesture:name]];
+    page.onSave = ^(NSString *command) {
+        [weakSelf finishWithFocusCommand:command];
     };
-    [self.navigationController pushViewController:gestures animated:YES];
+    [self.navigationController pushViewController:page animated:YES];
 }
 
 #pragma mark - Search

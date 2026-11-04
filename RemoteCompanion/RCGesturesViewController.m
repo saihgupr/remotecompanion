@@ -1,8 +1,17 @@
 #import "RCGesturesViewController.h"
 #import "RCConfigManager.h"
 #import "RCServerClient.h"
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
-@interface RCGesturesViewController ()
+// Top: Record New Gesture. Then the recording tab's options (Show Stop After, Tab Size),
+// then the gestures (or one status row), so neither gets lost below a long list.
+typedef NS_ENUM(NSInteger, RCGestureSection) {
+    RCGestureSectionTop,
+    RCGestureSectionOptions,
+    RCGestureSectionList,
+};
+
+@interface RCGesturesViewController () <UIDocumentPickerDelegate>
 @property (nonatomic, strong) NSArray<NSDictionary *> *gestures; // @{ name, duration, strokes }
 @property (nonatomic, assign) BOOL loading;
 @property (nonatomic, copy) NSString *errorText;
@@ -11,21 +20,64 @@
 @property (nonatomic, copy) NSString *tabSize; // Tab Size: small, medium or large
 @property (nonatomic, strong) UIBarButtonItem *clearButton;     // Select mode's Clear, bottom right
 @property (nonatomic, strong) UIBarButtonItem *selectAllButton; // and Select All, bottom left
+@property (nonatomic, strong) UIBarButtonItem *exportButton;    // and Export, in the middle
+@property (nonatomic, strong) UIBarButtonItem *moreButton;      // the ⋯ menu, top right
 @end
 
 @implementation RCGesturesViewController
 
 + (NSString *)commandForGesture:(NSString *)name {
-    if (name.length == 0) return @"gesture play-latest";
-    return [NSString stringWithFormat:@"gesture play \"%@\"", name];
+    return [self commandForGesture:name speed:1];
+}
+
++ (NSString *)speedSuffix:(double)speed {
+    return fabs(speed - 1) < 0.01 || speed <= 0 ? @"" : [NSString stringWithFormat:@" %gx", speed];
+}
+
++ (NSString *)commandForGesture:(NSString *)name speed:(double)speed {
+    if (name.length == 0) return [@"gesture play-latest" stringByAppendingString:[self speedSuffix:speed]];
+    return [NSString stringWithFormat:@"gesture play \"%@\"%@", name, [self speedSuffix:speed]];
+}
+
+// What follows "gesture play": the quoted name, then the speed
++ (NSString *)playArgumentsOf:(NSString *)command speed:(NSString **)speedOut {
+    if (speedOut) *speedOut = nil;
+    if (![command isKindOfClass:[NSString class]]) return nil;
+    NSCharacterSet *space = [NSCharacterSet whitespaceCharacterSet];
+    if ([command isEqualToString:@"gesture play-latest"] || [command hasPrefix:@"gesture play-latest "]) {
+        if (speedOut) *speedOut = [[command substringFromIndex:19] stringByTrimmingCharactersInSet:space];
+        return @"";
+    }
+    if (![command hasPrefix:@"gesture play "]) return nil;
+    NSString *rest = [[command substringFromIndex:13] stringByTrimmingCharactersInSet:space];
+    if ([rest hasPrefix:@"\""] && rest.length > 1) {
+        NSRange close = [rest rangeOfString:@"\"" options:0 range:NSMakeRange(1, rest.length - 1)];
+        if (close.location != NSNotFound) {
+            if (speedOut) *speedOut = [[rest substringFromIndex:close.location + 1] stringByTrimmingCharactersInSet:space];
+            return [rest substringWithRange:NSMakeRange(1, close.location - 1)];
+        }
+    }
+    return rest;
 }
 
 + (NSString *)gestureForCommand:(NSString *)command {
-    if ([command isKindOfClass:[NSString class]] && [command isEqualToString:@"gesture play-latest"]) return @"";
-    if (![command isKindOfClass:[NSString class]] || ![command hasPrefix:@"gesture play "]) return nil;
-    NSString *name = [[command substringFromIndex:13] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-    if (name.length >= 2 && [name hasPrefix:@"\""] && [name hasSuffix:@"\""]) name = [name substringWithRange:NSMakeRange(1, name.length - 2)];
-    return name;
+    return [self playArgumentsOf:command speed:NULL];
+}
+
++ (double)speedForCommand:(NSString *)command {
+    NSString *speed = nil;
+    [self playArgumentsOf:command speed:&speed];
+    double value = [[speed.lowercaseString stringByReplacingOccurrencesOfString:@"x" withString:@""] doubleValue];
+    return value > 0 ? value : 1;
+}
+
++ (NSString *)titleForSpeed:(double)speed {
+    return [NSString stringWithFormat:@"%g\u00D7", speed];
+}
+
+// The speeds a Play Gesture action offers
++ (NSArray<NSNumber *> *)speeds {
+    return @[@0.5, @1, @1.5, @2, @3];
 }
 
 + (NSString *)recordCommand {
@@ -60,6 +112,8 @@
         self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemCancel target:self action:@selector(cancel)];
     }
     self.tableView.allowsMultipleSelectionDuringEditing = YES;
+    [self.tableView addGestureRecognizer:[[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(longPressed:)]];
+    [self updateSelectButtons];
     self.refreshControl = [[UIRefreshControl alloc] init];
     [self.refreshControl addTarget:self action:@selector(reload) forControlEvents:UIControlEventValueChanged];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(appBecameActive) name:UIApplicationDidBecomeActiveNotification object:nil];
@@ -112,7 +166,7 @@
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf || error || !output) return;
         strongSelf.idleStop = [output doubleValue];
-        [strongSelf.tableView reloadSections:[NSIndexSet indexSetWithIndex:2] withRowAnimation:UITableViewRowAnimationNone];
+        [strongSelf.tableView reloadSections:[NSIndexSet indexSetWithIndex:RCGestureSectionOptions] withRowAnimation:UITableViewRowAnimationNone];
     }];
     [[RCServerClient sharedClient] executeCommand:@"gesture tab-size" completion:^(NSString *output, NSError *error) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
@@ -120,7 +174,7 @@
         NSString *size = [output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         if (![[strongSelf tabSizes] containsObject:size]) return;
         strongSelf.tabSize = size;
-        [strongSelf.tableView reloadSections:[NSIndexSet indexSetWithIndex:2] withRowAnimation:UITableViewRowAnimationNone];
+        [strongSelf.tableView reloadSections:[NSIndexSet indexSetWithIndex:RCGestureSectionOptions] withRowAnimation:UITableViewRowAnimationNone];
     }];
 }
 
@@ -133,19 +187,8 @@
 
 #pragma mark - Rows
 
-// Section 0: the gestures (or one status row). Section 1: Record New Gesture. Section 2: the
-// recording tab's settings (Show Stop After, Tab Size).
 - (BOOL)showsStatusRow {
     return self.loading || self.errorText || self.gestures.count == 0;
-}
-
-- (BOOL)currentIsMissing {
-    return self.currentName.length && !self.loading && !self.errorText && ![self gestureNamed:self.currentName];
-}
-
-// Picking for an action: Latest Recording comes first
-- (NSInteger)fixedRows {
-    return self.onSelected ? 1 : 0;
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
@@ -153,29 +196,25 @@
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    if (section == 1) return 1;
-    if (section == 2) return 2;
-    if ([self showsStatusRow] && ![self currentIsMissing]) return [self fixedRows] + 1;
-    return [self fixedRows] + self.gestures.count + ([self currentIsMissing] ? 1 : 0);
+    if (section == RCGestureSectionTop) return 1;
+    if (section == RCGestureSectionOptions) return 2;
+    return [self showsStatusRow] ? 1 : self.gestures.count;
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+    if (section == RCGestureSectionOptions) return @"Recording";
+    if (section == RCGestureSectionList) return @"Saved Gestures";
+    return nil;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    if (section == 2) return @"While recording, a red tab sits at the screen's edge. Pull it out to show Stop. Show Stop After brings Stop out by itself after a time without a touch.";
-    if (section != 1) return nil;
+    if (section == RCGestureSectionOptions) return @"While recording, a red tab sits at the screen's edge. Pull it out to show Stop. Show Stop After brings Stop out by itself after a time without a touch.";
+    if (section != RCGestureSectionTop) return nil;
     return @"Recording starts after a short countdown. Use the phone as usual, then tap Stop. Touches play back with the same timing, so start from the screen the gesture begins on.";
 }
 
-// The gesture on a row: the action's own one first when it's no longer in the library
 - (NSDictionary *)gestureAtRow:(NSInteger)row {
-    if ([self fixedRows]) {
-        if (row == 0) return @{ @"name": @"", @"latest": @YES };
-        row--;
-    }
-    if ([self currentIsMissing]) {
-        if (row == 0) return @{ @"name": self.currentName, @"missing": @YES };
-        row--;
-    }
-    return row < (NSInteger)self.gestures.count ? self.gestures[row] : nil;
+    return row >= 0 && row < (NSInteger)self.gestures.count ? self.gestures[row] : nil;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -189,7 +228,7 @@
     cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
     cell.imageView.tintColor = [UIColor secondaryLabelColor];
 
-    if (indexPath.section == 2) {
+    if (indexPath.section == RCGestureSectionOptions) {
         UITableViewCell *value = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:nil];
         value.backgroundColor = cell.backgroundColor;
         value.selectedBackgroundView = cell.selectedBackgroundView;
@@ -203,7 +242,7 @@
         value.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         return value;
     }
-    if (indexPath.section == 1) {
+    if (indexPath.section == RCGestureSectionTop) {
         cell.textLabel.text = @"Record New Gesture";
         cell.textLabel.textColor = self.view.tintColor;
         cell.imageView.image = [UIImage systemImageNamed:@"record.circle"];
@@ -226,30 +265,17 @@
         }
         return cell;
     }
-    BOOL ticked = self.currentName && [g[@"name"] caseInsensitiveCompare:self.currentName] == NSOrderedSame;
-    cell.accessoryType = ticked ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
-    if ([g[@"latest"] boolValue]) {
-        cell.textLabel.text = @"Latest Recording";
-        cell.detailTextLabel.text = @"Whichever gesture was recorded last";
-        cell.imageView.image = [UIImage systemImageNamed:@"clock.arrow.circlepath"];
-        return cell;
-    }
     cell.textLabel.text = g[@"name"];
     cell.imageView.image = [UIImage systemImageNamed:@"hand.draw.fill"];
-    if ([g[@"missing"] boolValue]) {
-        cell.detailTextLabel.text = @"Not Found";
-    } else {
-        NSInteger strokes = [g[@"strokes"] integerValue];
-        cell.detailTextLabel.text = [NSString stringWithFormat:@"%ld %@, %.1f s", (long)strokes, strokes == 1 ? @"Touch" : @"Touches", [g[@"duration"] doubleValue]];
-    }
+    NSInteger strokes = [g[@"strokes"] integerValue];
+    cell.detailTextLabel.text = [NSString stringWithFormat:@"%ld %@, %.1f s", (long)strokes, strokes == 1 ? @"Touch" : @"Touches", [g[@"duration"] doubleValue]];
     return cell;
 }
 
 // Only recorded gestures can be selected or swiped
 - (BOOL)isSavedGestureAt:(NSIndexPath *)indexPath {
-    if (indexPath.section != 0) return NO;
-    NSDictionary *g = [self gestureAtRow:indexPath.row];
-    return g && ![g[@"missing"] boolValue] && ![g[@"latest"] boolValue];
+    if (indexPath.section != RCGestureSectionList) return NO;
+    return [self gestureAtRow:indexPath.row] != nil;
 }
 
 - (BOOL)tableView:(UITableView *)tableView canEditRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -258,7 +284,7 @@
 
 - (BOOL)tableView:(UITableView *)tableView shouldHighlightRowAtIndexPath:(NSIndexPath *)indexPath {
     if (tableView.editing) return [self isSavedGestureAt:indexPath];
-    return indexPath.section >= 1 || [self gestureAtRow:indexPath.row] != nil;
+    return indexPath.section != RCGestureSectionList || [self gestureAtRow:indexPath.row] != nil;
 }
 
 - (NSIndexPath *)tableView:(UITableView *)tableView willSelectRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -276,22 +302,18 @@
         return;
     }
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    if (indexPath.section == 2) {
+    if (indexPath.section == RCGestureSectionOptions) {
         UIView *source = [tableView cellForRowAtIndexPath:indexPath];
         if (indexPath.row == 1) [self chooseTabSizeFromView:source];
         else [self chooseIdleStopFromView:source];
         return;
     }
-    if (indexPath.section == 1) {
+    if (indexPath.section == RCGestureSectionTop) {
         [self askNameAndRecord];
         return;
     }
     NSDictionary *g = [self gestureAtRow:indexPath.row];
     if (!g) return;
-    if (self.onSelected && ![g[@"missing"] boolValue]) {
-        self.onSelected(g[@"name"]);
-        return;
-    }
     [self showOptionsForGesture:g[@"name"] fromView:[tableView cellForRowAtIndexPath:indexPath]];
 }
 
@@ -325,7 +347,6 @@
 }
 
 - (void)updateSelectButtons {
-    if (self.onSelected) return;
     if (self.tableView.editing) {
         if (self.navigationItem.rightBarButtonItem.action != @selector(endSelecting)) {
             self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemCancel target:self action:@selector(endSelecting)];
@@ -335,11 +356,43 @@
         self.selectAllButton.title = allChecked ? @"Deselect All" : @"Select All";
         self.clearButton.title = count ? [NSString stringWithFormat:@"Clear (%ld)", (long)count] : @"Clear";
         self.clearButton.enabled = count > 0;
+        self.exportButton.enabled = count > 0;
         return;
     }
-    self.navigationItem.rightBarButtonItem = self.gestures.count
-        ? [[UIBarButtonItem alloc] initWithTitle:@"Select" style:UIBarButtonItemStylePlain target:self action:@selector(startSelecting)]
-        : nil;
+    // The same button throughout (shown at once, before the list loads); only its menu changes
+    if (!self.moreButton) self.moreButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"] menu:[self moreMenu]];
+    else self.moreButton.menu = [self moreMenu];
+    if (self.navigationItem.rightBarButtonItem != self.moreButton) self.navigationItem.rightBarButtonItem = self.moreButton;
+}
+
+// The ⋯ menu: Select, Import, Export All
+- (UIMenu *)moreMenu {
+    __weak typeof(self) weakSelf = self;
+    NSMutableArray *items = [NSMutableArray array];
+    if (self.gestures.count) {
+        [items addObject:[UIAction actionWithTitle:@"Select" image:[UIImage systemImageNamed:@"checkmark.circle"] identifier:nil handler:^(UIAction *a) { [weakSelf startSelecting]; }]];
+    }
+    [items addObject:[UIAction actionWithTitle:@"Import" image:[UIImage systemImageNamed:@"square.and.arrow.down"] identifier:nil handler:^(UIAction *a) { [weakSelf importGestures]; }]];
+    if (self.gestures.count) {
+        [items addObject:[UIAction actionWithTitle:@"Export All" image:[UIImage systemImageNamed:@"square.and.arrow.up"] identifier:nil handler:^(UIAction *a) {
+            NSMutableArray *names = [NSMutableArray array];
+            for (NSDictionary *g in weakSelf.gestures) [names addObject:g[@"name"]];
+            [weakSelf exportGestures:names fromView:nil];
+        }]];
+    }
+    return [UIMenu menuWithTitle:@"" children:items];
+}
+
+// A long press on a gesture starts Select with it checked
+- (void)longPressed:(UILongPressGestureRecognizer *)press {
+    if (press.state != UIGestureRecognizerStateBegan || self.tableView.editing) return;
+    NSIndexPath *path = [self.tableView indexPathForRowAtPoint:[press locationInView:self.tableView]];
+    if (!path || ![self isSavedGestureAt:path]) return;
+    [self startSelecting];
+    [self.tableView selectRowAtIndexPath:path animated:NO scrollPosition:UITableViewScrollPositionNone];
+    [self updateSelectButtons];
+    UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
+    [haptic impactOccurred];
 }
 
 - (void)startSelecting {
@@ -349,7 +402,9 @@
     self.clearButton = [[UIBarButtonItem alloc] initWithTitle:@"Clear" style:UIBarButtonItemStylePlain target:self action:@selector(confirmClear)];
     self.clearButton.tintColor = [UIColor systemRedColor];
     UIBarButtonItem *space = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil];
-    self.toolbarItems = @[self.selectAllButton, space, self.clearButton];
+    self.exportButton = [[UIBarButtonItem alloc] initWithTitle:@"Export" style:UIBarButtonItemStylePlain target:self action:@selector(exportSelected)];
+    UIBarButtonItem *space2 = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil];
+    self.toolbarItems = @[self.selectAllButton, space, self.exportButton, space2, self.clearButton];
     [self.navigationController setToolbarHidden:NO animated:YES];
     [self updateSelectButtons];
 }
@@ -363,9 +418,9 @@
 
 - (void)toggleSelectAll {
     BOOL allChecked = [self selectedCount] == (NSInteger)self.gestures.count;
-    NSInteger rows = [self.tableView numberOfRowsInSection:0];
+    NSInteger rows = [self.tableView numberOfRowsInSection:RCGestureSectionList];
     for (NSInteger row = 0; row < rows; row++) {
-        NSIndexPath *path = [NSIndexPath indexPathForRow:row inSection:0];
+        NSIndexPath *path = [NSIndexPath indexPathForRow:row inSection:RCGestureSectionList];
         if (![self isSavedGestureAt:path]) continue;
         if (allChecked) [self.tableView deselectRowAtIndexPath:path animated:NO];
         else [self.tableView selectRowAtIndexPath:path animated:NO scrollPosition:UITableViewScrollPositionNone];
@@ -407,6 +462,93 @@
     }];
 }
 
+#pragma mark - Export and Import
+
+- (void)exportSelected {
+    NSMutableArray<NSString *> *names = [NSMutableArray array];
+    for (NSIndexPath *path in self.tableView.indexPathsForSelectedRows) {
+        if ([self isSavedGestureAt:path]) [names addObject:[self gestureAtRow:path.row][@"name"]];
+    }
+    if (names.count) [self exportGestures:names fromView:nil];
+}
+
+// The tweak writes the gestures to a JSON file, then the share sheet sends it on
+- (void)exportGestures:(NSArray<NSString *> *)names fromView:(UIView *)source {
+    NSString *fileName = @"Gestures";
+    if (names.count == 1) {
+        NSCharacterSet *bad = [NSCharacterSet characterSetWithCharactersInString:@"/:\\"];
+        fileName = [[names.firstObject componentsSeparatedByCharactersInSet:bad] componentsJoinedByString:@"-"];
+    }
+    NSString *path = [@"/tmp" stringByAppendingPathComponent:[fileName stringByAppendingPathExtension:@"json"]];
+    NSMutableString *command = [NSMutableString stringWithFormat:@"gesture export \"%@\"", path];
+    for (NSString *name in names) [command appendFormat:@" \"%@\"", name];
+    __weak typeof(self) weakSelf = self;
+    [[RCServerClient sharedClient] executeCommand:command completion:^(NSString *output, NSError *error) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        if (error || ![output hasPrefix:@"Exported"]) {
+            [strongSelf showMessage:@"Couldn't Export" detail:error.localizedDescription ?: [output stringByReplacingOccurrencesOfString:@"Error: " withString:@""]];
+            return;
+        }
+        UIActivityViewController *share = [[UIActivityViewController alloc] initWithActivityItems:@[[NSURL fileURLWithPath:path]] applicationActivities:nil];
+        UIView *anchor = source ?: strongSelf.view;
+        share.popoverPresentationController.sourceView = anchor;
+        share.popoverPresentationController.sourceRect = anchor.bounds;
+        if (!source && strongSelf.exportButton) share.popoverPresentationController.barButtonItem = strongSelf.exportButton;
+        share.completionWithItemsHandler = ^(UIActivityType type, BOOL completed, NSArray *items, NSError *shareError) {
+            if (completed && strongSelf.tableView.editing) [strongSelf endSelecting];
+        };
+        [strongSelf presentViewController:share animated:YES completion:nil];
+    }];
+}
+
+- (void)importGestures {
+    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeJSON]];
+    picker.delegate = self;
+    picker.allowsMultipleSelection = YES;
+    [self presentViewController:picker animated:YES completion:nil];
+}
+
+// Each file is copied where the tweak can read it, then added one after another
+- (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
+    NSMutableArray<NSString *> *paths = [NSMutableArray array];
+    for (NSURL *url in urls) {
+        BOOL accessing = [url startAccessingSecurityScopedResource];
+        NSData *data = [NSData dataWithContentsOfURL:url];
+        if (accessing) [url stopAccessingSecurityScopedResource];
+        if (!data) continue;
+        NSString *path = [NSString stringWithFormat:@"/tmp/rc-gesture-import-%lu.json", (unsigned long)paths.count];
+        if ([data writeToFile:path atomically:YES]) [paths addObject:path];
+    }
+    if (!paths.count) {
+        [self showMessage:@"Couldn't Import" detail:@"The file couldn't be read."];
+        return;
+    }
+    [self importPaths:paths imported:0 failure:nil];
+}
+
+- (void)importPaths:(NSArray<NSString *> *)paths imported:(NSInteger)imported failure:(NSString *)failure {
+    if (paths.count == 0) {
+        [self reload];
+        if (imported) {
+            [self showMessage:imported == 1 ? @"Imported 1 Gesture" : [NSString stringWithFormat:@"Imported %ld Gestures", (long)imported] detail:nil];
+        } else {
+            [self showMessage:@"Couldn't Import" detail:failure ?: @"No gestures were found in the file."];
+        }
+        return;
+    }
+    NSString *path = paths.firstObject;
+    NSArray *rest = [paths subarrayWithRange:NSMakeRange(1, paths.count - 1)];
+    NSString *command = [NSString stringWithFormat:@"gesture import \"%@\"", path];
+    __weak typeof(self) weakSelf = self;
+    [[RCServerClient sharedClient] executeCommand:command completion:^(NSString *output, NSError *error) {
+        [[NSFileManager defaultManager] removeItemAtPath:path error:NULL];
+        NSInteger added = [output hasPrefix:@"Imported "] ? [[output substringFromIndex:9] integerValue] : 0;
+        NSString *problem = added ? failure : (error.localizedDescription ?: [output stringByReplacingOccurrencesOfString:@"Error: " withString:@""]);
+        [weakSelf importPaths:rest imported:imported + added failure:problem];
+    }];
+}
+
 #pragma mark - Show Stop After
 
 - (NSString *)idleStopTitle:(double)seconds {
@@ -427,7 +569,7 @@
                 __strong typeof(weakSelf) strongSelf = weakSelf;
                 if (!strongSelf) return;
                 if (!error && output) strongSelf.idleStop = [output doubleValue];
-                [strongSelf.tableView reloadSections:[NSIndexSet indexSetWithIndex:2] withRowAnimation:UITableViewRowAnimationNone];
+                [strongSelf.tableView reloadSections:[NSIndexSet indexSetWithIndex:RCGestureSectionOptions] withRowAnimation:UITableViewRowAnimationNone];
             }];
         }]];
     }
@@ -461,7 +603,7 @@
                 if (!strongSelf) return;
                 NSString *now = [output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
                 if (!error && [[strongSelf tabSizes] containsObject:now]) strongSelf.tabSize = now;
-                [strongSelf.tableView reloadSections:[NSIndexSet indexSetWithIndex:2] withRowAnimation:UITableViewRowAnimationNone];
+                [strongSelf.tableView reloadSections:[NSIndexSet indexSetWithIndex:RCGestureSectionOptions] withRowAnimation:UITableViewRowAnimationNone];
             }];
         }]];
     }
@@ -483,6 +625,7 @@
     [sheet addAction:[UIAlertAction actionWithTitle:exists ? @"Record Again" : @"Record" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) { [weakSelf record:name]; }]];
     if (exists) {
         [sheet addAction:[UIAlertAction actionWithTitle:@"Rename" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) { [weakSelf askRename:name]; }]];
+        [sheet addAction:[UIAlertAction actionWithTitle:@"Export" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) { [weakSelf exportGestures:@[name] fromView:source]; }]];
         [sheet addAction:[UIAlertAction actionWithTitle:@"Delete" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) { [weakSelf confirmDelete:name]; }]];
     }
     [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
@@ -590,10 +733,7 @@
         if ([status isEqualToString:@"recording"]) return; // opened again before Stop: still waiting
         strongSelf.waitingForRecording = NO;
         if ([status hasPrefix:@"saved\t"]) {
-            NSString *name = [status substringFromIndex:6];
-            [strongSelf reloadThen:^{
-                if (strongSelf.onSelected) strongSelf.onSelected(name);
-            }];
+            [strongSelf reload];
         } else {
             [strongSelf reload];
             if ([status isEqualToString:@"empty"]) [strongSelf showMessage:@"Nothing Recorded" detail:@"No touches were recorded before Stop."];
@@ -622,7 +762,6 @@
                 return;
             }
             [strongSelf renameInActionsFrom:name to:to];
-            if (strongSelf.currentName && [strongSelf.currentName caseInsensitiveCompare:name] == NSOrderedSame) strongSelf.currentName = to;
             [strongSelf reload];
         }];
     }]];
@@ -641,7 +780,7 @@
             NSString *played = [RCGesturesViewController gestureForCommand:item];
             if (played.length && [played caseInsensitiveCompare:from] == NSOrderedSame) {
                 changed = YES;
-                return [RCGesturesViewController commandForGesture:to];
+                return [RCGesturesViewController commandForGesture:to speed:[RCGesturesViewController speedForCommand:item]];
             }
             return item;
         }
