@@ -164,6 +164,16 @@ static NSMutableData *rc_gesture_unpack(NSData *data, NSUInteger *outCount) {
         int n = p[4];
         p += 5;
         if (n > kRCGestureMaxFingers || p + n * 10 > end) break;
+        // A frame from a file can hold anything: a time that isn't a number or is far off would
+        // keep playback waiting, and a position that isn't a number can't be sent
+        if (!isfinite(t) || t < 0 || t > 3600) break;
+        BOOL bad = NO;
+        for (int j = 0; j < n; j++) {
+            float xy[2];
+            memcpy(xy, p + 2 + j * 10, 8);
+            if (!isfinite(xy[0]) || !isfinite(xy[1]) || fabsf(xy[0]) > 10000 || fabsf(xy[1]) > 10000) bad = YES;
+        }
+        if (bad) break;
         for (int j = 0; j < n; j++) {
             float xy[2];
             memcpy(xy, p + 2, 8);
@@ -1282,7 +1292,8 @@ NSString *RCGestureCommand(NSString *cmd) {
         if (!count) return @"Error: The gesture is empty\n";
         NSString *name = g[@"name"];
         NSArray *size = g[@"screen"];
-        CGSize recorded = [size isKindOfClass:[NSArray class]] && size.count == 2 ? CGSizeMake([size[0] doubleValue], [size[1] doubleValue]) : CGSizeZero;
+        CGSize recorded = [size isKindOfClass:[NSArray class]] && size.count == 2 && [size[0] isKindOfClass:[NSNumber class]] && [size[1] isKindOfClass:[NSNumber class]]
+            ? CGSizeMake([size[0] doubleValue], [size[1] doubleValue]) : CGSizeZero;
         dispatch_block_t play = ^{ rc_gesture_play(name, frames.bytes, count, sender, speed, recorded); };
         if ([verb isEqualToString:@"play-soon"]) {
             // From the app's Gestures screen: a second for the app to step aside first
@@ -1301,8 +1312,13 @@ NSString *RCGestureCommand(NSString *cmd) {
     }
 
     if ([verb isEqualToString:@"export"]) {
-        // gesture export PATH ["Name" ...]: the named gestures (all without names) as a JSON file
+        // gesture export PATH ["Name" ...]: the named gestures (all without names) as a JSON file,
+        // into a temporary folder (the app and rc-mcp pass files that way)
         if (!arg.length) return @"Error: File path needed\n";
+        NSString *target = arg.stringByStandardizingPath;
+        if (!([target hasPrefix:@"/tmp/"] || [target hasPrefix:@"/private/tmp/"] || [target hasPrefix:@"/var/mobile/tmp/"]) || [target containsString:@"/../"]) {
+            return @"Error: Use a path in /tmp or /var/mobile/tmp\n";
+        }
         NSArray *list = rc_gestures_load();
         NSMutableArray *chosen = [NSMutableArray array];
         if (words.count > 3) {
@@ -1351,11 +1367,21 @@ NSString *RCGestureCommand(NSString *cmd) {
             for (NSInteger n = 2; rc_gesture_named(list, name); n++) name = [NSString stringWithFormat:@"%@ %ld", base, (long)n];
             NSMutableDictionary *g = [NSMutableDictionary dictionary];
             g[@"name"] = name;
-            double created = [entry[@"created"] doubleValue];
-            g[@"created"] = created > 0 ? [NSDate dateWithTimeIntervalSince1970:created] : [NSDate date];
-            g[@"duration"] = @([entry[@"duration"] doubleValue]);
-            g[@"strokes"] = @([entry[@"strokes"] integerValue]);
-            if ([entry[@"screen"] isKindOfClass:[NSArray class]]) g[@"screen"] = entry[@"screen"];
+            // Only numbers where numbers belong: anything else from the file is left out (a string
+            // or a list there would crash SpringBoard when it's read as a number)
+            id createdValue = entry[@"created"], durationValue = entry[@"duration"], strokesValue = entry[@"strokes"];
+            double created = [createdValue isKindOfClass:[NSNumber class]] ? [createdValue doubleValue] : 0;
+            g[@"created"] = created > 0 && isfinite(created) ? [NSDate dateWithTimeIntervalSince1970:created] : [NSDate date];
+            NSData *unpackedData = rc_gesture_unpack(frames, &count);
+            const RCGestureFrame *unpacked = unpackedData.bytes;
+            double duration = [durationValue isKindOfClass:[NSNumber class]] && isfinite([durationValue doubleValue]) ? [durationValue doubleValue] : (count ? unpacked[count - 1].t : 0);
+            g[@"duration"] = @(MIN(MAX(duration, 0), 3600));
+            g[@"strokes"] = [strokesValue isKindOfClass:[NSNumber class]] ? @([strokesValue integerValue]) : @(rc_gesture_stroke_count(unpacked, count));
+            NSArray *screen = entry[@"screen"];
+            if ([screen isKindOfClass:[NSArray class]] && screen.count == 2 && [screen[0] isKindOfClass:[NSNumber class]] && [screen[1] isKindOfClass:[NSNumber class]] &&
+                isfinite([screen[0] doubleValue]) && isfinite([screen[1] doubleValue]) && [screen[0] doubleValue] > 0 && [screen[1] doubleValue] > 0) {
+                g[@"screen"] = @[screen[0], screen[1]];
+            }
             g[@"frames"] = frames;
             [list addObject:g];
             added++;
