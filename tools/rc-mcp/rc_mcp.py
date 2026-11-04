@@ -131,7 +131,7 @@ class Watcher:
         self.last_asked = time.time()
         # Its own connection, not the shared one: stopping it then closes the session on the phone,
         # and rc-screen sees its reader gone and stops
-        args = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-o", "ServerAliveInterval=15",
+        args = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-o", "ServerAliveInterval=60",
                 "-o", "ControlMaster=no", "-o", "ControlPath=none"]
         key = os.environ.get("RC_SSH_KEY")
         if key:

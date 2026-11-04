@@ -47,6 +47,7 @@
 #import <signal.h>
 #import <poll.h>
 #import "../RCSpawn.h"
+#import <notify.h>
 
 extern char **environ;
 
@@ -780,14 +781,27 @@ static void rc_watch_report(RCWatchState *was, RCWatchState *now) {
     }
 }
 
+// Wakes the watcher: RemoteCompanion's tweak posts this on a touch, a button or an app coming
+// to the front; iOS posts the other when the screen goes dark or lights up
+static const char *kRCActivity = "com.goldenappleguy.rc.screen-activity";
+static const char *kRCBlanked = "com.apple.springboard.hasBlankedScreen";
+
 static int rc_watch(double interval, double duration) {
     NSDate *until = duration > 0 ? [NSDate dateWithTimeIntervalSinceNow:duration] : nil;
     RCWatchState *shown = nil;  // what was last reported
     NSString *last = nil;       // the previous read, to know when the screen has settled
-    // Quick while things change, slower once the screen has been still for a few reads (any
-    // change, or another app in front, makes it quick again)
-    int still = 0, reads = 0;
-    BOOL webSeen = YES;
+    // Reads follow activity, not a clock: after a touch, a button or an app switch, a short burst
+    // (until the screen settles, at least 2.5 s); then one every 15 s for changes nobody caused.
+    // Nothing while the screen is dark.
+    dispatch_semaphore_t wake = dispatch_semaphore_create(0);
+    __block volatile double activityAt = CFAbsoluteTimeGetCurrent();
+    int activityToken = 0, blankToken = 0;
+    dispatch_queue_t q = dispatch_get_global_queue(QOS_CLASS_UTILITY, 0);
+    notify_register_dispatch(kRCActivity, &activityToken, q, ^(int t) { activityAt = CFAbsoluteTimeGetCurrent(); dispatch_semaphore_signal(wake); });
+    notify_register_dispatch(kRCBlanked, &blankToken, q, ^(int t) { activityAt = CFAbsoluteTimeGetCurrent(); dispatch_semaphore_signal(wake); });
+    int reads = 0;
+    BOOL webSeen = YES, settled = NO;
+    double lastRead = 0;
     rc_watch_say(@"watching (a line per change; the outline when the app or page changes)");
     FILE *mark = fopen(kRCScreenWatching, "w");
     if (mark) { fprintf(mark, "%d\n", getpid()); fclose(mark); }
@@ -797,29 +811,46 @@ static int rc_watch(double interval, double duration) {
         // automation goes back off
         struct pollfd out = { .fd = STDOUT_FILENO, .events = 0 };
         if (getppid() == 1 || ferror(stdout) || (poll(&out, 1, 0) > 0 && (out.revents & (POLLHUP | POLLERR | POLLNVAL)))) break;
+        uint64_t blanked = 0;
+        notify_get_state(blankToken, &blanked);
+        double now = CFAbsoluteTimeGetCurrent();
+        BOOL busy = !settled || now - activityAt < 2.5;
+        if (blanked) {
+            // Dark: no reads; wake for the screen lighting up (or every 5 s to see if the reader left)
+            dispatch_semaphore_wait(wake, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)));
+            continue;
+        }
+        if (!busy && now - lastRead < 15) {
+            double left = MIN(15 - (now - lastRead), 5); // 5 s at most, to notice the reader leaving
+            dispatch_semaphore_wait(wake, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(left * NSEC_PER_SEC)));
+            continue;
+        }
         // On, in case something switched it off (apps opened meanwhile only answer while it's on);
         // every 10 s, since this process's own reading of the setting can be out of date
         static double lastOn = 0;
-        if (AXSSetAutomationEnabled && CFAbsoluteTimeGetCurrent() - lastOn > 10) {
+        if (AXSSetAutomationEnabled && now - lastOn > 10) {
             close(open(kRCScreenMarker, O_CREAT | O_WRONLY, 0666));
             AXSSetAutomationEnabled(1);
-            lastOn = CFAbsoluteTimeGetCurrent();
+            lastOn = now;
         }
         @autoreleasepool {
             // The page walk only when a page was there last time, or every 5th read to find a new one
             g_skipWeb = !webSeen && reads % 5 != 0;
             reads++;
-            RCWatchState *now = rc_watch_state();
-            if (!g_skipWeb) webSeen = [now.outline rangeOfString:@"\nweb page:"].location != NSNotFound;
-            if ([now.outline isEqualToString:last] && ![now.outline isEqualToString:shown.outline]) {
-                rc_watch_report(shown, now);
-                shown = now;
+            RCWatchState *nowState = rc_watch_state();
+            lastRead = CFAbsoluteTimeGetCurrent();
+            if (!g_skipWeb) webSeen = [nowState.outline rangeOfString:@"\nweb page:"].location != NSNotFound;
+            settled = [nowState.outline isEqualToString:last];
+            if (settled && ![nowState.outline isEqualToString:shown.outline]) {
+                rc_watch_report(shown, nowState);
+                shown = nowState;
             }
-            still = [now.outline isEqualToString:last] ? still + 1 : 0;
-            last = now.outline;
+            last = nowState.outline;
         }
-        [NSThread sleepForTimeInterval:still >= 4 ? MAX(interval, 2.0) : interval];
+        if (!settled || CFAbsoluteTimeGetCurrent() - activityAt < 2.5) [NSThread sleepForTimeInterval:interval];
     }
+    notify_cancel(activityToken);
+    notify_cancel(blankToken);
     unlink(kRCScreenWatching);
     return 0;
 }

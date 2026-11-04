@@ -2,6 +2,15 @@
 #import "RCSpawn.h"
 #import <UIKit/UIKit.h>
 #import <sys/stat.h>
+#import <notify.h>
+
+void RCScreenActivity(void) {
+    static volatile double last = 0;
+    double now = CFAbsoluteTimeGetCurrent();
+    if (now - last < 0.25) return;
+    last = now;
+    notify_post("com.goldenappleguy.rc.screen-activity");
+}
 
 // UIKit's own screen grab: the whole screen as SpringBoard shows it (main thread only)
 extern UIImage *_UICreateScreenUIImage(void) NS_RETURNS_RETAINED;

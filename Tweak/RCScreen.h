@@ -10,3 +10,7 @@ NSString *RCScreenCommand(NSString *cmd);
 
 // Whether an element on screen has this text in its label or value (case doesn't matter)
 BOOL RCScreenShowsText(NSString *text);
+
+// Something happened that may change the screen (a touch, a button, an app coming to the
+// front): tells rc-screen watch to look, so it doesn't have to keep checking. At most 4 a second.
+void RCScreenActivity(void);

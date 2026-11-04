@@ -14970,6 +14970,8 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
     // Before the exclusion check: a touch is a touch whatever app is in front
     if (IOHIDEventGetType(event) == 11) g_lastTouchAt = CFAbsoluteTimeGetCurrent(); // kIOHIDEventTypeDigitizer
     if (IOHIDEventGetType(event) == 11) RCGestureHIDEvent(event); // gestures: recording, and the touchscreen's sender ID
+    // A touch or a button: rc-screen watch looks at the screen then, not on a timer
+    if (IOHIDEventGetType(event) == 11 || IOHIDEventGetType(event) == 3) RCScreenActivity();
     if (RC_IsForegroundAppExcluded()) return;
     int type = IOHIDEventGetType(event);
     
@@ -17528,6 +17530,7 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
                     s_last_camera_app_trigger = [[NSDate date] timeIntervalSince1970];
                 }
                 SRLog(@"[AppLaunch] App became Active: %@", effectiveBundleId);
+                RCScreenActivity();
                 RCTKEvent(@"app.foreground", @{ @"bundle": effectiveBundleId ?: @"" });
                 RC_FireAppTriggers(@"app_launch_", effectiveBundleId);
             }
