@@ -53,6 +53,8 @@ if [ -z "$1" ]; then
     echo "  unlock [pin]      - Unlock the device screen"
     echo "  lock-toggle [pin] - Toggle device lock/unlock state"
     echo "  is-locked         - Check if device is locked"
+    echo "  autolock [30s|1m-5m|never|off|toggle|status] - Configure auto-lock timeout"
+    echo "  display sleep [30s|1m-5m|never|off] - Change when display goes to sleep"
     echo "  dnd on/off/debug   - Toggle Do Not Disturb or inspect state"
     echo "  audiomix on/off/toggle/status - Control AudioMix tweak"
     echo "  screenrecord [toggle|start|stop] - Control system screen recording"
@@ -130,7 +132,7 @@ else
     # Tunnel to the unix socket on the device
     # We try /var/jb/usr/bin/rc-client (rootless) then rootful path, then nc -U as final fallback
     REMOTE_CMD="echo -n '$_CMD' | /var/jb/usr/bin/rc-client 2>/dev/null || echo -n '$_CMD' | /usr/bin/rc-client 2>/dev/null || echo -n '$_CMD' | nc -U $SOCKET_PATH 2>/dev/null"
-    RESPONSE=$(ssh -o ConnectTimeout=3 -o StrictHostKeyChecking=no mobile@$IP "$REMOTE_CMD" 2>/dev/null)
+    RESPONSE=$(ssh -o ConnectTimeout=3 -o ServerAliveInterval=2 -o ServerAliveCountMax=2 -o StrictHostKeyChecking=no mobile@$IP "$REMOTE_CMD" 2>/dev/null)
 fi
 
 # Output handling

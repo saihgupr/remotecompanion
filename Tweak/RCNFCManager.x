@@ -8,6 +8,7 @@
 
 // Declare the external trigger function from Tweak.x
 extern void RCExecuteTrigger(NSString *triggerKey);
+extern void RCTriggerHapticFor(NSString *triggerKey);
 
 // Declare the external logging function from Tweak.x
 extern void SRLog(NSString *format, ...);
@@ -534,7 +535,7 @@ static NSString *sr_hexStringFromData(NSData *data) {
         dispatch_async(dispatch_get_main_queue(), ^{
             SRLog(@"Executing trigger: %@", triggerKey);
             // Haptic Feedback
-            AudioServicesPlaySystemSound(1520);
+            RCTriggerHapticFor(triggerKey);
             RCExecuteTrigger(triggerKey);
             
             if ([session isKindOfClass:[NFCTagReaderSession class]]) {
@@ -627,7 +628,7 @@ static NSString *sr_hexStringFromData(NSData *data) {
                     SRLog(@"[NFC] Same tag as a moment ago - not triggering again");
                 } else {
                     // Haptic Feedback
-                    AudioServicesPlaySystemSound(1520);
+                    RCTriggerHapticFor(triggerKey);
                     RCExecuteTrigger(triggerKey);
                 }
                 self.endedEarly = 0;
@@ -782,8 +783,9 @@ static void rcnfc_backgroundTag(uint64_t state) {
         return;
     }
     SRLog(@"[NFC] Tag %@ read by iOS (Experimental NFC)", uid);
-    AudioServicesPlaySystemSound(1520);
-    RCExecuteTrigger([@"nfc_" stringByAppendingString:uid]);
+    NSString *nfcTriggerKey = [@"nfc_" stringByAppendingString:uid];
+    RCTriggerHapticFor(nfcTriggerKey);
+    RCExecuteTrigger(nfcTriggerKey);
 }
 
 %ctor {

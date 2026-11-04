@@ -921,21 +921,67 @@ static id g_actionClipboard = nil;
     self.moreButton.menu = [self moreMenu];
 }
 
+- (BOOL)isHapticsEnabledForTrigger {
+    return [[RCConfigManager sharedManager] isHapticsEnabledForTrigger:_triggerKey];
+}
+
+- (void)setHapticsEnabledForTrigger:(BOOL)enabled {
+    [[RCConfigManager sharedManager] setHapticsEnabled:enabled forTrigger:_triggerKey];
+    self.moreButton.menu = [self moreMenu];
+}
+
+- (BOOL)isToastsEnabledForTrigger {
+    return [[RCConfigManager sharedManager] isToastsEnabledForTrigger:_triggerKey];
+}
+
+- (void)setToastsEnabledForTrigger:(BOOL)enabled {
+    [[RCConfigManager sharedManager] setToastsEnabled:enabled forTrigger:_triggerKey];
+    self.moreButton.menu = [self moreMenu];
+}
+
+- (void)presentWhenTriggeredAgainPicker {
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"When Triggered Again"
+        message:@"Choose what happens if this trigger fires while its actions are still running."
+        preferredStyle:UIAlertControllerStyleActionSheet];
+    NSString *current = [self runMode];
+    NSArray *choices = @[
+        @[@"parallel", @"Run Alongside"],
+        @[@"restart", @"Restart"],
+        @[@"single", @"Ignore"]
+    ];
+    __weak typeof(self) weakSelf = self;
+    for (NSArray *choice in choices) {
+        BOOL isCurrent = [choice[0] isEqualToString:current];
+        NSString *title = isCurrent ? [NSString stringWithFormat:@"%@ \u2713", choice[1]] : choice[1];
+        [sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+            [weakSelf setRunMode:choice[0]];
+        }]];
+    }
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    sheet.popoverPresentationController.barButtonItem = self.moreButton ?: self.navigationItem.rightBarButtonItems.firstObject;
+    [self presentViewController:sheet animated:YES completion:nil];
+}
+
 - (UIMenu *)moreMenu {
     __weak typeof(self) weakSelf = self;
-    NSMutableArray *modes = [NSMutableArray array];
     NSString *current = [self runMode];
-    NSArray *choices = @[@[@"parallel", @"Run Alongside", @"square.stack"], @[@"restart", @"Restart", @"arrow.counterclockwise"], @[@"single", @"Ignore", @"nosign"]];
-    for (NSArray *choice in choices) {
-        UIAction *action = [UIAction actionWithTitle:choice[1] image:[UIImage systemImageNamed:choice[2]] identifier:nil handler:^(__kindof UIAction *a) {
-            [weakSelf setRunMode:choice[0]];
-        }];
-        action.state = [current isEqualToString:choice[0]] ? UIMenuElementStateOn : UIMenuElementStateOff;
-        [modes addObject:action];
+    NSString *currentTitle = @"Run Alongside";
+    if ([current isEqualToString:@"restart"]) {
+        currentTitle = @"Restart";
+    } else if ([current isEqualToString:@"single"]) {
+        currentTitle = @"Ignore";
     }
-    UIMenu *whenFired = [UIMenu menuWithTitle:@"When Triggered Again" image:[UIImage systemImageNamed:@"repeat"] identifier:nil options:0 children:modes];
 
-    NSMutableArray *menuActions = [NSMutableArray arrayWithObject:whenFired];
+    NSString *displayTitle = [NSString stringWithFormat:@"When Triggered: %@", currentTitle];
+    UIAction *whenFiredAction = [UIAction actionWithTitle:displayTitle image:[UIImage systemImageNamed:@"repeat"] identifier:nil handler:^(__kindof UIAction *a) {
+        [weakSelf presentWhenTriggeredAgainPicker];
+    }];
+    if (@available(iOS 15.0, *)) {
+        whenFiredAction.title = @"When Triggered Again";
+        whenFiredAction.subtitle = currentTitle;
+    }
+
+    NSMutableArray *menuActions = [NSMutableArray arrayWithObject:whenFiredAction];
     // Triggers that take over what iOS normally does can keep it as well: the ping sound, and with a
     // Home button the Accessibility Shortcut, App Switcher, Siri and screenshot, otherwise Siri, the
     // Accessibility Shortcut, a screenshot and Wallet
@@ -950,6 +996,22 @@ static id g_actionClipboard = nil;
         sound.state = keep ? UIMenuElementStateOn : UIMenuElementStateOff;
         [menuActions addObject:sound];
     }
+    BOOL hapticsOn = [self isHapticsEnabledForTrigger];
+    UIImage *hapticImg = [UIImage systemImageNamed:@"iphone.radiowaves.left.and.right"] ?: [UIImage systemImageNamed:@"waveform"];
+    UIAction *hapticAction = [UIAction actionWithTitle:@"Haptic Feedback" image:hapticImg identifier:nil handler:^(__kindof UIAction *a) {
+        [weakSelf setHapticsEnabledForTrigger:!hapticsOn];
+    }];
+    hapticAction.state = hapticsOn ? UIMenuElementStateOn : UIMenuElementStateOff;
+    [menuActions addObject:hapticAction];
+
+    BOOL toastsOn = [self isToastsEnabledForTrigger];
+    UIImage *toastImg = [UIImage systemImageNamed:@"text.bubble"] ?: [UIImage systemImageNamed:@"capsule"];
+    UIAction *toastAction = [UIAction actionWithTitle:@"Toast Notifications" image:toastImg identifier:nil handler:^(__kindof UIAction *a) {
+        [weakSelf setToastsEnabledForTrigger:!toastsOn];
+    }];
+    toastAction.state = toastsOn ? UIMenuElementStateOn : UIMenuElementStateOff;
+    [menuActions addObject:toastAction];
+
     [menuActions addObject:[UIAction actionWithTitle:@"Import Actions" image:[UIImage systemImageNamed:@"square.and.arrow.down"] identifier:nil handler:^(__kindof UIAction *a) {
         [weakSelf importActions];
     }]];
@@ -2453,7 +2515,16 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     if (indexPath) {
         id item = self.actions[indexPath.row];
         BOOL isDisabled = [[RCConfigManager sharedManager] isActionDisabled:item];
-        
+
+        // Run Action option (mirrors web UI "Run Action Now": single action only, runs regardless of disabled state;
+        // hidden for non-executable structural rows like If/Else/EndIf that carry no command string)
+        NSString *runCmdStr = [item isKindOfClass:[NSDictionary class]] ? ((NSDictionary *)item)[@"command"] : item;
+        if ([runCmdStr isKindOfClass:[NSString class]] && runCmdStr.length > 0) {
+            [alert addAction:[UIAlertAction actionWithTitle:@"Run Action" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+                [[RCServerClient sharedClient] executeCommand:runCmdStr completion:^(NSString * _Nullable output, NSError * _Nullable error) {}];
+            }]];
+        }
+
         // Disable / Enable option
         NSString *toggleTitle = isDisabled ? @"Enable Action" : @"Disable Action";
         [alert addAction:[UIAlertAction actionWithTitle:toggleTitle style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
@@ -3489,6 +3560,9 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         banner.autoresizingMask = UIViewAutoresizingFlexibleWidth;
         banner.backgroundColor = [UIColor tertiarySystemFillColor];
         banner.layer.cornerRadius = 10;
+        banner.userInteractionEnabled = YES;
+        UITapGestureRecognizer *bannerTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(presentWhenTriggeredAgainPicker)];
+        [banner addGestureRecognizer:bannerTap];
         BOOL restart = [[self runMode] isEqualToString:@"restart"];
         UIImageView *icon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:restart ? @"arrow.counterclockwise" : @"nosign"]];
         icon.tintColor = [UIColor secondaryLabelColor];

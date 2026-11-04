@@ -180,7 +180,7 @@
             @{ @"name": @"Do Not Disturb", @"command": @"dnd toggle", @"icon": @"moon.circle.fill" },
             @{ @"name": @"Set Focus...", @"command": @"__FOCUS__", @"icon": @"moon.circle" },
             @{ @"name": @"Low Power Mode", @"command": @"low power toggle", @"icon": @"battery.25" },
-            @{ @"name": @"Auto-Lock", @"command": @"autolock toggle", @"icon": @"timer" },
+            @{ @"name": @"Auto-Lock (Display Sleep)", @"command": @"autolock toggle", @"icon": @"timer", @"keywords": @"display sleep timeout time off screen autolock" },
             @{ @"name": @"NFC Scanner", @"command": @"nfc scanner toggle", @"icon": @"wave.3.right" },
             @{ @"name": @"Button Triggers", @"command": @"button triggers pause 15", @"icon": @"pause.circle" }
         ],
@@ -1005,7 +1005,7 @@
             }
         }
         
-        NSPredicate *pred = [NSPredicate predicateWithFormat:@"name CONTAINS[cd] %@ OR command CONTAINS[cd] %@", text, text];
+        NSPredicate *pred = [NSPredicate predicateWithFormat:@"name CONTAINS[cd] %@ OR command CONTAINS[cd] %@ OR (keywords != nil AND keywords CONTAINS[cd] %@)", text, text, text];
         self.filteredActions = [allActions filteredArrayUsingPredicate:pred];
     }
     [self.tableView reloadData];

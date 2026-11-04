@@ -10,6 +10,8 @@
 @property (nonatomic, copy) NSString *webUIAccess;
 // Wi-Fi network names the Web UI can be reached on when webUIAccess is @"networks"
 @property (nonatomic, copy) NSArray<NSString *> *webUINetworks;
+// Optional API token for Web UI / remote HTTP access to privileged actions (root, sudo, exec)
+@property (nonatomic, copy) NSString *webUIApiToken;
 // Hold lists (and row swipe actions) still while a status bar, bottom bar,
 // or edge swipe gesture is being executed. Off by default.
 @property (nonatomic, assign) BOOL freezeListsDuringGestures;
@@ -79,6 +81,11 @@
 - (NSDictionary *)triggerDataForKey:(NSString *)triggerKey;
 - (void)updateTrigger:(NSString *)triggerKey withData:(NSDictionary *)data;
 - (void)removeTrigger:(NSString *)triggerKey;
++ (BOOL)defaultHapticsForTrigger:(NSString *)triggerKey;
+- (BOOL)isHapticsEnabledForTrigger:(NSString *)triggerKey;
+- (void)setHapticsEnabled:(BOOL)enabled forTrigger:(NSString *)triggerKey;
+- (BOOL)isToastsEnabledForTrigger:(NSString *)triggerKey;
+- (void)setToastsEnabled:(BOOL)enabled forTrigger:(NSString *)triggerKey;
 
 // Saves an App Launch ("app_launch_") or App Exit ("app_exit_") trigger for these apps and
 // returns its key, which is the first app's. The actions of the trigger it replaces (oldKey),
@@ -121,6 +128,9 @@
 - (void)registerKMMacroName:(NSString *)name forUid:(NSString *)uid;
 - (void)registerKMMacroNamesBatch:(NSDictionary<NSString *, NSString *> *)map;
 - (NSString *)nameForKMMacroUid:(NSString *)uid;
+
+// API Token Generation
+- (NSString *)generateRandomApiToken;
 
 // Backup/Restore
 - (NSData *)exportConfigAsJSON;

@@ -41,6 +41,7 @@
 
 @class SBProximitySensorManager;
 
+void RCTriggerHapticFor(NSString *triggerKey);
 static void trigger_haptic();
 static void toggle_system_vibration(BOOL silentMode, BOOL enable);
 static BOOL get_system_vibration(BOOL silentMode);
@@ -1124,6 +1125,12 @@ static NSArray<NSString *> *rc_parse_quoted_arguments(NSString *argString) {
 // whatever is underneath (the test kit's prompts, which sit over the status bar while the
 // status-bar gestures are being tested).
 static void rc_show_hud_toast_ex(NSString *title, NSString *subtitle, NSString *iconSymbol, NSTimeInterval hold, BOOL passThrough) {
+    if (!passThrough) {
+        if ([[NSThread currentThread].threadDictionary[@"rcRunToastsDisabled"] boolValue]) {
+            SRLog(@"[Toast] Suppressed: toasts disabled for this trigger sequence");
+            return;
+        }
+    }
     dispatch_async(dispatch_get_main_queue(), ^{
         if (g_rcHUDWindow) {
             [g_rcHUDWindow.layer removeAllAnimations];
@@ -2775,7 +2782,7 @@ static void rc_banner_show_toggle_state(NSString *cmd, NSString *title, NSString
             @{ @"key": @"screenrecord", @"prefixes": @[@"screenrecord "], @"status": @"screenrecord status", @"cond": @"screenrecord" },
             @{ @"key": @"silent_vibration", @"prefixes": @[@"vibration silent-"], @"status": @"vibration silent-status" },
             @{ @"key": @"ring_vibration", @"prefixes": @[@"vibration ring-"], @"status": @"vibration ring-status" },
-            @{ @"key": @"autolock", @"prefixes": @[@"autolock ", @"auto-lock "], @"status": @"autolock status" },
+            @{ @"key": @"autolock", @"prefixes": @[@"autolock ", @"auto-lock ", @"display sleep ", @"display-sleep ", @"display timeout ", @"display time off "], @"status": @"autolock status" },
             @{ @"key": @"haptics", @"prefixes": @[@"haptics "], @"words": @{ @"always": @"Always Play", @"silent-only": @"Play in Silent Mode",
                                                                          @"ring-only": @"Don't Play in Silent Mode", @"never": @"Never Play" } },
             @{ @"key": @"anc", @"prefixes": @[@"anc "], @"words": @{ @"on": @"Noise Cancellation", @"nc": @"Noise Cancellation", @"transparency": @"Transparency",
@@ -2995,6 +3002,62 @@ static BOOL rc_web_client_allowed(const struct sockaddr_storage *addr) {
     return wifi && [networks isKindOfClass:[NSArray class]] && [networks containsObject:wifi];
 }
 
+static BOOL rc_is_privileged_command(NSString *cmd) {
+    if (!cmd || ![cmd isKindOfClass:[NSString class]]) return NO;
+    NSString *trimmed = [cmd stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    return [trimmed hasPrefix:@"root "] || [trimmed isEqualToString:@"root"] ||
+           [trimmed hasPrefix:@"sudo "] || [trimmed isEqualToString:@"sudo"] ||
+           [trimmed hasPrefix:@"exec "] || [trimmed isEqualToString:@"exec"];
+}
+
+static BOOL rc_is_api_token_valid(NSString *providedToken) {
+    load_trigger_config();
+    NSString *expectedToken = g_triggerConfig[@"webUIApiToken"];
+    if (!expectedToken || ![expectedToken isKindOfClass:[NSString class]] || expectedToken.length == 0) {
+        return NO; // No token configured -> remote privileged execution disabled
+    }
+    if (!providedToken || ![providedToken isKindOfClass:[NSString class]] || providedToken.length == 0) {
+        return NO;
+    }
+    NSString *trimmedProvided = [providedToken stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    NSString *trimmedExpected = [expectedToken stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (trimmedExpected.length == 0 || trimmedProvided.length == 0) {
+        return NO;
+    }
+    if (trimmedProvided.length != trimmedExpected.length) return NO;
+    const char *a = [trimmedProvided UTF8String];
+    const char *b = [trimmedExpected UTF8String];
+    volatile unsigned char diff = 0;
+    for (NSUInteger i = 0; i < trimmedProvided.length; i++) diff |= a[i] ^ b[i];
+    return diff == 0;
+}
+
+static NSString *rc_extract_token_from_headers(NSString *requestHeaders) {
+    if (!requestHeaders || ![requestHeaders isKindOfClass:[NSString class]]) return nil;
+    NSArray *lines = [requestHeaders componentsSeparatedByString:@"\r\n"];
+    for (NSUInteger i = 1; i < lines.count; i++) {
+        NSString *line = lines[i];
+        if (line.length == 0) break; // End of HTTP headers
+        
+        NSRange colonRange = [line rangeOfString:@":"];
+        if (colonRange.location == NSNotFound) continue;
+        
+        NSString *headerName = [[line substringToIndex:colonRange.location] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        NSString *headerValue = [[line substringFromIndex:colonRange.location + 1] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        
+        if ([headerName caseInsensitiveCompare:@"Authorization"] == NSOrderedSame) {
+            if ([headerValue.lowercaseString hasPrefix:@"bearer "]) {
+                NSString *token = [[headerValue substringFromIndex:7] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+                if (token.length > 0) return token;
+            }
+        } else if ([headerName caseInsensitiveCompare:@"X-API-Key"] == NSOrderedSame) {
+            NSString *token = [headerValue stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            if (token.length > 0) return token;
+        }
+    }
+    return nil;
+}
+
 // A trigger's runs. Each firing runs the actions on a thread of its own; a run carries its
 // trigger's generation and stops (before its next step, or out of a wait) once that changes - when
 // the trigger is fired again in Restart mode, or stopped by a "stop trigger" action.
@@ -3048,9 +3111,36 @@ static BOOL rc_run_wait(double seconds) {
     return !rc_run_stopped();
 }
 
+static BOOL RC_IsToastsEnabledForTrigger(NSString *triggerKey) {
+    if (!triggerKey.length) return YES;
+    NSString *cleanKey = triggerKey;
+    if ([cleanKey hasPrefix:@"SIMULATE:"]) cleanKey = [cleanKey substringFromIndex:9];
+    if (!g_triggerConfig) load_trigger_config();
+    if (g_triggerConfig) {
+        NSDictionary *triggers = g_triggerConfig[@"triggers"];
+        if ([triggers isKindOfClass:[NSDictionary class]]) {
+            NSDictionary *trigger = triggers[cleanKey];
+            if ([trigger isKindOfClass:[NSDictionary class]]) {
+                id val = trigger[@"toasts"];
+                if (val != nil && [val respondsToSelector:@selector(boolValue)]) {
+                    return [val boolValue];
+                }
+            }
+        }
+    }
+    return YES;
+}
+
 static void rc_execute_action_sequence(NSArray *actions, NSString *triggerKey, BOOL simulationMode) {
     if (![actions isKindOfClass:[NSArray class]] || actions.count == 0) return;
     
+    BOOL toastsEnabled = RC_IsToastsEnabledForTrigger(triggerKey);
+    NSMutableDictionary *threadDict = [NSThread currentThread].threadDictionary;
+    BOOL previouslyDisabled = [threadDict[@"rcRunToastsDisabled"] boolValue];
+    if (!toastsEnabled) {
+        threadDict[@"rcRunToastsDisabled"] = @YES;
+    }
+
     for (NSInteger idx = 0; idx < (NSInteger)actions.count; idx++) {
         id actionItem = actions[idx];
 
@@ -3069,7 +3159,9 @@ static void rc_execute_action_sequence(NSArray *actions, NSString *triggerKey, B
             SRLogMin(@"[%@] -> %@", triggerKey, action);
             RCTKEvent(@"action", @{ @"trigger": triggerKey ?: @"", @"command": action });
             handle_command(action);
-            rc_maybe_show_action_banner(action);
+            if (toastsEnabled) {
+                rc_maybe_show_action_banner(action);
+            }
             usleep(simulationMode ? 50000 : 10000);
             continue;
         }
@@ -3148,6 +3240,9 @@ static void rc_execute_action_sequence(NSArray *actions, NSString *triggerKey, B
         } else {
             SRLog(@"[%@] Skipping unsupported dictionary action type: %@", triggerKey, type);
         }
+    }
+    if (!toastsEnabled && !previouslyDisabled) {
+        [threadDict removeObjectForKey:@"rcRunToastsDisabled"];
     }
 }
 
@@ -3321,6 +3416,7 @@ void RCExecuteTrigger(NSString *triggerKey) {
     
     SRLogMin(@"TRIGGER FIRED: '%@' -> Executing %lu actions", triggerKey, (unsigned long)actions.count);
     RCTKEvent(@"trigger.fired", @{ @"key": triggerKey, @"actions": @(actions.count) });
+    RCTriggerHapticFor(triggerKey);
     
     // Execute on background queue to allow for delays and blocking operations
     // Fired again while a run is going: "parallel" (the default) runs alongside, "restart" stops the
@@ -3351,8 +3447,11 @@ void RCExecuteTrigger(NSString *triggerKey) {
         thread[@"rcRunKey"] = triggerKey;
         thread[@"rcRunGeneration"] = generation;
         thread[@"rcRunWait"] = wait;
+        if (!RC_IsToastsEnabledForTrigger(triggerKey)) {
+            thread[@"rcRunToastsDisabled"] = @YES;
+        }
         rc_execute_action_sequence(actions, triggerKey, NO);
-        [thread removeObjectsForKeys:@[@"rcRunKey", @"rcRunGeneration", @"rcRunWait"]];
+        [thread removeObjectsForKeys:@[@"rcRunKey", @"rcRunGeneration", @"rcRunWait", @"rcRunToastsDisabled"]];
         @synchronized (rc_run_lock()) {
             [g_runWaits[triggerKey] removeObject:wait];
             NSUInteger left = g_runCount[triggerKey].unsignedIntegerValue;
@@ -6786,13 +6885,14 @@ static NSString *rc_execute_km_command(NSString *cmdArgs) {
         sessionConfig.timeoutIntervalForRequest = 10.0;
         sessionConfig.timeoutIntervalForResource = 10.0;
         NSURLSession *session = [NSURLSession sessionWithConfiguration:sessionConfig delegate:[RCInsecureSessionDelegate sharedDelegate] delegateQueue:nil];
+        BOOL kmToastsDisabled = [[NSThread currentThread].threadDictionary[@"rcRunToastsDisabled"] boolValue];
         [[session dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *err) {
             if (err) {
                 respMsg = [NSString stringWithFormat:@"Error: %@\n", err.localizedDescription];
             } else {
                 NSHTTPURLResponse *http = (NSHTTPURLResponse *)resp;
                 if (http.statusCode >= 200 && http.statusCode < 400) {
-                    if (rc_own_banner_enabled(@"__KM_TRIGGER__")) rc_show_hud_toast(@"Keyboard Maestro", @"Triggered URL Macro", @"command");
+                    if (!kmToastsDisabled && rc_own_banner_enabled(@"__KM_TRIGGER__")) rc_show_hud_toast(@"Keyboard Maestro", @"Triggered URL Macro", @"command");
                     respMsg = [NSString stringWithFormat:@"Keyboard Maestro trigger succeeded (HTTP %ld)\n", (long)http.statusCode];
                 } else if (http.statusCode == 401) {
                     respMsg = @"Keyboard Maestro error (HTTP 401: Unauthorized - Check Username/Password)\n";
@@ -7839,10 +7939,10 @@ static NSString *rc_autolock_label(int seconds) {
     return [NSString stringWithFormat:@"%d Seconds", seconds];
 }
 
-// "30s", "30 sec", "2m", "2 min", "120", "never" -> seconds; -1 if unrecognized
+// "30s", "30 sec", "2m", "2 min", "120", "never", "off" -> seconds; -1 if unrecognized
 static int rc_autolock_parse(NSString *arg) {
     NSString *a = [[arg lowercaseString] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    if ([a isEqualToString:@"never"]) return kRCAutoLockNever;
+    if ([a isEqualToString:@"never"] || [a isEqualToString:@"off"] || [a isEqualToString:@"disable"] || [a isEqualToString:@"disabled"]) return kRCAutoLockNever;
     NSScanner *scanner = [NSScanner scannerWithString:a];
     int n = 0;
     if (![scanner scanInt:&n] || n <= 0) return -1;
@@ -7878,7 +7978,7 @@ static NSString *rc_handle_autolock(NSString *arg) {
         }
     } else {
         target = rc_autolock_parse(a);
-        if (target < 0) return [NSString stringWithFormat:@"Error: unknown Auto-Lock value '%@' (use 30s, 1m-5m, never, toggle or status)\n", arg];
+        if (target < 0) return [NSString stringWithFormat:@"Error: unknown Auto-Lock value '%@' (use 30s, 1m-5m, never, off, toggle or status)\n", arg];
     }
 
     [mc setValue:@(target) forSetting:@"maxInactivity"];
@@ -7946,8 +8046,36 @@ static NSString *handle_command(NSString *cmd) {
         return nil;
     } else if ([cleanCmd isEqualToString:@"testkit"] || [cleanCmd hasPrefix:@"testkit "]) {
         return RCTKHandleCommand([cleanCmd substringFromIndex:7]);
-    } else if ([[cleanCmd lowercaseString] hasPrefix:@"autolock "] || [[cleanCmd lowercaseString] hasPrefix:@"auto-lock "]) {
-        return rc_handle_autolock([cleanCmd substringFromIndex:[cleanCmd rangeOfString:@" "].location + 1]);
+    } else if ([[cleanCmd lowercaseString] hasPrefix:@"autolock"] ||
+               [[cleanCmd lowercaseString] hasPrefix:@"auto-lock"] ||
+               [[cleanCmd lowercaseString] hasPrefix:@"display sleep"] ||
+               [[cleanCmd lowercaseString] hasPrefix:@"display-sleep"] ||
+               [[cleanCmd lowercaseString] hasPrefix:@"display time off"] ||
+               [[cleanCmd lowercaseString] hasPrefix:@"display-time-off"] ||
+               [[cleanCmd lowercaseString] hasPrefix:@"display timeout"] ||
+               [[cleanCmd lowercaseString] hasPrefix:@"display-timeout"]) {
+        NSString *sub = nil;
+        NSString *lower = [cleanCmd lowercaseString];
+        NSArray *prefixes = @[
+            @"display time off ", @"display-time-off ",
+            @"display timeout ", @"display-timeout ",
+            @"display sleep ", @"display-sleep ",
+            @"auto-lock ", @"autolock "
+        ];
+        for (NSString *p in prefixes) {
+            if ([lower hasPrefix:p]) {
+                sub = [cleanCmd substringFromIndex:p.length];
+                break;
+            }
+        }
+        if (!sub) {
+            if ([lower isEqualToString:@"display time off"] || [lower isEqualToString:@"display-time-off"]) {
+                sub = @"never";
+            } else {
+                sub = @"status";
+            }
+        }
+        return rc_handle_autolock(sub);
     } else if ([cleanCmd isEqualToString:@"proximity"] || [cleanCmd hasPrefix:@"proximity "]) {
         NSString *sub = nil;
         if ([cleanCmd hasPrefix:@"proximity "]) {
@@ -9703,6 +9831,10 @@ static NSString *handle_command(NSString *cmd) {
     } else if ([cleanCmd isEqualToString:@"wifi-on"] || [cleanCmd isEqualToString:@"wi-on"] || [cleanCmd isEqualToString:@"wifi on"]) {
         SBWiFiManager *manager = [objc_getClass("SBWiFiManager") sharedInstance];
         if (manager) {
+            BOOL cur = [manager wiFiEnabled];
+            if (cur) {
+                return @"WiFi Already ON\n";
+            }
             [manager setWiFiEnabled:YES];
             SRLog(@"WiFi enabled");
             return @"WiFi Enabled\n";
@@ -9718,8 +9850,17 @@ static NSString *handle_command(NSString *cmd) {
     } else if ([cleanCmd isEqualToString:@"wifi-off"] || [cleanCmd isEqualToString:@"wi-off"] || [cleanCmd isEqualToString:@"wifi off"]) {
         SBWiFiManager *manager = [objc_getClass("SBWiFiManager") sharedInstance];
         if (manager) {
-            [manager setWiFiEnabled:NO];
-            SRLog(@"WiFi disabled");
+            BOOL cur = [manager wiFiEnabled];
+            if (!cur) {
+                return @"WiFi Already OFF\n";
+            }
+            // Defer the actual shutoff so the response is written + the socket
+            // closed while WiFi is still up (remote `rc wifi off` over WiFi SSH
+            // would otherwise kill its own transport before the reply arrives).
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                [manager setWiFiEnabled:NO];
+                SRLog(@"WiFi disabled");
+            });
             return @"WiFi Disabled\n";
         }
         return @"Error: SBWiFiManager not found\n";
@@ -9727,8 +9868,16 @@ static NSString *handle_command(NSString *cmd) {
         SBWiFiManager *manager = [objc_getClass("SBWiFiManager") sharedInstance];
         if (manager) {
             BOOL current = [manager wiFiEnabled];
-            [manager setWiFiEnabled:!current];
-            SRLog(@"WiFi toggled: %d -> %d", current, !current);
+            if (current) {
+                // Turning OFF: same deferred-shutoff treatment as `wifi off`.
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                    [manager setWiFiEnabled:NO];
+                    SRLog(@"WiFi toggled: %d -> %d", current, !current);
+                });
+            } else {
+                [manager setWiFiEnabled:!current];
+                SRLog(@"WiFi toggled: %d -> %d", current, !current);
+            }
             return [NSString stringWithFormat:@"WiFi Toggled: %@\n", !current ? @"ON" : @"OFF"];
         }
         return @"Error: SBWiFiManager not found\n";
@@ -10567,8 +10716,41 @@ static NSString *handle_command(NSString *cmd) {
         } else if ([sub isEqualToString:@"wifi"]) {
             // The Wi-Fi network this iPhone is on, for adding it as a trusted network
             return [NSString stringWithFormat:@"%@\n", rc_current_wifi_name() ?: @""];
+        } else if ([sub isEqualToString:@"token"] || [sub isEqualToString:@"token get"]) {
+            NSString *token = mConfig[@"webUIApiToken"];
+            if (token && [token isKindOfClass:[NSString class]] && token.length > 0) return [NSString stringWithFormat:@"Web UI API Token: %@\n", token];
+            return @"No API token configured\n";
+        } else if ([sub hasPrefix:@"token set "]) {
+            NSString *newTok = [[sub substringFromIndex:10] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            if (newTok.length > 0) {
+                mConfig[@"webUIApiToken"] = newTok;
+                rc_set_trigger_config([mConfig copy]);
+                save_trigger_config();
+                return [NSString stringWithFormat:@"Web UI API Token set to: %@\n", newTok];
+            } else {
+                [mConfig removeObjectForKey:@"webUIApiToken"];
+                rc_set_trigger_config([mConfig copy]);
+                save_trigger_config();
+                return @"Web UI API Token cleared\n";
+            }
+        } else if ([sub isEqualToString:@"token clear"]) {
+            [mConfig removeObjectForKey:@"webUIApiToken"];
+            rc_set_trigger_config([mConfig copy]);
+            save_trigger_config();
+            return @"Web UI API Token cleared\n";
+        } else if ([sub isEqualToString:@"token generate"]) {
+            uint8_t randomBytes[16];
+            arc4random_buf(randomBytes, sizeof(randomBytes));
+            NSMutableString *token = [NSMutableString stringWithCapacity:sizeof(randomBytes) * 2];
+            for (NSUInteger i = 0; i < sizeof(randomBytes); i++) {
+                [token appendFormat:@"%02x", randomBytes[i]];
+            }
+            mConfig[@"webUIApiToken"] = [token copy];
+            rc_set_trigger_config([mConfig copy]);
+            save_trigger_config();
+            return [NSString stringWithFormat:@"Generated Web UI API Token: %@\n", token];
         }
-        return @"Usage: rc webui <on|off|status|access any|access networks|access local|wifi>\n";
+        return @"Usage: rc webui <on|off|status|access any|access networks|access local|wifi|token [get|set <tok>|generate|clear]>\n";
     } else if ([cleanCmd isEqualToString:@"respring"]) {
         SRLog(@"Triggering Respring");
         
@@ -11057,7 +11239,7 @@ static void start_web_server() {
                             NSString *path = requestLine[1];
                             
                             // CORS headers
-                            NSString *cors = @"Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\n";
+                            NSString *cors = @"Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization, X-API-Key\r\n";
                             NSString *responseString = [NSString stringWithFormat:@"HTTP/1.1 404 Not Found\r\n%@Content-Length: 9\r\n\r\nNot Found", cors];
                             
                             if ([method isEqualToString:@"OPTIONS"]) {
@@ -11741,7 +11923,11 @@ static void start_web_server() {
                                     responseString = [NSString stringWithFormat:@"HTTP/1.1 403 Forbidden\r\n%@Content-Length: 17\r\n\r\nWeb UI is disabled", cors];
                                 } else {
                                     __block NSString *command = nil;
-                                    
+                                    NSString *clientToken = nil;
+
+                                    // Extract Token from Headers
+                                    clientToken = rc_extract_token_from_headers(requestString);
+
                                     // 1. Try Query Parameters (Allow for both GET and POST)
                                     NSRange qMarkRange = [path rangeOfString:@"?"];
                                     if (qMarkRange.location != NSNotFound) {
@@ -11752,15 +11938,19 @@ static void start_web_server() {
                                             if (kv.count == 2) {
                                                 NSString *key = [kv[0] lowercaseString];
                                                 if ([key isEqualToString:@"cmd"] || [key isEqualToString:@"command"]) {
-                                                    command = [kv[1] stringByRemovingPercentEncoding];
-                                                    break;
+                                                    NSString *val = [kv[1] stringByReplacingOccurrencesOfString:@"+" withString:@" "];
+                                                    command = [val stringByRemovingPercentEncoding];
+                                                } else if ([key isEqualToString:@"token"] || [key isEqualToString:@"key"]) {
+                                                    if (!clientToken || clientToken.length == 0) {
+                                                        clientToken = [kv[1] stringByRemovingPercentEncoding];
+                                                    }
                                                 }
                                             }
                                         }
                                     }
 
-                                    // 2. If no query param found, and it's a POST, check the body
-                                    if (!command && [method isEqualToString:@"POST"]) {
+                                    // 2. If it's a POST, check the body
+                                    if ([method isEqualToString:@"POST"]) {
                                         NSRange clRange = [requestString rangeOfString:@"Content-Length: " options:NSCaseInsensitiveSearch];
                                         int contentLength = 0;
                                         if (clRange.location != NSNotFound) {
@@ -11790,8 +11980,14 @@ static void start_web_server() {
                                             if (bodyText.length > 0) {
                                                 if ([bodyText hasPrefix:@"{"]) {
                                                     NSDictionary *json = [NSJSONSerialization JSONObjectWithData:bodyData options:0 error:nil];
-                                                    if (json && json[@"command"]) command = json[@"command"];
-                                                } else {
+                                                    if (json && [json isKindOfClass:[NSDictionary class]]) {
+                                                        if (!command && json[@"command"]) command = json[@"command"];
+                                                        if (!clientToken || clientToken.length == 0) {
+                                                            if (json[@"token"]) clientToken = json[@"token"];
+                                                            else if (json[@"key"]) clientToken = json[@"key"];
+                                                        }
+                                                    }
+                                                } else if (!command) {
                                                     command = [bodyText stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
                                                 }
                                             }
@@ -11799,22 +11995,30 @@ static void start_web_server() {
                                     }
 
                                     if (command && command.length > 0) {
-                                        // Action commands use async to avoid SpringBoard deadlocks
-                                        dispatch_async(dispatch_get_main_queue(), ^{
-                                            handle_command(command);
-                                        });
-                                        NSString *safeCommand = command;
-                                        if ([command hasPrefix:@"unlock "]) {
-                                            safeCommand = @"unlock ****";
-                                        } else if ([command hasPrefix:@"lock-toggle "] || [command hasPrefix:@"lock toggle "]) {
-                                            safeCommand = @"lock-toggle ****";
-                                        } else if ([command hasPrefix:@"testkit passcode/set"]) {
-                                            safeCommand = @"testkit passcode/set (redacted)";
+                                        BOOL isLocal = RCCommandFromLocalSocket();
+                                        BOOL isPrivileged = rc_is_privileged_command(command);
+                                        if (!isLocal && isPrivileged && !rc_is_api_token_valid(clientToken)) {
+                                            NSString *errJson = @"{\"ok\":false,\"error\":\"Privileged command requires valid token\"}";
+                                            NSData *errData = [errJson dataUsingEncoding:NSUTF8StringEncoding];
+                                            responseString = [NSString stringWithFormat:@"HTTP/1.1 403 Forbidden\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)errData.length, errJson];
+                                        } else {
+                                            // Action commands use async to avoid SpringBoard deadlocks
+                                            dispatch_async(dispatch_get_main_queue(), ^{
+                                                handle_command(command);
+                                            });
+                                            NSString *safeCommand = command;
+                                            if ([command hasPrefix:@"unlock "]) {
+                                                safeCommand = @"unlock ****";
+                                            } else if ([command hasPrefix:@"lock-toggle "] || [command hasPrefix:@"lock toggle "]) {
+                                                safeCommand = @"lock-toggle ****";
+                                            } else if ([command hasPrefix:@"testkit passcode/set"]) {
+                                                safeCommand = @"testkit passcode/set (redacted)";
+                                            }
+                                            NSDictionary *resp = @{@"ok": @YES, @"command": safeCommand, @"status": @"Acknowledged"};
+                                            NSData *respData = [NSJSONSerialization dataWithJSONObject:resp options:0 error:nil];
+                                            NSString *jsonStr = [[NSString alloc] initWithData:respData encoding:NSUTF8StringEncoding];
+                                            responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)respData.length, jsonStr];
                                         }
-                                        NSDictionary *resp = @{@"ok": @YES, @"command": safeCommand, @"status": @"Acknowledged"};
-                                        NSData *respData = [NSJSONSerialization dataWithJSONObject:resp options:0 error:nil];
-                                        NSString *jsonStr = [[NSString alloc] initWithData:respData encoding:NSUTF8StringEncoding];
-                                        responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)respData.length, jsonStr];
                                     } else {
                                         responseString = [NSString stringWithFormat:@"HTTP/1.1 400 Bad Request\r\n%@Content-Length: 15\r\n\r\nMissing command", cors];
                                     }
@@ -12150,7 +12354,7 @@ static void RC_NoteHomePowerChord(void) {
         g_homePowerChordClaimed = !keep;
         dispatch_async(dispatch_get_main_queue(), ^{
             SRLog(@"[Home] Home + Power trigger%@", keep ? @" (keeping the screenshot)" : @" - no screenshot");
-            trigger_haptic();
+            RCTriggerHapticFor(@"trigger_home_power");
             RCExecuteTrigger(@"trigger_home_power");
         });
     }
@@ -12574,11 +12778,77 @@ static void RC_ReplayWalletDoublePress(void) {
 
 
 
+static BOOL RC_DefaultHapticsForTrigger(NSString *triggerKey) {
+    if (!triggerKey.length) return NO;
+    if ([triggerKey hasPrefix:@"power_"]) return YES;
+    if ([triggerKey hasPrefix:@"volume_"]) return YES;
+    if ([triggerKey hasPrefix:@"touchid_"]) return YES;
+    if ([triggerKey hasPrefix:@"nfc_"]) return YES;
+    if ([triggerKey isEqualToString:@"trigger_home_power"]) return YES;
+    if ([triggerKey hasPrefix:@"trigger_home_"]) return YES;
+    if ([triggerKey hasPrefix:@"trigger_statusbar_"]) return YES;
+    if ([triggerKey hasPrefix:@"trigger_bottombar_"]) return YES;
+    if ([triggerKey hasPrefix:@"trigger_bottom_swipe_up_"]) return YES;
+    if ([triggerKey hasPrefix:@"trigger_edge_"]) return YES;
+    return NO;
+}
+
+static BOOL RC_IsHapticsEnabledForTrigger(NSString *triggerKey) {
+    if (!triggerKey.length) return YES;
+    if (!g_triggerConfig) load_trigger_config();
+    if (g_triggerConfig) {
+        id globalHaptics = g_triggerConfig[@"hapticsEnabled"];
+        if (globalHaptics && [globalHaptics respondsToSelector:@selector(boolValue)] && ![globalHaptics boolValue]) {
+            return NO;
+        }
+        id triggers = g_triggerConfig[@"triggers"];
+        if ([triggers isKindOfClass:[NSDictionary class]]) {
+            id trigger = triggers[triggerKey];
+            if ([trigger isKindOfClass:[NSDictionary class]]) {
+                id hapticsVal = trigger[@"haptics"];
+                if (hapticsVal != nil && [hapticsVal respondsToSelector:@selector(boolValue)]) {
+                    return [hapticsVal boolValue];
+                }
+            }
+        }
+    }
+    return RC_DefaultHapticsForTrigger(triggerKey);
+}
+
 // Helper to trigger haptic feedback
-// Helper to trigger haptic feedback
-static void trigger_haptic() {
+void RCTriggerHapticFor(NSString *triggerKey) {
     if (RC_IsForegroundAppExcluded()) return;
+    if (triggerKey.length > 0 && !RC_IsHapticsEnabledForTrigger(triggerKey)) {
+        return;
+    }
+    if (!triggerKey.length) {
+        if (!g_triggerConfig) load_trigger_config();
+        if (g_triggerConfig) {
+            id globalHaptics = g_triggerConfig[@"hapticsEnabled"];
+            if (globalHaptics && [globalHaptics respondsToSelector:@selector(boolValue)] && ![globalHaptics boolValue]) {
+                return;
+            }
+        }
+    }
+
+    if (triggerKey.length > 0) {
+        static CFAbsoluteTime s_lastHapticTime = 0;
+        static NSString *s_lastHapticKey = nil;
+        CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+        if (s_lastHapticKey && [s_lastHapticKey isEqualToString:triggerKey]) {
+            if (now - s_lastHapticTime < 0.35) {
+                return;
+            }
+        }
+        s_lastHapticTime = now;
+        s_lastHapticKey = [triggerKey copy];
+    }
+
     AudioServicesPlaySystemSound(1520);
+}
+
+static void trigger_haptic(void) {
+    RCTriggerHapticFor(nil);
 }
 
 // --- SAFE VOLUME HOLD IMPLEMENTATION ---
@@ -12734,7 +13004,7 @@ static BOOL g_isSwappingVolume = NO;
             RC_SetScreenshotRecognizerSuppressed(YES);
             if (g_volUpTimer) { [g_volUpTimer invalidate]; g_volUpTimer = nil; }
             if (g_volDownTimer) { [g_volDownTimer invalidate]; g_volDownTimer = nil; }
-            trigger_haptic();
+            RCTriggerHapticFor(@"power_volume_up");
             RCExecuteTrigger(@"power_volume_up");
             return;
         }
@@ -12763,7 +13033,7 @@ static BOOL g_isSwappingVolume = NO;
             g_volSeqJustFired = YES;
             if (g_volUpTimer) { [g_volUpTimer invalidate]; g_volUpTimer = nil; }
             if (g_volDownTimer) { [g_volDownTimer invalidate]; g_volDownTimer = nil; }
-            trigger_haptic();
+            RCTriggerHapticFor(@"volume_down_then_up");
             RCExecuteTrigger(@"volume_down_then_up");
             return;
         }
@@ -12776,7 +13046,7 @@ static BOOL g_isSwappingVolume = NO;
             SRLog(@"Volume Down then Up sequence triggered! (Down had gone to native; this Up cancels it)");
             g_volUpSeqArmedUntil = 0;
             g_volUpSkipArm = YES;
-            trigger_haptic();
+            RCTriggerHapticFor(@"volume_down_then_up");
             RCExecuteTrigger(@"volume_down_then_up");
             g_volUpLastPassedThrough = YES;
             g_volUpNativeSessionActive = YES;
@@ -12818,7 +13088,7 @@ static BOOL g_isSwappingVolume = NO;
             g_volComboTriggered = YES;
             RC_VolComboUsePresses();
             SRLog(@"Volume Both Press combo triggered (from Vol Up Hook)");
-            trigger_haptic();
+            RCTriggerHapticFor(@"volume_both_press");
             RCExecuteTrigger(@"volume_both_press");
         } else {
             g_volComboTriggered = YES;
@@ -12871,7 +13141,7 @@ static BOOL g_isSwappingVolume = NO;
                 if (RC_VolumePressWasPowerCombo(now) || !g_volUpIsDown) return;
                 if (holdEnabled) {
                     g_volUpTriggered = YES;
-                    trigger_haptic();
+                    RCTriggerHapticFor(@"volume_up_hold");
                     RCExecuteTrigger(@"volume_up_hold");
                 } else {
                     // We only armed this timer to watch for volume_both_press or a
@@ -13021,7 +13291,7 @@ static BOOL g_isSwappingVolume = NO;
             RC_MarkPowerVolComboFired();
             if (g_volUpTimer) { [g_volUpTimer invalidate]; g_volUpTimer = nil; }
             if (g_volDownTimer) { [g_volDownTimer invalidate]; g_volDownTimer = nil; }
-            trigger_haptic();
+            RCTriggerHapticFor(@"power_volume_down");
             RCExecuteTrigger(@"power_volume_down");
             return;
         }
@@ -13060,7 +13330,7 @@ static BOOL g_isSwappingVolume = NO;
             g_volSeqJustFired = YES;
             if (g_volUpTimer) { [g_volUpTimer invalidate]; g_volUpTimer = nil; }
             if (g_volDownTimer) { [g_volDownTimer invalidate]; g_volDownTimer = nil; }
-            trigger_haptic();
+            RCTriggerHapticFor(@"volume_up_then_down");
             RCExecuteTrigger(@"volume_up_then_down");
             return;
         }
@@ -13073,7 +13343,7 @@ static BOOL g_isSwappingVolume = NO;
             SRLog(@"Volume Up then Down sequence triggered! (Up had gone to native; this Down cancels it)");
             g_volDownSeqArmedUntil = 0;
             g_volDownSkipArm = YES;
-            trigger_haptic();
+            RCTriggerHapticFor(@"volume_up_then_down");
             RCExecuteTrigger(@"volume_up_then_down");
             g_volDownLastPassedThrough = YES;
             g_volDownNativeSessionActive = YES;
@@ -13112,7 +13382,7 @@ static BOOL g_isSwappingVolume = NO;
             g_volComboTriggered = YES;
             RC_VolComboUsePresses();
             SRLog(@"Volume Both Press combo triggered (from Vol Down Hook)");
-            trigger_haptic();
+            RCTriggerHapticFor(@"volume_both_press");
             RCExecuteTrigger(@"volume_both_press");
         } else {
             g_volComboTriggered = YES;
@@ -13158,7 +13428,7 @@ static BOOL g_isSwappingVolume = NO;
                 if (RC_VolumePressWasPowerCombo(now) || !g_volDownIsDown) return;
                 if (holdEnabled) {
                     g_volDownTriggered = YES;
-                    trigger_haptic();
+                    RCTriggerHapticFor(@"volume_down_hold");
                     RCExecuteTrigger(@"volume_down_hold");
                 } else {
                     // We only armed this timer to watch for volume_both_press or a
@@ -13460,7 +13730,7 @@ static void RC_CheckAndFire() {
     // 3. IMMEDIATE FIRE CHECK (Quadruple)
     if (quadEnabled && g_homeClickCount >= 4) {
         SRLog(@"🚀 QUAD CLICK (4+) REACHED! Firing immediately.");
-        trigger_haptic();
+        RCTriggerHapticFor(@"trigger_home_quadruple_click");
         RCExecuteTrigger(@"trigger_home_quadruple_click");
         RC_FinishHomeActions(g_homeClickCount, YES);
         g_homeClickCount = 0; // Reset Sequence
@@ -13488,7 +13758,7 @@ static void RC_CheckAndFire() {
             BOOL enabled = [g_triggerConfig[@"triggers"][triggerKey][@"enabled"] boolValue];
             if (enabled) {
                 SRLog(@"✅ FIRING TRIGGER: %@", triggerKey);
-                trigger_haptic();
+                RCTriggerHapticFor(triggerKey);
                 RCExecuteTrigger(triggerKey);
                 fired = YES;
             }
@@ -13532,7 +13802,7 @@ static void RC_CheckAndFirePower() {
     // 3. IMMEDIATE FIRE CHECK (Quadruple)
     if (quadEnabled && g_powerClickCount >= 4) {
         SRLog(@"🚀 POWER QUAD CLICK (4+) REACHED! Firing.");
-        trigger_haptic();
+        RCTriggerHapticFor(@"power_quadruple_click");
         RCExecuteTrigger(@"power_quadruple_click");
         g_powerClickCount = 0;
         // Quad just claimed the sequence - any deferred Wallet double-press
@@ -13589,7 +13859,7 @@ static void RC_CheckAndFirePower() {
             BOOL enabled = [g_triggerConfig[@"triggers"][triggerKey][@"enabled"] boolValue];
             if (enabled) {
                 SRLog(@"✅ FIRING POWER TRIGGER: %@", triggerKey);
-                trigger_haptic();
+                RCTriggerHapticFor(triggerKey);
                 RCExecuteTrigger(triggerKey);
                 claimed = YES;
                 higherClaimed = (count >= 3);
@@ -13736,7 +14006,7 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
                         }
 
                         if ([g_triggerConfig[@"triggers"][@"touchid_tap"][@"enabled"] boolValue]) {
-                            trigger_haptic();
+                            RCTriggerHapticFor(@"touchid_tap");
                             RCExecuteTrigger(@"touchid_tap");
                         }
                     }
@@ -13791,7 +14061,7 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
                         if (g_triggerConfig) {
                             NSDictionary *holdTrigger = g_triggerConfig[@"triggers"][@"touchid_hold"];
                             if ([holdTrigger[@"enabled"] boolValue] && [holdTrigger[@"actions"] count] > 0) {
-                                trigger_haptic();
+                                RCTriggerHapticFor(@"touchid_hold");
                                 RCExecuteTrigger(@"touchid_hold");
                             }
                         }
@@ -13943,7 +14213,7 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
                                  cancel_pending_volume_sequences();
                                  if (g_volUpTimer) { [g_volUpTimer invalidate]; g_volUpTimer = nil; }
                                  if (g_volDownTimer) { [g_volDownTimer invalidate]; g_volDownTimer = nil; }
-                                 trigger_haptic();
+                                 RCTriggerHapticFor(triggerKey);
                                  RCExecuteTrigger(triggerKey);
                             });
                         } else if (!enabled) {
@@ -14050,7 +14320,7 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
                     }
                     if (g_volUpTimer) { [g_volUpTimer invalidate]; g_volUpTimer = nil; }
                     if (g_volDownTimer) { [g_volDownTimer invalidate]; g_volDownTimer = nil; }
-                    trigger_haptic();
+                    RCTriggerHapticFor(triggerKey);
                     RCExecuteTrigger(triggerKey);
                 });
             }
@@ -14075,7 +14345,7 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
                         cancel_pending_volume_sequences();
                         if (g_volUpTimer) { [g_volUpTimer invalidate]; g_volUpTimer = nil; }
                         if (g_volDownTimer) { [g_volDownTimer invalidate]; g_volDownTimer = nil; }
-                        trigger_haptic();
+                        RCTriggerHapticFor(@"volume_both_press");
                         RCExecuteTrigger(@"volume_both_press");
                     });
                 }
@@ -14224,7 +14494,7 @@ static void setup_background_hid_listener() {
             if (g_volUpIsDown) RC_SetScreenshotRecognizerSuppressed(YES);
             if (g_volUpTimer) { [g_volUpTimer invalidate]; g_volUpTimer = nil; }
             if (g_volDownTimer) { [g_volDownTimer invalidate]; g_volDownTimer = nil; }
-            trigger_haptic();
+            RCTriggerHapticFor(triggerKey);
             RCExecuteTrigger(triggerKey);
             return;
         }
@@ -14265,7 +14535,7 @@ static void setup_background_hid_listener() {
                 }
                 g_lockButtonTriggered = YES;
                 g_powerPressWasLongPress = YES;
-                trigger_haptic();
+                RCTriggerHapticFor(@"power_long_press");
                 RCExecuteTrigger(@"power_long_press");
                 SRLog(@"Power Long Press Fired (Stage 1)!");
                 
@@ -14501,7 +14771,7 @@ static void setup_background_hid_listener() {
     // Keep Default Action: the actions run and iOS goes on to Siri
     if (longPressEnabled && RC_TriggerKeepsDefault(@"power_long_press") && !g_lockButtonTriggered) {
         SRLog(@"Power Long Press Fired, keeping the default action (Siri)");
-        trigger_haptic();
+        RCTriggerHapticFor(@"power_long_press");
         RCExecuteTrigger(@"power_long_press");
         %orig;
         return;
@@ -14515,7 +14785,7 @@ static void setup_background_hid_listener() {
             }
             g_lockButtonTriggered = YES;
             g_powerPressWasLongPress = YES;
-            trigger_haptic();
+            RCTriggerHapticFor(@"power_long_press");
             RCExecuteTrigger(@"power_long_press");
             SRLog(@"Power Long Press Fired (via performLongPressActions)!");
             
@@ -14623,7 +14893,7 @@ static BOOL RC_HomeSinglePressIsPartOfHeldClicks(void) {
     if (!g_homeActionReplaying && RC_HomeTriggerArmed(@"trigger_home_hold", &keep) && !RC_IsForegroundAppExcluded()) {
         SRLog(@"[Home] Home Hold%@", keep ? @", keeping the default action (Siri)" : @" - no Siri");
         g_homeHoldFired = YES;
-        trigger_haptic();
+        RCTriggerHapticFor(@"trigger_home_hold");
         RCExecuteTrigger(@"trigger_home_hold");
         if (keep) %orig;
         return;
@@ -15370,7 +15640,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                         if (now - g_lastStatusBarDoubleTapTime > 0.4) {
                             g_lastStatusBarDoubleTapTime = now;
                             g_statusBarHoldTriggered = YES;
-                            trigger_haptic();
+                            RCTriggerHapticFor(@"trigger_statusbar_double_tap");
                             RCExecuteTrigger(@"trigger_statusbar_double_tap");
                             SRLog(@"[RCStatus] Status Bar Double Tap FIRED!");
                         } else {
@@ -15407,7 +15677,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                             
                             if (enabled) {
                                 g_statusBarHoldTriggered = YES;
-                                trigger_haptic();
+                                RCTriggerHapticFor(g_pendingStatusBarTrigger);
                                 if (RC_TriggerIsActionable(g_pendingStatusBarTrigger)) RC_FreezeGestureScrolling();
                                 RCExecuteTrigger(g_pendingStatusBarTrigger);
                                 SRLog(@"%@ FIRED!", g_pendingStatusBarTrigger);
@@ -15562,7 +15832,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                         NSString *trigger = (user_dx > 0) ? @"trigger_statusbar_swipe_right" : @"trigger_statusbar_swipe_left";
                         load_trigger_config();
                         if (RC_MasterEnabled() && [g_triggerConfig[@"triggers"][trigger][@"enabled"] boolValue]) {
-                            trigger_haptic();
+                            RCTriggerHapticFor(trigger);
                         }
                         if (RC_TriggerIsActionable(trigger)) RC_FreezeGestureScrolling();
                         g_statusBarSwipeHapticFired = YES;
@@ -15588,7 +15858,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                         NSString *trigger = (user_dx > 0) ? @"trigger_bottombar_swipe_right" : @"trigger_bottombar_swipe_left";
                         load_trigger_config();
                         if (RC_MasterEnabled() && [g_triggerConfig[@"triggers"][trigger][@"enabled"] boolValue]) {
-                            trigger_haptic();
+                            RCTriggerHapticFor(trigger);
                         }
                         if (RC_TriggerIsActionable(trigger)) RC_FreezeGestureScrolling();
                         g_bottomBarHapticFired = YES;
@@ -15612,7 +15882,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                         if (enabled) {
                             g_bottomBarSwipeUpTriggered = YES;
                             g_lastBottomSwipeTriggerTime = [[NSDate date] timeIntervalSince1970];
-                            trigger_haptic();
+                            RCTriggerHapticFor(g_pendingBottomBarSwipeUpTrigger);
                             if (RC_TriggerIsActionable(g_pendingBottomBarSwipeUpTrigger)) RC_FreezeGestureScrolling();
                             RCExecuteTrigger(g_pendingBottomBarSwipeUpTrigger);
                             SRLog(@"[RCBottom] %@ FIRED during move!", g_pendingBottomBarSwipeUpTrigger);
@@ -15642,7 +15912,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                             if (enabled) {
                                 g_bottomBarSwipeUpTriggered = YES;
                                 g_lastBottomSwipeTriggerTime = [[NSDate date] timeIntervalSince1970];
-                                trigger_haptic();
+                                RCTriggerHapticFor(g_pendingBottomBarSwipeUpTrigger);
                                 if (RC_TriggerIsActionable(g_pendingBottomBarSwipeUpTrigger)) RC_FreezeGestureScrolling();
                                 RCExecuteTrigger(g_pendingBottomBarSwipeUpTrigger);
                                 SRLog(@"[RCBottom] %@ FIRED on ended!", g_pendingBottomBarSwipeUpTrigger);
@@ -15905,7 +16175,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                 
                 if (enabled) {
                     // Haptic feedback ONLY if enabled
-                    trigger_haptic();
+                    RCTriggerHapticFor(triggerKey);
                     if (RC_TriggerIsActionable(triggerKey)) RC_FreezeGestureScrolling();
                     RCExecuteTrigger(triggerKey);
                     SRLog(@"%@ FIRED INSTANTLY!", triggerKey);
