@@ -3985,14 +3985,14 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     CGFloat top = (bannerHeight > 0 ? bannerHeight + 12 : 0) + stripHeight;
     UIView *headerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, 40 + top)];
     if (stripHeight > 0) {
-        [headerView addSubview:[self runStripWithWidth:width left:tableView.layoutMargins.left right:tableView.layoutMargins.right]];
+        // The table puts this header on the action cards' frame, so the cards' edges are 0 and width here
+        [headerView addSubview:[self runStripWithWidth:width left:0 right:0]];
     }
     if (bannerHeight > 0) {
-        // Lined up with the action cards (the table's margins), and kept so as the header is resized
-        CGFloat left = tableView.layoutMargins.left, right = tableView.layoutMargins.right;
+        // Lined up with the action cards (this header's own bounds), and kept so as the header is resized
         // Tapping it changes When Triggered Again, as the ••• menu does
         UIButton *banner = [UIButton buttonWithType:UIButtonTypeCustom];
-        banner.frame = CGRectMake(left, 10 + stripHeight, width - left - right, bannerHeight);
+        banner.frame = CGRectMake(0, 10 + stripHeight, width, bannerHeight);
         banner.autoresizingMask = UIViewAutoresizingFlexibleWidth;
         banner.backgroundColor = [UIColor tertiarySystemFillColor];
         banner.layer.cornerRadius = 10;
