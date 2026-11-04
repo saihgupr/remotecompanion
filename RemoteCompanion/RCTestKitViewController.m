@@ -297,7 +297,7 @@ static NSString *RCSuiteIcon(NSString *suite) {
 // (see RCTestKit.x); the app doesn't keep it either
 - (void)askForPasscode {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Passcode for Tests"
-        message:@"Lets test runs unlock the phone between steps. It's kept only in memory - not saved anywhere - and forgotten after 30 minutes, a respring, or if it doesn't unlock the phone."
+        message:@"Lets test runs unlock the phone between steps. It stays on this phone only (in its Keychain, never in a backup), and is forgotten after 30 minutes, a restart, or if it doesn't unlock the phone."
         preferredStyle:UIAlertControllerStyleAlert];
     [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
         field.secureTextEntry = YES;
@@ -385,7 +385,7 @@ static NSString *RCSuiteIcon(NSString *suite) {
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == RCTestKitSectionSuites) return @"Your settings are put back when a test ends.";
-    if (section == RCTestKitSectionUnlock) return @"Optional. Tests that lock the phone can unlock it again with this. Kept in memory only; a passcode that doesn't work is forgotten after one try.";
+    if (section == RCTestKitSectionUnlock) return @"Optional. Tests that lock the phone can unlock it again with this. Kept on this phone only, until it restarts or 30 minutes pass; a passcode that doesn't work is forgotten after one try.";
     if (section == RCTestKitSectionReports && !self.reports.count) return @"Reports of finished tests appear here.";
     return nil;
 }

@@ -55,6 +55,8 @@
 #import <sys/utsname.h>
 #import <mach/mach_time.h>
 #import <pthread.h>
+#import <Security/Security.h>
+#import <sys/sysctl.h>
 #import "RCTestKit.h"
 
 extern void SRLog(NSString *format, ...);
@@ -2457,9 +2459,11 @@ static void RCTKSuiteReplay(NSMutableDictionary *run) {
 // A passcode the user typed into the Test Kit screen, so runs (and whoever drives the test
 // kit) can unlock the phone between steps. It's guarded like this:
 // - Set only over the UNIX socket - from this phone - never over the network.
-// - Kept only here, in SpringBoard's memory: never in the config, the log (handle_command
-//   redacts the command), the journal or a report, and never returned by any endpoint. A
-//   respring forgets it, and so does kRCTKPasscodeLifetimeMs passing.
+// - Kept here, in SpringBoard's memory, and in the Keychain so a respring keeps it (this device
+//   only, so never in a backup; readable once the phone has been unlocked since it started):
+//   never in the config, the log (handle_command redacts the command), the journal or a
+//   report, and never returned by any endpoint. kRCTKPasscodeLifetimeMs passing forgets it, and
+//   so does a restart (it's tied to this boot).
 // - Forgotten the moment an unlock with it doesn't work, so a wrong passcode is tried at
 //   most once - iOS disables the phone (or erases it, if set to) after repeated wrong ones.
 static const double kRCTKPasscodeLifetimeMs = 30 * 60 * 1000;
@@ -2467,15 +2471,76 @@ static NSString *g_tkPasscode;
 static double g_tkPasscodeExpiresAt;
 static __thread BOOL g_tkFromNetwork = NO;
 
+// When the phone last started, so a saved passcode is for this boot only
+static NSString *RCTKBootID(void) {
+    struct timeval boot = {0};
+    size_t size = sizeof(boot);
+    int mib[2] = { CTL_KERN, KERN_BOOTTIME };
+    if (sysctl(mib, 2, &boot, &size, NULL, 0) != 0) return @"";
+    return [NSString stringWithFormat:@"%ld", (long)boot.tv_sec];
+}
+
+static NSDictionary *RCTKPasscodeQuery(void) {
+    return @{ (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
+              (__bridge id)kSecAttrService: @"com.goldenappleguy.rc.testkit",
+              (__bridge id)kSecAttrAccount: @"passcode" };
+}
+
+static void RCTKDeleteSavedPasscode(void) {
+    SecItemDelete((__bridge CFDictionaryRef)RCTKPasscodeQuery());
+}
+
+static void RCTKSavePasscode(NSString *passcode, double expiresAt) {
+    RCTKDeleteSavedPasscode();
+    NSDictionary *value = @{ @"code": passcode, @"expires": @(expiresAt), @"boot": RCTKBootID() };
+    NSData *data = [NSJSONSerialization dataWithJSONObject:value options:0 error:nil];
+    if (!data) return;
+    NSMutableDictionary *item = [RCTKPasscodeQuery() mutableCopy];
+    item[(__bridge id)kSecValueData] = data;
+    item[(__bridge id)kSecAttrAccessible] = (__bridge id)kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly;
+    OSStatus status = SecItemAdd((__bridge CFDictionaryRef)item, NULL);
+    if (status != errSecSuccess) RCTKEvent(@"passcode", @{ @"saved": @NO, @"status": @(status) });
+}
+
+// After a respring: the saved one, if it's for this boot and still in time
+static void RCTKLoadSavedPasscode(void) {
+    static BOOL loaded;
+    if (loaded) return;
+    loaded = YES;
+    NSMutableDictionary *query = [RCTKPasscodeQuery() mutableCopy];
+    query[(__bridge id)kSecReturnData] = @YES;
+    query[(__bridge id)kSecMatchLimit] = (__bridge id)kSecMatchLimitOne;
+    CFTypeRef result = NULL;
+    if (SecItemCopyMatching((__bridge CFDictionaryRef)query, &result) != errSecSuccess || !result) return;
+    NSData *data = (__bridge_transfer NSData *)result;
+    NSDictionary *value = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    NSString *code = [value isKindOfClass:[NSDictionary class]] ? value[@"code"] : nil;
+    double expires = [value[@"expires"] doubleValue];
+    if (![code isKindOfClass:[NSString class]] || ![value[@"boot"] isEqual:RCTKBootID()] || RCTKNowMs() > expires) {
+        RCTKDeleteSavedPasscode();
+        return;
+    }
+    g_tkPasscode = [code copy];
+    g_tkPasscodeExpiresAt = expires;
+}
+
 static NSString *RCTKCurrentPasscode(void) {
     @synchronized (RCTKLock()) {
-        if (g_tkPasscode && RCTKNowMs() > g_tkPasscodeExpiresAt) g_tkPasscode = nil;
+        RCTKLoadSavedPasscode();
+        if (g_tkPasscode && RCTKNowMs() > g_tkPasscodeExpiresAt) {
+            g_tkPasscode = nil;
+            RCTKDeleteSavedPasscode();
+        }
         return g_tkPasscode;
     }
 }
 
 static void RCTKForgetPasscode(void) {
-    @synchronized (RCTKLock()) { g_tkPasscode = nil; g_tkPasscodeExpiresAt = 0; }
+    @synchronized (RCTKLock()) {
+        g_tkPasscode = nil;
+        g_tkPasscodeExpiresAt = 0;
+        RCTKDeleteSavedPasscode();
+    }
 }
 
 static NSDictionary *RCTKPasscodeStatus(void) {
@@ -2493,6 +2558,7 @@ static NSDictionary *RCTKSetPasscode(NSString *passcode) {
     @synchronized (RCTKLock()) {
         g_tkPasscode = [passcode copy];
         g_tkPasscodeExpiresAt = RCTKNowMs() + kRCTKPasscodeLifetimeMs;
+        RCTKSavePasscode(g_tkPasscode, g_tkPasscodeExpiresAt);
     }
     RCTKEvent(@"passcode", @{ @"set": @YES }); // that it was set - not what it is
     return RCTKPasscodeStatus();
@@ -2594,7 +2660,11 @@ static NSDictionary *RCTKDispatch(NSString *endpoint, NSDictionary<NSString *, N
     if ([endpoint isEqualToString:@"passcode"]) return RCTKPasscodeStatus();
     if ([endpoint isEqualToString:@"passcode/set"]) return RCTKSetPasscode(params[@"code"]);
     if ([endpoint isEqualToString:@"passcode/forget"]) { RCTKForgetPasscode(); return RCTKPasscodeStatus(); }
-    if ([endpoint isEqualToString:@"unlock"]) return RCTKUnlock();
+    if ([endpoint isEqualToString:@"unlock"]) {
+        // Only from this phone (rc-client, over SSH): anyone on the network could unlock it otherwise
+        if (g_tkFromNetwork) return @{ @"error": @"unlocking only works from the phone itself (rc-client testkit unlock), not over the network", @"unlocked": @NO };
+        return RCTKUnlock();
+    }
     if ([endpoint isEqualToString:@"suites"]) return RCTKSuites();
     if ([endpoint isEqualToString:@"suite/run"]) {
         NSString *name = params[@"name"] ?: body;
