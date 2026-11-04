@@ -28,5 +28,8 @@ RemoteCompanion_FILES += RCWebUIAccessViewController.m
 
 # Reorganized Settings submenus
 RemoteCompanion_FILES += RCAdvancedSettingsViewController.m
+RemoteCompanion_FILES += RCSSHSettingsViewController.m
+RemoteCompanion_FILES += RCSSHHostEditorViewController.m
+RemoteCompanion_FILES += RCSSHActionEditorViewController.m
 
 include $(THEOS_MAKE_PATH)/application.mk

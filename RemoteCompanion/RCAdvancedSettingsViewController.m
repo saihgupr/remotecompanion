@@ -15,6 +15,7 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
     RCAdvancedSettingsSectionNFC,
     RCAdvancedSettingsSectionOptions,
     RCAdvancedSettingsSectionButtons,
+    RCAdvancedSettingsSectionSecurity,
 };
 
 @implementation RCAdvancedSettingsViewController
@@ -97,7 +98,7 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
 #pragma mark - Table View Data Source
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    return 4;
+    return 5;
 }
 
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
@@ -105,7 +106,8 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
     if (section == RCAdvancedSettingsSectionBanners) title = @"Banners";
     else if (section == RCAdvancedSettingsSectionNFC) title = @"NFC";
     else if (section == RCAdvancedSettingsSectionOptions) title = @"Options";
-    else title = @"Buttons";
+    else if (section == RCAdvancedSettingsSectionButtons) title = @"Buttons";
+    else title = @"Security";
     
     UIView *headerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, tableView.bounds.size.width, 40)];
     UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(20, 15, tableView.bounds.size.width - 40, 20)];
@@ -133,6 +135,8 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
         return nil;
     } else if (section == RCAdvancedSettingsSectionButtons) {
         return @"How long a press waits for the next one before it counts. A shorter time responds sooner and needs quicker presses.";
+    } else if (section == RCAdvancedSettingsSectionSecurity) {
+        return @"Lets scripts, terminals and other tools call the root helper directly. Any app on this device can then get root, so leave it off unless you need it.";
     }
     return nil;
 }
@@ -141,6 +145,7 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
     if (section == RCAdvancedSettingsSectionBanners) return 1;
     if (section == RCAdvancedSettingsSectionNFC) return 3;
     if (section == RCAdvancedSettingsSectionButtons) return (NSInteger)[self timingRows].count;
+    if (section == RCAdvancedSettingsSectionSecurity) return 1;
     return 3; // Wrap Long Names, Logging, Freeze Lists During Gestures
 }
 
@@ -219,6 +224,13 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
         cell.textLabel.text = row[@"title"];
         cell.detailTextLabel.text = [NSString stringWithFormat:@"%.2f s", get()];
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    } else if (indexPath.section == RCAdvancedSettingsSectionSecurity) {
+        cell.textLabel.text = @"Allow Direct Root Helper Calls";
+        UISwitch *directRootSwitch = [[UISwitch alloc] init];
+        directRootSwitch.on = cm.allowDirectRootHelper;
+        [directRootSwitch addTarget:self action:@selector(directRootToggleChanged:) forControlEvents:UIControlEventValueChanged];
+        cell.accessoryView = directRootSwitch;
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
     }
     
     return cell;
@@ -304,6 +316,10 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
 
 - (void)freezeListsToggleChanged:(UISwitch *)sender {
     [RCConfigManager sharedManager].freezeListsDuringGestures = sender.on;
+}
+
+- (void)directRootToggleChanged:(UISwitch *)sender {
+    [RCConfigManager sharedManager].allowDirectRootHelper = sender.on;
 }
 
 - (void)chooseLogLevelFromView:(UIView *)sourceView {

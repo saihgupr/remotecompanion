@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 ## [4.1.0] - 2026-11-03
 
 ### Added
+- **New SSH host editor**: adding or editing a host now opens a proper Settings-style screen (Server details plus a Password / Private Key picker) instead of a cramped popup. The password field is masked with a show/hide eye button and never displays the saved password: leave it blank to keep the current one.
+- **New SSH command editor**: creating or editing an `ssh-run` action now shows a host picker plus a full command editor, instead of a one-line popup with the raw `ssh-run <id> ...` string.
+
+### Security
+- **Hardened `ssh-run`**: the remote command, user@host and key path are now POSIX single-quoted, so `$(...)` and backticks are evaluated only on the remote host and never on the phone. Passwords are passed through `sshpass -e` (the `SSHPASS` environment variable) instead of `-p`, so they no longer appear in `ps`. Host and username starting with `-` or containing spaces are rejected to block ssh option injection.
+- **`rc-root` caller check**: the setuid helper now runs shell commands and touch injection only when its parent process is SpringBoard (where RemoteCommand spawns it). Other apps, tweaks, or scripts running as `mobile` that call `rc-root <command>` directly are refused instead of getting root. Root actions, `rc -r`, and touch injection (`rc-root iohid …`) work as before. Settings > Advanced Settings > Security > Allow Direct Root Helper Calls switches the check off for scripts, terminals and other tools; it is off by default. Note: the toggle lives in the shared config file, so treat it as convenience, not a boundary against other local mobile processes.
+
+### Upgrade Notes
+- Root commands from scripts and terminals now need **Settings > Advanced Settings > Security > Allow Direct Root Helper Calls** turned on. Everything else works as before.
+- SSH actions now send commands exactly as typed, and passwords no longer show up in the process list.
+
+### Added
 - **Deep Linking URL Scheme & CLI Navigation**: added `remotecompanion://` URL scheme support and `rc nav <panel>` CLI command to jump directly into Settings, Integrations (Home Assistant, Keyboard Maestro, MQTT), New Trigger picker, or Triggers list from Siri Shortcuts, automation scripts, or terminal.
 - **Web UI access control**: Settings > General > Access limits where the Web UI can be reached from — Any Network (default, as before), Trusted Networks (only while on listed Wi-Fi networks), or This iPhone Only. The check runs per-connection before any endpoint, so it covers `/api/*` too, and the phone itself can always connect. Also `rc webui access any|networks|local` and `rc webui wifi` (#105).
 - **CarPlay triggers and condition**: new CarPlay Connected / Disconnected triggers plus a CarPlay connection condition; device/media triggers flattened in the New Trigger screen, Home Button section hidden on button-less phones (#67).

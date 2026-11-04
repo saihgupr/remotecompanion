@@ -1,6 +1,6 @@
 /*
  * rc-root - Setuid root helper for RemoteCommand
- * Executes shell commands as root when called from mobile user
+ * Executes shell commands as root when called by SpringBoard (RemoteCommand), and IOHID touch injection
  *
  * Must be installed with: chown root:wheel rc-root && chmod 4755 rc-root
  */
@@ -17,6 +17,50 @@
 #include <mach/mach_time.h>
 
 extern char **environ;
+
+// proc_pidpath lives in libSystem but is not exposed in the iOS SDK headers
+extern int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
+
+// rc-root is setuid root, so it must not run arbitrary shell commands for whichever process
+// happens to call it. Shell commands are only honoured when the direct parent is SpringBoard,
+// which is where RemoteCommand's tweak spawns this helper. The kernel sets the parent PID, so
+// another app cannot fake it.
+static int rc_parent_is_springboard(void) {
+    pid_t ppid = getppid();
+    if (ppid <= 1) return 0;
+    char path[4096];
+    if (proc_pidpath(ppid, path, sizeof(path)) <= 0) return 0;
+    return strcmp(path, "/System/Library/CoreServices/SpringBoard.app/SpringBoard") == 0;
+}
+
+// RemoteCommand's config, written by the app: Settings > Advanced Settings > Security
+#define RC_CONFIG_PATH "/var/mobile/Documents/rc_triggers.plist"
+
+// "Allow Direct Root Helper Calls", off unless the user turns it on. Reading this file is safe:
+// a bad value just means the check below stays in force.
+static int rc_direct_calls_allowed(void) {
+    CFURLRef url = CFURLCreateFromFileSystemRepresentation(kCFAllocatorDefault, (const UInt8 *)RC_CONFIG_PATH, strlen(RC_CONFIG_PATH), false);
+    if (!url) return 0;
+    CFReadStreamRef stream = CFReadStreamCreateWithFile(kCFAllocatorDefault, url);
+    CFRelease(url);
+    if (!stream) return 0;
+    int allowed = 0;
+    if (CFReadStreamOpen(stream)) {
+        CFPropertyListRef plist = CFPropertyListCreateWithStream(kCFAllocatorDefault, stream, 0, kCFPropertyListImmutable, NULL, NULL);
+        if (plist) {
+            if (CFGetTypeID(plist) == CFDictionaryGetTypeID()) {
+                CFTypeRef value = CFDictionaryGetValue((CFDictionaryRef)plist, CFSTR("allowDirectRootHelper"));
+                if (value && CFGetTypeID(value) == CFBooleanGetTypeID()) {
+                    allowed = CFBooleanGetValue((CFBooleanRef)value) ? 1 : 0;
+                }
+            }
+            CFRelease(plist);
+        }
+        CFReadStreamClose(stream);
+    }
+    CFRelease(stream);
+    return allowed;
+}
 
 // IOHIDEvent types and private function pointers
 typedef struct __IOHIDEvent *IOHIDEventRef;
@@ -224,6 +268,15 @@ int main(int argc, char *argv[]) {
 
     if (setgid(0) != 0) {
         fprintf(stderr, "Error: Failed to setgid to root\n");
+        return 1;
+    }
+
+    // All privileged operations (shell and touch injection) are restricted to calls
+    // made by SpringBoard (RemoteCommand's tweak), unless the user turned on
+    // Allow Direct Root Helper Calls in Advanced Settings
+    if (!rc_direct_calls_allowed() && !rc_parent_is_springboard()) {
+        fprintf(stderr, "Error: rc-root may only be run by RemoteCommand (permission denied).\n");
+        fprintf(stderr, "To allow scripts and other tools to call rc-root directly, turn on Allow Direct Root Helper Calls in Settings > Advanced Settings > Security.\n");
         return 1;
     }
 

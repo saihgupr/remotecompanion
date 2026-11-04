@@ -6,6 +6,7 @@
 #import "RCHAEntityPickerViewController.h"
 #import "RCKMMacroPickerViewController.h"
 #import "RCCategoryBar.h"
+#import "RCSSHActionEditorViewController.h"
 
 @interface RCActionPickerViewController () <UISearchResultsUpdating>
 @property (nonatomic, strong) NSArray<NSString *> *sectionTitles;
@@ -215,6 +216,7 @@
             if (cm.mqttEnabled) {
                 [integrations addObject:@{ @"name": @"MQTT: Publish Topic...", @"command": @"__MQTT_PUBLISH__", @"icon": @"dot.radiowaves.left.and.right" }];
             }
+            [integrations addObject:@{ @"name": @"SSH: Run Remote Command...", @"command": @"__SSH_COMMAND__", @"icon": @"terminal.fill" }];
             [integrations addObject:@{ @"name": @"Shortcuts: Run Shortcut...", @"command": @"__SHORTCUT_PICKER__", @"icon": @"wand.and.stars" }];
             NSArray *sneakyPaths = @[
                 @"/Library/MobileSubstrate/DynamicLibraries/SneakyCam.dylib",
@@ -505,6 +507,7 @@
         [cmd isEqualToString:@"__DELAY__"] ||
         [cmd isEqualToString:@"__STOP_TRIGGER__"] ||
         [cmd isEqualToString:@"__CUSTOM__"] ||
+        [cmd isEqualToString:@"__SSH_COMMAND__"] ||
         [cmd isEqualToString:@"__HA_PICKER__"] ||
         [cmd isEqualToString:@"__KM_TRIGGER__"] ||
         [cmd isEqualToString:@"__TAP__"] ||
@@ -596,6 +599,11 @@
 
     if ([command isEqualToString:@"__MQTT_PUBLISH__"]) {
         [self handleMQTTPublish];
+        return;
+    }
+
+    if ([command isEqualToString:@"__SSH_COMMAND__"]) {
+        [self handleSSHCommand];
         return;
     }
 
@@ -1085,6 +1093,62 @@
     }]];
     
     [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)handleSSHCommand {
+    RCConfigManager *cm = [RCConfigManager sharedManager];
+    NSArray<NSDictionary *> *hosts = cm.sshHosts;
+    if (hosts.count == 0) {
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"No SSH Hosts Configured"
+                                                                       message:@"You must add at least one SSH host before creating an SSH action.\nGo to Settings > Integrations > SSH Hosts."
+                                                                preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:alert animated:YES completion:nil];
+        return;
+    }
+    
+    if (hosts.count == 1) {
+        [self promptForSSHCommandWithHost:hosts.firstObject];
+        return;
+    }
+    
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Select SSH Host"
+                                                                   message:@"Choose a target host for this remote command"
+                                                            preferredStyle:UIAlertControllerStyleActionSheet];
+    __weak typeof(self) weakSelf = self;
+    for (NSDictionary *host in hosts) {
+        NSString *title = host[@"name"] ?: host[@"host"];
+        NSString *sub = [NSString stringWithFormat:@"%@@%@:%@", host[@"user"] ?: @"", host[@"host"] ?: @"", host[@"port"] ?: @22];
+        NSString *display = [NSString stringWithFormat:@"%@ (%@)", title, sub];
+        [sheet addAction:[UIAlertAction actionWithTitle:display style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+            [weakSelf promptForSSHCommandWithHost:host];
+        }]];
+    }
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:sheet animated:YES completion:nil];
+}
+
+- (void)promptForSSHCommandWithHost:(NSDictionary *)host {
+    RCSSHActionEditorViewController *editor = [[RCSSHActionEditorViewController alloc]
+        initWithHostId:host[@"id"] command:@""];
+    __weak typeof(self) weakSelf = self;
+    editor.onSave = ^(NSString *hostId, NSString *command) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        NSString *actionString = [NSString stringWithFormat:@"ssh-run %@ %@", hostId, command];
+        if (strongSelf.onActionSelected) {
+            strongSelf.onActionSelected(actionString);
+        }
+        if (strongSelf.searchController.isActive) {
+            [strongSelf.searchController dismissViewControllerAnimated:NO completion:^{
+                [strongSelf dismissViewControllerAnimated:YES completion:nil];
+            }];
+        } else {
+            [strongSelf dismissViewControllerAnimated:YES completion:nil];
+        }
+    };
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:editor];
+    [self presentViewController:nav animated:YES completion:nil];
 }
 
 @end
