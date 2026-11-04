@@ -24,6 +24,7 @@
 #import "RCToastPill.h"
 #import "RCNFCTriggerViewController.h"
 #import "RCDevicePickerViewController.h"
+#import "RCGesturesViewController.h"
 #import "RCFocusPickerViewController.h"
 #import "RCTriggerPickerViewController.h"
 #import "RCKMMacroPickerViewController.h"
@@ -3402,6 +3403,22 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             sheet.popoverPresentationController.sourceView = cell;
         }
         [self presentViewController:sheet animated:YES completion:nil];
+        return;
+    } else if ([RCGesturesViewController gestureForCommand:currentAction]) {
+        // Play Gesture: the library, with this action's gesture ticked
+        RCGesturesViewController *gestures = [[RCGesturesViewController alloc] init];
+        gestures.currentName = [RCGesturesViewController gestureForCommand:currentAction];
+        __weak typeof(self) weakSelf = self;
+        __weak RCGesturesViewController *weakGestures = gestures;
+        gestures.onSelected = ^(NSString *name) {
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) return;
+            strongSelf.actions[indexPath.row] = [RCGesturesViewController commandForGesture:name];
+            [strongSelf saveActions];
+            [strongSelf.tableView reloadData];
+            [weakGestures.navigationController popViewControllerAnimated:YES];
+        };
+        [self.navigationController pushViewController:gestures animated:YES];
         return;
     } else if ([currentAction isEqualToString:@"unlock"] || [currentAction hasPrefix:@"unlock "]) {
         [self promptEditUnlockActionAtIndex:indexPath.row];

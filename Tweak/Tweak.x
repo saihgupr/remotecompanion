@@ -8844,6 +8844,8 @@ BOOL RCCommandFromLocalSocket(void) {
     return g_rcCommandFromLocalSocket;
 }
 
+#import "RCGestures.h"
+
 static NSString *handle_command(NSString *cmd) {
     if (!cmd || ![cmd isKindOfClass:[NSString class]]) {
         SRLogMin(@"ERROR: handle_command received nil or invalid command string");
@@ -11462,6 +11464,10 @@ static NSString *handle_command(NSString *cmd) {
     // taptest show|hide|reset|status|run [system|app]
     } else if ([cleanCmd isEqualToString:@"taptest"] || [cleanCmd hasPrefix:@"taptest "]) {
         return rc_handle_taptest_command(cleanCmd);
+
+    // gesture record|play|list|delete|rename ... (RCGestures.m)
+    } else if ([cleanCmd hasPrefix:@"gesture "]) {
+        return RCGestureCommand(cleanCmd);
 
     // taprecord
     } else if ([cleanCmd isEqualToString:@"taprecord"]) {
@@ -14939,6 +14945,7 @@ static void RC_CheckAndFirePower() {
 static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientRef service, IOHIDEventRef event) {
     // Before the exclusion check: a touch is a touch whatever app is in front
     if (IOHIDEventGetType(event) == 11) g_lastTouchAt = CFAbsoluteTimeGetCurrent(); // kIOHIDEventTypeDigitizer
+    if (IOHIDEventGetType(event) == 11) RCGestureHIDEvent(event); // gestures: recording, and the touchscreen's sender ID
     if (RC_IsForegroundAppExcluded()) return;
     int type = IOHIDEventGetType(event);
     
