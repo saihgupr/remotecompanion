@@ -29,6 +29,7 @@ extern double IOHIDEventGetFloatValue(RCHIDEventRef event, int field);
 extern int IOHIDEventGetIntegerValue(RCHIDEventRef event, int field);
 extern int IOHIDEventGetType(RCHIDEventRef event);
 extern uint64_t IOHIDEventGetSenderID(RCHIDEventRef event);
+extern uint64_t IOHIDEventGetTimeStamp(RCHIDEventRef event);
 extern RCHIDEventRef IOHIDEventCreateDigitizerEvent(CFAllocatorRef allocator, uint64_t timeStamp, uint32_t transducerType, uint32_t index, uint32_t identity,
     uint32_t eventMask, uint32_t buttonMask, double x, double y, double z, double tipPressure, double barrelPressure, boolean_t range, boolean_t touch, uint32_t options);
 extern RCHIDEventRef IOHIDEventCreateDigitizerFingerEvent(CFAllocatorRef allocator, uint64_t timeStamp, uint32_t index, uint32_t identity, uint32_t eventMask,
@@ -93,6 +94,12 @@ static BOOL rc_gestures_set_setting(NSString *key, id value) {
     NSMutableDictionary *root = [[NSDictionary dictionaryWithContentsOfFile:kRCGesturesPath] mutableCopy] ?: [NSMutableDictionary dictionaryWithObject:@[] forKey:@"gestures"];
     root[key] = value;
     return [root writeToFile:kRCGesturesPath atomically:YES];
+}
+
+// Stop on Touch: a new finger on the screen while a gesture plays stops it
+static BOOL rc_gestures_stop_on_touch(void) {
+    id value = [NSDictionary dictionaryWithContentsOfFile:kRCGesturesPath][@"stopOnTouch"];
+    return value ? [value boolValue] : YES;
 }
 
 static BOOL rc_gestures_set_idle_stop(double seconds) {
@@ -243,9 +250,86 @@ static uint64_t rc_touch_sender(void) {
 
 #pragma mark - Recording (from the HID listener)
 
+#pragma mark - Playback state
+
+static volatile BOOL g_playCancel;
+static volatile BOOL g_playing;
+static volatile BOOL g_playStopOnTouch;
+static volatile BOOL g_playTouched;            // the last playback was stopped by a touch
+static NSString *g_playResult = @"none";       // how the last playback ended (gesture play-status)
+
+// The touches playback sends, by timestamp, so they aren't mistaken for real ones
+static uint64_t g_sentStamps[64];
+static volatile uint32_t g_sentNext;
+
+static void rc_gesture_note_sent(uint64_t stamp) {
+    g_sentStamps[g_sentNext++ % 64] = stamp;
+}
+
+static BOOL rc_gesture_was_sent(uint64_t stamp) {
+    for (int i = 0; i < 64; i++) if (g_sentStamps[i] == stamp) return YES;
+    return NO;
+}
+
+// Fingers really on the screen (by slot). A new one while a gesture plays stops it; one already
+// down when it started (the touch that ran the trigger) doesn't.
+static uint32_t g_realDown;
+// What the watcher saw during the current playback, for the log
+static uint32_t g_watchEvents, g_watchSent, g_watchDowns, g_watchMixed;
+static double g_realTouchAt; // the last real finger seen (CFAbsoluteTime)
+
+// Playback's fingers all have this contact size (read back as fixed point, so close to it); a
+// real fingertip's varies
+static BOOL rc_gesture_finger_is_sent(RCHIDEventRef child) {
+    return fabs(IOHIDEventGetFloatValue(child, 0xB0014) - 0.04) < 1e-4;
+}
+
+static void rc_gesture_watch_real_touch(RCHIDEventRef event) {
+    BOOL playing = g_playing;
+    if (playing) g_watchEvents++;
+    BOOL sentEvent = rc_gesture_was_sent(IOHIDEventGetTimeStamp(event));
+    if (playing && sentEvent) g_watchSent++;
+    CFArrayRef children = IOHIDEventGetChildren(event);
+    if (!children) return;
+    // A real event lists every finger on the screen, so it replaces what's held: a lift that went
+    // unseen can't leave a finger marked down
+    uint32_t nowDown = 0;
+    BOOL sawReal = NO;
+    for (CFIndex i = 0; i < CFArrayGetCount(children); i++) {
+        RCHIDEventRef child = (RCHIDEventRef)CFArrayGetValueAtIndex(children, i);
+        if (IOHIDEventGetType(child) != 11) continue;
+        // A finger of playback's own, whether it came alone or with a real one in the same event
+        if (rc_gesture_finger_is_sent(child)) continue;
+        sawReal = YES;
+        if (sentEvent && playing) {
+            g_watchMixed++;
+            if (g_watchMixed <= 3) SRLog(@"[Gesture] a real finger came inside a playback event (size %.6f)", IOHIDEventGetFloatValue(child, 0xB0014));
+        }
+        uint32_t index = (uint32_t)IOHIDEventGetIntegerValue(child, 0xB0005);
+        uint32_t bit = 1u << (index & 31);
+        BOOL touching = IOHIDEventGetIntegerValue(child, 0xB0009) != 0;
+        if (playing && touching && !(g_realDown & bit)) {
+            g_watchDowns++;
+            SRLog(@"[Gesture] touch down during playback: finger %u (size %.4f, %@), held before 0x%x, stop on touch %@",
+                index, IOHIDEventGetFloatValue(child, 0xB0014), sentEvent ? @"inside a playback event" : @"its own event",
+                g_realDown, g_playStopOnTouch ? @"on" : @"off");
+            if (g_playStopOnTouch && !g_playCancel) {
+                g_playTouched = YES;
+                g_playCancel = YES;
+            }
+        }
+        if (touching) nowDown |= bit;
+        if (!sentEvent) continue;
+        if (touching) g_realDown |= bit; else g_realDown &= ~bit; // inside a playback event: only this finger
+    }
+    if (sawReal) g_realTouchAt = CFAbsoluteTimeGetCurrent();
+    if (!sentEvent) g_realDown = nowDown;
+}
+
 void RCGestureHIDEvent(const void *rawEvent) {
     RCHIDEventRef event = (RCHIDEventRef)rawEvent;
     if (!g_touchSender) rc_learn_sender(event);
+    rc_gesture_watch_real_touch(event);
     if (!g_recActive) return;
     CFArrayRef children = IOHIDEventGetChildren(event);
     if (!children) return;
@@ -864,8 +948,6 @@ static void rc_on_main_sync(dispatch_block_t block) {
 
 #pragma mark - Playback
 
-static volatile BOOL g_playCancel;
-static volatile BOOL g_playing;
 
 static dispatch_queue_t rc_gesture_play_queue(void) {
     static dispatch_queue_t queue;
@@ -892,20 +974,24 @@ static BOOL rc_gesture_wait_until(uint64_t deadline) {
 
 // One frame as the touchscreen sends it. *down holds the fingers already down (by slot): a
 // finger's first frame is its down, then moves, and its last (not touching) lifts it.
-static void rc_gesture_send_frame(const RCGestureFrame *frame, uint32_t *down, CGSize screen, uint64_t sender) {
+// `screen` is the size the gesture was recorded on: positions go out as fractions of it, so on a
+// screen of another size the gesture is stretched to fit (the home bar stays at the bottom)
+// `extra` goes into every mask: 0x80 (cancel) when a stopped gesture lets go
+static void rc_gesture_send_frame_ex(const RCGestureFrame *frame, uint32_t *down, CGSize screen, uint64_t sender, uint32_t extra) {
     static RCHIDClientRef client;
     if (!client) client = IOHIDEventSystemClientCreate(kCFAllocatorDefault);
     if (!client || frame->count == 0) return;
     uint64_t ts = mach_absolute_time();
+    rc_gesture_note_sent(ts);
     RCHIDEventRef parent = IOHIDEventCreateDigitizerEvent(kCFAllocatorDefault, ts, 3, 99, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     if (!parent) return;
     IOHIDEventSetIntegerValue(parent, 0xB0019, 1); // display integrated
     IOHIDEventSetIntegerValue(parent, 0x4, 1);
-    uint32_t parentMask = 0x23;
+    uint32_t parentMask = 0x23 | extra;
     for (int i = 0; i < frame->count; i++) {
         const RCTouchFinger *f = &frame->fingers[i];
         uint32_t bit = 1u << (f->slot & 31);
-        uint32_t mask = !f->touching ? 0x2 : (*down & bit) ? 0x4 : 0x3; // touch (lift) / position / range | touch
+        uint32_t mask = (!f->touching ? 0x2 : (*down & bit) ? 0x4 : 0x3) | extra; // touch (lift) / position / range | touch
         // A finger on a screen edge carries its edge bits, as the touchscreen sends them: without
         // them iOS doesn't start the home bar gesture or an app's swipe back from the left edge
         if (f->edge) {
@@ -914,7 +1000,7 @@ static void rc_gesture_send_frame(const RCGestureFrame *frame, uint32_t *down, C
             parentMask |= edgeBits | 0x40;
         }
         RCHIDEventRef finger = IOHIDEventCreateDigitizerFingerEvent(kCFAllocatorDefault, ts, f->slot, 3, mask,
-            f->x / screen.width, f->y / screen.height, 0, 0, 0, (boolean_t)f->touching, (boolean_t)f->touching, 0);
+            MIN(MAX(f->x / screen.width, 0), 1), MIN(MAX(f->y / screen.height, 0), 1), 0, 0, 0, (boolean_t)f->touching, (boolean_t)f->touching, 0);
         if (finger) {
             IOHIDEventSetFloatValue(finger, 0xB0014, 0.04); // contact size
             IOHIDEventSetFloatValue(finger, 0xB0015, 0.04);
@@ -931,6 +1017,10 @@ static void rc_gesture_send_frame(const RCGestureFrame *frame, uint32_t *down, C
     CFRelease(parent);
 }
 
+static void rc_gesture_send_frame(const RCGestureFrame *frame, uint32_t *down, CGSize screen, uint64_t sender) {
+    rc_gesture_send_frame_ex(frame, down, screen, sender, 0);
+}
+
 // Playback speed from "2x", "0.5x" or "1.5": 1 when missing, kept between 0.25 and 4
 static double rc_gesture_speed(NSString *word) {
     NSString *text = [word.lowercaseString stringByReplacingOccurrencesOfString:@"x" withString:@""];
@@ -938,28 +1028,55 @@ static double rc_gesture_speed(NSString *word) {
     return speed > 0 ? MIN(MAX(speed, 0.25), 4) : 1;
 }
 
-static void rc_gesture_play(NSString *name, const RCGestureFrame *frames, NSUInteger count, uint64_t sender, double speed) {
-    g_playing = YES;
+static void rc_gesture_play(NSString *name, const RCGestureFrame *frames, NSUInteger count, uint64_t sender, double speed, CGSize recorded) {
     g_playCancel = NO;
+    g_playTouched = NO;
+    g_watchEvents = g_watchSent = g_watchDowns = g_watchMixed = 0;
+    // A finger still on the screen keeps sending events; with none for a moment, nothing is held
+    if (CFAbsoluteTimeGetCurrent() - g_realTouchAt > 0.25) g_realDown = 0;
+    g_playResult = @"playing";
+    g_playStopOnTouch = rc_gestures_stop_on_touch();
+    g_playing = YES;
     __block CGSize screen = CGSizeZero;
     rc_on_main_sync(^{ screen = [UIScreen mainScreen].fixedCoordinateSpace.bounds.size; });
+    if (recorded.width > 0 && recorded.height > 0) {
+        if (fabs(recorded.width - screen.width) > 1 || fabs(recorded.height - screen.height) > 1) {
+            SRLog(@"[Gesture] recorded on %gx%g, playing on %gx%g: scaled", recorded.width, recorded.height, screen.width, screen.height);
+        }
+        screen = recorded;
+    }
     NSUInteger edgeFrames = 0;
     for (NSUInteger k = 0; k < count; k++) for (int j = 0; j < frames[k].count; j++) if (frames[k].fingers[j].edge) { edgeFrames++; break; }
-    SRLog(@"[Gesture] playing '%@' at %gx (%lu frames, %lu on an edge)", name, speed, (unsigned long)count, (unsigned long)edgeFrames);
+    SRLog(@"[Gesture] playing '%@' at %gx (%lu frames, %lu on an edge), stop on touch %@, fingers held 0x%x",
+        name, speed, (unsigned long)count, (unsigned long)edgeFrames, g_playStopOnTouch ? @"on" : @"off", g_realDown);
     uint64_t start = mach_absolute_time();
     uint32_t down = 0;
+    RCTouchFinger held[32] = {0}; // where each finger down was last sent
     NSUInteger i = 0;
     for (; i < count; i++) {
         if (!rc_gesture_wait_until(start + rc_mach_from_seconds(MAX(0, frames[i].t) / speed))) break;
         rc_gesture_send_frame(&frames[i], &down, screen, sender);
+        for (int j = 0; j < frames[i].count; j++) held[frames[i].fingers[j].slot & 31] = frames[i].fingers[j];
     }
     if (down) {
-        // Stopped mid-stroke: lift the fingers where they are
-        RCGestureFrame lift = frames[MIN(i, count - 1)];
-        for (int j = 0; j < lift.count; j++) lift.fingers[j].touching = 0;
-        rc_gesture_send_frame(&lift, &down, screen, sender);
+        // Stopped mid-stroke. Lifting a moving finger reads as a flick, so a half-done swipe up
+        // from the home bar would still go home: the fingers stay still a moment, then let go as
+        // a cancelled touch, which iOS drops
+        RCGestureFrame still = {0};
+        for (uint32_t slot = 0; slot < 32 && still.count < kRCGestureMaxFingers; slot++) {
+            if (down & (1u << slot)) still.fingers[still.count++] = held[slot];
+        }
+        for (int k = 0; k < 6 && still.count; k++) {
+            rc_gesture_send_frame(&still, &down, screen, sender);
+            mach_wait_until(mach_absolute_time() + rc_mach_from_seconds(0.02));
+        }
+        for (int j = 0; j < still.count; j++) still.fingers[j].touching = 0;
+        rc_gesture_send_frame_ex(&still, &down, screen, sender, 0x80);
+        down = 0;
     }
-    SRLog(@"[Gesture] '%@' %@", name, g_playCancel ? @"stopped" : @"done");
+    g_playResult = g_playTouched ? @"stopped by touch" : g_playCancel ? @"stopped" : @"done";
+    SRLog(@"[Gesture] '%@' %@: %u touch events seen, %u of them sent by playback (%u with a real finger inside), %u new fingers",
+        name, g_playResult, g_watchEvents, g_watchSent, g_watchMixed, g_watchDowns);
     g_playing = NO;
 }
 
@@ -984,6 +1101,15 @@ static NSArray<NSString *> *rc_gesture_words(NSString *text) {
         [words addObject:word ?: @""];
     }
     return words;
+}
+
+NSArray<NSDictionary *> *RCGestureList(void) {
+    NSMutableArray *out = [NSMutableArray array];
+    for (NSDictionary *g in rc_gestures_load()) {
+        if (![g[@"name"] isKindOfClass:[NSString class]]) continue;
+        [out addObject:@{ @"name": g[@"name"], @"duration": g[@"duration"] ?: @0, @"strokes": g[@"strokes"] ?: @0 }];
+    }
+    return out;
 }
 
 NSString *RCGestureCommand(NSString *cmd) {
@@ -1033,6 +1159,18 @@ NSString *RCGestureCommand(NSString *cmd) {
         if (words.count > 2) rc_gestures_set_idle_stop([arg doubleValue]);
         return [NSString stringWithFormat:@"%g\n", rc_gestures_idle_stop()];
     }
+    if ([verb isEqualToString:@"play-status"]) {
+        return [g_playResult stringByAppendingString:@"\n"];
+    }
+    if ([verb isEqualToString:@"stop-on-touch"]) {
+        // gesture stop-on-touch [on|off]: Stop on Touch; without one, the setting
+        if (words.count > 2) {
+            NSString *value = arg.lowercaseString;
+            if (![@[@"on", @"off"] containsObject:value]) return @"Error: Use on or off\n";
+            rc_gestures_set_setting(@"stopOnTouch", @([value isEqualToString:@"on"]));
+        }
+        return rc_gestures_stop_on_touch() ? @"on\n" : @"off\n";
+    }
     if ([verb isEqualToString:@"tab-size"]) {
         // gesture tab-size [small|medium|large]: Tab Size; without one, the setting
         NSString *size = arg.lowercaseString;
@@ -1070,7 +1208,9 @@ NSString *RCGestureCommand(NSString *cmd) {
         NSData *frames = rc_gesture_unpack(g[@"frames"], &count);
         if (!count) return @"Error: The gesture is empty\n";
         NSString *name = g[@"name"];
-        dispatch_block_t play = ^{ rc_gesture_play(name, frames.bytes, count, sender, speed); };
+        NSArray *size = g[@"screen"];
+        CGSize recorded = [size isKindOfClass:[NSArray class]] && size.count == 2 ? CGSizeMake([size[0] doubleValue], [size[1] doubleValue]) : CGSizeZero;
+        dispatch_block_t play = ^{ rc_gesture_play(name, frames.bytes, count, sender, speed, recorded); };
         if ([verb isEqualToString:@"play-soon"]) {
             // From the app's Gestures screen: a second for the app to step aside first
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), rc_gesture_play_queue(), play);
@@ -1221,5 +1361,5 @@ NSString *RCGestureCommand(NSString *cmd) {
         return [NSString stringWithFormat:@"Renamed to '%@'\n", to];
     }
 
-    return @"Usage: gesture list | record \"Name\" | record-toggle [\"Name\"] | record-stop | record-cancel | record-status | play \"Name\" [SPEED] | play-soon \"Name\" [SPEED] | play-latest [SPEED] | stop | idle-stop [SECONDS] | tab-size [small|medium|large] | export PATH [\"Name\" ...] | import PATH | trim \"Name\" START END | delete \"Name\" | rename \"Old\" \"New\"\n";
+    return @"Usage: gesture list | record \"Name\" | record-toggle [\"Name\"] | record-stop | record-cancel | record-status | play \"Name\" [SPEED] | play-soon \"Name\" [SPEED] | play-latest [SPEED] | play-status | stop | idle-stop [SECONDS] | tab-size [small|medium|large] | stop-on-touch [on|off] | export PATH [\"Name\" ...] | import PATH | trim \"Name\" START END | delete \"Name\" | rename \"Old\" \"New\"\n";
 }

@@ -6,3 +6,4 @@
 
 void RCGestureHIDEvent(const void *event);   // every digitizer event, from the HID listener's thread
 NSString *RCGestureCommand(NSString *cmd);   // "gesture ..." commands
+NSArray<NSDictionary *> *RCGestureList(void); // name, duration, strokes: for the web UI (/api/gestures)
