@@ -1203,8 +1203,11 @@ static void RCSetRunWatching(BOOL watching) {
     self.stripRuns = runs;
     if (had != (runs.count > 0)) {
         [self.tableView reloadData]; // the strip comes or goes (the header's height changes)
-    } else if (self.stripLabel) {
+    } else if (runs.count && self.stripLabel) {
         self.stripLabel.text = [self stripText];
+        // A longer step name wraps to another line, which the header has to grow for
+        CGFloat height = [self runStripHeightForWidth:self.tableView.bounds.size.width];
+        if (fabs(height - CGRectGetHeight(self.stripLabel.superview.bounds)) > 0.5) [self.tableView reloadData];
     }
     if (runs.count && !self.runTimer && self.runsToken) {
         __weak typeof(self) weakSelf = self;
@@ -1225,20 +1228,34 @@ static void RCSetRunWatching(BOOL watching) {
     return [NSString stringWithFormat:@"%@ · %@ · %@", [run[@"test"] boolValue] ? @"Testing" : @"Running", time, step];
 }
 
+- (UIFont *)runStripFont {
+    return [UIFont monospacedDigitSystemFontOfSize:13 weight:UIFontWeightMedium];
+}
+
+// The strip's height for its text: one line is the usual 40, longer step names wrap and make it taller
+- (CGFloat)runStripHeightForWidth:(CGFloat)width {
+    CGFloat labelWidth = width - self.tableView.layoutMargins.left - self.tableView.layoutMargins.right - 42 - 44;
+    CGRect bounds = [[self stripText] boundingRectWithSize:CGSizeMake(MAX(0, labelWidth), CGFLOAT_MAX)
+                                                    options:NSStringDrawingUsesLineFragmentOrigin
+                                                 attributes:@{ NSFontAttributeName: [self runStripFont] } context:nil];
+    return MAX(40, ceil(bounds.size.height) + 24);
+}
+
 // The strip: green, with the runs' state; tap for this trigger's Running list, Stop ends them all
-- (UIView *)runStripWithWidth:(CGFloat)width left:(CGFloat)left right:(CGFloat)right {
-    UIView *strip = [[UIView alloc] initWithFrame:CGRectMake(left, 10, width - left - right, 40)];
+- (UIView *)runStripWithWidth:(CGFloat)width left:(CGFloat)left right:(CGFloat)right height:(CGFloat)height {
+    UIView *strip = [[UIView alloc] initWithFrame:CGRectMake(left, 10, width - left - right, height)];
     strip.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     strip.backgroundColor = [[UIColor systemGreenColor] colorWithAlphaComponent:0.18];
     strip.layer.cornerRadius = 10;
     UIImageView *icon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"play.circle.fill"]];
     icon.tintColor = [UIColor systemGreenColor];
     icon.contentMode = UIViewContentModeCenter;
-    icon.frame = CGRectMake(10, 0, 24, 40);
+    icon.frame = CGRectMake(10, 0, 24, height);
     [strip addSubview:icon];
-    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(42, 0, strip.bounds.size.width - 42 - 44, 40)];
-    label.font = [UIFont monospacedDigitSystemFontOfSize:13 weight:UIFontWeightMedium];
+    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(42, 10, strip.bounds.size.width - 42 - 44, height - 20)];
+    label.font = [self runStripFont];
     label.textColor = [UIColor labelColor];
+    label.numberOfLines = 0;
     label.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     label.text = [self stripText];
     [strip addSubview:label];
@@ -1246,7 +1263,7 @@ static void RCSetRunWatching(BOOL watching) {
     UIButton *stop = [UIButton buttonWithType:UIButtonTypeSystem];
     [stop setImage:[UIImage systemImageNamed:@"stop.circle.fill" withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:20]] forState:UIControlStateNormal];
     stop.tintColor = [UIColor systemRedColor];
-    stop.frame = CGRectMake(strip.bounds.size.width - 44, 0, 44, 40);
+    stop.frame = CGRectMake(strip.bounds.size.width - 44, 0, 44, height);
     stop.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
     stop.accessibilityLabel = @"Stop";
     [stop addTarget:self action:@selector(stopAllRuns) forControlEvents:UIControlEventTouchUpInside];
@@ -3981,12 +3998,13 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     
     CGFloat width = tableView.bounds.size.width;
     CGFloat bannerHeight = [self runModeBannerHeightForWidth:width];
-    CGFloat stripHeight = [self showsRunStrip] ? 52 : 0;
+    CGFloat stripBoxHeight = [self showsRunStrip] ? [self runStripHeightForWidth:width] : 0;
+    CGFloat stripHeight = stripBoxHeight > 0 ? stripBoxHeight + 12 : 0; // the gap below it
     CGFloat top = (bannerHeight > 0 ? bannerHeight + 12 : 0) + stripHeight;
     UIView *headerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, 40 + top)];
-    if (stripHeight > 0) {
+    if (stripBoxHeight > 0) {
         // The table puts this header on the action cards' frame, so the cards' edges are 0 and width here
-        [headerView addSubview:[self runStripWithWidth:width left:0 right:0]];
+        [headerView addSubview:[self runStripWithWidth:width left:0 right:0 height:stripBoxHeight]];
     }
     if (bannerHeight > 0) {
         // Lined up with the action cards (this header's own bounds), and kept so as the header is resized
@@ -4027,8 +4045,10 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 
 - (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section {
     if (_actions.count == 0) return 0;
-    CGFloat bannerHeight = [self runModeBannerHeightForWidth:tableView.bounds.size.width];
-    return 40.0f + (bannerHeight > 0 ? bannerHeight + 12 : 0) + ([self showsRunStrip] ? 52 : 0);
+    CGFloat width = tableView.bounds.size.width;
+    CGFloat bannerHeight = [self runModeBannerHeightForWidth:width];
+    CGFloat stripHeight = [self showsRunStrip] ? [self runStripHeightForWidth:width] + 12 : 0;
+    return 40.0f + (bannerHeight > 0 ? bannerHeight + 12 : 0) + stripHeight;
 }
 
 // The ordinary editor while its trigger runs (the debugger view has the run above its title instead)
