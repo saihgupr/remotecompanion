@@ -19,6 +19,8 @@
 //   rc-screen menu TEXT|#N          opens the element's menu (as a long press does, without the touch)
 //   rc-screen watch [SECONDS] [--every S]  a line per change on the screen (and the outline when
 //                                   the app or page changes), until stopped or for SECONDS
+//   rc-screen notifications [--keep-open]  the notifications, a line each (opens Notification
+//                                   Center for it and closes it after)
 //   rc-screen type TEXT             types into the text field being edited (--replace: clears it first)
 //   rc-screen clear                 empties the text field being edited
 //   rc-screen set TEXT|#N on|off    turns a switch on or off (only presses it if it needs to)
@@ -134,9 +136,13 @@ static NSString *rc_kind(uint64_t traits) {
 @implementation RCScreenElement
 @end
 
+// --springboard: SpringBoard's own elements (banners, overlays) even with an app in front
+static BOOL g_springboard = NO;
+
 // The app in front, or SpringBoard (home screen, lock screen) when there's none
 static id rc_primary_app(void) {
     Class AXElement = NSClassFromString(@"AXElement");
+    if (g_springboard) return rc_call(AXElement, @"systemApplication");
     id app = rc_call(AXElement, @"primaryApp");
     if (rc_call(app, @"explorerElements")) return app;
     id system = rc_call(AXElement, @"systemApplication");
@@ -204,6 +210,9 @@ static NSArray<RCScreenElement *> *rc_web_elements(id app) {
     return out;
 }
 
+// The watcher skips the web page walk (the slowest part of a read) when there's no page to walk
+static BOOL g_skipWeb = NO;
+
 static NSArray<RCScreenElement *> *rc_elements(id app) {
     NSMutableArray *list = [NSMutableArray array];
     NSUInteger number = 0;
@@ -212,7 +221,7 @@ static NSArray<RCScreenElement *> *rc_elements(id app) {
         e.number = ++number;
         [list addObject:e];
     }
-    for (RCScreenElement *e in rc_web_elements(app)) {
+    for (RCScreenElement *e in (g_skipWeb ? @[] : rc_web_elements(app))) {
         e.web = YES;
         e.number = ++number;
         [list addObject:e];
@@ -325,7 +334,7 @@ static void rc_quit(int sig) {
 }
 
 static int rc_usage(void) {
-    fprintf(stderr, "Usage: rc-screen [--json|--outline] | find TEXT [--json] | press TEXT|#N | wait TEXT [SECONDS] | tap TEXT|#N | hold TEXT|#N [SECONDS] | menu TEXT|#N | type TEXT | scroll-to TEXT [up|left|right] | adjust TEXT|#N up|down [STEPS] | adjust TEXT|#N PERCENT%% | set TEXT|#N on|off | clear | pinch TEXT|#N SCALE | rotate TEXT|#N DEGREES | watch [SECONDS] [--every S]\n");
+    fprintf(stderr, "Usage: rc-screen [--json|--outline] | find TEXT [--json] | press TEXT|#N | wait TEXT [SECONDS] | tap TEXT|#N | hold TEXT|#N [SECONDS] | menu TEXT|#N | type TEXT | scroll-to TEXT [up|left|right] | adjust TEXT|#N up|down [STEPS] | adjust TEXT|#N PERCENT%% | set TEXT|#N on|off | clear | pinch TEXT|#N SCALE | rotate TEXT|#N DEGREES | watch [SECONDS] [--every S] | notifications [--keep-open]\n");
     return 2;
 }
 
@@ -576,6 +585,80 @@ static NSString *rc_outline(id app, NSString *appName, NSString *bundleID, NSArr
     return [out componentsJoinedByString:@"\n"];
 }
 
+#pragma mark - Notifications
+
+// The notifications in Notification Center (or on the lock screen), a line each: app, when,
+// title and text, as iOS reads them out. Opens Notification Center if it isn't showing, and
+// closes it again after, unless keepOpen.
+static double g_screenWidth = 390;
+
+static BOOL rc_notification_item(RCScreenElement *e) {
+    if (![e.kind isEqualToString:@"button"] || ![e.label containsString:@", "]) return NO;
+    if ([e.label hasPrefix:@"Clear"] || [e.value isEqualToString:@"Notification Center"]) return NO;
+    // A notification is a card nearly as wide as the screen (widgets and buttons are narrower), or
+    // reads "APP, when, …" with the app's name in capitals; its label starts with when it came
+    // ("20 minutes ago, …") or the app, depending on where iOS lists it
+    if (e.frame.size.width > g_screenWidth * 0.85) return YES;
+    NSString *first = [e.label componentsSeparatedByString:@", "].firstObject;
+    return first.length > 1 && [first isEqualToString:first.uppercaseString] && ![first isEqualToString:first.lowercaseString];
+}
+
+static NSArray<RCScreenElement *> *rc_notifications_now(void) {
+    NSMutableArray *out = [NSMutableArray array];
+    id app = rc_primary_app();
+    CGRect screen = rc_frame(app);
+    if (!CGRectIsEmpty(screen)) g_screenWidth = screen.size.width;
+    for (RCScreenElement *e in rc_elements(app)) if (rc_notification_item(e)) [out addObject:e];
+    return out;
+}
+
+static BOOL rc_notification_center_open(void) {
+    for (RCScreenElement *e in rc_elements(rc_primary_app())) {
+        if ([e.kind isEqualToString:@"header"] && [e.label isEqualToString:@"Notification Center"]) return YES;
+    }
+    return NO;
+}
+
+static int rc_command(NSString *command);
+
+static int rc_notifications(BOOL json, BOOL keepOpen) {
+    id app = rc_primary_app();
+    CGRect screen = rc_frame(app);
+    if (CGRectIsEmpty(screen)) screen = CGRectMake(0, 0, 390, 844);
+    BOOL opened = NO;
+    if (!rc_notification_center_open() && rc_notifications_now().count == 0) {
+        // Down from the top edge, left of the middle (the right side is Control Center)
+        double x = screen.origin.x + screen.size.width * 0.2;
+        if (rc_command([NSString stringWithFormat:@"gesture swipe %.0f 0 %.0f %.0f 0.4", x, x, screen.size.height * 0.7]) != 0) return 2;
+        opened = YES;
+        // Open once its header or its first card shows
+        for (int i = 0; i < 15 && !rc_notification_center_open() && rc_notifications_now().count == 0; i++) [NSThread sleepForTimeInterval:0.2];
+        [NSThread sleepForTimeInterval:0.3];
+    }
+    NSArray<RCScreenElement *> *items = rc_notifications_now();
+    if (json) {
+        NSMutableArray *list = [NSMutableArray array];
+        for (RCScreenElement *e in items) {
+            NSArray *parts = [e.label componentsSeparatedByString:@", "];
+            [list addObject:@{ @"number": @(e.number), @"app": parts.firstObject ?: @"", @"when": parts.count > 1 ? parts[1] : @"",
+                               @"text": parts.count > 2 ? [[parts subarrayWithRange:NSMakeRange(2, parts.count - 2)] componentsJoinedByString:@", "] : @"" }];
+        }
+        rc_print_json(list);
+    } else if (!items.count) {
+        printf("No notifications\n");
+    } else {
+        for (RCScreenElement *e in items) printf("#%lu %s\n", (unsigned long)e.number, e.label.UTF8String);
+    }
+    if (opened && !keepOpen) {
+        // Up from the bottom edge closes it
+        rc_command([NSString stringWithFormat:@"gesture swipe %.0f %.0f %.0f %.0f 0.25", CGRectGetMidX(screen), CGRectGetMaxY(screen), CGRectGetMidX(screen), screen.size.height * 0.45]);
+        // Back where it was before returning, so the next read sees the app again
+        for (int i = 0; i < 15 && (rc_notification_center_open() || rc_notifications_now().count); i++) [NSThread sleepForTimeInterval:0.15];
+        [NSThread sleepForTimeInterval:0.4];
+    }
+    return 0;
+}
+
 #pragma mark - Watch
 
 // rc-screen watch: a running log of what changes on the screen, a line per change once the screen
@@ -701,6 +784,10 @@ static int rc_watch(double interval, double duration) {
     NSDate *until = duration > 0 ? [NSDate dateWithTimeIntervalSinceNow:duration] : nil;
     RCWatchState *shown = nil;  // what was last reported
     NSString *last = nil;       // the previous read, to know when the screen has settled
+    // Quick while things change, slower once the screen has been still for a few reads (any
+    // change, or another app in front, makes it quick again)
+    int still = 0, reads = 0;
+    BOOL webSeen = YES;
     rc_watch_say(@"watching (a line per change; the outline when the app or page changes)");
     FILE *mark = fopen(kRCScreenWatching, "w");
     if (mark) { fprintf(mark, "%d\n", getpid()); fclose(mark); }
@@ -719,14 +806,19 @@ static int rc_watch(double interval, double duration) {
             lastOn = CFAbsoluteTimeGetCurrent();
         }
         @autoreleasepool {
+            // The page walk only when a page was there last time, or every 5th read to find a new one
+            g_skipWeb = !webSeen && reads % 5 != 0;
+            reads++;
             RCWatchState *now = rc_watch_state();
+            if (!g_skipWeb) webSeen = [now.outline rangeOfString:@"\nweb page:"].location != NSNotFound;
             if ([now.outline isEqualToString:last] && ![now.outline isEqualToString:shown.outline]) {
                 rc_watch_report(shown, now);
                 shown = now;
             }
+            still = [now.outline isEqualToString:last] ? still + 1 : 0;
             last = now.outline;
         }
-        [NSThread sleepForTimeInterval:interval];
+        [NSThread sleepForTimeInterval:still >= 4 ? MAX(interval, 2.0) : interval];
     }
     unlink(kRCScreenWatching);
     return 0;
@@ -746,12 +838,13 @@ int main(int argc, char **argv) {
             if ([a isEqualToString:@"--json"]) json = YES;
             else if ([a isEqualToString:@"--replace"]) replace = YES;
             else if ([a isEqualToString:@"--outline"]) outline = YES;
+            else if ([a isEqualToString:@"--springboard"]) g_springboard = YES;
             else if ([a isEqualToString:@"-h"] || [a isEqualToString:@"--help"]) return rc_usage();
             else [args addObject:a];
         }
         NSString *verb = args.count ? args[0] : @"list";
-        if (![@[@"list", @"find", @"press", @"wait", @"tap", @"hold", @"menu", @"type", @"scroll-to", @"adjust", @"set", @"clear", @"pinch", @"rotate", @"watch"] containsObject:verb]) return rc_usage();
-        if (![verb isEqualToString:@"list"] && ![verb isEqualToString:@"clear"] && ![verb isEqualToString:@"watch"] && args.count < 2) return rc_usage();
+        if (![@[@"list", @"find", @"press", @"wait", @"tap", @"hold", @"menu", @"type", @"scroll-to", @"adjust", @"set", @"clear", @"pinch", @"rotate", @"watch", @"notifications"] containsObject:verb]) return rc_usage();
+        if (![verb isEqualToString:@"list"] && ![verb isEqualToString:@"clear"] && ![verb isEqualToString:@"watch"] && ![verb isEqualToString:@"notifications"] && args.count < 2) return rc_usage();
 
         void *lib = dlopen("/usr/lib/libAccessibility.dylib", RTLD_NOW);
         AXSAutomationEnabled = lib ? dlsym(lib, "_AXSAutomationEnabled") : NULL;
@@ -769,6 +862,10 @@ int main(int argc, char **argv) {
         }
         atexit(rc_restore);
 
+        if ([verb isEqualToString:@"notifications"]) {
+            g_springboard = YES; // Notification Center is SpringBoard's, whatever app is in front
+            return rc_notifications(json, [args containsObject:@"--keep-open"]);
+        }
         if ([verb isEqualToString:@"watch"]) {
             // watch [SECONDS] [--every SECONDS]: forever (until stopped) or for SECONDS
             double duration = args.count > 1 ? [args[1] doubleValue] : 0, interval = 0.5;

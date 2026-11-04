@@ -1,7 +1,52 @@
 #import "RCScreen.h"
 #import "RCSpawn.h"
+#import <UIKit/UIKit.h>
+#import <sys/stat.h>
+
+// UIKit's own screen grab: the whole screen as SpringBoard shows it (main thread only)
+extern UIImage *_UICreateScreenUIImage(void) NS_RETURNS_RETAINED;
+
+// The screen as a small JPEG at `path`: `scale` of its size in points, JPEG `quality`
+static NSString *rc_screen_capture(NSString *path, double scale, double quality) {
+    __block NSData *jpeg = nil;
+    __block CGSize size = CGSizeZero;
+    void (^grab)(void) = ^{
+        UIImage *shot = _UICreateScreenUIImage();
+        if (!shot) return;
+        CGSize points = [UIScreen mainScreen].bounds.size;
+        size = CGSizeMake(round(points.width * scale), round(points.height * scale));
+        UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat defaultFormat];
+        format.scale = 1;
+        UIImage *small = [[[UIGraphicsImageRenderer alloc] initWithSize:size format:format] imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+            [shot drawInRect:CGRectMake(0, 0, size.width, size.height)];
+        }];
+        jpeg = UIImageJPEGRepresentation(small, quality);
+    };
+    if ([NSThread isMainThread]) grab(); else dispatch_sync(dispatch_get_main_queue(), grab);
+    if (!jpeg) return @"Error: Couldn't capture the screen\n";
+    [[NSFileManager defaultManager] createDirectoryAtPath:path.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
+    if (![jpeg writeToFile:path atomically:YES]) return [NSString stringWithFormat:@"Error: Couldn't write %@\n", path];
+    chmod(path.fileSystemRepresentation, 0644);
+    return [NSString stringWithFormat:@"%@ %.0fx%.0f %lu bytes\n", path, size.width, size.height, (unsigned long)jpeg.length];
+}
 
 void SRLog(NSString *format, ...);
+
+// Screenshots go only into the phone's temporary folders: no "..", and the folder it lands in
+// (or the nearest one that exists) must still be one of them with symlinks followed
+static BOOL rc_capture_path_ok(NSString *path) {
+    if (![path hasPrefix:@"/var/mobile/tmp/"] && ![path hasPrefix:@"/tmp/"]) return NO;
+    if ([path.pathComponents containsObject:@".."]) return NO;
+    NSString *dir = path.stringByDeletingLastPathComponent;
+    while (dir.length > 1 && ![[NSFileManager defaultManager] fileExistsAtPath:dir]) dir = dir.stringByDeletingLastPathComponent;
+    char real[PATH_MAX];
+    if (!realpath(dir.fileSystemRepresentation, real)) return NO;
+    NSString *resolved = @(real);
+    for (NSString *root in @[@"/private/var/tmp", @"/private/var/mobile/tmp", @"/var/tmp", @"/var/mobile/tmp", @"/tmp"]) {
+        if ([resolved isEqualToString:root] || [resolved hasPrefix:[root stringByAppendingString:@"/"]]) return YES;
+    }
+    return NO;
+}
 
 // Runs rc-screen with these arguments; its exit status (-1 if it couldn't run or took longer
 // than `timeout`), with what it printed in *output
@@ -49,6 +94,17 @@ NSString *RCScreenCommand(NSString *cmd) {
     NSRange space = [rest rangeOfString:@" "];
     NSString *verb = (space.location == NSNotFound ? rest : [rest substringToIndex:space.location]).lowercaseString;
     NSString *arg = space.location == NSNotFound ? @"" : [rest substringFromIndex:space.location + 1];
+    if ([verb isEqualToString:@"capture"]) {
+        // screen capture [PATH] [SCALE] [QUALITY]
+        NSArray *words = [arg componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        words = [words filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"length > 0"]];
+        NSString *path = words.count > 0 && [words[0] hasPrefix:@"/"] ? words[0] : @"/var/mobile/tmp/rc-screen.jpg";
+        NSUInteger next = words.count > 0 && [words[0] hasPrefix:@"/"] ? 1 : 0;
+        double scale = words.count > next ? MIN(MAX([words[next] doubleValue], 0.1), 1) : 0.5;
+        double quality = words.count > next + 1 ? MIN(MAX([words[next + 1] doubleValue], 0.1), 1) : 0.6;
+        if (!rc_capture_path_ok(path)) return @"Error: Use a path in /var/mobile/tmp or /tmp\n";
+        return rc_screen_capture(path, scale, quality);
+    }
     double seconds = 10;
     NSString *text = rc_screen_text(arg, &seconds);
     if (![@[@"tap", @"wait", @"scroll-to"] containsObject:verb] || !text.length) {

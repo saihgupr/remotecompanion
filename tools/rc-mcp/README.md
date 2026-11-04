@@ -43,6 +43,8 @@ the phone. One file, Python 3.8 or later, nothing to install.
 | `wait` | Waits until some text is on screen and the screen has settled |
 | `scroll_to` | Scrolls the list until some text is on screen |
 | `open_app`, `home`, `wake` | Opens an app, goes home, turns the screen on |
+| `screenshot` | A small picture of the screen, only for what the outline can't show (maps, games, pictures) |
+| `notifications` | The notifications, a line each (opens Notification Center and closes it after) |
 | `screen_events`, `watch_stop` | A live log of what changes on the screen; `wait` waits for the next change |
 | `rc_command` | Any RemoteCompanion command, with its reply |
 | `log` | The end of RemoteCompanion's log |

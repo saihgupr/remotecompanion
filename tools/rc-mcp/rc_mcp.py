@@ -368,6 +368,26 @@ def testkit_unlock(host):
         return None
 
 
+def t_screenshot(args):
+    """A small JPEG of the screen, for what the outline can't show (maps, games, pictures)"""
+    host = host_for(args.get("phone"))
+    scale = min(max(float(args.get("scale", 0.5)), 0.1), 1.0)
+    path = "/var/mobile/tmp/rc-mcp-screenshot.jpg"
+    reply = run(host, rc_cmd("screen capture %s %g 0.6" % (path, scale)), timeout=20)
+    code, data, err = ssh(host, "base64 < %s | tr -d '\\n'; rm -f %s" % (path, path), timeout=30)
+    if code != 0 or not data:
+        raise ToolError("Couldn't fetch the screenshot: %s" % (err or reply))
+    size = reply.split()[1] if len(reply.split()) > 1 else ""
+    return {"content": [{"type": "image", "data": data.strip(), "mimeType": "image/jpeg"},
+                        {"type": "text", "text": "Screenshot %s (positions in it are screen points x %g)." % (size, scale)}]}
+
+
+def t_notifications(args):
+    host = host_for(args.get("phone"))
+    words = ["notifications"] + (["--keep-open"] if args.get("keep_open") else [])
+    return run(host, screen_cmd(*words), timeout=40)
+
+
 def t_screen_events(args):
     host = host_for(args.get("phone"))
     w = WATCHERS.get(host)
@@ -378,7 +398,7 @@ def t_screen_events(args):
     lines, last = w.since(cursor, wait)
     if fresh_start:
         # The first report (the app and its outline) comes once the screen has settled
-        deadline = time.time() + 6
+        deadline = time.time() + 10
         while time.time() < deadline and not any(t.startswith(("app", "page")) or " app \u2192 " in t for _, t in lines):
             more, last = w.since(last, deadline - time.time())
             lines += more
@@ -508,6 +528,15 @@ TOOLS = [
      "RemoteCompanion's Test Kit on the phone (kept there for 30 minutes; never sent to you). "
      "Use it when the screen list is empty or shows the lock screen; apps don't open while the screen is off.",
      {"show_screen": SHOW}, []),
+    ("screenshot", t_screenshot,
+     "A picture of the screen (a small JPEG). Only when the outline from `screen` can't tell you what you need: "
+     "a map, a game, a camera view, a picture, a drawing, or an element with no label. It costs far more than "
+     "the outline, so prefer `screen`.",
+     {"scale": {"type": "number", "description": "Size as a share of the screen's points (default 0.5, up to 1)."}}, []),
+    ("notifications", t_notifications,
+     "The phone's notifications, a line each as iOS reads them: APP, when, title, text (with #N to press one "
+     "while Notification Center is open). Opens Notification Center for this and closes it again, unless keep_open.",
+     {"keep_open": {"type": "boolean", "description": "Leave Notification Center open (to press or clear one)."}}, []),
     ("screen_events", t_screen_events,
      "A live log of the screen: what changed since `since` (a cursor from the last call), one line per change "
      "once the screen settles: 'app → …' and 'page → …' (followed by the new page's outline, indented), "
@@ -578,7 +607,10 @@ def handle(msg):
             return
         try:
             text = fn(params.get("arguments") or {})
-            reply(msg_id, {"content": [{"type": "text", "text": text}], "isError": False})
+            if isinstance(text, dict) and "content" in text:  # a tool that returns its own content (an image)
+                reply(msg_id, {"content": text["content"], "isError": False})
+            else:
+                reply(msg_id, {"content": [{"type": "text", "text": text}], "isError": False})
         except ToolError as e:
             reply(msg_id, {"content": [{"type": "text", "text": str(e)}], "isError": True})
         except KeyError as e:

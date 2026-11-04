@@ -150,6 +150,7 @@ text and links of a web page. Scripts can use it to find and act on what's there
 | `rc-screen adjust "Sound volume" up` | Moves a slider, stepper or picker a step (`down 2`, or `30%` for a percentage) |
 | `rc-screen menu "Settings"` | Opens an element's menu, like a long press |
 | `rc-screen wait "Done" 10` | Waits until the text is on screen and the screen has settled |
+| `rc-screen notifications` | The notifications, a line each: app, when, title, text (opens Notification Center and closes it after) |
 | `rc-screen watch` | A line per change on the screen (`app →`, `page →` with its outline, alerts, keyboard, values), until stopped |
 | `rc-screen scroll-to "Privacy"` | Scrolls until the text is on screen: down, or add `up`, `left` or `right` (pages, carousels) |
 
