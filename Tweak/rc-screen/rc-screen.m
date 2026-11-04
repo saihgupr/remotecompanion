@@ -213,12 +213,29 @@ static NSArray<RCScreenElement *> *rc_web_elements(id app) {
 
 // The watcher skips the web page walk (the slowest part of a read) when there's no page to walk
 static BOOL g_skipWeb = NO;
+// Whether the last read left out elements that aren't laid out yet (see rc_elements)
+static BOOL g_unplaced = NO;
+
+static NSString *rc_box(CGRect f) {
+    return [NSString stringWithFormat:@"%.1f,%.1f,%.1f,%.1f", f.origin.x, f.origin.y, f.size.width, f.size.height];
+}
 
 static NSArray<RCScreenElement *> *rc_elements(id app) {
     NSMutableArray *list = [NSMutableArray array];
     NSUInteger number = 0;
+    NSMutableArray *all = [NSMutableArray array];
+    NSCountedSet *boxes = [NSCountedSet set];
     for (id element in rc_call(app, @"explorerElements")) {
         RCScreenElement *e = rc_element_from(element);
+        [all addObject:e];
+        [boxes addObject:rc_box(e.frame)];
+    }
+    // iOS 14 gives elements not laid out yet (further down a list) one made-up box: three or more
+    // different elements in exactly the same box aren't on screen, so they're left out (and
+    // scroll-to scrolls to them rather than "finding" them there)
+    g_unplaced = NO;
+    for (RCScreenElement *e in all) {
+        if (!CGRectIsEmpty(e.frame) && [boxes countForObject:rc_box(e.frame)] >= 3) { g_unplaced = YES; continue; }
         e.number = ++number;
         [list addObject:e];
     }
@@ -318,7 +335,15 @@ static RCScreenElement *rc_pick(NSArray<RCScreenElement *> *list, NSString *text
     return nil;
 }
 
+// A change rc-screen made itself (press, type, set, adjust…) isn't a touch, so the tweak doesn't
+// see it: tell a running watcher to look, as the tweak does for touches
+static BOOL g_acted = NO;
+static void rc_tell_watcher(void) {
+    if (g_acted) notify_post("com.goldenappleguy.rc.screen-activity");
+}
+
 static void rc_restore(void) {
+    rc_tell_watcher();
     if (access(kRCScreenMarker, F_OK) != 0 || !AXSSetAutomationEnabled) return;
     if (rc_watcher_running()) return; // the watcher needs it; it turns it off when it stops
     AXSSetAutomationEnabled(0);
@@ -366,9 +391,12 @@ static NSString *rc_ol_text(RCScreenElement *e) {
     NSString *label = e.label.length ? e.label : @"";
     if ([e.kind isEqualToString:@"switch"]) {
         NSString *state = [e.value isEqualToString:@"1"] ? @"on" : [e.value isEqualToString:@"0"] ? @"off" : e.value;
-        return [NSString stringWithFormat:@"%@: %@", label, state];
+        return label.length ? [NSString stringWithFormat:@"%@: %@", label, state] : [NSString stringWithFormat:@"switch: %@", state];
     }
-    if ([e.kind isEqualToString:@"adjustable"]) return [NSString stringWithFormat:@"%@: %@ (adjustable)", label, e.value.length ? e.value : @"?"];
+    if ([e.kind isEqualToString:@"adjustable"]) {
+        NSString *value = e.value.length ? e.value : @"?";
+        return label.length ? [NSString stringWithFormat:@"%@: %@ (adjustable)", label, value] : [NSString stringWithFormat:@"%@ (adjustable)", value];
+    }
     if ([e.kind isEqualToString:@"search"] || (e.traits & 0x40000)) return [NSString stringWithFormat:@"<%@%@>", label.length ? label : @"field", e.value.length && ![e.value isEqualToString:label] ? [NSString stringWithFormat:@": %@", e.value] : @""];
     if ([e.kind isEqualToString:@"button"] || [e.kind isEqualToString:@"link"] || [e.kind isEqualToString:@"key"]) {
         NSString *inner = label.length ? label : @"unlabeled";
@@ -483,6 +511,7 @@ static NSString *rc_outline(id app, NSString *appName, NSString *bundleID, NSArr
         else [native addObject:e];
     }
     native = [rc_ol_merge(native) mutableCopy];
+    BOOL unplaced = g_unplaced;
 
     // The page title: the top bar's header, or a large header near the top
     NSString *title = nil;
@@ -540,9 +569,13 @@ static NSString *rc_outline(id app, NSString *appName, NSString *bundleID, NSArr
             if (e.frame.size.width > screen.size.width * 0.85) [wide addObject:e];
             else [rest addObject:e];
         }
-        // One small item on a list row is its accessory; three or more side by side are a bar
+        // One small control on a list row is its accessory (an info button, a switch); three or
+        // more side by side are a bar. A header or text isn't an accessory: under a see-through
+        // bar it's the bar's title over a row scrolled beneath it
         if (wide.count && rest.count < 3) {
+            NSSet *controls = [NSSet setWithArray:@[@"button", @"switch", @"link", @"adjustable", @"key"]];
             for (RCScreenElement *e in [rest copy]) {
+                if (![controls containsObject:e.kind]) continue;
                 for (RCScreenElement *w in [wide copy]) {
                     if (CGRectIntersectsRect(w.frame, e.frame)) { [wide addObject:e]; [rest removeObject:e]; break; }
                 }
@@ -558,6 +591,7 @@ static NSString *rc_outline(id app, NSString *appName, NSString *bundleID, NSArr
         else [content addObjectsFromArray:rest];
     }
     for (RCScreenElement *e in web) if (CGRectGetMaxY(e.frame) > CGRectGetMaxY(screen) + 1) below = YES;
+    if (unplaced) below = YES;
 
     for (NSArray *row in rc_ol_rows(topBar)) [out addObject:[@"top: " stringByAppendingString:rc_ol_row(row)]];
     if (above) [out addObject:@"↑ more above"];
@@ -578,6 +612,12 @@ static NSString *rc_outline(id app, NSString *appName, NSString *bundleID, NSArr
     // A big area with nothing readable (a map, a game, a camera, a canvas)
     for (RCScreenElement *e in all) {
         if (!e.label.length && !e.value.length && e.frame.size.width * e.frame.size.height > screen.size.width * h * 0.35 && ![e.kind isEqualToString:@"key"]) {
+            // A container with readable things in it (a web view, a list) isn't opaque
+            NSUInteger inside = 0;
+            for (RCScreenElement *o in all) {
+                if (o != e && (o.label.length || o.value.length) && CGRectContainsPoint(e.frame, CGPointMake(CGRectGetMidX(o.frame), CGRectGetMidY(o.frame)))) inside++;
+            }
+            if (inside >= 3) continue;
             [out addObject:[NSString stringWithFormat:@"(an area of %.0fx%.0f with nothing readable at %.0f,%.0f: a map, game or canvas? Use touches there, or a screenshot)",
                             e.frame.size.width, e.frame.size.height, CGRectGetMidX(e.frame), CGRectGetMidY(e.frame)]];
             break;
@@ -604,17 +644,41 @@ static BOOL rc_notification_item(RCScreenElement *e) {
     return first.length > 1 && [first isEqualToString:first.uppercaseString] && ![first isEqualToString:first.lowercaseString];
 }
 
+// Notification Center shows in SpringBoard's own elements on iOS 17 (with an app in front), and
+// in the front app's reading on iOS 14: whichever has it
+static NSArray<RCScreenElement *> *rc_notification_elements(void) {
+    BOOL was = g_springboard;
+    NSArray<RCScreenElement *> *best = @[];
+    for (int pass = 0; pass < 2; pass++) {
+        g_springboard = pass == 0;
+        id app = rc_primary_app();
+        if (pass == 1) {
+            // Only while SpringBoard itself is in front: an app's own wide rows (Settings' Apple
+            // ID row) aren't notifications
+            SEL systemSel = NSSelectorFromString(@"isSystemApplication");
+            BOOL system = [app respondsToSelector:systemSel] && ((BOOL (*)(id, SEL))objc_msgSend)(app, systemSel);
+            if (!system && rc_text(rc_call(app, @"label")).length) break;
+        }
+        CGRect screen = rc_frame(app);
+        if (!CGRectIsEmpty(screen)) g_screenWidth = screen.size.width;
+        NSArray<RCScreenElement *> *list = rc_elements(app);
+        for (RCScreenElement *e in list) {
+            if (rc_notification_item(e) || ([e.kind isEqualToString:@"header"] && [e.label isEqualToString:@"Notification Center"])) { best = list; break; }
+        }
+        if (best.count) break;
+    }
+    g_springboard = was;
+    return best;
+}
+
 static NSArray<RCScreenElement *> *rc_notifications_now(void) {
     NSMutableArray *out = [NSMutableArray array];
-    id app = rc_primary_app();
-    CGRect screen = rc_frame(app);
-    if (!CGRectIsEmpty(screen)) g_screenWidth = screen.size.width;
-    for (RCScreenElement *e in rc_elements(app)) if (rc_notification_item(e)) [out addObject:e];
+    for (RCScreenElement *e in rc_notification_elements()) if (rc_notification_item(e)) [out addObject:e];
     return out;
 }
 
 static BOOL rc_notification_center_open(void) {
-    for (RCScreenElement *e in rc_elements(rc_primary_app())) {
+    for (RCScreenElement *e in rc_notification_elements()) {
         if ([e.kind isEqualToString:@"header"] && [e.label isEqualToString:@"Notification Center"]) return YES;
     }
     return NO;
@@ -704,7 +768,9 @@ static RCWatchState *rc_watch_state(void) {
     NSMutableArray *order = [NSMutableArray array];
     for (RCScreenElement *e in list) {
         if ([e.kind isEqualToString:@"key"] || !rc_ol_shown(e)) continue;
-        NSString *key = [NSString stringWithFormat:@"%@|%@", e.kind, e.label];
+        // A search field reads as its placeholder while empty: the same field either way
+        BOOL field = [e.kind isEqualToString:@"search"] || (e.traits & 0x40000);
+        NSString *key = [NSString stringWithFormat:@"%@|%@", e.kind, field && !e.label.length ? e.value : e.label];
         if (items[key]) continue;
         items[key] = e;
         [order addObject:key];
@@ -769,6 +835,18 @@ static void rc_watch_report(RCWatchState *was, RCWatchState *now) {
     NSMutableArray *added = [NSMutableArray array], *gone = [NSMutableArray array];
     for (NSString *key in now.order) if (!was.items[key]) [added addObject:now.items[key]];
     for (NSString *key in was.order) if (!now.items[key]) [gone addObject:was.items[key]];
+    // The same kind of element in the same place with new text (a timer, a counter) changed,
+    // rather than one going and another coming
+    for (RCScreenElement *b in [added copy]) {
+        for (RCScreenElement *a in [gone copy]) {
+            if (![a.kind isEqualToString:b.kind] || fabs(CGRectGetMidX(a.frame) - CGRectGetMidX(b.frame)) > 4 ||
+                fabs(CGRectGetMidY(a.frame) - CGRectGetMidY(b.frame)) > 4) continue;
+            rc_watch_say([NSString stringWithFormat:@"#%lu %@ \u2192 %@", (unsigned long)b.number, rc_ol_text(a), rc_ol_text(b)]);
+            [added removeObject:b];
+            [gone removeObject:a];
+            break;
+        }
+    }
     if (added.count + gone.count == 0) return;
     if (added.count + gone.count <= 6) {
         for (RCScreenElement *e in added) rc_watch_say([@"+ " stringByAppendingString:rc_ol_item(e)]);
@@ -799,13 +877,33 @@ static int rc_watch(double interval, double duration) {
     dispatch_queue_t q = dispatch_get_global_queue(QOS_CLASS_UTILITY, 0);
     notify_register_dispatch(kRCActivity, &activityToken, q, ^(int t) { activityAt = CFAbsoluteTimeGetCurrent(); dispatch_semaphore_signal(wake); });
     notify_register_dispatch(kRCBlanked, &blankToken, q, ^(int t) { activityAt = CFAbsoluteTimeGetCurrent(); dispatch_semaphore_signal(wake); });
+    // Stopped (Ctrl-C, kill, the terminal closing): finish the current read and leave the usual
+    // way, so accessibility automation goes back off; a second signal leaves at once
+    __block volatile BOOL stop = NO;
+    NSMutableArray *signalSources = [NSMutableArray array];
+    const int signals[] = { SIGINT, SIGTERM, SIGHUP };
+    for (size_t i = 0; i < sizeof(signals) / sizeof(signals[0]); i++) {
+        int sig = signals[i];
+        signal(sig, SIG_IGN);
+        dispatch_source_t source = dispatch_source_create(DISPATCH_SOURCE_TYPE_SIGNAL, (uintptr_t)sig, 0, q);
+        dispatch_source_set_event_handler(source, ^{
+            if (stop) _exit(130);
+            stop = YES;
+            dispatch_semaphore_signal(wake);
+        });
+        dispatch_resume(source);
+        [signalSources addObject:source];
+    }
     int reads = 0;
     BOOL webSeen = YES, settled = NO;
     double lastRead = 0;
+    // A screen that never settles (a stopwatch, a video's time, an animation) is reported as it
+    // is after 5 s, and read every 3 s while it keeps changing
+    double unsettledSince = 0;
     rc_watch_say(@"watching (a line per change; the outline when the app or page changes)");
     FILE *mark = fopen(kRCScreenWatching, "w");
     if (mark) { fprintf(mark, "%d\n", getpid()); fclose(mark); }
-    while (!until || [until timeIntervalSinceNow] > 0) {
+    while (!stop && (!until || [until timeIntervalSinceNow] > 0)) {
         // Whoever was reading is gone (an SSH session that ends without a terminal sends no
         // hangup, and with a shared connection the parent lives on): stop, so accessibility
         // automation goes back off
@@ -841,14 +939,24 @@ static int rc_watch(double interval, double duration) {
             lastRead = CFAbsoluteTimeGetCurrent();
             if (!g_skipWeb) webSeen = [nowState.outline rangeOfString:@"\nweb page:"].location != NSNotFound;
             settled = [nowState.outline isEqualToString:last];
-            if (settled && ![nowState.outline isEqualToString:shown.outline]) {
+            if (settled) unsettledSince = 0;
+            else if (!unsettledSince) unsettledSince = lastRead;
+            BOOL restless = unsettledSince && lastRead - unsettledSince > 5;
+            if ((settled || restless) && ![nowState.outline isEqualToString:shown.outline]) {
                 rc_watch_report(shown, nowState);
                 shown = nowState;
             }
             last = nowState.outline;
         }
-        if (!settled || CFAbsoluteTimeGetCurrent() - activityAt < 2.5) [NSThread sleepForTimeInterval:interval];
+        double since = CFAbsoluteTimeGetCurrent();
+        if (unsettledSince && since - unsettledSince > 5 && since - activityAt > 2.5) {
+            // Still changing on its own: every 3 s (a touch makes it quick again)
+            dispatch_semaphore_wait(wake, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)));
+        } else if (!settled || since - activityAt < 2.5) {
+            [NSThread sleepForTimeInterval:interval];
+        }
     }
+    for (dispatch_source_t source in signalSources) dispatch_source_cancel(source);
     notify_cancel(activityToken);
     notify_cancel(blankToken);
     unlink(kRCScreenWatching);
@@ -874,6 +982,7 @@ int main(int argc, char **argv) {
             else [args addObject:a];
         }
         NSString *verb = args.count ? args[0] : @"list";
+        g_acted = [@[@"press", @"tap", @"hold", @"menu", @"type", @"clear", @"set", @"adjust", @"scroll-to", @"pinch", @"rotate"] containsObject:verb];
         if (![@[@"list", @"find", @"press", @"wait", @"tap", @"hold", @"menu", @"type", @"scroll-to", @"adjust", @"set", @"clear", @"pinch", @"rotate", @"watch", @"notifications"] containsObject:verb]) return rc_usage();
         if (![verb isEqualToString:@"list"] && ![verb isEqualToString:@"clear"] && ![verb isEqualToString:@"watch"] && ![verb isEqualToString:@"notifications"] && args.count < 2) return rc_usage();
 
@@ -1004,6 +1113,15 @@ int main(int argc, char **argv) {
                     CGRect f = found.frame;
                     if (CGRectGetMinY(f) < CGRectGetMinY(screen) || CGRectGetMaxY(f) > CGRectGetMaxY(screen)) {
                         ((void (*)(id, SEL))objc_msgSend)(found.element, NSSelectorFromString(@"scrollToVisible"));
+                        list = rc_settled_elements(2);
+                        found = rc_pick(list, text) ?: found;
+                    }
+                    // Not under a bar: in the top or bottom band (a see-through nav bar, a tab
+                    // bar) a press or tap lands on the bar, so drag it toward the middle
+                    double mid = CGRectGetMidY(found.frame), band = screen.size.height * 0.14;
+                    if (!sideways && (mid < screen.origin.y + band || mid > CGRectGetMaxY(screen) - band)) {
+                        double shift = CGRectGetMidY(screen) - mid, from = CGRectGetMidY(screen) - shift / 2;
+                        rc_command([NSString stringWithFormat:@"gesture swipe %.0f %.0f %.0f %.0f 0.6", x, from, x, from + shift]);
                         list = rc_settled_elements(2);
                         found = rc_pick(list, text) ?: found;
                     }
