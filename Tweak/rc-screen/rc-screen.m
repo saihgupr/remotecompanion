@@ -7,8 +7,9 @@
 //   rc-screen press TEXT|#N         presses the element (exact label first, then contains; #N by
 //                                   its number in the list)
 //   rc-screen wait TEXT [SECONDS]   waits until TEXT is on screen and settled (default 10 s)
-//   rc-screen scroll-to TEXT [up]   scrolls until TEXT is on screen: down first (or up), then the
-//                                   other way once the list ends
+//   rc-screen scroll-to TEXT [up|left|right]
+//                                   scrolls until TEXT is on screen: down first (or the way given),
+//                                   then back the other way once the list ends
 //   rc-screen tap TEXT|#N           a real touch on the element's center (for what press can't reach)
 //   rc-screen hold TEXT|#N [SECONDS] touches and holds it (default 1 s)
 //   rc-screen pinch TEXT|#N SCALE   two fingers on it, apart (2: zoom in) or together (0.5: zoom out)
@@ -301,7 +302,7 @@ static void rc_quit(int sig) {
 }
 
 static int rc_usage(void) {
-    fprintf(stderr, "Usage: rc-screen [--json] | find TEXT [--json] | press TEXT|#N | wait TEXT [SECONDS] | tap TEXT|#N | hold TEXT|#N [SECONDS] | menu TEXT|#N | type TEXT | scroll-to TEXT [up] | adjust TEXT|#N up|down [STEPS] | adjust TEXT|#N PERCENT%% | set TEXT|#N on|off | clear | pinch TEXT|#N SCALE | rotate TEXT|#N DEGREES\n");
+    fprintf(stderr, "Usage: rc-screen [--json] | find TEXT [--json] | press TEXT|#N | wait TEXT [SECONDS] | tap TEXT|#N | hold TEXT|#N [SECONDS] | menu TEXT|#N | type TEXT | scroll-to TEXT [up|left|right] | adjust TEXT|#N up|down [STEPS] | adjust TEXT|#N PERCENT%% | set TEXT|#N on|off | clear | pinch TEXT|#N SCALE | rotate TEXT|#N DEGREES\n");
     return 2;
 }
 
@@ -447,16 +448,23 @@ int main(int argc, char **argv) {
             // Swipes the list in the middle of the screen, gently enough not to fling past, until
             // the text shows; a swipe that brings in nothing new is the end of the list
             NSString *text = args[1];
-            BOOL down = !(args.count > 2 && [args[2].lowercaseString isEqualToString:@"up"]);
+            // Which way to look: down (the default), up, left or right; "down" brings in what's below
+            NSString *way = args.count > 2 ? args[2].lowercaseString : @"down";
+            if (![@[@"down", @"up", @"left", @"right"] containsObject:way]) return rc_usage();
+            BOOL sideways = [way isEqualToString:@"left"] || [way isEqualToString:@"right"];
+            BOOL down = [way isEqualToString:@"down"] || [way isEqualToString:@"right"]; // toward the end
             CGRect screen = rc_frame(app);
             if (CGRectIsEmpty(screen)) screen = CGRectMake(0, 0, 390, 844);
             // 60% of the screen per swipe: less than a screen, so nothing is skipped
             double x = CGRectGetMidX(screen), high = screen.origin.y + screen.size.height * 0.2, low = screen.origin.y + screen.size.height * 0.8;
+            double y = CGRectGetMidY(screen), leftX = screen.origin.x + screen.size.width * 0.2, rightX = screen.origin.x + screen.size.width * 0.8;
             NSArray<RCScreenElement *> *list = rc_settled_elements(2);
             int turns = 0, swipes = 0;
             NSString *mention = nil; // text that only mentions it, kept scrolling past
             NSSet *acting = [NSSet setWithArray:@[@"button", @"link", @"switch", @"key", @"search", @"adjustable"]];
-            while (swipes < 24) {
+            // Pages run sideways, and are few; the home screen's live edges (Today View, App
+            // Library) never look like an end, so a sideways search stops sooner
+            while (swipes < (sideways ? 12 : 24)) {
                 RCScreenElement *found = rc_pick(list, text); // an exact label first, as press does
                 // Only an exact label or something to act on ends the search
                 if (found && [found.label compare:rc_text(text) options:NSCaseInsensitiveSearch | NSDiacriticInsensitiveSearch] != NSOrderedSame && ![acting containsObject:found.kind]) {
@@ -476,8 +484,15 @@ int main(int argc, char **argv) {
                     return 0;
                 }
                 NSSet<NSString *> *before = rc_screen_items(list);
-                NSString *swipe = down ? [NSString stringWithFormat:@"gesture swipe %.0f %.0f %.0f %.0f 0.5", x, low, x, high]
-                                       : [NSString stringWithFormat:@"gesture swipe %.0f %.0f %.0f %.0f 0.5", x, high, x, low];
+                NSString *swipe;
+                if (sideways) {
+                    // Seeing what's to the right drags the content left
+                    swipe = down ? [NSString stringWithFormat:@"gesture swipe %.0f %.0f %.0f %.0f 0.5", rightX, y, leftX, y]
+                                 : [NSString stringWithFormat:@"gesture swipe %.0f %.0f %.0f %.0f 0.5", leftX, y, rightX, y];
+                } else {
+                    swipe = down ? [NSString stringWithFormat:@"gesture swipe %.0f %.0f %.0f %.0f 0.5", x, low, x, high]
+                                 : [NSString stringWithFormat:@"gesture swipe %.0f %.0f %.0f %.0f 0.5", x, high, x, low];
+                }
                 if (rc_command(swipe) != 0) return 2;
                 swipes++;
                 list = rc_settled_elements(2);

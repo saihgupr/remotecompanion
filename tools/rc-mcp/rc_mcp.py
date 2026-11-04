@@ -202,7 +202,10 @@ def t_swipe(args):
 
 def t_scroll_to(args):
     host = host_for(args.get("phone"))
-    words = ["scroll-to", args["text"]] + (["up"] if args.get("up") else [])
+    way = (args.get("direction") or ("up" if args.get("up") else "down")).lower()
+    if way not in ("down", "up", "left", "right"):
+        raise ToolError("direction is down, up, left or right")
+    words = ["scroll-to", args["text"]] + ([way] if way != "down" else [])
     code, out, err = ssh(host, screen_cmd(*words), timeout=120)
     if code != 0:
         raise ToolError(err or out or "Not found after scrolling")
@@ -266,12 +269,31 @@ def t_home(args):
     return with_screen(host, "Home screen.", args)
 
 
+def testkit_unlock(host):
+    """Asks the phone's test kit to unlock with the passcode the user typed into it on the phone
+    (Settings > Diagnostics > Test Kit). The code never leaves the phone: this only asks, and the
+    reply says whether it worked. None when there's no test kit."""
+    port = os.environ.get("RC_WEB_PORT", "8080")
+    try:
+        req = urllib.request.Request("http://%s:%s/api/testkit/unlock" % (host, port), data=b"", method="POST")
+        with urllib.request.urlopen(req, timeout=12) as r:
+            return json.loads(r.read().decode("utf-8", "replace"))
+    except Exception:
+        return None
+
+
 def t_wake(args):
     host = host_for(args.get("phone"))
     run(host, rc_cmd("unlock"))
     _, status, _ = ssh(host, "sleep 1.2; " + rc_cmd("lock status"))
     if "unlocked" in status:
         return with_screen(host, "Awake and unlocked.", args)
+    reply = testkit_unlock(host)
+    if reply and reply.get("unlocked"):
+        return with_screen(host, "Awake, and unlocked with the passcode set in the Test Kit on the phone.", args)
+    if reply and reply.get("error"):
+        return ("The screen is on but the phone is still locked: %s. Only the person holding the phone should "
+                "enter the passcode (on the phone, or in Settings > Diagnostics > Test Kit for 30 minutes)." % reply["error"])
     return ("The screen is on but the phone is still locked: it needs its passcode, which only the person "
             "holding it should enter.")
 
@@ -327,9 +349,12 @@ TOOLS = [
       "seconds": {"type": "number", "description": "Duration (default 0.3)."}, "show_screen": SHOW},
      ["x1", "y1", "x2", "y2"]),
     ("scroll_to", t_scroll_to,
-     "Scrolls the list on screen until an element with this text shows, searching down first (or up), then the "
-     "other way. Returns the element. Slow when the text isn't there at all (a long list is searched to its end).",
-     {"text": {"type": "string"}, "up": {"type": "boolean", "description": "Search up first."}, "show_screen": SHOW}, ["text"]),
+     "Scrolls until an element with this text shows: down by default, or up, left or right (pages, carousels, "
+     "home screen pages), then back the other way once it reaches the end. Returns the element. Slow when the "
+     "text isn't there at all (it searches to the end).",
+     {"text": {"type": "string"},
+      "direction": {"type": "string", "enum": ["down", "up", "left", "right"], "description": "Where to look first (default down)."},
+      "up": {"type": "boolean", "description": "Same as direction up."}, "show_screen": SHOW}, ["text"]),
     ("adjust", t_adjust,
      "Moves an adjustable element (slider, stepper, picker; kind 'adjustable' in the screen list) the way "
      "VoiceOver does: to 'up' or 'down' (optionally 'up 3' for steps), or to a percentage like '30%' "
@@ -364,7 +389,8 @@ TOOLS = [
      {"app": {"type": "string"}, "show_screen": SHOW}, ["app"]),
     ("home", t_home, "Goes to the home screen.", {"show_screen": SHOW}, []),
     ("wake", t_wake,
-     "Turns the screen on and dismisses the lock screen (if the phone has no passcode or is already unlocked). "
+     "Turns the screen on and unlocks the phone: without a passcode, or with one the person entered in "
+     "RemoteCompanion's Test Kit on the phone (kept there for 30 minutes; never sent to you). "
      "Use it when the screen list is empty or shows the lock screen; apps don't open while the screen is off.",
      {"show_screen": SHOW}, []),
     ("rc_command", t_command,
