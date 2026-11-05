@@ -84,7 +84,7 @@ Access the desktop-class automation hub at `http://[DEVICE_IP]:8080` from any co
 
 ### Device Control
 - `rc lock` - Lock the screen.
-- `rc unlock [pin]` - Wakes and unlocks the device (or wakes screen if pin omitted).
+- `rc unlock [pin]` - Wakes and unlocks the device (or wakes screen if pin omitted). With Settings > Advanced Settings > Options > Only Unlock Out of Pocket on, it skips the unlock while the proximity sensor is covered.
 - `rc lock-toggle [pin]` / `rc lock toggle [pin]` - Toggle screen lock/unlock state (unlocks with optional passcode if locked).
 - `rc autolock [toggle|30s|1m|2m|3m|4m|5m|never|off]` / `rc display sleep [duration]` / `rc display time off` - Configure display sleep / auto-lock timeout.
 - `rc button [power|lock|home|volup|voldown|mute]` - Simulate physical button presses.

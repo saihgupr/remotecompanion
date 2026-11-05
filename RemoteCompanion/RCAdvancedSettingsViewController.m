@@ -132,7 +132,7 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
         }
         return @"NFC scanning options.";
     } else if (section == RCAdvancedSettingsSectionOptions) {
-        return nil;
+        return @"When Only Unlock Out of Pocket is on, Unlock Device and lock toggle skip unlocking while the proximity sensor is covered, such as in a pocket.";
     } else if (section == RCAdvancedSettingsSectionButtons) {
         return @"How long a press waits for the next one before it counts. A shorter time responds sooner and needs quicker presses.";
     } else if (section == RCAdvancedSettingsSectionSecurity) {
@@ -146,7 +146,7 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
     if (section == RCAdvancedSettingsSectionNFC) return 3;
     if (section == RCAdvancedSettingsSectionButtons) return (NSInteger)[self timingRows].count;
     if (section == RCAdvancedSettingsSectionSecurity) return 1;
-    return 3; // Wrap Long Names, Logging, Freeze Lists During Gestures
+    return 4; // Wrap Long Names, Logging, Freeze Lists During Gestures, Only Unlock Out of Pocket
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -223,6 +223,13 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
             freezeSwitch.on = cm.freezeListsDuringGestures;
             [freezeSwitch addTarget:self action:@selector(freezeListsToggleChanged:) forControlEvents:UIControlEventValueChanged];
             cell.accessoryView = freezeSwitch;
+            cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        } else if (indexPath.row == 3) {
+            cell.textLabel.text = @"Only Unlock Out of Pocket";
+            UISwitch *proximityUnlockSwitch = [[UISwitch alloc] init];
+            proximityUnlockSwitch.on = cm.onlyUnlockOutOfPocket;
+            [proximityUnlockSwitch addTarget:self action:@selector(onlyUnlockOutOfPocketChanged:) forControlEvents:UIControlEventValueChanged];
+            cell.accessoryView = proximityUnlockSwitch;
             cell.selectionStyle = UITableViewCellSelectionStyleNone;
         }
     } else if (indexPath.section == RCAdvancedSettingsSectionButtons) {
@@ -323,6 +330,10 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
 
 - (void)freezeListsToggleChanged:(UISwitch *)sender {
     [RCConfigManager sharedManager].freezeListsDuringGestures = sender.on;
+}
+
+- (void)onlyUnlockOutOfPocketChanged:(UISwitch *)sender {
+    [RCConfigManager sharedManager].onlyUnlockOutOfPocket = sender.on;
 }
 
 - (void)directRootToggleChanged:(UISwitch *)sender {

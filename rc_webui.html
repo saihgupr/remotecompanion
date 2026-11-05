@@ -2208,7 +2208,14 @@
           <input type="checkbox" class="ios-toggle" id="setting-freeze-lists" onchange="config.freezeListsDuringGestures=this.checked;saveConfig()">
         </div>
       </div>
+      <div class="settings-row">
+        <span class="settings-label">Only Unlock Out of Pocket</span>
+        <div class="settings-btn">
+          <input type="checkbox" class="ios-toggle" id="setting-only-unlock-out-of-pocket" onchange="config.onlyUnlockOutOfPocket=this.checked;saveConfig()">
+        </div>
+      </div>
     </div>
+    <div style="color:#8e8e93;font-size:13px;margin:8px 32px 0">When on, Unlock Device and lock toggle skip unlocking while the proximity sensor is covered, such as in a pocket.</div>
     <div class="action-list-header">Buttons</div>
     <div class="action-list-card">
       <div class="settings-row">
@@ -7540,6 +7547,8 @@ function openAdvancedPanel() {
   document.getElementById('setting-loglevel').value = ['off','minimal','full'].includes(config.logLevel) ? config.logLevel : 'minimal';
   const freezeEl = document.getElementById('setting-freeze-lists');
   if (freezeEl) freezeEl.checked = (config.freezeListsDuringGestures == null) ? true : !!config.freezeListsDuringGestures;
+  const onlyUnlockEl = document.getElementById('setting-only-unlock-out-of-pocket');
+  if (onlyUnlockEl) onlyUnlockEl.checked = !!config.onlyUnlockOutOfPocket;
   const wrapEl = document.getElementById('setting-wrap-names');
   if (wrapEl) wrapEl.checked = isWrapLongNamesEnabled();
   syncExperimentalNFCUI();

@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Only Unlock Out of Pocket**: Settings > Advanced Settings > Options (and the Web UI's Advanced panel) has an off-by-default toggle that makes Unlock Device, `rc unlock` and lock toggle skip unlocking while the proximity sensor is covered, such as in a pocket. The check turns the sensor on briefly and blocks if it cannot confirm the phone is clear.
 - **Variables**: the Set Variable action saves a value, changes it with math or an RC command, or keeps it for one run only. `{name}` in action text becomes its value, a Variable condition compares it, and Settings > Advanced Settings > Variables lists saved values. The number, time, command and Toast editors have a + menu to insert one.
 - **Two-finger edge slide gestures**: edge swipe triggers now recognize a second finger, with distance-based firing, a widened landing zone, Control Center suppression mid-gesture, and a Lock Scrolling During Gestures toggle (off by default) that keeps lists still while gesturing.
 - **New SSH host editor**: adding or editing a host now opens a proper Settings-style screen (Server details plus a Password / Private Key picker) instead of a cramped popup. The password field is masked with a show/hide eye button and never displays the saved password: leave it blank to keep the current one.

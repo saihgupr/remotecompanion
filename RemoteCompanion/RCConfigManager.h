@@ -36,6 +36,9 @@
 @property (nonatomic, copy) NSArray<NSString *> *bannerOptOut;
 // A banner that comes while the screen is off turns it on (off: the banner waits for the screen to turn on)
 @property (nonatomic, assign) BOOL toastsWakeScreen;
+// Unlock Device and lock toggle skip unlocking while the proximity sensor is covered, such as
+// in a pocket. Off by default (Settings > Advanced Settings > Options).
+@property (nonatomic, assign) BOOL onlyUnlockOutOfPocket;
 @property (nonatomic, assign) BOOL nfcEnabled;
 // Seconds the NFC scan keeps going after the screen turns off (0: only while the screen is on)
 @property (nonatomic, assign) double nfcScreenOffSeconds;

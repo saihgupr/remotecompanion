@@ -53,6 +53,7 @@ static NSString *g_previousAppBundleId = nil;
 static SBProximitySensorManager *g_proximitySensorManager = nil;
 static BOOL g_forceProximityDetection = NO;
 static int g_latestHIDProximityState = -1;
+static CFAbsoluteTime g_latestHIDProximityAt = 0;
 
 // WorkflowKit interfaces
 @interface WFWorkflowDescriptor : NSObject
@@ -528,6 +529,50 @@ extern void BKSTerminateApplicationForReasonAndReportWithDescription(NSString *b
 - (void)_disableProx;
 - (void)_setProximityDetectionEnabled:(BOOL)enabled;
 @end
+
+// Proximity sensor helpers for the Only Unlock Out of Pocket guard. iOS powers the sensor down
+// while it is not needed, so the guard turns it on for the check and restores it afterwards.
+static id RC_ProximitySensorManagerInstance(void) {
+    if (g_proximitySensorManager) return g_proximitySensorManager;
+    Class cls = objc_getClass("SBProximitySensorManager");
+    return (cls && [cls respondsToSelector:@selector(sharedInstance)]) ? [cls performSelector:@selector(sharedInstance)] : nil;
+}
+
+static BOOL RC_ProximityDetectionEnabled(void) {
+    id manager = RC_ProximitySensorManagerInstance();
+    BOOL managerOn = manager && [manager respondsToSelector:@selector(isProximityDetectionEnabled)] && [manager isProximityDetectionEnabled];
+    return managerOn || [UIDevice currentDevice].proximityMonitoringEnabled;
+}
+
+static void RC_SetProximityDetectionEnabled(BOOL enabled) {
+    id manager = RC_ProximitySensorManagerInstance();
+    if (enabled) {
+        if ([manager respondsToSelector:@selector(_enableProx)]) {
+            [manager _enableProx];
+        } else if ([manager respondsToSelector:@selector(_setProximityDetectionEnabled:)]) {
+            [manager _setProximityDetectionEnabled:YES];
+        }
+    } else {
+        if ([manager respondsToSelector:@selector(_disableProx)]) {
+            [manager _disableProx];
+        } else if ([manager respondsToSelector:@selector(_setProximityDetectionEnabled:)]) {
+            [manager _setProximityDetectionEnabled:NO];
+        }
+    }
+    [UIDevice currentDevice].proximityMonitoringEnabled = enabled;
+}
+
+// The manager's live state after the sensor has had a moment to settle. A HID report from before
+// the guard turned the sensor on is not trusted here.
+static int RC_ProximityManagerState(void) {
+    id manager = RC_ProximitySensorManagerInstance();
+    if (manager && [manager respondsToSelector:@selector(isObjectInProximity)]) {
+        return [manager isObjectInProximity] ? 1 : 0;
+    }
+    UIDevice *device = [UIDevice currentDevice];
+    if (device.proximityMonitoringEnabled) return device.proximityState ? 1 : 0;
+    return -1;
+}
 
 @interface SBScreenshotManager : NSObject
 + (instancetype)sharedInstance;
@@ -9615,6 +9660,16 @@ static NSString *handle_command(NSString *cmd) {
         } else {
             SRLog(@"[SmartUnlock] Unlock command received (wake / UI unlock)");
         }
+
+        // Only Unlock Out of Pocket (Settings > Advanced Settings > Options). A fresh near report
+        // is enough to skip without waking; the full check runs after the screen is awake below.
+        load_trigger_config();
+        BOOL onlyUnlockOutOfPocket = [g_triggerConfig[@"onlyUnlockOutOfPocket"] boolValue];
+        if (onlyUnlockOutOfPocket && g_latestHIDProximityState == 1 &&
+            CFAbsoluteTimeGetCurrent() - g_latestHIDProximityAt < 2.0) {
+            SRLogMin(@"[SmartUnlock] Skipped: the proximity sensor is covered (phone in a pocket)");
+            return @"unlock_blocked_proximity\n";
+        }
         
         dispatch_async(dispatch_get_main_queue(), ^{
             Class SBLockScreenManagerClass = objc_getClass("SBLockScreenManager");
@@ -9628,6 +9683,14 @@ static NSString *handle_command(NSString *cmd) {
             if (!isLocked) {
                  SRLog(@"[SmartUnlock] Device already unlocked. Doing nothing.");
                  return;
+            }
+
+            // Give the sensor a moment to report before unlocking. Restored before the unlock so
+            // it does not blank the screen afterwards, unless it was already on for another reason.
+            BOOL restoreProximity = NO;
+            if (onlyUnlockOutOfPocket) {
+                restoreProximity = !RC_ProximityDetectionEnabled();
+                RC_SetProximityDetectionEnabled(YES);
             }
             
             SRLog(@"[SmartUnlock] Device is locked. Checking screen state...");
@@ -9658,6 +9721,16 @@ static NSString *handle_command(NSString *cmd) {
             
             // Wait for screen to wake/process (0.5s delay for more reliability)
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                if (onlyUnlockOutOfPocket) {
+                    int proximity = RC_ProximityManagerState();
+                    if (restoreProximity) RC_SetProximityDetectionEnabled(NO);
+                    if (proximity != 0) {
+                        SRLogMin(@"[SmartUnlock] Skipped: %@", proximity > 0
+                                 ? @"the proximity sensor is covered (phone in a pocket)"
+                                 : @"the proximity sensor could not confirm the phone is out of a pocket");
+                        return;
+                    }
+                }
                 if (!manager) {
                     SRLogMin(@"[SmartUnlock] ERROR: Manager became nil!");
                     return;
@@ -14874,6 +14947,7 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
         int level = IOHIDEventGetIntegerValue(event, (14 << 16) | 1);
         SRLog(@"[HID Proximity] Event type 14 detected! detection=%d, level=%d", detection, level);
         g_latestHIDProximityState = (detection != 0) ? 1 : 0;
+        g_latestHIDProximityAt = CFAbsoluteTimeGetCurrent();
         RCTKNoteProximity(detection != 0);
     }
     

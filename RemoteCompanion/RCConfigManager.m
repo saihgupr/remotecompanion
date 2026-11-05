@@ -168,6 +168,12 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
             [self saveConfig];
         }
 
+        // Auto-add onlyUnlockOutOfPocket (default to NO: unlocking works wherever the phone is)
+        if (_config[@"onlyUnlockOutOfPocket"] == nil) {
+            _config[@"onlyUnlockOutOfPocket"] = @NO;
+            [self saveConfig];
+        }
+
         // Cleanup deprecated watch triggers
         BOOL didChange = NO;
         if (triggers[@"watch_near"]) { [triggers removeObjectForKey:@"watch_near"]; didChange = YES; }
@@ -196,6 +202,7 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
             @"webUIEnabled": @NO,
             @"freezeListsDuringGestures": @YES,
             @"allowDirectRootHelper": @NO,
+            @"onlyUnlockOutOfPocket": @NO,
             @"nfcEnabled": @YES,
             @"rootEnabled": @YES,
             @"sshHosts": [NSMutableArray array],
@@ -428,6 +435,15 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
 
 - (void)setAllowDirectRootHelper:(BOOL)allowDirectRootHelper {
     _config[@"allowDirectRootHelper"] = @(allowDirectRootHelper);
+    [self saveConfig];
+}
+
+- (BOOL)onlyUnlockOutOfPocket {
+    return [_config[@"onlyUnlockOutOfPocket"] boolValue];
+}
+
+- (void)setOnlyUnlockOutOfPocket:(BOOL)onlyUnlockOutOfPocket {
+    _config[@"onlyUnlockOutOfPocket"] = @(onlyUnlockOutOfPocket);
     [self saveConfig];
 }
 
