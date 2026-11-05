@@ -132,7 +132,7 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
         }
         return @"NFC scanning options.";
     } else if (section == RCAdvancedSettingsSectionOptions) {
-        return @"When Only Unlock Out of Pocket is on, Unlock Device and lock toggle skip unlocking while the proximity sensor is covered, such as in a pocket.";
+        return nil;
     } else if (section == RCAdvancedSettingsSectionButtons) {
         return @"How long a press waits for the next one before it counts. A shorter time responds sooner and needs quicker presses.";
     } else if (section == RCAdvancedSettingsSectionSecurity) {
