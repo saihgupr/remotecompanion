@@ -1994,9 +1994,6 @@
     </div>
     <div class="rc-navbar-center" id="navbar-small-title">RemoteCompanion</div>
     <div class="rc-navbar-right">
-      <button class="nav-btn" id="nav-running-btn" onclick="openRunning()" title="Running">
-        <i class="f7-icons">list_bullet</i>
-      </button>
       <button class="nav-btn" id="nav-logs-btn" onclick="toggleLogPanel()" title="Live System Logs">
         <i class="f7-icons">list_dash</i>
       </button>
@@ -3459,11 +3456,6 @@ function runStepText(run) {
   return text;
 }
 
-function updateRunningButton(runs) {
-  const btn = document.getElementById('nav-running-btn');
-  if (btn) btn.style.color = (runs && runs.length) ? 'var(--rc-green)' : '';
-}
-
 // The last runs that ended, from Run History: fetched on opening and when a run starts or ends
 let recentRuns = [];
 let recentRunCount = -1;
@@ -3552,7 +3544,6 @@ async function refreshRunning() {
   const runs = await fetchRunning();
   if (runs === null) return;
   runningRuns = runs;
-  updateRunningButton(runs);
   renderRunning();
   // A run started or ended: Recent may have a new one
   if (runs.length !== recentRunCount) {
@@ -3590,13 +3581,6 @@ async function stopAllRuns() {
   }
   refreshRunning();
 }
-
-// The navbar button's colour, every 3 s while the page is visible and the sheet is closed
-setInterval(async () => {
-  if (document.hidden || runningTimer) return;
-  const runs = await fetchRunning();
-  if (runs !== null) updateRunningButton(runs);
-}, 3000);
 
 function buildShortcutAction(name, silent, input) {
   const quote = name.startsWith('"') || name.startsWith('-r ') || name.endsWith(' -i') || name.includes(' -p ');
