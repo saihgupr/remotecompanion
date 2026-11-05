@@ -247,6 +247,24 @@ static NSArray<RCScreenElement *> *rc_elements(id app) {
     return list;
 }
 
+// The whole element tree: a list's children include rows that haven't scrolled in yet, with
+// labels and virtual frames, so the target can often be found without scanning a screen at a
+// time. Caps: a huge or lazy tree can't stall the run
+static void rc_tree_walk(id node, int depth, NSMutableArray<RCScreenElement *> *out, int *budget, NSDate *until, BOOL *truncated) {
+    if (!node || depth > 40) return;
+    if (*budget <= 0 || [until timeIntervalSinceNow] <= 0) { *truncated = YES; return; }
+    (*budget)--;
+    [out addObject:rc_element_from(node)];
+    for (id kid in rc_call(node, @"children")) rc_tree_walk(kid, depth + 1, out, budget, until, truncated);
+}
+static NSArray<RCScreenElement *> *rc_tree_elements(id app, BOOL *truncated) {
+    NSMutableArray<RCScreenElement *> *out = [NSMutableArray array];
+    int budget = 3000;
+    *truncated = NO;
+    rc_tree_walk(app, 0, out, &budget, [NSDate dateWithTimeIntervalSinceNow:3], truncated);
+    return out;
+}
+
 static NSString *rc_line(RCScreenElement *e);
 
 // The screen once it has stopped changing (the same on two reads in a row), or as it is after
@@ -1082,8 +1100,9 @@ int main(int argc, char **argv) {
         }
 
         if ([verb isEqualToString:@"scroll-to"]) {
-            // Swipes the list in the middle of the screen, gently enough not to fling past, until
-            // the text shows; a swipe that brings in nothing new is the end of the list
+            // Finds the text by pulling the list, gently enough not to overshoot. The element
+            // tree usually knows the off-screen rows, so the target can be steered to directly;
+            // lists that don't expose them get a scan that steps and checks each screen
             NSString *text = args[1];
             // Which way to look: down (the default), up, left or right; "down" brings in what's below
             NSString *way = args.count > 2 ? args[2].lowercaseString : @"down";
@@ -1092,61 +1111,182 @@ int main(int argc, char **argv) {
             BOOL down = [way isEqualToString:@"down"] || [way isEqualToString:@"right"]; // toward the end
             CGRect screen = rc_frame(app);
             if (CGRectIsEmpty(screen)) screen = CGRectMake(0, 0, 390, 844);
-            // 60% of the screen per swipe: less than a screen, so nothing is skipped
-            double x = CGRectGetMidX(screen), high = screen.origin.y + screen.size.height * 0.2, low = screen.origin.y + screen.size.height * 0.8;
-            double y = CGRectGetMidY(screen), leftX = screen.origin.x + screen.size.width * 0.2, rightX = screen.origin.x + screen.size.width * 0.8;
+            double x = CGRectGetMidX(screen), y = CGRectGetMidY(screen);
             NSArray<RCScreenElement *> *list = rc_settled_elements(2);
+            // Reads during the search can skip the web hit-tests when there's no web content
+            BOOL anyWeb = NO;
+            for (RCScreenElement *e in list) if (e.web) { anyWeb = YES; break; }
+            if (!anyWeb) g_skipWeb = YES;
             int turns = 0, swipes = 0;
             NSString *mention = nil; // text that only mentions it, kept scrolling past
             NSSet *acting = [NSSet setWithArray:@[@"button", @"link", @"switch", @"key", @"search", @"adjustable"]];
+            double band = (sideways ? screen.size.width : screen.size.height) * 0.14;
+            // Only an exact label or something to act on counts as found
+            RCScreenElement *found = nil;
+            NSString *match = rc_text(text);
+            RCScreenElement *(^pick)(NSArray<RCScreenElement *> *) = ^RCScreenElement *(NSArray<RCScreenElement *> *cands) {
+                RCScreenElement *f = rc_pick(cands, text);
+                if (f && [f.label compare:match options:NSCaseInsensitiveSearch | NSDiacriticInsensitiveSearch] != NSOrderedSame && ![acting containsObject:f.kind]) return nil;
+                return f;
+            };
+
+            // Steer: the target may already be in the tree off screen, and the walk says which
+            // way it is (frames between walks update too slowly to track mid-search). Then
+            // it's a directed scan: 60% drags that way, the same gap guard as the scan, until
+            // the target shows on screen
+            {
+                BOOL truncated = NO;
+                NSArray<RCScreenElement *> *tree = rc_tree_elements(app, &truncated);
+                RCScreenElement *hit = pick(tree);
+                // An untruncated walk that puts at least 20 labeled rows past the edge the
+                // search looks toward and still has no match settles it without a scan; a
+                // sparse or cut-off tree (lazy lists, web pages) falls through to the scan
+                if (!hit && !truncated) {
+                    NSUInteger off = 0;
+                    for (RCScreenElement *e in tree) {
+                        CGRect f = e.frame;
+                        if (!e.label.length || CGRectIsEmpty(f)) continue;
+                        BOOL offDir = sideways
+                            ? (down ? CGRectGetMinX(f) >= CGRectGetMaxX(screen) : CGRectGetMaxX(f) <= CGRectGetMinX(screen))
+                            : (down ? CGRectGetMinY(f) >= CGRectGetMaxY(screen) : CGRectGetMaxY(f) <= CGRectGetMinY(screen));
+                        if (offDir) off++;
+                    }
+                    if (off >= 20) {
+                        RCScreenElement *m = rc_pick(tree, text);
+                        if (m) fprintf(stderr, "Not found in the list (%lu rows checked): %s (only mentioned in: %s)\n",
+                            (unsigned long)off, text.UTF8String, rc_line(m).UTF8String);
+                        else fprintf(stderr, "Not found in the list (%lu rows checked): %s\n", (unsigned long)off, text.UTF8String);
+                        return 1;
+                    }
+                }
+                CGRect tf = hit ? rc_frame(hit.element) : CGRectZero;
+                if (hit && !CGRectIsEmpty(tf) && !CGRectIntersectsRect(tf, screen)) {
+                    BOOL towardEnd = (sideways ? CGRectGetMidX(tf) : CGRectGetMidY(tf))
+                        > (sideways ? CGRectGetMidX(screen) : CGRectGetMidY(screen));
+                    double span = (sideways ? screen.size.width : screen.size.height) * 0.6;
+                    int stuck = 0;
+                    for (int t = 0; !found && t < 24 && stuck < 2; t++) {
+                        NSMutableDictionary<NSString *, NSString *> *beforeFrames = [NSMutableDictionary dictionary];
+                        for (RCScreenElement *e in list) {
+                            NSString *k = [NSString stringWithFormat:@"%@|%@|%@", e.kind, e.label, e.value];
+                            if (!beforeFrames[k]) beforeFrames[k] = rc_box(e.frame);
+                        }
+                        NSString *drag;
+                        if (sideways) drag = [NSString stringWithFormat:@"gesture drag %.0f %.0f %.0f %.0f 0.62",
+                            x + (towardEnd ? span / 2 : -span / 2), y, x - (towardEnd ? span / 2 : -span / 2), y];
+                        else drag = [NSString stringWithFormat:@"gesture drag %.0f %.0f %.0f %.0f 0.62",
+                            x, y + (towardEnd ? span / 2 : -span / 2), x, y - (towardEnd ? span / 2 : -span / 2)];
+                        if (rc_command(drag) != 0) return 2;
+                        list = rc_settled_elements(1.2);
+                        found = pick(list);
+                        if (found) break;
+                        if ([rc_screen_items(list) isSubsetOfSet:[NSSet setWithArray:beforeFrames.allKeys]]) { stuck++; continue; }
+                        BOOL moved = NO;
+                        for (RCScreenElement *e in list) {
+                            NSString *bf = beforeFrames[[NSString stringWithFormat:@"%@|%@|%@", e.kind, e.label, e.value]];
+                            if (bf && ![bf isEqualToString:rc_box(e.frame)]) { moved = YES; break; }
+                        }
+                        if (!moved) {
+                            // A step that left nothing of the last screen where it was skipped a
+                            // screen of rows: back off half a step and look again
+                            NSString *back;
+                            if (sideways) back = [NSString stringWithFormat:@"gesture drag %.0f %.0f %.0f %.0f 0.62",
+                                x + (towardEnd ? -span / 4 : span / 4), y, x - (towardEnd ? -span / 4 : span / 4), y];
+                            else back = [NSString stringWithFormat:@"gesture drag %.0f %.0f %.0f %.0f 0.62",
+                                x, y + (towardEnd ? -span / 4 : span / 4), x, y - (towardEnd ? -span / 4 : span / 4)];
+                            if (rc_command(back) != 0) return 2;
+                            list = rc_settled_elements(1.2);
+                            found = pick(list);
+                            if (found) break;
+                            continue;
+                        }
+                        stuck = 0;
+                    }
+                }
+            }
+
             // Pages run sideways, and are few; the home screen's live edges (Today View, App
             // Library) never look like an end, so a sideways search stops sooner
-            while (swipes < (sideways ? 12 : 24)) {
-                RCScreenElement *found = rc_pick(list, text); // an exact label first, as press does
-                // Only an exact label or something to act on ends the search
-                if (found && [found.label compare:rc_text(text) options:NSCaseInsensitiveSearch | NSDiacriticInsensitiveSearch] != NSOrderedSame && ![acting containsObject:found.kind]) {
-                    if (!mention) mention = rc_line(found);
-                    found = nil;
+            while (!found && swipes < (sideways ? 12 : 24)) {
+                found = pick(list);
+                if (!found) {
+                    RCScreenElement *m = rc_pick(list, text);
+                    if (m && !mention && ![acting containsObject:m.kind]) mention = rc_line(m);
                 }
-                if (found) {
-                    // Fully on screen, if it's cut off at an edge
-                    CGRect f = found.frame;
-                    if (CGRectGetMinY(f) < CGRectGetMinY(screen) || CGRectGetMaxY(f) > CGRectGetMaxY(screen)) {
-                        ((void (*)(id, SEL))objc_msgSend)(found.element, NSSelectorFromString(@"scrollToVisible"));
-                        list = rc_settled_elements(2);
-                        found = rc_pick(list, text) ?: found;
-                    }
-                    // Not under a bar: in the top or bottom band (a see-through nav bar, a tab
-                    // bar) a press or tap lands on the bar, so drag it toward the middle
-                    double mid = CGRectGetMidY(found.frame), band = screen.size.height * 0.14;
-                    if (!sideways && (mid < screen.origin.y + band || mid > CGRectGetMaxY(screen) - band)) {
-                        double shift = CGRectGetMidY(screen) - mid, from = CGRectGetMidY(screen) - shift / 2;
-                        rc_command([NSString stringWithFormat:@"gesture swipe %.0f %.0f %.0f %.0f 0.6", x, from, x, from + shift]);
-                        list = rc_settled_elements(2);
-                        found = rc_pick(list, text) ?: found;
-                    }
-                    if (json) rc_print_json(rc_json(found));
-                    else printf("%s\n", rc_line(found).UTF8String);
-                    return 0;
+                if (found) break;
+                // The screen keyed kind|label|value -> frame, so after the step a shared item
+                // that moved proves the scroll kept the last screen's content in view
+                NSMutableDictionary<NSString *, NSString *> *beforeFrames = [NSMutableDictionary dictionary];
+                for (RCScreenElement *e in list) {
+                    NSString *k = [NSString stringWithFormat:@"%@|%@|%@", e.kind, e.label, e.value];
+                    if (!beforeFrames[k]) beforeFrames[k] = rc_box(e.frame);
                 }
-                NSSet<NSString *> *before = rc_screen_items(list);
-                NSString *swipe;
+                NSSet<NSString *> *before = [NSSet setWithArray:beforeFrames.allKeys];
+                // 40% drags: the list can't coast past the next screen
+                double h = screen.size.height, w = screen.size.width;
+                NSString *drag;
                 if (sideways) {
-                    // Seeing what's to the right drags the content left
-                    swipe = down ? [NSString stringWithFormat:@"gesture swipe %.0f %.0f %.0f %.0f 0.5", rightX, y, leftX, y]
-                                 : [NSString stringWithFormat:@"gesture swipe %.0f %.0f %.0f %.0f 0.5", leftX, y, rightX, y];
+                    double lx = screen.origin.x + w * 0.3, rx = screen.origin.x + w * 0.7;
+                    drag = down ? [NSString stringWithFormat:@"gesture drag %.0f %.0f %.0f %.0f 0.62", rx, y, lx, y]
+                                : [NSString stringWithFormat:@"gesture drag %.0f %.0f %.0f %.0f 0.62", lx, y, rx, y];
                 } else {
-                    swipe = down ? [NSString stringWithFormat:@"gesture swipe %.0f %.0f %.0f %.0f 0.5", x, low, x, high]
-                                 : [NSString stringWithFormat:@"gesture swipe %.0f %.0f %.0f %.0f 0.5", x, high, x, low];
+                    double hi = screen.origin.y + h * 0.3, lo = screen.origin.y + h * 0.7;
+                    drag = down ? [NSString stringWithFormat:@"gesture drag %.0f %.0f %.0f %.0f 0.62", x, lo, x, hi]
+                                : [NSString stringWithFormat:@"gesture drag %.0f %.0f %.0f %.0f 0.62", x, hi, x, lo];
                 }
-                if (rc_command(swipe) != 0) return 2;
+                if (rc_command(drag) != 0) return 2;
                 swipes++;
                 list = rc_settled_elements(2);
                 if ([rc_screen_items(list) isSubsetOfSet:before]) {
-                    // The end of the list: the other way, once
+                    // The end of the list: the other way, once (checked first, so a list stopped
+                    // at its end doesn't look like a gap)
                     if (++turns > 1) break;
                     down = !down;
+                } else {
+                    // Nothing of the last screen is still moving on this one: the step skipped a
+                    // screen of rows, so back off halfway and look again before going on. Static
+                    // chrome (nav bar, tab bar) doesn't count - it never moves
+                    BOOL moved = NO;
+                    for (RCScreenElement *e in list) {
+                        NSString *bf = beforeFrames[[NSString stringWithFormat:@"%@|%@|%@", e.kind, e.label, e.value]];
+                        if (bf && ![bf isEqualToString:rc_box(e.frame)]) { moved = YES; break; }
+                    }
+                    if (!moved) {
+                        NSString *back;
+                        if (sideways) {
+                            double lx = screen.origin.x + w * 0.4, rx = screen.origin.x + w * 0.6;
+                            back = down ? [NSString stringWithFormat:@"gesture drag %.0f %.0f %.0f %.0f 0.62", lx, y, rx, y]
+                                        : [NSString stringWithFormat:@"gesture drag %.0f %.0f %.0f %.0f 0.62", rx, y, lx, y];
+                        } else {
+                            double hi = screen.origin.y + h * 0.4, lo = screen.origin.y + h * 0.6;
+                            back = down ? [NSString stringWithFormat:@"gesture drag %.0f %.0f %.0f %.0f 0.62", x, hi, x, lo]
+                                        : [NSString stringWithFormat:@"gesture drag %.0f %.0f %.0f %.0f 0.62", x, lo, x, hi];
+                        }
+                        if (rc_command(back) != 0) return 2;
+                        list = rc_settled_elements(2);
+                    }
                 }
+            }
+            if (found) {
+                // Fully on screen, if it's cut off at an edge
+                CGRect f = found.frame;
+                if (CGRectGetMinY(f) < CGRectGetMinY(screen) || CGRectGetMaxY(f) > CGRectGetMaxY(screen)) {
+                    ((void (*)(id, SEL))objc_msgSend)(found.element, NSSelectorFromString(@"scrollToVisible"));
+                    list = rc_settled_elements(2);
+                    found = pick(list) ?: found;
+                }
+                // Not under a bar: in the top or bottom band (a see-through nav bar, a tab
+                // bar) a press or tap lands on the bar, so drag it toward the middle
+                CGRect fr = found.frame;
+                if (!sideways && (CGRectGetMinY(fr) < screen.origin.y + band || CGRectGetMaxY(fr) > CGRectGetMaxY(screen) - band)) {
+                    double shift = CGRectGetMidY(screen) - CGRectGetMidY(fr), from = CGRectGetMidY(screen) - shift / 2;
+                    rc_command([NSString stringWithFormat:@"gesture drag %.0f %.0f %.0f %.0f 0.62", x, from, x, from + shift]);
+                    list = rc_settled_elements(2);
+                    found = pick(list) ?: found;
+                }
+                if (json) rc_print_json(rc_json(found));
+                else printf("%s\n", rc_line(found).UTF8String);
+                return 0;
             }
             if (mention) fprintf(stderr, "Not found after scrolling: %s (only mentioned in: %s)\n", text.UTF8String, mention.UTF8String);
             else fprintf(stderr, "Not found after scrolling: %s\n", text.UTF8String);

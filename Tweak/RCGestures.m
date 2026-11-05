@@ -1260,10 +1260,11 @@ static NSString *rc_gesture_touch_command(NSString *verb, NSArray<NSString *> *w
     // gesture tap X Y | hold X Y [SECONDS] | swipe X1 Y1 X2 Y2 [SECONDS]
     //         pinch X Y SCALE [SECONDS] | rotate X Y DEGREES [SECONDS] | swipe2 X1 Y1 X2 Y2 [SECONDS]
     BOOL swipe = [verb isEqualToString:@"swipe"] || [verb isEqualToString:@"swipe2"];
+    BOOL drag = [verb isEqualToString:@"drag"];
     BOOL pinch = [verb isEqualToString:@"pinch"], rotate = [verb isEqualToString:@"rotate"];
-    NSUInteger points = swipe || pinch || rotate ? (swipe ? 4 : 3) : 2;
+    NSUInteger points = swipe || drag || pinch || rotate ? (swipe || drag ? 4 : 3) : 2;
     if (words.count < 2 + points) {
-        NSDictionary *usage = @{ @"swipe": @"swipe X1 Y1 X2 Y2 [SECONDS]", @"swipe2": @"swipe2 X1 Y1 X2 Y2 [SECONDS]",
+        NSDictionary *usage = @{ @"swipe": @"swipe X1 Y1 X2 Y2 [SECONDS]", @"swipe2": @"swipe2 X1 Y1 X2 Y2 [SECONDS]", @"drag": @"drag X1 Y1 X2 Y2 [SECONDS]",
                                  @"pinch": @"pinch X Y SCALE [SECONDS]", @"rotate": @"rotate X Y DEGREES [SECONDS]",
                                  @"hold": @"hold X Y [SECONDS]", @"tap": @"tap X Y" };
         return [NSString stringWithFormat:@"Error: Use gesture %@\n", usage[verb]];
@@ -1272,11 +1273,11 @@ static NSString *rc_gesture_touch_command(NSString *verb, NSArray<NSString *> *w
     for (NSUInteger i = 2; i < words.count; i++) {
         if (![[words[i] stringByTrimmingCharactersInSet:number] isEqualToString:@""]) return [NSString stringWithFormat:@"Error: Not a number: %@\n", words[i]];
     }
-    double seconds = [verb isEqualToString:@"tap"] ? 0.05 : [verb isEqualToString:@"swipe"] ? 0.3 : (pinch || rotate) ? 0.6 : [verb isEqualToString:@"swipe2"] ? 0.4 : 1;
+    double seconds = [verb isEqualToString:@"tap"] ? 0.05 : [verb isEqualToString:@"swipe"] ? 0.3 : drag ? 0.62 : (pinch || rotate) ? 0.6 : [verb isEqualToString:@"swipe2"] ? 0.4 : 1;
     if (words.count > 2 + points) seconds = MIN(MAX([words[2 + points] doubleValue], 0.02), 30);
     CGSize size = CGSizeZero;
     CGPoint from = rc_gesture_upright(CGPointMake([words[2] doubleValue], [words[3] doubleValue]), &size);
-    CGPoint to = swipe ? rc_gesture_upright(CGPointMake([words[4] doubleValue], [words[5] doubleValue]), NULL) : from;
+    CGPoint to = swipe || drag ? rc_gesture_upright(CGPointMake([words[4] doubleValue], [words[5] doubleValue]), NULL) : from;
     // A point on the edge (0, or the width) is kept just inside
     from = CGPointMake(MIN(MAX(from.x, 0), size.width - 0.5), MIN(MAX(from.y, 0), size.height - 0.5));
     to = CGPointMake(MIN(MAX(to.x, 0), size.width - 0.5), MIN(MAX(to.y, 0), size.height - 0.5));
@@ -1313,6 +1314,22 @@ static NSString *rc_gesture_touch_command(NSString *verb, NSArray<NSString *> *w
             double side = i ? 1 : -1;
             return rc_gesture_inside(CGPointMake(from.x + dx * f + ox * side, from.y + dy * f + oy * side), size);
         }, seconds, size);
+    } else if (drag) {
+        // A decelerating pull that lets go going slow: the last 12% of the time crawls a point
+        // and a half, so iOS sees almost no release velocity and the content doesn't coast on
+        // the way it does when a swipe lifts at full speed
+        double dx = to.x - from.x, dy = to.y - from.y, len = MAX(hypot(dx, dy), 1);
+        double crawl = MIN(1.5, len / 2), ux = dx / len, uy = dy / len;
+        CGPoint main = CGPointMake(to.x - ux * crawl, to.y - uy * crawl);
+        double split = MAX(0.1, (seconds - 0.12) / seconds);
+        frames = rc_gesture_make_path(1, ^CGPoint(int i, double f) {
+            if (f <= split) {
+                double g = f / split, p = g * g * (3 - 2 * g); // smoothstep over most of it
+                return CGPointMake(from.x + (main.x - from.x) * p, from.y + (main.y - from.y) * p);
+            }
+            double t = (f - split) / (1 - split);
+            return CGPointMake(main.x + ux * crawl * t, main.y + uy * crawl * t);
+        }, seconds, size);
     } else {
         frames = rc_gesture_make(from, to, seconds, size);
     }
@@ -1335,7 +1352,7 @@ NSString *RCGestureCommand(NSString *cmd) {
     NSString *verb = words.count > 1 ? words[1].lowercaseString : @"";
     NSString *arg = words.count > 2 ? [words[2] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]] : @"";
 
-    if ([@[@"tap", @"hold", @"swipe", @"swipe2", @"pinch", @"rotate"] containsObject:verb]) return rc_gesture_touch_command(verb, words);
+    if ([@[@"tap", @"hold", @"swipe", @"swipe2", @"drag", @"pinch", @"rotate"] containsObject:verb]) return rc_gesture_touch_command(verb, words);
 
     if ([verb isEqualToString:@"list"]) {
         NSMutableString *out = [NSMutableString string];
