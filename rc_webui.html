@@ -5,8 +5,26 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="theme-color" content="#000000">
+  <meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+  <meta name="color-scheme" content="dark light">
   <title>RemoteCompanion</title>
+  <script>
+    // The status bar style cannot be set by a media query, so keep the meta
+    // in sync with the system appearance.
+    (function () {
+      var mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: light)') : null;
+      function sync() {
+        var meta = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+        if (meta) meta.setAttribute('content', mq && mq.matches ? 'default' : 'black-translucent');
+      }
+      sync();
+      if (mq) {
+        if (mq.addEventListener) mq.addEventListener('change', sync);
+        else if (mq.addListener) mq.addListener(sync);
+      }
+    })();
+  </script>
   
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
@@ -17,9 +35,76 @@
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
 
   <style>
+    /* ── Theme tokens (dark is the default) ── */
+    :root {
+      color-scheme: dark;
+
+      --rc-bg: #000;
+      --rc-surface: #1c1c1e;
+      --rc-surface-2: #2c2c2e;
+      --rc-surface-3: #3a3a3c;
+      --rc-surface-hover: #26262a;
+      --rc-panel-bg: #121214;
+      --rc-console-bg: #09090b;
+      --rc-nav-bg: rgba(0,0,0,0.85);
+      --rc-dialog-bg: rgba(30,30,30,0.88);
+      --rc-menu-bg: rgba(44,44,46,0.9);
+      --rc-menu-bg-solid: rgba(44,44,46,0.96);
+      --rc-toast-bg: rgba(58,58,60,0.98);
+      --rc-backdrop: rgba(0,0,0,0.55);
+      --rc-input-bg: rgba(0,0,0,0.35);
+      --rc-sunken-tint: rgba(0,0,0,0.18);
+      --rc-sunken-tint-2: rgba(0,0,0,0.25);
+      --rc-log-details-bg: rgba(0,0,0,0.4);
+
+      --rc-label: #fff;
+      --rc-label-2: #8e8e93;
+      --rc-label-3: #636366;
+      --rc-label-4: #98989d;
+      --rc-label-5: #d1d1d6;
+      --rc-label-6: #e5e5ea;
+      --rc-glyph: #3a3a3c;
+      --rc-placeholder: rgba(235,235,245,0.3);
+
+      --rc-border-faint: rgba(255,255,255,0.05);
+      --rc-border: rgba(255,255,255,0.08);
+      --rc-border-strong: rgba(255,255,255,0.12);
+      --rc-border-heavy: rgba(255,255,255,0.16);
+      --rc-border-max: rgba(255,255,255,0.3);
+
+      --rc-fill-tint: rgba(255,255,255,0.05);
+      --rc-fill: rgba(255,255,255,0.08);
+      --rc-fill-raised: rgba(255,255,255,0.11);
+      --rc-fill-strong: rgba(255,255,255,0.16);
+      --rc-fill-heavy: rgba(255,255,255,0.2);
+      --rc-fill-max: rgba(255,255,255,0.3);
+
+      --rc-blue: #0a84ff;
+      --rc-blue-rgb: 10,132,255;
+      --rc-green: #30d158;
+      --rc-green-rgb: 48,209,88;
+      --rc-red: #ff453a;
+      --rc-red-rgb: 255,69,58;
+      --rc-orange: #ff9f0a;
+      --rc-orange-rgb: 255,159,10;
+      --rc-yellow: #ffd60a;
+      --rc-yellow-fill: #ffd60a;
+      --rc-yellow-rgb: 255,214,10;
+      --rc-teal: #64d2ff;
+      --rc-teal-rgb: 100,210,255;
+      --rc-purple: #bf5af2;
+      --rc-purple-rgb: 191,90,242;
+      --rc-gray-rgb: 142,142,147;
+      --rc-gold: #f2c350;
+
+      --rc-chip-bg: #fff;
+      --rc-chip-fg: #000;
+      --rc-seg-selected: #636366;
+    }
+
     /* ── Reset & Base ── */
     *, *::before, *::after { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-    html, body { margin: 0; padding: 0; background: #000; color: #fff; height: 100%; }
+    html, body { margin: 0; padding: 0; background: var(--rc-bg); color: var(--rc-label); height: 100%; }
     body {
       font-family: -apple-system, "SF Pro Display", "SF Pro Text", Helvetica, Arial, sans-serif;
       -webkit-font-smoothing: antialiased;
@@ -32,10 +117,10 @@
       top: 0; left: 0; right: 0;
       z-index: 100;
       /* Solid below scroll, transparent at top */
-      background: rgba(0,0,0,0.85);
+      background: var(--rc-nav-bg);
       backdrop-filter: blur(20px);
       -webkit-backdrop-filter: blur(20px);
-      border-bottom: 0.5px solid rgba(255,255,255,0.12);
+      border-bottom: 0.5px solid var(--rc-border-strong);
       /* Safe area */
       padding-top: env(safe-area-inset-top, 0px);
     }
@@ -52,14 +137,14 @@
     .rc-navbar-right { justify-content: flex-end; }
     .rc-navbar-center {
       flex: 1; text-align: center;
-      font-size: 17px; font-weight: 600; color: #fff;
+      font-size: 17px; font-weight: 600; color: var(--rc-label);
       /* Hidden when large title is fully visible */
       opacity: 0;
       transition: opacity 0.2s;
     }
     .rc-navbar-center.visible { opacity: 1; }
     .nav-btn {
-      background: none; border: none; color: #fff;
+      background: none; border: none; color: var(--rc-label);
       font-size: 17px; font-family: inherit;
       cursor: default; padding: 8px 10px;
       user-select: none; -webkit-user-select: none;
@@ -82,7 +167,7 @@
       font-size: 34px;
       font-weight: 700;
       letter-spacing: -0.02em;
-      color: #fff;
+      color: var(--rc-label);
       padding: 20px 16px 12px;
       margin: 0;
     }
@@ -93,19 +178,19 @@
       font-weight: 500;
       letter-spacing: 0.05em;
       text-transform: uppercase;
-      color: #8e8e93;
+      color: var(--rc-label-2);
       padding: 0 32px;
       margin: 24px 0 6px;
     }
-    .section-header.favorites { color: #f2c350; font-weight: 600; }
+    .section-header.favorites { color: var(--rc-gold); font-weight: 600; }
 
     /* ── Inset list card ── */
     .list-card {
       margin: 0 16px 8px;
-      background: #1c1c1e;
+      background: var(--rc-surface);
       border-radius: 12px;
       overflow: hidden;
-      border: 0.5px solid rgba(255,255,255,0.08);
+      border: 0.5px solid var(--rc-border);
     }
 
     /* ── Trigger row ── */
@@ -121,7 +206,7 @@
       transition: background 0.15s;
     }
     .trigger-row:last-child { border-bottom: none; }
-    .trigger-row:active { background: rgba(255,255,255,0.05); }
+    .trigger-row:active { background: var(--rc-fill-tint); }
 
     /* Separator line for triggers */
     .trigger-row-inner::after {
@@ -131,7 +216,7 @@
       right: 0;
       bottom: 0;
       height: 0.5px;
-      background: rgba(255,255,255,0.12);
+      background: var(--rc-fill-raised);
       z-index: 3;
     }
     .trigger-row:last-child .trigger-row-inner::after { display: none; }
@@ -144,7 +229,7 @@
       will-change: transform;
       transform: translateX(0);
       transition: transform 0.3s cubic-bezier(0.32,0.72,0,1);
-      background: #1c1c1e;
+      background: var(--rc-surface);
       position: relative;
       z-index: 2;
     }
@@ -196,11 +281,11 @@
     .row-text { flex: 1; min-width: 0; }
     .row-title {
       display: flex; align-items: center; gap: 8px;
-      font-size: 17px; font-weight: 400; color: #fff;
+      font-size: 17px; font-weight: 400; color: var(--rc-label);
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .row-subtitle {
-      font-size: 12px; color: #636366;
+      font-size: 12px; color: var(--rc-label-3);
       font-family: "SF Mono", Menlo, monospace;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       max-width: 280px;
@@ -210,7 +295,7 @@
 
 
     /* Chevron */
-    .row-chevron { color: #3a3a3c; font-size: 14px; margin-left: 8px; flex-shrink: 0; }
+    .row-chevron { color: var(--rc-glyph); font-size: 14px; margin-left: 8px; flex-shrink: 0; }
 
     /* ── Icon gradients ── */
     .icon-blue   { background: linear-gradient(180deg, #5ac8fa 0%, #007aff 100%); }
@@ -228,7 +313,7 @@
 
     /* ── Connection banner ── */
     #conn-banner {
-      background: #3a3a3c; color: #fff;
+      background: var(--rc-surface-3); color: var(--rc-label);
       font-size: 13px; font-weight: 500;
       text-align: center; padding: 8px;
       display: none;
@@ -243,12 +328,12 @@
     }
     .page-footer strong {
       display: block;
-      font-size: 15px; font-weight: 600; color: #8e8e93;
+      font-size: 15px; font-weight: 600; color: var(--rc-label-2);
       margin-bottom: 2px;
     }
     .page-footer span {
       display: block;
-      font-size: 13px; color: #636366;
+      font-size: 13px; color: var(--rc-label-3);
     }
     /* Fixed variant for settings (matching iOS sticky pattern) */
     .page-footer.fixed {
@@ -258,14 +343,14 @@
       display: none;
       padding-top: 10px;
       padding-bottom: calc(env(safe-area-inset-bottom, 10px) + 12px);
-      background: linear-gradient(to top, #000 70%, transparent 100%);
+      background: linear-gradient(to top, var(--rc-bg) 70%, transparent 100%);
       pointer-events: none;
     }
 
     /* ── Full-screen panels (push navigation) ── */
     .rc-panel {
       position: fixed; inset: 0; z-index: 500;
-      background: #000;
+      background: var(--rc-bg);
       transform: translateX(100%);
       transition: transform 0.35s cubic-bezier(0.32,0.72,0,1);
       overflow-y: auto;
@@ -295,9 +380,9 @@
 
     /* Hero Device Header Card */
     .sys-hero-card {
-      background: #1c1c1e;
+      background: var(--rc-surface);
       border-radius: 14px;
-      border: 0.5px solid rgba(255, 255, 255, 0.08);
+      border: 0.5px solid var(--rc-border);
       padding: 16px;
       margin-bottom: 8px;
       display: flex;
@@ -318,11 +403,11 @@
       align-items: center;
       justify-content: center;
       flex-shrink: 0;
-      box-shadow: 0 2px 8px rgba(10, 132, 255, 0.25);
+      box-shadow: 0 2px 8px rgba(var(--rc-blue-rgb), 0.25);
     }
     .sys-hero-icon i {
       font-size: 22px;
-      color: #ffffff;
+      color: #fff;
     }
     .sys-hero-details {
       display: flex;
@@ -331,18 +416,18 @@
     .sys-hero-title {
       font-size: 20px;
       font-weight: 700;
-      color: #ffffff;
+      color: var(--rc-label);
       letter-spacing: -0.01em;
       line-height: 1.2;
     }
     .sys-hero-sub {
       font-size: 13px;
-      color: #8e8e93;
+      color: var(--rc-label-2);
       margin-top: 2px;
     }
     .sys-hero-status {
       font-size: 12px;
-      color: #8e8e93;
+      color: var(--rc-label-2);
       margin-top: 4px;
       display: flex;
       align-items: center;
@@ -351,15 +436,15 @@
     .sys-status-dot {
       width: 7px;
       height: 7px;
-      background: #30d158;
+      background: var(--rc-green);
       border-radius: 50%;
-      box-shadow: 0 0 6px rgba(48, 209, 88, 0.6);
+      box-shadow: 0 0 6px rgba(var(--rc-green-rgb), 0.6);
       flex-shrink: 0;
     }
     .sys-hero-badge {
-      background: rgba(10, 132, 255, 0.12);
-      border: 1px solid rgba(10, 132, 255, 0.25);
-      color: #0a84ff;
+      background: rgba(var(--rc-blue-rgb), 0.12);
+      border: 1px solid rgba(var(--rc-blue-rgb), 0.25);
+      color: var(--rc-blue);
       padding: 5px 12px;
       border-radius: 12px;
       font-size: 12px;
@@ -373,17 +458,17 @@
       font-weight: 500;
       letter-spacing: 0.04em;
       text-transform: uppercase;
-      color: #8e8e93;
+      color: var(--rc-label-2);
       padding: 0 16px;
       margin: 22px 0 6px;
     }
 
     /* Inset Grouped Section Card */
     .sys-card {
-      background: #1c1c1e;
+      background: var(--rc-surface);
       border-radius: 12px;
       overflow: hidden;
-      border: 0.5px solid rgba(255, 255, 255, 0.08);
+      border: 0.5px solid var(--rc-border);
       margin-bottom: 8px;
     }
 
@@ -403,7 +488,7 @@
       right: 0;
       bottom: 0;
       height: 0.5px;
-      background: rgba(255, 255, 255, 0.08);
+      background: var(--rc-fill);
     }
     .sys-row:last-child::after {
       display: none;
@@ -430,7 +515,7 @@
     }
     .sys-row-icon i {
       font-size: 15px;
-      color: #ffffff;
+      color: var(--rc-label);
     }
     .sys-row-label-group {
       display: flex;
@@ -440,14 +525,14 @@
     .sys-row-label {
       font-size: 16px;
       font-weight: 400;
-      color: #ffffff;
+      color: var(--rc-label);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
     .sys-row-sublabel {
       font-size: 12px;
-      color: #8e8e93;
+      color: var(--rc-label-2);
       margin-top: 1px;
     }
 
@@ -460,13 +545,13 @@
     }
     .sys-value-text {
       font-size: 15px;
-      color: #8e8e93;
+      color: var(--rc-label-2);
       font-weight: 400;
     }
     .sys-value-bold {
       font-size: 15px;
       font-weight: 600;
-      color: #ffffff;
+      color: var(--rc-label);
     }
     .sys-mono {
       font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
@@ -484,20 +569,20 @@
       gap: 4px;
     }
     .sys-pill-green {
-      background: rgba(48, 209, 88, 0.15);
-      color: #30d158;
+      background: rgba(var(--rc-green-rgb), 0.15);
+      color: var(--rc-green);
     }
     .sys-pill-orange {
-      background: rgba(255, 159, 10, 0.15);
-      color: #ff9f0a;
+      background: rgba(var(--rc-orange-rgb), 0.15);
+      color: var(--rc-orange);
     }
     .sys-pill-red {
-      background: rgba(255, 69, 58, 0.15);
-      color: #ff453a;
+      background: rgba(var(--rc-red-rgb), 0.15);
+      color: var(--rc-red);
     }
     .sys-pill-blue {
-      background: rgba(10, 132, 255, 0.15);
-      color: #0a84ff;
+      background: rgba(var(--rc-blue-rgb), 0.15);
+      color: var(--rc-blue);
     }
 
     /* Progress Bar Block (for Battery, Storage, RAM) */
@@ -510,7 +595,7 @@
       position: absolute;
       left: 16px; right: 0; bottom: 0;
       height: 0.5px;
-      background: rgba(255, 255, 255, 0.08);
+      background: var(--rc-fill);
     }
     .sys-progress-block:last-child::after {
       display: none;
@@ -527,16 +612,16 @@
       align-items: center;
       gap: 12px;
       font-size: 16px;
-      color: #ffffff;
+      color: var(--rc-label);
     }
     .sys-progress-val {
       font-size: 15px;
       font-weight: 600;
-      color: #ffffff;
+      color: var(--rc-label);
     }
     .sys-progress-track {
       height: 7px;
-      background: #2c2c2e;
+      background: var(--rc-surface-2);
       border-radius: 4px;
       overflow: hidden;
       margin-bottom: 6px;
@@ -547,21 +632,21 @@
       border-radius: 4px;
       transition: width 0.5s cubic-bezier(0.32, 0.72, 0, 1), background-color 0.3s;
     }
-    .sys-progress-fill.green { background: #30d158; }
-    .sys-progress-fill.blue { background: #0a84ff; }
-    .sys-progress-fill.purple { background: #bf5af2; }
+    .sys-progress-fill.green { background: var(--rc-green); }
+    .sys-progress-fill.blue { background: var(--rc-blue); }
+    .sys-progress-fill.purple { background: var(--rc-purple); }
     .sys-progress-sub {
       display: flex;
       justify-content: space-between;
       font-size: 12px;
-      color: #8e8e93;
+      color: var(--rc-label-2);
     }
 
     /* iOS Action Buttons inside rows */
     .sys-action-btn {
-      background: rgba(255, 255, 255, 0.08);
+      background: var(--rc-fill);
       border: none;
-      color: #0a84ff;
+      color: var(--rc-blue);
       padding: 6px 12px;
       border-radius: 8px;
       font-size: 13px;
@@ -575,29 +660,29 @@
       -webkit-user-select: none;
     }
     .sys-action-btn:active {
-      background: rgba(255, 255, 255, 0.16);
+      background: var(--rc-fill-strong);
       transform: scale(0.97);
     }
     .sys-action-btn.red {
-      background: rgba(255, 69, 58, 0.12);
-      color: #ff453a;
+      background: rgba(var(--rc-red-rgb), 0.12);
+      color: var(--rc-red);
     }
     .sys-action-btn.red:active {
-      background: rgba(255, 69, 58, 0.22);
+      background: rgba(var(--rc-red-rgb), 0.22);
     }
     .sys-action-btn.green {
-      background: rgba(48, 209, 88, 0.12);
-      color: #30d158;
+      background: rgba(var(--rc-green-rgb), 0.12);
+      color: var(--rc-green);
     }
     .sys-action-btn.green:active {
-      background: rgba(48, 209, 88, 0.22);
+      background: rgba(var(--rc-green-rgb), 0.22);
     }
     .sys-action-btn.orange {
-      background: rgba(255, 149, 0, 0.12);
-      color: #ff9500;
+      background: rgba(var(--rc-orange-rgb), 0.12);
+      color: var(--rc-orange);
     }
     .sys-action-btn.orange:active {
-      background: rgba(255, 149, 0, 0.22);
+      background: rgba(var(--rc-orange-rgb), 0.22);
     }
 
     /* Responsive multi-column for tablet/desktop */
@@ -613,17 +698,17 @@
     /* Panel navbar */
     .panel-navbar {
       position: sticky; top: 0; z-index: 10;
-      background: rgba(0,0,0,0.85);
+      background: var(--rc-nav-bg);
       backdrop-filter: blur(20px);
       -webkit-backdrop-filter: blur(20px);
-      border-bottom: 0.5px solid rgba(255,255,255,0.1);
+      border-bottom: 0.5px solid var(--rc-border-strong);
       padding-top: env(safe-area-inset-top, 0px);
       display: flex; align-items: center;
       min-height: calc(44px + env(safe-area-inset-top, 0px));
       padding-left: 8px; padding-right: 8px;
     }
     .panel-back {
-      background: none; border: none; color: #007aff;
+      background: none; border: none; color: var(--rc-blue);
       font-size: 17px; font-family: inherit; cursor: default;
       user-select: none; -webkit-user-select: none;
       display: flex; align-items: center; gap: 2px;
@@ -632,22 +717,22 @@
     .panel-back i { font-size: 20px; }
     .panel-title {
       flex: 1; text-align: center;
-      font-size: 17px; font-weight: 600; color: #fff;
+      font-size: 17px; font-weight: 600; color: var(--rc-label);
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .panel-action {
-      background: none; border: none; color: #007aff;
+      background: none; border: none; color: var(--rc-blue);
       font-size: 17px; font-family: inherit; cursor: pointer;
       padding: 8px; flex-shrink: 0;
       transition: opacity 0.1s, transform 0.1s;
       display: flex; align-items: center; justify-content: center;
     }
     .panel-action:active { opacity: 0.5; transform: scale(0.92); }
-    .panel-action.white { color: #fff; }
+    .panel-action.white { color: var(--rc-label); }
     .panel-action i { font-size: 20px; }
 
     .panel-large-title {
-      font-size: 34px; font-weight: 700; color: #fff;
+      font-size: 34px; font-weight: 700; color: var(--rc-label);
       letter-spacing: -0.02em;
       padding: 18px 20px 0; margin: 0;
     }
@@ -682,27 +767,27 @@
       justify-content: center;
       width: 32px;
       height: 32px;
-      color: #fff;
+      color: var(--rc-label);
     }
     .panel-content { padding-bottom: 80px; }
 
     /* ── Settings panel action lists ── */
     .action-list-header {
       font-size: 13px; font-weight: 500; letter-spacing: 0.05em;
-      text-transform: uppercase; color: #8e8e93;
+      text-transform: uppercase; color: var(--rc-label-2);
       padding: 0 32px; margin: 24px 0 6px;
     }
     .action-list-card {
       margin: 0 16px 8px;
-      background: #1c1c1e; border-radius: 12px;
-      overflow: hidden; border: 0.5px solid rgba(255,255,255,0.08);
+      background: var(--rc-surface); border-radius: 12px;
+      overflow: hidden; border: 0.5px solid var(--rc-border);
     }
     /* ── Action sequence rows ── */
     .action-seq-row {
       display: flex; align-items: stretch;
       min-height: 50px;
       overflow: hidden; position: relative;
-      background: #000;
+      background: var(--rc-bg);
       user-select: none;
       -webkit-user-select: none;
       transition: background 0.15s;
@@ -715,7 +800,7 @@
       right: 0;
       bottom: 0;
       height: 0.5px;
-      background: rgba(255,255,255,0.12);
+      background: var(--rc-fill-raised);
       z-index: 3;
     }
     .action-seq-row:last-child .action-seq-inner::after { display: none; }
@@ -728,12 +813,12 @@
       transform: translateX(0);
       transition: transform 0.3s cubic-bezier(0.32,0.72,0,1);
       position: relative; z-index: 2;
-      background: #1c1c1e; /* Row color */
+      background: var(--rc-surface); /* Row color */
     }
     
     .action-del-btn {
       position: absolute; right: 0; top: 0; bottom: 0;
-      width: 75px; background: #ff3b30;
+      width: 75px; background: var(--rc-red);
       display: flex; align-items: center; justify-content: center;
       z-index: 1; cursor: pointer;
     }
@@ -750,23 +835,23 @@
 
     /* ── Indent Guides Visual Hierarchy ── */
     .nest-style-btn {
-      background: rgba(255, 255, 255, 0.06);
-      border: 0.5px solid rgba(255, 255, 255, 0.12);
+      background: var(--rc-fill-tint);
+      border: 0.5px solid var(--rc-border-strong);
       border-radius: 4px;
-      color: #8e8e93;
+      color: var(--rc-label-2);
       font-size: 11px;
       padding: 2px 8px;
       cursor: pointer;
       transition: all 0.15s ease;
     }
     .nest-style-btn:hover {
-      background: rgba(255, 255, 255, 0.12);
-      color: #fff;
+      background: var(--rc-fill-raised);
+      color: var(--rc-label);
     }
     .nest-style-btn.active {
-      background: rgba(255, 255, 255, 0.18);
-      border-color: rgba(255, 255, 255, 0.3);
-      color: #fff;
+      background: var(--rc-fill-strong);
+      border-color: var(--rc-border-max);
+      color: var(--rc-label);
       font-weight: 500;
     }
 
@@ -786,11 +871,11 @@
       top: 0;
       bottom: 0;
       width: 1px;
-      background: rgba(255, 255, 255, 0.09);
+      background: var(--rc-fill);
     }
     .action-list-card.nest-style-rails .indent-line.active-level,
     .action-list-card:not(.nest-style-accents):not(.nest-style-connectors) .indent-line.active-level {
-      background: rgba(255, 255, 255, 0.18);
+      background: var(--rc-fill-strong);
     }
     .action-list-card.nest-style-rails .indent-joint,
     .action-list-card:not(.nest-style-accents):not(.nest-style-connectors) .indent-joint {
@@ -804,10 +889,10 @@
       bottom: 6px;
       width: 2px;
       border-radius: 1px;
-      background: rgba(255, 255, 255, 0.08);
+      background: var(--rc-fill);
     }
     .action-list-card.nest-style-accents .indent-line.active-level {
-      background: rgba(255, 255, 255, 0.26);
+      background: var(--rc-fill-max);
     }
     .action-list-card.nest-style-accents .indent-joint {
       display: none;
@@ -819,7 +904,7 @@
       top: 0;
       bottom: 0;
       width: 1px;
-      background: rgba(255, 255, 255, 0.08);
+      background: var(--rc-fill);
     }
     .action-list-card.nest-style-connectors .indent-line.active-level {
       display: none;
@@ -830,8 +915,8 @@
       height: 50%;
       width: 10px;
       box-sizing: border-box;
-      border-left: 1px solid rgba(255, 255, 255, 0.20);
-      border-bottom: 1px solid rgba(255, 255, 255, 0.20);
+      border-left: 1px solid var(--rc-border-heavy);
+      border-bottom: 1px solid var(--rc-border-heavy);
       border-bottom-left-radius: 3px;
     }
 
@@ -840,13 +925,13 @@
       display: flex; align-items: center;
       min-height: 50px;
       padding: 10px 16px;
-      border-bottom: 0.5px solid rgba(255,255,255,0.08);
+      border-bottom: 0.5px solid var(--rc-border);
       cursor: default;
       user-select: none;
       -webkit-user-select: none;
     }
     .action-list-row:last-child { border-bottom: none; }
-    .action-list-row:active { background: rgba(255,255,255,0.05); }
+    .action-list-row:active { background: var(--rc-fill-tint); }
     .action-row-icon {
       width: 24px; height: 24px; border-radius: 6px;
       display: flex; align-items: center; justify-content: center;
@@ -854,26 +939,26 @@
     }
     .action-row-icon i { font-size: 14px; color: #fff; }
     .action-row-text {
-      flex: 1; font-size: 16px; font-weight: 400; color: #fff;
+      flex: 1; font-size: 16px; font-weight: 400; color: var(--rc-label);
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
-    .action-row-handle { color: #3a3a3c; font-size: 18px; flex-shrink: 0; margin-left: 8px; }
-    .action-row-chevron { color: #3a3a3c; font-size: 14px; flex-shrink: 0; margin-left: 8px; }
+    .action-row-handle { color: var(--rc-glyph); font-size: 18px; flex-shrink: 0; margin-left: 8px; }
+    .action-row-chevron { color: var(--rc-glyph); font-size: 14px; flex-shrink: 0; margin-left: 8px; }
 
     /* Enabled toggle row */
     .toggle-row {
       display: flex; align-items: center;
       padding: 12px 16px; min-height: 50px;
     }
-    .toggle-label { flex: 1; font-size: 17px; color: #fff; }
+    .toggle-label { flex: 1; font-size: 17px; color: var(--rc-label); }
     .ios-toggle {
       width: 51px; height: 31px; position: relative;
       appearance: none; -webkit-appearance: none;
-      background: #3a3a3c; border-radius: 16px;
+      background: var(--rc-surface-3); border-radius: 16px;
       cursor: pointer; transition: background 0.2s;
       flex-shrink: 0;
     }
-    .ios-toggle:checked { background: #34c759; }
+    .ios-toggle:checked { background: var(--rc-green); }
     .ios-toggle::after {
       content: ''; position: absolute;
       width: 27px; height: 27px; border-radius: 50%;
@@ -885,8 +970,8 @@
     /* Add action button */
     .add-action-btn {
       display: block; width: calc(100% - 32px); margin: 12px 16px 0;
-      background: #1c1c1e; border-radius: 12px; border: none;
-      color: #007aff; font-size: 17px; font-family: inherit;
+      background: var(--rc-surface); border-radius: 12px; border: none;
+      color: var(--rc-blue); font-size: 17px; font-family: inherit;
       padding: 14px; text-align: center; cursor: pointer;
     }
     .add-action-btn:active { opacity: 0.7; }
@@ -898,22 +983,22 @@
     .search-wrap {
       padding: 8px 16px;
       position: sticky; top: calc(44px + env(safe-area-inset-top, 0px)); z-index: 9;
-      background: #000;
+      background: var(--rc-bg);
     }
     .search-input {
-      width: 100%; background: #1c1c1e; border: none;
-      color: #fff; font-size: 16px; font-family: inherit;
+      width: 100%; background: var(--rc-surface); border: none;
+      color: var(--rc-label); font-size: 16px; font-family: inherit;
       border-radius: 10px; padding: 9px 14px;
       outline: none;
     }
-    .search-input::placeholder { color: #636366; }
+    .search-input::placeholder { color: var(--rc-label-3); }
 
     /* ── Category filter pills (matches iOS RCCategoryBar) ── */
     .category-bar-wrap {
       position: sticky;
       top: calc(44px + env(safe-area-inset-top, 0px));
       z-index: 9;
-      background: #000;
+      background: var(--rc-bg);
       padding: 4px 0 8px;
     }
     .category-bar {
@@ -934,14 +1019,14 @@
       font-weight: 600;
       font-family: inherit;
       cursor: pointer;
-      background: rgba(255,255,255,0.12);
-      color: #fff;
+      background: var(--rc-fill-raised);
+      color: var(--rc-label);
       transition: background 0.15s, color 0.15s, transform 0.1s;
       user-select: none;
       -webkit-user-select: none;
     }
     .cat-chip:active { transform: scale(0.96); }
-    .cat-chip.active { background: #fff; color: #000; }
+    .cat-chip.active { background: var(--rc-chip-bg); color: var(--rc-chip-fg); }
 
     /* ── Picker dialog category pills (same component, dialog sizing) ── */
     .picker-category-bar {
@@ -958,9 +1043,9 @@
 
     /* ── Condition picker option rows (mirror iOS indented options) ── */
     .cond-option-row { padding-left: 60px !important; }
-    .cond-option-row .picker-row-text.blue { color: #0a84ff; }
-    .cond-option-row .picker-row-text.dim { color: #636366; }
-    .cond-check { font-size: 16px; color: #0a84ff; flex-shrink: 0; margin-left: 8px; }
+    .cond-option-row .picker-row-text.blue { color: var(--rc-blue); }
+    .cond-option-row .picker-row-text.dim { color: var(--rc-label-3); }
+    .cond-check { font-size: 16px; color: var(--rc-blue); flex-shrink: 0; margin-left: 8px; }
 
     /* ── Dialog pickers iOS inset-grouped colors ── */
     #cond-picker-content, #picker-content { background: transparent; }
@@ -970,33 +1055,33 @@
       font-size: 13px;
       font-weight: 500;
       letter-spacing: 0.05em;
-      color: #8e8e93;
+      color: var(--rc-label-2);
       padding: 0 18px;
       margin: 20px 0 6px;
     }
     #cond-picker-content .picker-section-header:first-child, #picker-content .picker-section-header:first-child { margin-top: 6px; }
     .dialog-card {
       margin: 0 2px 8px;
-      background: #1c1c1e;
+      background: var(--rc-surface);
       border-radius: 12px;
       overflow: hidden;
-      border: 0.5px solid rgba(255,255,255,0.08);
+      border: 0.5px solid var(--rc-border);
     }
     #cond-picker-content .picker-row, #picker-content .picker-row { border-bottom: none; background: transparent; min-height: 52px; position: relative; }
     #cond-picker-content .picker-row + .picker-row::after, #picker-content .picker-row + .picker-row::after {
       content: ''; position: absolute; left: 60px; right: 0; top: 0; height: 0.5px;
-      background: rgba(255,255,255,0.12);
+      background: var(--rc-fill-raised);
     }
     .dialog-row-icon {
       width: 30px; display: flex; align-items: center; justify-content: center;
-      flex-shrink: 0; margin-right: 14px; color: #8e8e93;
+      flex-shrink: 0; margin-right: 14px; color: var(--rc-label-2);
     }
     .dialog-row-icon i { font-size: 22px; }
 
     /* ── Picker action rows ── */
     .picker-section-header {
       font-size: 13px; font-weight: 500; letter-spacing: 0.05em;
-      text-transform: uppercase; color: #8e8e93;
+      text-transform: uppercase; color: var(--rc-label-2);
       padding: 0 32px; margin: 24px 0 6px;
     }
     .app-picker-list .picker-section-header {
@@ -1004,10 +1089,10 @@
       margin: 0;
       font-size: 12px;
       font-weight: 600;
-      color: #8e8e93;
+      color: var(--rc-label-2);
       text-transform: uppercase;
       letter-spacing: 0.05em;
-      background: #2c2c2e;
+      background: var(--rc-surface-2);
       position: sticky;
       top: 0;
       z-index: 2;
@@ -1022,23 +1107,23 @@
       display: flex; align-items: center;
       min-height: 50px;
       padding: 10px 16px;
-      border-bottom: 0.5px solid rgba(255,255,255,0.08);
+      border-bottom: 0.5px solid var(--rc-border);
       cursor: pointer;
     }
     .picker-row:last-child { border-bottom: none; }
-    .picker-row:active { background: rgba(255,255,255,0.05); }
+    .picker-row:active { background: var(--rc-fill-tint); }
     .picker-row-icon {
       width: 30px; height: 30px; border-radius: 7px;
       display: flex; align-items: center; justify-content: center;
       flex-shrink: 0; margin-right: 14px; overflow: hidden;
     }
     .picker-row-icon i { font-size: 16px; color: #fff; }
-    .picker-row-text { flex: 1; font-size: 17px; color: #fff; }
-    .picker-row-chevron { color: #3a3a3c; font-size: 14px; }
+    .picker-row-text { flex: 1; font-size: 17px; color: var(--rc-label); }
+    .picker-row-chevron { color: var(--rc-glyph); font-size: 14px; }
 
     /* ── Bottom sheet ── */
     .sheet-backdrop {
-      position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+      position: fixed; inset: 0; background: var(--rc-backdrop);
       z-index: 950; display: none;
     }
     .sheet-backdrop.visible { display: block; }
@@ -1050,25 +1135,25 @@
       transition: transform 0.3s cubic-bezier(0.32,0.72,0,1);
     }
     .sheet.open { transform: translateX(-50%) translateY(0); }
-    .sheet-main { background: #1c1c1e; border-radius: 14px; overflow: hidden; }
+    .sheet-main { background: var(--rc-surface); border-radius: 14px; overflow: hidden; }
     .sheet-title {
-      font-size: 13px; color: #8e8e93; font-weight: 600;
+      font-size: 13px; color: var(--rc-label-2); font-weight: 600;
       text-transform: uppercase; letter-spacing: 0.05em;
       text-align: center; padding: 16px 20px 10px;
-      border-bottom: 0.5px solid rgba(255,255,255,0.08);
+      border-bottom: 0.5px solid var(--rc-border);
     }
     .sheet-btn {
       display: block; width: 100%;
-      background: none; border: none; border-top: 0.5px solid rgba(255,255,255,0.08);
-      color: #007aff; font-size: 20px; font-family: inherit;
+      background: none; border: none; border-top: 0.5px solid var(--rc-border);
+      color: var(--rc-blue); font-size: 20px; font-family: inherit;
       padding: 18px 20px; text-align: center; cursor: pointer;
     }
     .sheet-btn:first-of-type { border-top: none; }
-    .sheet-btn.destructive { color: #ff3b30; }
+    .sheet-btn.destructive { color: var(--rc-red); }
     .sheet-cancel {
       margin: 8px 0 12px;
-      background: #2c2c2e; border-radius: 12px; border: none;
-      color: #007aff; font-size: 17px; font-weight: 600;
+      background: var(--rc-surface-2); border-radius: 12px; border: none;
+      color: var(--rc-blue); font-size: 17px; font-weight: 600;
       font-family: inherit; padding: 15px; width: 100%;
       text-align: center; cursor: pointer;
     }
@@ -1083,11 +1168,11 @@
     }
     .dialog-backdrop.visible {
       display: flex;
-      background: rgba(0,0,0,0.55);
+      background: var(--rc-backdrop);
       backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
     }
     .dialog-box {
-      background: rgba(30,30,30,0.88);
+      background: var(--rc-dialog-bg);
       backdrop-filter: blur(40px); -webkit-backdrop-filter: blur(40px);
       border-radius: 14px;
       width: 270px;
@@ -1100,22 +1185,22 @@
       transform: scale(1); opacity: 1;
     }
     .dialog-title {
-      font-size: 17px; font-weight: 600; color: #fff;
+      font-size: 17px; font-weight: 600; color: var(--rc-label);
       text-align: center; padding: 20px 16px 4px;
       line-height: 1.25;
     }
     .dialog-msg {
-      font-size: 13px; color: #8e8e93;
+      font-size: 13px; color: var(--rc-label-2);
       text-align: center; padding: 0 16px 14px;
       line-height: 1.35;
     }
     .dialog-input {
       width: calc(100% - 32px); margin: 0 16px 16px;
-      background: rgba(0,0,0,0.35); border: 0.5px solid rgba(255,255,255,0.2); color: #fff;
+      background: var(--rc-input-bg); border: 0.5px solid var(--rc-border-heavy); color: var(--rc-label);
       font-size: 14px; font-family: inherit;
       border-radius: 6px; padding: 6px 10px; outline: none;
       display: block; text-align: center;
-      caret-color: #0a84ff;
+      caret-color: var(--rc-blue);
       box-sizing: border-box;
       -webkit-appearance: none; appearance: none;
     }
@@ -1123,35 +1208,35 @@
     .dialog-input::-webkit-inner-spin-button,
     .dialog-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
     .dialog-input[type=number] { -moz-appearance: textfield; }
-    .dialog-input:focus { border-color: rgba(255,255,255,0.35); }
+    .dialog-input:focus { border-color: var(--rc-border-max); }
     .dialog-btns {
-      display: flex; border-top: 0.5px solid rgba(255,255,255,0.15);
+      display: flex; border-top: 0.5px solid var(--rc-border-heavy);
       margin-top: 0;
     }
     .dialog-btns button {
-      flex: 1; height: 44px; background: none; border: none; color: #0a84ff;
+      flex: 1; height: 44px; background: none; border: none; color: var(--rc-blue);
       font-size: 17px; font-family: inherit; padding: 0; cursor: pointer;
       display: flex; align-items: center; justify-content: center;
       transition: background-color 0.1s;
       outline: none;
     }
-    .dialog-btns button:active { background-color: rgba(255,255,255,0.08); }
-    .dialog-btns button:not(:last-child) { border-right: 0.5px solid rgba(255,255,255,0.15); }
+    .dialog-btns button:active { background-color: var(--rc-fill); }
+    .dialog-btns button:not(:last-child) { border-right: 0.5px solid var(--rc-border-heavy); }
     .dialog-btns button:last-child { font-weight: 600; }
-    #dialog-record { color: #ff9500; font-weight: 400; }
+    #dialog-record { color: var(--rc-orange); font-weight: 400; }
     .dialog-box.wide {
       width: 320px;
     }
     .dialog-autocomplete {
       max-height: 180px;
       overflow-y: auto;
-      background: rgba(0, 0, 0, 0.25);
-      border-top: 0.5px solid rgba(255, 255, 255, 0.15);
+      background: var(--rc-sunken-tint-2);
+      border-top: 0.5px solid var(--rc-border-heavy);
       display: none;
     }
     .autocomplete-item {
       padding: 10px 16px;
-      border-bottom: 0.5px solid rgba(255, 255, 255, 0.08);
+      border-bottom: 0.5px solid var(--rc-border);
       cursor: pointer;
       display: flex;
       flex-direction: column;
@@ -1163,22 +1248,22 @@
       border-bottom: none;
     }
     .autocomplete-item:active {
-      background-color: rgba(255, 255, 255, 0.1);
+      background-color: var(--rc-fill-raised);
     }
     .autocomplete-name {
       font-size: 14px;
       font-weight: 500;
-      color: #fff;
+      color: var(--rc-label);
     }
     .autocomplete-subtitle {
       font-size: 11px;
-      color: #8e8e93;
+      color: var(--rc-label-2);
     }
 
     /* ── Context Menu (Right-click) ── */
     .context-menu {
       position: fixed; z-index: 2000;
-      background: rgba(44, 44, 46, 0.9);
+      background: var(--rc-menu-bg);
       backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px);
       border-radius: 12px; min-width: 220px;
       box-shadow: 0 8px 32px rgba(0,0,0,0.5);
@@ -1190,16 +1275,16 @@
     .context-menu-item {
       display: flex; align-items: center;
       padding: 10px 14px; border-radius: 8px;
-      font-size: 16px; color: #fff; cursor: pointer;
+      font-size: 16px; color: var(--rc-label); cursor: pointer;
       transition: background 0.1s;
-      border-bottom: 0.5px solid rgba(255,255,255,0.08);
+      border-bottom: 0.5px solid var(--rc-border);
     }
     .context-menu-item:last-child { border-bottom: none; }
-    .context-menu-item:active { background: rgba(255,255,255,0.1); }
+    .context-menu-item:active { background: var(--rc-fill-raised); }
     .context-menu-item .item-label { flex: 1; }
-    .context-menu-item i { font-size: 17px; color: #fff; margin-left: 12px; opacity: 0.9; }
-    .context-menu-item.destructive { color: #ff453a; }
-    .context-menu-item.destructive i { color: #ff453a; }
+    .context-menu-item i { font-size: 17px; color: var(--rc-label); margin-left: 12px; opacity: 0.9; }
+    .context-menu-item.destructive { color: var(--rc-red); }
+    .context-menu-item.destructive i { color: var(--rc-red); }
 
     /* ── App Launch Picker ── */
     .app-launch-dialog {
@@ -1210,34 +1295,34 @@
     .app-launch-dialog > div:nth-child(3) { flex: 1; min-height: 0; display: flex; flex-direction: column; }
     .app-picker-search-wrap {
       display: flex; align-items: center; gap: 8px;
-      background: #2c2c2e; border-radius: 10px;
+      background: var(--rc-surface-2); border-radius: 10px;
       padding: 8px 12px; margin-bottom: 10px;
     }
     .app-picker-search {
-      flex: 1; background: none; border: none; color: #fff;
+      flex: 1; background: none; border: none; color: var(--rc-label);
       font-size: 16px; font-family: inherit; outline: none;
     }
-    .app-picker-search::placeholder { color: #636366; }
+    .app-picker-search::placeholder { color: var(--rc-label-3); }
     .app-picker-list {
       flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
       max-height: 42vh; max-height: 42dvh;
-      border-radius: 10px; background: #2c2c2e;
+      border-radius: 10px; background: var(--rc-surface-2);
     }
     .app-picker-loading {
-      text-align: center; color: #636366;
+      text-align: center; color: var(--rc-label-3);
       font-size: 15px; padding: 28px 16px;
     }
     .app-picker-row {
       display: flex; align-items: center;
       padding: 10px 14px;
-      border-bottom: 0.5px solid rgba(255,255,255,0.07);
+      border-bottom: 0.5px solid var(--rc-border);
       cursor: pointer; transition: background 0.12s; gap: 8px;
     }
     .app-picker-row:last-child { border-bottom: none; }
-    .app-picker-row:active { background: rgba(255,255,255,0.08); }
+    .app-picker-row:active { background: var(--rc-fill); }
     .app-picker-row-inner { flex: 1; min-width: 0; }
-    .app-picker-name { font-size: 16px; color: #fff; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .app-picker-bid { font-size: 12px; color: #636366; font-family: "SF Mono", Menlo, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+    .app-picker-name { font-size: 16px; color: var(--rc-label); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .app-picker-bid { font-size: 12px; color: var(--rc-label-3); font-family: "SF Mono", Menlo, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
 
     /* ── KM Macro Picker ── */
     .km-group-container {
@@ -1248,19 +1333,19 @@
       align-items: center;
       justify-content: space-between;
       padding: 7px 12px;
-      background: rgba(255,255,255,0.06);
+      background: var(--rc-fill-tint);
       border-radius: 8px;
       cursor: pointer;
       user-select: none;
       transition: background 0.15s;
     }
     .km-group-header:active, .km-group-header:hover {
-      background: rgba(255,255,255,0.1);
+      background: var(--rc-fill-raised);
     }
     .km-group-title {
       font-size: 13px;
       font-weight: 600;
-      color: #98989d;
+      color: var(--rc-label-4);
       display: flex;
       align-items: center;
       gap: 8px;
@@ -1269,8 +1354,8 @@
       text-overflow: ellipsis;
     }
     .km-group-badge {
-      background: rgba(255,255,255,0.14);
-      color: #fff;
+      background: var(--rc-fill-strong);
+      color: var(--rc-label);
       font-size: 11px;
       font-weight: 600;
       padding: 1px 7px;
@@ -1279,7 +1364,7 @@
     }
     .km-group-chevron {
       font-size: 12px;
-      color: #8e8e93;
+      color: var(--rc-label-2);
       transition: transform 0.2s ease;
       flex-shrink: 0;
     }
@@ -1292,7 +1377,7 @@
     .km-group-body {
       margin-top: 4px;
       border-radius: 8px;
-      background: rgba(0,0,0,0.18);
+      background: var(--rc-sunken-tint);
       overflow: hidden;
     }
     .spin {
@@ -1306,7 +1391,7 @@
     /* ── Toast ── */
     .toast {
       position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
-      background: rgba(58,58,60,0.98); color: #fff;
+      background: var(--rc-toast-bg); color: var(--rc-label);
       border-radius: 20px; padding: 10px 20px;
       font-size: 15px; font-weight: 500;
       z-index: 1000; pointer-events: none;
@@ -1319,10 +1404,10 @@
     .settings-row {
       display: flex; align-items: center;
       padding: 12px 16px; min-height: 50px;
-      border-bottom: 0.5px solid rgba(255,255,255,0.08);
+      border-bottom: 0.5px solid var(--rc-border);
     }
     .settings-row:last-child { border-bottom: none; }
-    .settings-label { flex: 1; font-size: 17px; color: #fff; }
+    .settings-label { flex: 1; font-size: 17px; color: var(--rc-label); }
     .settings-btn { display: flex; align-items: center; }
     a { color: inherit; text-decoration: none; }
 
@@ -1346,10 +1431,10 @@
     .day-pill span {
       width: 34px; height: 34px; border-radius: 50%;
       display: flex; align-items: center; justify-content: center;
-      font-size: 12px; font-weight: 500; color: #8e8e93;
-      background: #3a3a3c; transition: background 0.15s, color 0.15s;
+      font-size: 12px; font-weight: 500; color: var(--rc-label-2);
+      background: var(--rc-surface-3); transition: background 0.15s, color 0.15s;
     }
-    .day-pill input:checked + span { background: #007aff; color: #fff; }
+    .day-pill input:checked + span { background: var(--rc-blue); color: #fff; }
 
     /* ── Toast action dialog (iOS inset-grouped, mirrors condition picker) ── */
     .toast-dialog {
@@ -1368,7 +1453,7 @@
     .toast-section-header {
       font-size: 13px; font-weight: 500;
       letter-spacing: 0.05em; text-transform: uppercase;
-      color: #8e8e93;
+      color: var(--rc-label-2);
       padding: 0 18px; margin: 20px 0 6px;
     }
     .toast-section-header:first-child { margin-top: 8px; }
@@ -1383,30 +1468,30 @@
     }
     .toast-row + .toast-row::after {
       content: ''; position: absolute; top: 0; left: 60px; right: 0;
-      height: 0.5px; background: rgba(255,255,255,0.12);
+      height: 0.5px; background: var(--rc-fill-raised);
     }
-    .toast-row:focus-within { background: rgba(255,255,255,0.03); }
+    .toast-row:focus-within { background: var(--rc-fill-tint); }
     .toast-row .dialog-row-icon { transition: color 0.18s ease; }
-    .toast-row:focus-within .dialog-row-icon { color: #0a84ff; }
+    .toast-row:focus-within .dialog-row-icon { color: var(--rc-blue); }
     .toast-row-label {
       flex: 0 0 auto; margin-right: 10px;
-      font-size: 17px; color: #fff; letter-spacing: -0.01em;
+      font-size: 17px; color: var(--rc-label); letter-spacing: -0.01em;
       white-space: nowrap;
     }
     .toast-row-hint {
       flex: 0 0 auto; margin-right: 10px;
-      font-size: 13px; color: #636366;
+      font-size: 13px; color: var(--rc-label-3);
       white-space: nowrap;
     }
     .toast-row-input {
       flex: 1; min-width: 0;
       margin: 0; padding: 0; border: none; outline: none; background: none;
-      font-family: inherit; font-size: 17px; color: #fff;
+      font-family: inherit; font-size: 17px; color: var(--rc-label);
       text-align: right;
-      caret-color: #0a84ff;
+      caret-color: var(--rc-blue);
       -webkit-appearance: none; appearance: none;
     }
-    .toast-row-input::placeholder { color: #636366; }
+    .toast-row-input::placeholder { color: var(--rc-label-3); }
     .toast-row-input::-webkit-outer-spin-button,
     .toast-row-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 
@@ -1420,22 +1505,22 @@
       aspect-ratio: 1 / 1;
       display: flex; align-items: center; justify-content: center;
       padding: 0;
-      background: #1c1c1e;
-      border: 0.5px solid rgba(255,255,255,0.08);
+      background: var(--rc-surface);
+      border: 0.5px solid var(--rc-border);
       border-radius: 11px;
-      color: #d1d1d6;
+      color: var(--rc-label-5);
       cursor: pointer;
       -webkit-appearance: none; appearance: none;
       -webkit-tap-highlight-color: transparent;
       transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
     }
     .toast-icon-tile i { font-size: 19px; }
-    .toast-icon-tile:hover { background: #26262a; color: #fff; }
+    .toast-icon-tile:hover { background: var(--rc-surface-hover); color: var(--rc-label); }
     .toast-icon-tile:active {
       transform: scale(0.94);
-      background: rgba(10,132,255,0.16);
-      border-color: rgba(10,132,255,0.4);
-      color: #0a84ff;
+      background: rgba(var(--rc-blue-rgb), 0.16);
+      border-color: rgba(var(--rc-blue-rgb), 0.4);
+      color: var(--rc-blue);
     }
 
     /* Preview reads as a quiet card, not a floating mock */
@@ -1447,11 +1532,11 @@
       display: flex; align-items: center; gap: 10px;
       max-width: 100%;
       padding: 9px 16px;
-      background: #2c2c2e;
-      border: 0.5px solid rgba(255,255,255,0.08);
+      background: var(--rc-surface-2);
+      border: 0.5px solid var(--rc-border);
       border-radius: 16px;
     }
-    .toast-preview-icon { display: flex; flex-shrink: 0; color: #8e8e93; }
+    .toast-preview-icon { display: flex; flex-shrink: 0; color: var(--rc-label-2); }
     .toast-preview-icon i { font-size: 20px; }
     .toast-preview-text {
       display: flex; flex-direction: column; align-items: flex-start;
@@ -1459,12 +1544,12 @@
     }
     .toast-preview-title {
       max-width: 100%;
-      font-size: 15px; font-weight: 600; color: #fff;
+      font-size: 15px; font-weight: 600; color: var(--rc-label);
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .toast-preview-subtitle {
       max-width: 100%;
-      font-size: 13px; color: #8e8e93;
+      font-size: 13px; color: var(--rc-label-2);
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     @media (max-width: 380px) {
@@ -1484,63 +1569,63 @@
       background-color: white; transition: .25s; border-radius: 50%;
       box-shadow: 0 2px 4px rgba(0,0,0,0.3);
     }
-    .toggle-switch input:checked + .toggle-slider { background-color: #34c759; }
+    .toggle-switch input:checked + .toggle-slider { background-color: var(--rc-green); }
     .toggle-switch input:checked + .toggle-slider:before { transform: translateX(20px); }
 
     /* ── Variable editors ── */
     .var-editor-box { width: 92%; max-width: 460px; display: flex; flex-direction: column; max-height: 88vh; max-height: 88dvh; }
     .var-editor-body { overflow-y: auto; padding: 4px 14px 6px; text-align: left; -webkit-overflow-scrolling: touch; }
     .var-ed-section { margin-bottom: 10px; }
-    .var-ed-header { font-size: 13px; font-weight: 500; letter-spacing: 0.05em; color: #8e8e93; text-transform: uppercase; margin: 10px 4px 6px; }
-    .var-ed-note { font-size: 12px; color: #8e8e93; line-height: 1.35; margin: 6px 4px 0; }
+    .var-ed-header { font-size: 13px; font-weight: 500; letter-spacing: 0.05em; color: var(--rc-label-2); text-transform: uppercase; margin: 10px 4px 6px; }
+    .var-ed-note { font-size: 12px; color: var(--rc-label-2); line-height: 1.35; margin: 6px 4px 0; }
     .var-ed-note:empty { display: none; }
-    .var-ed-note.bad { color: #ff453a; }
+    .var-ed-note.bad { color: var(--rc-red); }
     .var-ed-grid { display: grid; gap: 8px; }
     .var-ed-tile {
       display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
       min-height: 64px; padding: 8px 4px; border-radius: 12px; cursor: pointer;
-      background: rgba(255,255,255,0.07); border: 1.5px solid transparent; color: #fff;
+      background: var(--rc-fill); border: 1.5px solid transparent; color: var(--rc-label);
       font-family: inherit; font-size: 12px; font-weight: 500; line-height: 1.15; text-align: center;
       transition: background 0.12s, border-color 0.12s, transform 0.1s;
     }
-    .var-ed-tile i.f7-icons { font-size: 22px; color: #0a84ff; }
+    .var-ed-tile i.f7-icons { font-size: 22px; color: var(--rc-blue); }
     .var-ed-grid.compact .var-ed-tile { min-height: 54px; font-size: 11px; }
     .var-ed-grid.compact .var-ed-tile i.f7-icons { font-size: 19px; }
     .var-ed-tile:active { transform: scale(0.96); }
-    .var-ed-tile.selected { background: rgba(10,132,255,0.22); border-color: #0a84ff; }
-    .var-ed-card { background: rgba(255,255,255,0.07); border-radius: 12px; overflow: hidden; }
+    .var-ed-tile.selected { background: rgba(var(--rc-blue-rgb), 0.22); border-color: var(--rc-blue); }
+    .var-ed-card { background: var(--rc-fill); border-radius: 12px; overflow: hidden; }
     .var-ed-row { display: flex; align-items: center; gap: 12px; min-height: 46px; padding: 0 12px 0 14px; position: relative; }
     .var-ed-card > .var-ed-row + .var-ed-row::before, .var-ed-card > .var-ed-row + .var-ed-chips::before {
-      content: ''; position: absolute; top: 0; left: 14px; right: 0; height: 0.5px; background: rgba(255,255,255,0.12);
+      content: ''; position: absolute; top: 0; left: 14px; right: 0; height: 0.5px; background: var(--rc-fill-raised);
     }
     label.var-ed-row { cursor: pointer; justify-content: space-between; }
-    .var-ed-label { font-size: 15px; color: #fff; min-width: 84px; flex-shrink: 0; }
+    .var-ed-label { font-size: 15px; color: var(--rc-label); min-width: 84px; flex-shrink: 0; }
     .var-ed-input {
-      flex: 1; min-width: 0; background: transparent; border: none; outline: none; color: #fff;
-      font-size: 15px; font-family: inherit; padding: 12px 0; caret-color: #0a84ff;
+      flex: 1; min-width: 0; background: transparent; border: none; outline: none; color: var(--rc-label);
+      font-size: 15px; font-family: inherit; padding: 12px 0; caret-color: var(--rc-blue);
     }
-    .var-ed-input::placeholder { color: rgba(235,235,245,0.3); }
-    .var-ed-insert { background: none; border: none; padding: 6px; margin-right: -4px; color: #0a84ff; cursor: pointer; display: flex; }
+    .var-ed-input::placeholder { color: var(--rc-placeholder); }
+    .var-ed-insert { background: none; border: none; padding: 6px; margin-right: -4px; color: var(--rc-blue); cursor: pointer; display: flex; }
     .var-ed-insert i.f7-icons { font-size: 22px; }
     .var-ed-select-wrap { flex: 1; min-width: 0; position: relative; display: flex; align-items: center; }
     .var-ed-select {
       flex: 1; min-width: 0; -webkit-appearance: none; appearance: none; background: transparent; border: none; outline: none;
-      color: #0a84ff; font-size: 15px; font-family: inherit; padding: 12px 34px 12px 0; text-align: left; cursor: pointer;
+      color: var(--rc-blue); font-size: 15px; font-family: inherit; padding: 12px 34px 12px 0; text-align: left; cursor: pointer;
     }
     .var-ed-select option, .var-ed-select optgroup { color: #000; }
-    .var-ed-select-icon { position: absolute; right: 6px; font-size: 15px; color: #0a84ff; pointer-events: none; }
+    .var-ed-select-icon { position: absolute; right: 6px; font-size: 15px; color: var(--rc-blue); pointer-events: none; }
     .var-ed-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 12px 12px 14px; position: relative; }
     .var-ed-chip {
-      background: rgba(10,132,255,0.18); color: #0a84ff; border: none; border-radius: 14px;
+      background: rgba(var(--rc-blue-rgb), 0.18); color: var(--rc-blue); border: none; border-radius: 14px;
       padding: 5px 11px; font-size: 13px; font-family: inherit; cursor: pointer;
     }
-    .var-ed-chip:active { background: rgba(10,132,255,0.32); }
+    .var-ed-chip:active { background: rgba(var(--rc-blue-rgb), 0.32); }
     .var-ed-seg { display: flex; background: rgba(118,118,128,0.24); border-radius: 9px; padding: 2px; margin-top: 6px; }
     .var-ed-seg button {
-      flex: 1; background: none; border: none; color: #fff; font-family: inherit; font-size: 14px; font-weight: 500;
+      flex: 1; background: none; border: none; color: var(--rc-label); font-family: inherit; font-size: 14px; font-weight: 500;
       padding: 7px 0; border-radius: 7px; cursor: pointer; transition: background 0.15s;
     }
-    .var-ed-seg button.selected { background: #636366; box-shadow: 0 2px 6px rgba(0,0,0,0.25); }
+    .var-ed-seg button.selected { background: var(--rc-seg-selected); box-shadow: 0 2px 6px rgba(0,0,0,0.25); }
     .terminal-var-insert { position: absolute; right: 4px; top: 4px; margin: 0; }
     .terminal-var-insert i.f7-icons { font-size: 20px; }
     #symbol-picker-backdrop { z-index: 960; }
@@ -1553,69 +1638,69 @@
     .sym-cats::-webkit-scrollbar { display: none; }
     .sym-cat {
       flex-shrink: 0; border: none; border-radius: 15px; padding: 6px 12px; font-size: 13px; font-weight: 600; font-family: inherit;
-      background: rgba(255,255,255,0.12); color: #fff; cursor: pointer;
+      background: var(--rc-fill-raised); color: var(--rc-label); cursor: pointer;
     }
-    .sym-cat.active { background: #fff; color: #000; }
+    .sym-cat.active { background: var(--rc-chip-bg); color: var(--rc-chip-fg); }
     .sym-grid {
       overflow-y: auto; padding: 4px 14px 14px; display: grid; gap: 8px;
       grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); -webkit-overflow-scrolling: touch;
     }
     .sym-tile {
       aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
-      background: rgba(255,255,255,0.07); border: 1.5px solid transparent; border-radius: 12px; color: #fff; cursor: pointer;
+      background: var(--rc-fill); border: 1.5px solid transparent; border-radius: 12px; color: var(--rc-label); cursor: pointer;
       font-family: inherit; padding: 4px; min-width: 0; transition: transform 0.1s, background 0.12s;
     }
     .sym-tile i.f7-icons { font-size: 24px; }
-    .sym-tile span { font-size: 9.5px; color: #8e8e93; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .sym-tile:hover { background: rgba(255,255,255,0.12); }
+    .sym-tile span { font-size: 9.5px; color: var(--rc-label-2); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sym-tile:hover { background: var(--rc-fill-raised); }
     .sym-tile:active { transform: scale(0.94); }
-    .sym-tile.selected { background: rgba(10,132,255,0.22); border-color: #0a84ff; }
-    .sym-tile.selected i.f7-icons { color: #0a84ff; }
-    .sym-empty { grid-column: 1 / -1; text-align: center; color: #8e8e93; font-size: 13px; padding: 24px 0; }
+    .sym-tile.selected { background: rgba(var(--rc-blue-rgb), 0.22); border-color: var(--rc-blue); }
+    .sym-tile.selected i.f7-icons { color: var(--rc-blue); }
+    .sym-empty { grid-column: 1 / -1; text-align: center; color: var(--rc-label-2); font-size: 13px; padding: 24px 0; }
     #cmd-picker-backdrop { z-index: 960; }
     .cmd-list { display: block; padding-top: 0; }
-    .cmd-head { font-size: 13px; font-weight: 500; letter-spacing: 0.05em; color: #8e8e93; text-transform: uppercase; margin: 12px 4px 6px; }
-    .cmd-card { background: rgba(255,255,255,0.07); border-radius: 12px; overflow: hidden; }
+    .cmd-head { font-size: 13px; font-weight: 500; letter-spacing: 0.05em; color: var(--rc-label-2); text-transform: uppercase; margin: 12px 4px 6px; }
+    .cmd-card { background: var(--rc-fill); border-radius: 12px; overflow: hidden; }
     .cmd-row { display: flex; align-items: center; gap: 12px; padding: 9px 12px; cursor: pointer; position: relative; }
-    .cmd-row + .cmd-row::before { content: ''; position: absolute; top: 0; left: 46px; right: 0; height: 0.5px; background: rgba(255,255,255,0.12); }
-    .cmd-row:hover { background: rgba(255,255,255,0.05); }
-    .cmd-row > i.f7-icons { font-size: 20px; color: #0a84ff; width: 22px; text-align: center; }
+    .cmd-row + .cmd-row::before { content: ''; position: absolute; top: 0; left: 46px; right: 0; height: 0.5px; background: var(--rc-fill-raised); }
+    .cmd-row:hover { background: var(--rc-fill-tint); }
+    .cmd-row > i.f7-icons { font-size: 20px; color: var(--rc-blue); width: 22px; text-align: center; }
     .cmd-text { flex: 1; min-width: 0; text-align: left; }
-    .cmd-title { font-size: 15px; color: #fff; }
+    .cmd-title { font-size: 15px; color: var(--rc-label); }
     .cmd-sub { font-size: 12px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .cmd-sub code { font-family: ui-monospace, Menlo, monospace; color: #8e8e93; }
-    .cmd-sub span { color: #0a84ff; font-weight: 500; margin-left: 8px; }
-    .cmd-check { color: #0a84ff; font-size: 17px; }
-    .cmd-note { font-size: 12px; color: #8e8e93; margin: 6px 4px 0; line-height: 1.35; }
-    #var-editor-save:disabled { color: rgba(235,235,245,0.3); cursor: default; }
+    .cmd-sub code { font-family: ui-monospace, Menlo, monospace; color: var(--rc-label-2); }
+    .cmd-sub span { color: var(--rc-blue); font-weight: 500; margin-left: 8px; }
+    .cmd-check { color: var(--rc-blue); font-size: 17px; }
+    .cmd-note { font-size: 12px; color: var(--rc-label-2); margin: 6px 4px 0; line-height: 1.35; }
+    #var-editor-save:disabled { color: var(--rc-placeholder); cursor: default; }
     .var-ed-menu {
       position: fixed; z-index: 3000; min-width: 220px; max-width: 300px; max-height: 60vh; overflow-y: auto;
-      background: rgba(44,44,46,0.96); backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px);
+      background: var(--rc-menu-bg-solid); backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px);
       border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.5); padding: 6px 5px 8px;
       opacity: 0; transform: scale(0.96); transition: opacity 0.12s, transform 0.12s; transform-origin: top right;
     }
     .var-ed-menu.show { opacity: 1; transform: scale(1); }
-    .var-ed-menu-header { font-size: 12px; color: #8e8e93; padding: 8px 12px 4px; }
-    .var-ed-menu-gap { height: 6px; margin: 4px 8px 4px; border-bottom: 0.5px solid rgba(255,255,255,0.12); }
+    .var-ed-menu-header { font-size: 12px; color: var(--rc-label-2); padding: 8px 12px 4px; }
+    .var-ed-menu-gap { height: 6px; margin: 4px 8px 4px; border-bottom: 0.5px solid var(--rc-border-strong); }
     .var-ed-menu-item {
       display: flex; align-items: center; justify-content: space-between; gap: 12px;
-      padding: 10px 12px; border-radius: 8px; font-size: 15px; color: #fff; cursor: pointer;
+      padding: 10px 12px; border-radius: 8px; font-size: 15px; color: var(--rc-label); cursor: pointer;
     }
-    .var-ed-menu-item:active, .var-ed-menu-item:hover { background: rgba(255,255,255,0.1); }
+    .var-ed-menu-item:active, .var-ed-menu-item:hover { background: var(--rc-fill-raised); }
     .var-ed-menu-item i.f7-icons { font-size: 17px; opacity: 0.9; }
-    .var-ed-menu-sub { font-size: 12px; color: #8e8e93; margin-top: 2px; }
+    .var-ed-menu-sub { font-size: 12px; color: var(--rc-label-2); margin-top: 2px; }
 
     /* Live Log Viewer Styling - iOS Native Design Language */
     #logs-panel {
-      background: #121214 !important;
+      background: var(--rc-panel-bg) !important;
     }
 
     .log-pulse-dot {
       display: inline-block; width: 8px; height: 8px; border-radius: 50%;
-      background-color: #30d158; box-shadow: 0 0 8px rgba(48, 209, 88, 0.6);
+      background-color: var(--rc-green); box-shadow: 0 0 8px rgba(var(--rc-green-rgb), 0.6);
       animation: logPulse 1.8s infinite;
     }
-    .log-pulse-dot.paused { background-color: #ff9500; box-shadow: none; animation: none; }
+    .log-pulse-dot.paused { background-color: var(--rc-orange); box-shadow: none; animation: none; }
     @keyframes logPulse {
       0% { opacity: 1; transform: scale(1); }
       50% { opacity: 0.35; transform: scale(0.85); }
@@ -1627,8 +1712,8 @@
       display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 2px;
     }
     .log-stat-item {
-      background: #1c1c1e;
-      border: 0.5px solid rgba(255, 255, 255, 0.12);
+      background: var(--rc-surface);
+      border: 0.5px solid var(--rc-border-strong);
       border-radius: 12px;
       padding: 10px 6px;
       text-align: center;
@@ -1636,13 +1721,13 @@
       user-select: none; -webkit-user-select: none;
       transition: background 0.15s ease, transform 0.1s ease, border-color 0.15s ease;
     }
-    .log-stat-item:hover { background: #2c2c2e; border-color: rgba(255, 255, 255, 0.2); }
+    .log-stat-item:hover { background: var(--rc-surface-2); border-color: var(--rc-border-heavy); }
     .log-stat-item:active { transform: scale(0.96); }
     .log-stat-value {
       display: block;
       font-size: 20px;
       font-weight: 700;
-      color: #ffffff;
+      color: var(--rc-label);
       letter-spacing: -0.01em;
       line-height: 1.1;
     }
@@ -1652,12 +1737,12 @@
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.04em;
-      color: #8e8e93;
+      color: var(--rc-label-2);
       margin-top: 4px;
     }
-    .log-stat-item.exec .log-stat-value { color: #30d158; }
-    .log-stat-item.err .log-stat-value { color: #ff453a; }
-    .log-stat-item.http .log-stat-value { color: #64d2ff; }
+    .log-stat-item.exec .log-stat-value { color: var(--rc-green); }
+    .log-stat-item.err .log-stat-value { color: var(--rc-red); }
+    .log-stat-item.http .log-stat-value { color: var(--rc-teal); }
 
     .log-toolbar { display: flex; flex-direction: column; gap: 8px; }
 
@@ -1670,17 +1755,17 @@
       -webkit-overflow-scrolling: touch;
     }
     .log-tab {
-      flex: 1; border: 0.5px solid transparent; background: transparent; color: #8e8e93;
+      flex: 1; border: 0.5px solid transparent; background: transparent; color: var(--rc-label-2);
       border-radius: 7px; padding: 6px 10px; font-size: 12px; font-weight: 600; line-height: 1.2;
       font-family: inherit; cursor: pointer; white-space: nowrap; text-align: center;
       transition: background 0.15s cubic-bezier(0.2, 0, 0, 1), color 0.15s ease, border-color 0.15s ease;
       user-select: none; -webkit-user-select: none; box-sizing: border-box;
     }
-    .log-tab:hover { color: #ffffff; }
+    .log-tab:hover { color: var(--rc-label); }
     .log-tab.active {
-      background: #3a3a3c;
-      color: #ffffff;
-      border-color: rgba(255, 255, 255, 0.15);
+      background: var(--rc-surface-3);
+      color: var(--rc-label);
+      border-color: var(--rc-border-heavy);
       box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
     }
 
@@ -1689,51 +1774,51 @@
     .log-search-wrap { flex: 1; min-width: 0; position: relative; margin: 0; padding: 0; background: transparent; }
     .log-search-wrap i.search-icon {
       position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
-      font-size: 15px; color: #8e8e93; pointer-events: none;
+      font-size: 15px; color: var(--rc-label-2); pointer-events: none;
     }
     .log-search-wrap .search-input {
       width: 100%; height: 36px;
       background: rgba(118, 118, 128, 0.18);
-      border: 0.5px solid rgba(255, 255, 255, 0.08);
+      border: 0.5px solid var(--rc-border);
       border-radius: 10px;
       padding: 0 12px 0 32px;
-      font-size: 13px; color: #ffffff; font-family: inherit;
+      font-size: 13px; color: var(--rc-label); font-family: inherit;
       outline: none; transition: background 0.15s ease, border-color 0.15s ease;
     }
     .log-search-wrap .search-input:focus {
       background: rgba(118, 118, 128, 0.25);
-      border-color: #007aff;
+      border-color: var(--rc-blue);
     }
     .log-action-btn {
       height: 36px;
-      background: #1c1c1e;
-      border: 0.5px solid rgba(255, 255, 255, 0.12);
-      color: #ffffff;
+      background: var(--rc-surface);
+      border: 0.5px solid var(--rc-border-strong);
+      color: var(--rc-label);
       border-radius: 10px; padding: 0 12px; font-size: 13px; font-weight: 600;
       cursor: pointer; display: flex; align-items: center; gap: 5px; white-space: nowrap;
       transition: background 0.15s ease, transform 0.1s ease;
       user-select: none; -webkit-user-select: none; flex-shrink: 0;
     }
     .log-action-btn i { font-size: 16px; }
-    .log-action-btn:hover { background: #2c2c2e; }
-    .log-action-btn:active { transform: scale(0.96); background: #3a3a3c; }
+    .log-action-btn:hover { background: var(--rc-surface-2); }
+    .log-action-btn:active { transform: scale(0.96); background: var(--rc-surface-3); }
     .log-action-btn.danger {
-      background: rgba(255, 69, 58, 0.15);
-      color: #ff453a;
-      border-color: rgba(255, 69, 58, 0.3);
+      background: rgba(var(--rc-red-rgb), 0.15);
+      color: var(--rc-red);
+      border-color: rgba(var(--rc-red-rgb), 0.3);
     }
-    .log-action-btn.danger:hover { background: rgba(255, 69, 58, 0.22); }
-    .log-action-btn.danger:active { transform: scale(0.96); background: rgba(255, 69, 58, 0.32); }
+    .log-action-btn.danger:hover { background: rgba(var(--rc-red-rgb), 0.22); }
+    .log-action-btn.danger:active { transform: scale(0.96); background: rgba(var(--rc-red-rgb), 0.32); }
 
     /* iOS Inset Console / Log Viewer Container */
     .log-viewer-wrap {
-      background: #09090b;
-      border: 0.5px solid rgba(255, 255, 255, 0.12);
+      background: var(--rc-console-bg);
+      border: 0.5px solid var(--rc-border-strong);
       border-radius: 14px;
       padding: 6px;
       font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
       font-size: 12px;
-      color: #e5e5ea;
+      color: var(--rc-label-6);
       text-align: left;
       line-height: 1.5;
       box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.6);
@@ -1743,7 +1828,7 @@
     /* iOS Grouped Row Entries & Expandable Drawer */
     .log-row-container {
       display: flex; flex-direction: column;
-      border-bottom: 0.5px solid rgba(255, 255, 255, 0.06);
+      border-bottom: 0.5px solid var(--rc-border-faint);
       border-radius: 8px;
     }
     .log-row-container:last-child { border-bottom: none; }
@@ -1752,26 +1837,26 @@
       border-radius: 8px; cursor: pointer; user-select: none; -webkit-user-select: none;
       transition: background 0.1s ease;
     }
-    .log-row:hover { background: rgba(255, 255, 255, 0.05); }
+    .log-row:hover { background: var(--rc-fill-tint); }
     .log-row-expand-icon {
-      font-size: 11px; color: #8e8e93; flex-shrink: 0; margin-top: 3px;
+      font-size: 11px; color: var(--rc-label-2); flex-shrink: 0; margin-top: 3px;
       transition: transform 0.2s ease;
     }
-    .log-row-container.expanded .log-row-expand-icon { transform: rotate(90deg); color: #ffffff; }
+    .log-row-container.expanded .log-row-expand-icon { transform: rotate(90deg); color: var(--rc-label); }
     .log-row-details {
       display: none; padding: 8px 12px 10px 32px; font-size: 11px;
-      background: rgba(0, 0, 0, 0.4); border-radius: 0 0 8px 8px;
-      border-top: 0.5px solid rgba(255, 255, 255, 0.05);
-      color: #8e8e93; font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
+      background: var(--rc-log-details-bg); border-radius: 0 0 8px 8px;
+      border-top: 0.5px solid var(--rc-border-faint);
+      color: var(--rc-label-2); font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
       white-space: pre-wrap; word-break: break-all;
     }
     .log-row-container.expanded .log-row-details { display: block; }
 
     .log-time-pill {
-      font-size: 11px; font-weight: 500; color: #8e8e93;
-      background: rgba(255, 255, 255, 0.06);
+      font-size: 11px; font-weight: 500; color: var(--rc-label-2);
+      background: var(--rc-fill-tint);
       padding: 2px 6px; border-radius: 5px; flex-shrink: 0; white-space: nowrap; margin-top: 1px;
-      border: 0.5px solid rgba(255, 255, 255, 0.04);
+      border: 0.5px solid var(--rc-border-faint);
     }
 
     /* iOS Status Pill Badges */
@@ -1780,28 +1865,122 @@
       flex-shrink: 0; letter-spacing: 0.03em; margin-top: 1px; white-space: nowrap;
       text-transform: uppercase;
     }
-    .log-tag-badge.exec { background: rgba(48, 209, 88, 0.16); color: #30d158; border: 0.5px solid rgba(48, 209, 88, 0.3); }
-    .log-tag-badge.err  { background: rgba(255, 69, 58, 0.16);  color: #ff453a; border: 0.5px solid rgba(255, 69, 58, 0.3); }
-    .log-tag-badge.warn { background: rgba(255, 214, 10, 0.16); color: #ffd60a; border: 0.5px solid rgba(255, 214, 10, 0.3); }
-    .log-tag-badge.http { background: rgba(100, 210, 255, 0.16); color: #64d2ff; border: 0.5px solid rgba(100, 210, 255, 0.3); }
-    .log-tag-badge.sys  { background: rgba(191, 90, 242, 0.16); color: #bf5af2; border: 0.5px solid rgba(191, 90, 242, 0.3); }
-    .log-tag-badge.info { background: rgba(142, 142, 147, 0.16); color: #98989d; border: 0.5px solid rgba(142, 142, 147, 0.3); }
+    .log-tag-badge.exec { background: rgba(var(--rc-green-rgb), 0.16); color: var(--rc-green); border: 0.5px solid rgba(var(--rc-green-rgb), 0.3); }
+    .log-tag-badge.err  { background: rgba(var(--rc-red-rgb), 0.16);  color: var(--rc-red); border: 0.5px solid rgba(var(--rc-red-rgb), 0.3); }
+    .log-tag-badge.warn { background: rgba(var(--rc-yellow-rgb), 0.16); color: var(--rc-yellow); border: 0.5px solid rgba(var(--rc-yellow-rgb), 0.3); }
+    .log-tag-badge.http { background: rgba(var(--rc-teal-rgb), 0.16); color: var(--rc-teal); border: 0.5px solid rgba(var(--rc-teal-rgb), 0.3); }
+    .log-tag-badge.sys  { background: rgba(var(--rc-purple-rgb), 0.16); color: var(--rc-purple); border: 0.5px solid rgba(var(--rc-purple-rgb), 0.3); }
+    .log-tag-badge.info { background: rgba(var(--rc-gray-rgb), 0.16); color: var(--rc-label-4); border: 0.5px solid rgba(var(--rc-gray-rgb), 0.3); }
 
-    .log-msg-text { flex: 1; word-break: break-word; color: #e5e5ea; font-size: 12px; font-family: "SF Mono", Menlo, Monaco, Consolas, monospace; }
-    .log-msg-text .hl-target { color: #64d2ff; font-weight: 600; }
-    .log-msg-text .hl-success { color: #30d158; font-weight: 600; }
-    .log-msg-text .hl-error { color: #ff453a; font-weight: 600; }
+    .log-msg-text { flex: 1; word-break: break-word; color: var(--rc-label-6); font-size: 12px; font-family: "SF Mono", Menlo, Monaco, Consolas, monospace; }
+    .log-msg-text .hl-target { color: var(--rc-teal); font-weight: 600; }
+    .log-msg-text .hl-success { color: var(--rc-green); font-weight: 600; }
+    .log-msg-text .hl-error { color: var(--rc-red); font-weight: 600; }
 
     /* iOS Log Footer */
     .log-footer-bar {
       display: flex; align-items: center; justify-content: space-between;
-      font-size: 12px; color: #8e8e93; padding: 8px 6px 2px;
-      border-top: 0.5px solid rgba(255, 255, 255, 0.08);
+      font-size: 12px; color: var(--rc-label-2); padding: 8px 6px 2px;
+      border-top: 0.5px solid var(--rc-border);
       margin-top: 2px;
     }
     .log-autoscroll-label {
-      font-size: 13px; font-weight: 500; color: #e5e5ea;
+      font-size: 13px; font-weight: 500; color: var(--rc-label-6);
       user-select: none; -webkit-user-select: none;
+    }
+
+    /* ── Light appearance ──────────────────────────────────────────────
+       The UI follows the system appearance. These overrides keep the same
+       hierarchy as the dark theme, mapped onto iOS light-mode colours. */
+    @media (prefers-color-scheme: light) {
+      :root {
+        color-scheme: light;
+
+        --rc-bg: #f2f2f7;
+        --rc-surface: #ffffff;
+        --rc-surface-2: #ebebf0;
+        --rc-surface-3: #e5e5ea;
+        --rc-surface-hover: #f7f7fa;
+        --rc-panel-bg: #f2f2f7;
+        --rc-console-bg: #ffffff;
+        --rc-nav-bg: rgba(249,249,249,0.86);
+        --rc-dialog-bg: rgba(249,249,249,0.92);
+        --rc-menu-bg: rgba(249,249,249,0.94);
+        --rc-menu-bg-solid: rgba(249,249,249,0.97);
+        --rc-toast-bg: rgba(235,235,240,0.98);
+        --rc-backdrop: rgba(0,0,0,0.35);
+        --rc-input-bg: rgba(118,118,128,0.12);
+        --rc-sunken-tint: rgba(0,0,0,0.04);
+        --rc-sunken-tint-2: rgba(0,0,0,0.03);
+        --rc-log-details-bg: rgba(0,0,0,0.04);
+
+        --rc-label: #000;
+        --rc-label-2: #6e6e73;
+        --rc-label-3: #8e8e93;
+        --rc-label-4: #6e6e73;
+        --rc-label-5: #3a3a3c;
+        --rc-label-6: #1d1d1f;
+        --rc-glyph: #c7c7cc;
+        --rc-placeholder: rgba(60,60,67,0.3);
+
+        --rc-border-faint: rgba(60,60,67,0.08);
+        --rc-border: rgba(60,60,67,0.14);
+        --rc-border-strong: rgba(60,60,67,0.2);
+        --rc-border-heavy: rgba(60,60,67,0.26);
+        --rc-border-max: rgba(60,60,67,0.36);
+
+        --rc-fill-tint: rgba(60,60,67,0.05);
+        --rc-fill: rgba(60,60,67,0.1);
+        --rc-fill-raised: rgba(60,60,67,0.14);
+        --rc-fill-strong: rgba(60,60,67,0.18);
+        --rc-fill-heavy: rgba(60,60,67,0.22);
+        --rc-fill-max: rgba(60,60,67,0.3);
+
+        --rc-blue: #007aff;
+        --rc-blue-rgb: 0,122,255;
+        --rc-green: #34c759;
+        --rc-green-rgb: 52,199,89;
+        --rc-red: #ff3b30;
+        --rc-red-rgb: 255,59,48;
+        --rc-orange: #ff9500;
+        --rc-orange-rgb: 255,149,0;
+        --rc-yellow: #b58900;
+        --rc-yellow-fill: #ffcc00;
+        --rc-yellow-rgb: 255,204,0;
+        --rc-teal: #30b0c7;
+        --rc-teal-rgb: 48,176,199;
+        --rc-purple: #af52de;
+        --rc-purple-rgb: 175,82,222;
+        --rc-gray-rgb: 142,142,147;
+        --rc-gold: #c79000;
+
+        --rc-chip-bg: #1d1d1f;
+        --rc-chip-fg: #ffffff;
+        --rc-seg-selected: #ffffff;
+      }
+
+      /* A dark inset shadow reads as dirt on a white console */
+      .log-viewer-wrap { box-shadow: inset 0 1px 3px rgba(0,0,0,0.06); }
+
+      /* Vivid system tints need a darker text variant on light chips */
+      .sys-pill-green, .sys-action-btn.green { color: #248a3d; }
+      .sys-pill-orange, .sys-action-btn.orange { color: #b25000; }
+      .sys-pill-red, .sys-action-btn.red { color: #d70015; }
+      .sys-pill-blue { color: #0071e3; }
+
+      .log-tag-badge.exec { color: #248a3d; }
+      .log-tag-badge.err  { color: #d70015; }
+      .log-tag-badge.warn { color: #8a6100; }
+      .log-tag-badge.http { color: #0071a4; }
+      .log-tag-badge.sys  { color: #8944ab; }
+
+      .log-stat-item.exec .log-stat-value { color: #248a3d; }
+      .log-stat-item.err .log-stat-value { color: #d70015; }
+      .log-stat-item.http .log-stat-value { color: #0071a4; }
+
+      .log-msg-text .hl-target { color: #0071a4; }
+      .log-msg-text .hl-success { color: #248a3d; }
+      .log-msg-text .hl-error { color: #d70015; }
     }
   </style>
 </head>
@@ -1899,7 +2078,7 @@
     <div class="dialog-msg" style="text-align:center;padding:0 16px 6px">Choose an action to add to this trigger.</div>
     <div style="padding:0 14px 10px; display:flex; flex-direction:column; flex:1; min-height:0;">
       <div class="app-picker-search-wrap">
-        <i class="f7-icons" style="font-size:16px;color:#8e8e93;flex-shrink:0">search</i>
+        <i class="f7-icons" style="font-size:16px;color:var(--rc-label-2);flex-shrink:0">search</i>
         <input class="app-picker-search" type="text" placeholder="Search actions…" id="action-search" autocorrect="off" autocapitalize="none" spellcheck="false" oninput="renderPickerSections()">
       </div>
       <div class="picker-category-bar" id="picker-category-bar"></div>
@@ -1921,7 +2100,7 @@
       <div class="app-picker-list" id="running-content" style="max-height: 52vh; max-height: 52dvh; overflow-y: auto;"></div>
     </div>
     <div class="dialog-btns">
-      <button onclick="stopAllRuns()" id="running-stop-all" style="color:#ff453a">Stop All</button>
+      <button onclick="stopAllRuns()" id="running-stop-all" style="color:var(--rc-red)">Stop All</button>
       <button onclick="closeRunning()">Done</button>
     </div>
   </div>
@@ -1933,7 +2112,7 @@
     <div class="dialog-msg" style="text-align:center;padding:0 16px 6px">Choose a condition, then pick its value.</div>
     <div style="padding:0 14px 10px; display:flex; flex-direction:column; flex:1; min-height:0;">
       <div class="app-picker-search-wrap">
-        <i class="f7-icons" style="font-size:16px;color:#8e8e93;flex-shrink:0">search</i>
+        <i class="f7-icons" style="font-size:16px;color:var(--rc-label-2);flex-shrink:0">search</i>
         <input class="app-picker-search" type="text" placeholder="Search Conditions" id="cond-picker-search" autocorrect="off" autocapitalize="none" spellcheck="false" oninput="renderCondPicker()">
       </div>
       <div class="app-picker-list" id="cond-picker-content" style="max-height: 48vh; max-height: 48dvh; overflow-y: auto;"></div>
@@ -1949,7 +2128,7 @@
   <div class="panel-navbar">
     <div style="width:80px"></div>
     <div class="panel-title">Settings</div>
-    <button class="panel-action" onclick="closeSettings()" style="color:#007aff">Done</button>
+    <button class="panel-action" onclick="closeSettings()" style="color:var(--rc-blue)">Done</button>
   </div>
   <div class="panel-content">
     <div class="action-list-header" style="margin-top:28px">General</div>
@@ -1969,7 +2148,7 @@
       <div class="settings-row" id="webui-token-row">
         <span class="settings-label">API Token</span>
         <div style="display:flex;align-items:center;gap:6px;">
-          <input type="password" id="setting-webui-token" placeholder="Optional token" style="background:#2c2c2e;border:1px solid #3a3a3c;border-radius:6px;color:#fff;padding:4px 8px;font-size:13px;width:140px;" onchange="onApiTokenChange(this.value)">
+          <input type="password" id="setting-webui-token" placeholder="Optional token" style="background:var(--rc-surface-2);border:1px solid var(--rc-border-strong);border-radius:6px;color:var(--rc-label);padding:4px 8px;font-size:13px;width:140px;" onchange="onApiTokenChange(this.value)">
         </div>
       </div>
     </div>
@@ -1978,8 +2157,8 @@
     <div class="action-list-card">
       <div class="action-list-row" onclick="openIntegrationsPanel()">
         <div class="action-row-icon icon-indigo"><i class="f7-icons">globe</i></div>
-        <div class="action-row-text" style="flex:1">Integrations<br><span id="setting-integrations-status" style="font-size:13px;color:#8e8e93;font-weight:400">Disabled</span></div>
-        <i class="f7-icons row-chevron" style="color:#8e8e93; font-size:14px;">chevron_right</i>
+        <div class="action-row-text" style="flex:1">Integrations<br><span id="setting-integrations-status" style="font-size:13px;color:var(--rc-label-2);font-weight:400">Disabled</span></div>
+        <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
       </div>
     </div>
 
@@ -1988,7 +2167,7 @@
       <div class="action-list-row" onclick="openAdvancedPanel()">
         <div class="action-row-icon icon-purple"><i class="f7-icons">gearshape_2_fill</i></div>
         <div class="action-row-text">Advanced Settings</div>
-        <i class="f7-icons row-chevron" style="color:#8e8e93; font-size:14px;">chevron_right</i>
+        <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
       </div>
     </div>
 
@@ -1997,10 +2176,10 @@
       <div class="action-list-row" onclick="openSysInfoPanel()">
         <div class="action-row-icon icon-blue"><i class="f7-icons">info_circle</i></div>
         <div class="action-row-text">Device Diagnostics & Health</div>
-        <i class="f7-icons row-chevron" style="color:#8e8e93; font-size:14px;">chevron_right</i>
+        <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
       </div>
     </div>
-    <div style="color:#8e8e93;font-size:13px;margin:8px 32px 0">System info, battery, storage, and logs for this device.</div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 32px 0">System info, battery, storage, and logs for this device.</div>
 
     <div class="action-list-header">Backup</div>
     <div class="action-list-card">
@@ -2013,7 +2192,7 @@
         <div class="action-row-text">Import Configuration</div>
       </div>
     </div>
-    <div style="color:#8e8e93;font-size:13px;margin:8px 16px 0">Export your configuration to share or backup. Import to restore.</div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">Export your configuration to share or backup. Import to restore.</div>
     <input type="file" id="import-file-input" accept=".json" style="display:none" onchange="handleImportFile(this)">
 
   </div>
@@ -2037,21 +2216,21 @@
           <input type="checkbox" class="ios-toggle" id="setting-ha" onchange="onHAToggleChange(this.checked)">
         </div>
       </div>
-      <div id="ha-credentials-wrapper" style="display:none; padding: 14px 16px; border-top: 1px solid rgba(255,255,255,0.08); background: rgba(0,0,0,0.18);">
-        <div style="font-size: 12px; color: #8e8e93; margin-bottom: 6px; font-weight: 600; letter-spacing: 0.5px;">SERVER URL</div>
-        <input type="url" id="setting-ha-url" placeholder="http://192.168.1.100:8123" style="width: 100%; box-sizing: border-box; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); color: #fff; border-radius: 8px; padding: 10px 12px; font-size: 15px; margin-bottom: 12px; outline: none;" onchange="config.haUrl=this.value.trim();saveConfig()">
+      <div id="ha-credentials-wrapper" style="display:none; padding: 14px 16px; border-top: 1px solid var(--rc-border); background: var(--rc-sunken-tint);">
+        <div style="font-size: 12px; color: var(--rc-label-2); margin-bottom: 6px; font-weight: 600; letter-spacing: 0.5px;">SERVER URL</div>
+        <input type="url" id="setting-ha-url" placeholder="http://192.168.1.100:8123" style="width: 100%; box-sizing: border-box; background: var(--rc-fill); border: 1px solid var(--rc-border-strong); color: var(--rc-label); border-radius: 8px; padding: 10px 12px; font-size: 15px; margin-bottom: 12px; outline: none;" onchange="config.haUrl=this.value.trim();saveConfig()">
         
-        <div style="font-size: 12px; color: #8e8e93; margin-bottom: 6px; font-weight: 600; letter-spacing: 0.5px;">LONG-LIVED ACCESS TOKEN</div>
+        <div style="font-size: 12px; color: var(--rc-label-2); margin-bottom: 6px; font-weight: 600; letter-spacing: 0.5px;">LONG-LIVED ACCESS TOKEN</div>
         <div style="position: relative; margin-bottom: 12px;">
-          <input type="password" id="setting-ha-token" placeholder="eyJhbGciOiJIUzI1Ni..." style="width: 100%; box-sizing: border-box; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); color: #fff; border-radius: 8px; padding: 10px 40px 10px 12px; font-size: 15px; outline: none;" onchange="config.haToken=this.value.trim();saveConfig()">
-          <button type="button" onclick="toggleHATokenVisibility()" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; color: #8e8e93; cursor: pointer; padding: 6px;"><i class="f7-icons" id="ha-token-eye-icon" style="font-size: 18px;">eye</i></button>
+          <input type="password" id="setting-ha-token" placeholder="eyJhbGciOiJIUzI1Ni..." style="width: 100%; box-sizing: border-box; background: var(--rc-fill); border: 1px solid var(--rc-border-strong); color: var(--rc-label); border-radius: 8px; padding: 10px 40px 10px 12px; font-size: 15px; outline: none;" onchange="config.haToken=this.value.trim();saveConfig()">
+          <button type="button" onclick="toggleHATokenVisibility()" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--rc-label-2); cursor: pointer; padding: 6px;"><i class="f7-icons" id="ha-token-eye-icon" style="font-size: 18px;">eye</i></button>
         </div>
         
         <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 4px;">
           <button class="sys-action-btn green" id="ha-test-btn" onclick="testHAConnection()" style="margin: 0; padding: 8px 16px; font-size: 14px; border-radius: 8px; font-weight: 600;">
             <i class="f7-icons" style="font-size: 16px; margin-right: 4px;">bolt_fill</i> Test Connection
           </button>
-          <span id="ha-test-status" style="font-size: 13px; color: #8e8e93; margin-left: 12px;"></span>
+          <span id="ha-test-status" style="font-size: 13px; color: var(--rc-label-2); margin-left: 12px;"></span>
         </div>
       </div>
     </div>
@@ -2063,20 +2242,20 @@
           <input type="checkbox" class="ios-toggle" id="setting-km" onchange="onKMToggleChange(this.checked)">
         </div>
       </div>
-      <div id="km-credentials-wrapper" style="display:none; padding: 14px 16px; border-top: 1px solid rgba(255,255,255,0.08); background: rgba(0,0,0,0.18);">
-        <div style="font-size: 12px; color: #8e8e93; margin-bottom: 6px; font-weight: 600; letter-spacing: 0.5px;">WEB SERVER URL</div>
-        <input type="url" id="setting-km-url" placeholder="http://192.168.1.50:4490" style="width: 100%; box-sizing: border-box; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); color: #fff; border-radius: 8px; padding: 10px 12px; font-size: 15px; margin-bottom: 12px; outline: none;" onchange="config.kmUrl=this.value.trim();saveConfig()">
+      <div id="km-credentials-wrapper" style="display:none; padding: 14px 16px; border-top: 1px solid var(--rc-border); background: var(--rc-sunken-tint);">
+        <div style="font-size: 12px; color: var(--rc-label-2); margin-bottom: 6px; font-weight: 600; letter-spacing: 0.5px;">WEB SERVER URL</div>
+        <input type="url" id="setting-km-url" placeholder="http://192.168.1.50:4490" style="width: 100%; box-sizing: border-box; background: var(--rc-fill); border: 1px solid var(--rc-border-strong); color: var(--rc-label); border-radius: 8px; padding: 10px 12px; font-size: 15px; margin-bottom: 12px; outline: none;" onchange="config.kmUrl=this.value.trim();saveConfig()">
         
         <div style="display: flex; gap: 10px; margin-bottom: 12px;">
           <div style="flex: 1;">
-            <div style="font-size: 12px; color: #8e8e93; margin-bottom: 6px; font-weight: 600; letter-spacing: 0.5px;">USERNAME</div>
-            <input type="text" id="setting-km-user" placeholder="Optional" autocorrect="off" autocapitalize="none" spellcheck="false" style="width: 100%; box-sizing: border-box; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); color: #fff; border-radius: 8px; padding: 10px 12px; font-size: 15px; outline: none;" onchange="config.kmUser=this.value.trim();saveConfig()">
+            <div style="font-size: 12px; color: var(--rc-label-2); margin-bottom: 6px; font-weight: 600; letter-spacing: 0.5px;">USERNAME</div>
+            <input type="text" id="setting-km-user" placeholder="Optional" autocorrect="off" autocapitalize="none" spellcheck="false" style="width: 100%; box-sizing: border-box; background: var(--rc-fill); border: 1px solid var(--rc-border-strong); color: var(--rc-label); border-radius: 8px; padding: 10px 12px; font-size: 15px; outline: none;" onchange="config.kmUser=this.value.trim();saveConfig()">
           </div>
           <div style="flex: 1;">
-            <div style="font-size: 12px; color: #8e8e93; margin-bottom: 6px; font-weight: 600; letter-spacing: 0.5px;">PASSWORD</div>
+            <div style="font-size: 12px; color: var(--rc-label-2); margin-bottom: 6px; font-weight: 600; letter-spacing: 0.5px;">PASSWORD</div>
             <div style="position: relative;">
-              <input type="password" id="setting-km-password" placeholder="Optional" style="width: 100%; box-sizing: border-box; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); color: #fff; border-radius: 8px; padding: 10px 40px 10px 12px; font-size: 15px; outline: none;" onchange="config.kmPassword=this.value.trim();saveConfig()">
-              <button type="button" onclick="toggleKMPasswordVisibility()" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; color: #8e8e93; cursor: pointer; padding: 6px;"><i class="f7-icons" id="km-password-eye-icon" style="font-size: 18px;">eye</i></button>
+              <input type="password" id="setting-km-password" placeholder="Optional" style="width: 100%; box-sizing: border-box; background: var(--rc-fill); border: 1px solid var(--rc-border-strong); color: var(--rc-label); border-radius: 8px; padding: 10px 40px 10px 12px; font-size: 15px; outline: none;" onchange="config.kmPassword=this.value.trim();saveConfig()">
+              <button type="button" onclick="toggleKMPasswordVisibility()" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--rc-label-2); cursor: pointer; padding: 6px;"><i class="f7-icons" id="km-password-eye-icon" style="font-size: 18px;">eye</i></button>
             </div>
           </div>
         </div>
@@ -2085,7 +2264,7 @@
           <button class="sys-action-btn green" id="km-test-btn" onclick="testKMConnection()" style="margin: 0; padding: 8px 16px; font-size: 14px; border-radius: 8px; font-weight: 600;">
             <i class="f7-icons" style="font-size: 16px; margin-right: 4px;">bolt_fill</i> Test Connection
           </button>
-          <span id="km-test-status" style="font-size: 13px; color: #8e8e93; margin-left: 12px;"></span>
+          <span id="km-test-status" style="font-size: 13px; color: var(--rc-label-2); margin-left: 12px;"></span>
         </div>
       </div>
     </div>
@@ -2097,51 +2276,51 @@
           <input type="checkbox" class="ios-toggle" id="setting-mqtt" onchange="onMQTTToggleChange(this.checked)">
         </div>
       </div>
-      <div id="mqtt-credentials-wrapper" style="display:none; padding: 14px 16px; border-top: 1px solid rgba(255,255,255,0.08); background: rgba(0,0,0,0.18);">
+      <div id="mqtt-credentials-wrapper" style="display:none; padding: 14px 16px; border-top: 1px solid var(--rc-border); background: var(--rc-sunken-tint);">
         <div style="display: flex; gap: 10px; margin-bottom: 12px;">
           <div style="flex: 2;">
-            <div style="font-size: 12px; color: #8e8e93; margin-bottom: 6px; font-weight: 600; letter-spacing: 0.5px;">BROKER HOST</div>
-            <input type="text" id="setting-mqtt-host" placeholder="192.168.1.50 or broker.local" autocorrect="off" autocapitalize="none" spellcheck="false" style="width: 100%; box-sizing: border-box; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); color: #fff; border-radius: 8px; padding: 10px 12px; font-size: 15px; outline: none;" onchange="config.mqttHost=this.value.trim();saveConfig()">
+            <div style="font-size: 12px; color: var(--rc-label-2); margin-bottom: 6px; font-weight: 600; letter-spacing: 0.5px;">BROKER HOST</div>
+            <input type="text" id="setting-mqtt-host" placeholder="192.168.1.50 or broker.local" autocorrect="off" autocapitalize="none" spellcheck="false" style="width: 100%; box-sizing: border-box; background: var(--rc-fill); border: 1px solid var(--rc-border-strong); color: var(--rc-label); border-radius: 8px; padding: 10px 12px; font-size: 15px; outline: none;" onchange="config.mqttHost=this.value.trim();saveConfig()">
           </div>
           <div style="flex: 1;">
-            <div style="font-size: 12px; color: #8e8e93; margin-bottom: 6px; font-weight: 600; letter-spacing: 0.5px;">PORT</div>
-            <input type="number" id="setting-mqtt-port" placeholder="1883" style="width: 100%; box-sizing: border-box; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); color: #fff; border-radius: 8px; padding: 10px 12px; font-size: 15px; outline: none;" onchange="config.mqttPort=parseInt(this.value)||1883;saveConfig()">
+            <div style="font-size: 12px; color: var(--rc-label-2); margin-bottom: 6px; font-weight: 600; letter-spacing: 0.5px;">PORT</div>
+            <input type="number" id="setting-mqtt-port" placeholder="1883" style="width: 100%; box-sizing: border-box; background: var(--rc-fill); border: 1px solid var(--rc-border-strong); color: var(--rc-label); border-radius: 8px; padding: 10px 12px; font-size: 15px; outline: none;" onchange="config.mqttPort=parseInt(this.value)||1883;saveConfig()">
           </div>
         </div>
 
         <div style="margin-bottom: 12px;">
-          <div style="font-size: 12px; color: #8e8e93; margin-bottom: 6px; font-weight: 600; letter-spacing: 0.5px;">CLIENT ID</div>
-          <input type="text" id="setting-mqtt-clientid" placeholder="RemoteCompanion" autocorrect="off" autocapitalize="none" spellcheck="false" style="width: 100%; box-sizing: border-box; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); color: #fff; border-radius: 8px; padding: 10px 12px; font-size: 15px; outline: none;" onchange="config.mqttClientId=this.value.trim();saveConfig()">
+          <div style="font-size: 12px; color: var(--rc-label-2); margin-bottom: 6px; font-weight: 600; letter-spacing: 0.5px;">CLIENT ID</div>
+          <input type="text" id="setting-mqtt-clientid" placeholder="RemoteCompanion" autocorrect="off" autocapitalize="none" spellcheck="false" style="width: 100%; box-sizing: border-box; background: var(--rc-fill); border: 1px solid var(--rc-border-strong); color: var(--rc-label); border-radius: 8px; padding: 10px 12px; font-size: 15px; outline: none;" onchange="config.mqttClientId=this.value.trim();saveConfig()">
         </div>
 
         <div style="display: flex; gap: 10px; margin-bottom: 12px;">
           <div style="flex: 1;">
-            <div style="font-size: 12px; color: #8e8e93; margin-bottom: 6px; font-weight: 600; letter-spacing: 0.5px;">USERNAME</div>
-            <input type="text" id="setting-mqtt-user" placeholder="Optional" autocorrect="off" autocapitalize="none" spellcheck="false" style="width: 100%; box-sizing: border-box; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); color: #fff; border-radius: 8px; padding: 10px 12px; font-size: 15px; outline: none;" onchange="config.mqttUser=this.value.trim();saveConfig()">
+            <div style="font-size: 12px; color: var(--rc-label-2); margin-bottom: 6px; font-weight: 600; letter-spacing: 0.5px;">USERNAME</div>
+            <input type="text" id="setting-mqtt-user" placeholder="Optional" autocorrect="off" autocapitalize="none" spellcheck="false" style="width: 100%; box-sizing: border-box; background: var(--rc-fill); border: 1px solid var(--rc-border-strong); color: var(--rc-label); border-radius: 8px; padding: 10px 12px; font-size: 15px; outline: none;" onchange="config.mqttUser=this.value.trim();saveConfig()">
           </div>
           <div style="flex: 1;">
-            <div style="font-size: 12px; color: #8e8e93; margin-bottom: 6px; font-weight: 600; letter-spacing: 0.5px;">PASSWORD</div>
+            <div style="font-size: 12px; color: var(--rc-label-2); margin-bottom: 6px; font-weight: 600; letter-spacing: 0.5px;">PASSWORD</div>
             <div style="position: relative;">
-              <input type="password" id="setting-mqtt-password" placeholder="Optional" style="width: 100%; box-sizing: border-box; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); color: #fff; border-radius: 8px; padding: 10px 40px 10px 12px; font-size: 15px; outline: none;" onchange="config.mqttPassword=this.value.trim();saveConfig()">
-              <button type="button" onclick="toggleMQTTPasswordVisibility()" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; color: #8e8e93; cursor: pointer; padding: 6px;"><i class="f7-icons" id="mqtt-password-eye-icon" style="font-size: 18px;">eye</i></button>
+              <input type="password" id="setting-mqtt-password" placeholder="Optional" style="width: 100%; box-sizing: border-box; background: var(--rc-fill); border: 1px solid var(--rc-border-strong); color: var(--rc-label); border-radius: 8px; padding: 10px 40px 10px 12px; font-size: 15px; outline: none;" onchange="config.mqttPassword=this.value.trim();saveConfig()">
+              <button type="button" onclick="toggleMQTTPasswordVisibility()" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--rc-label-2); cursor: pointer; padding: 6px;"><i class="f7-icons" id="mqtt-password-eye-icon" style="font-size: 18px;">eye</i></button>
             </div>
           </div>
         </div>
 
         <div style="margin-bottom: 12px;">
-          <div style="font-size: 12px; color: #8e8e93; margin-bottom: 6px; font-weight: 600; letter-spacing: 0.5px;">DEFAULT TOPIC PREFIX</div>
-          <input type="text" id="setting-mqtt-prefix" placeholder="remotecompanion" autocorrect="off" autocapitalize="none" spellcheck="false" style="width: 100%; box-sizing: border-box; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); color: #fff; border-radius: 8px; padding: 10px 12px; font-size: 15px; outline: none;" onchange="config.mqttTopicPrefix=this.value.trim();saveConfig()">
+          <div style="font-size: 12px; color: var(--rc-label-2); margin-bottom: 6px; font-weight: 600; letter-spacing: 0.5px;">DEFAULT TOPIC PREFIX</div>
+          <input type="text" id="setting-mqtt-prefix" placeholder="remotecompanion" autocorrect="off" autocapitalize="none" spellcheck="false" style="width: 100%; box-sizing: border-box; background: var(--rc-fill); border: 1px solid var(--rc-border-strong); color: var(--rc-label); border-radius: 8px; padding: 10px 12px; font-size: 15px; outline: none;" onchange="config.mqttTopicPrefix=this.value.trim();saveConfig()">
         </div>
         
         <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 4px;">
           <button class="sys-action-btn green" id="mqtt-test-btn" onclick="testMQTTConnection()" style="margin: 0; padding: 8px 16px; font-size: 14px; border-radius: 8px; font-weight: 600;">
             <i class="f7-icons" style="font-size: 16px; margin-right: 4px;">bolt_fill</i> Test Connection
           </button>
-          <span id="mqtt-test-status" style="font-size: 13px; color: #8e8e93; margin-left: 12px;"></span>
+          <span id="mqtt-test-status" style="font-size: 13px; color: var(--rc-label-2); margin-left: 12px;"></span>
         </div>
       </div>
     </div>
-    <div style="color:#8e8e93;font-size:13px;margin:8px 16px 0">Configure external service integrations to trigger actions and control third-party automations.</div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">Configure external service integrations to trigger actions and control third-party automations.</div>
   </div>
 </div>
 
@@ -2159,11 +2338,11 @@
     <div class="action-list-card">
       <div class="action-list-row" onclick="openBannersPanel()">
         <div class="action-row-icon icon-purple"><i class="f7-icons">bell_fill</i></div>
-        <div class="action-row-text" style="flex:1">Banners<br><span id="setting-banners-count" style="font-size:13px;color:#8e8e93;font-weight:400">Off</span></div>
-        <i class="f7-icons row-chevron" style="color:#8e8e93; font-size:14px;">chevron_right</i>
+        <div class="action-row-text" style="flex:1">Banners<br><span id="setting-banners-count" style="font-size:13px;color:var(--rc-label-2);font-weight:400">Off</span></div>
+        <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
       </div>
     </div>
-    <div style="color:#8e8e93;font-size:13px;margin:8px 32px 0">Actions that show a banner when a trigger runs them.</div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 32px 0">Actions that show a banner when a trigger runs them.</div>
     <div class="action-list-header">NFC</div>
     <div class="action-list-card">
       <div class="settings-row">
@@ -2179,11 +2358,11 @@
         </div>
       </div>
       <div class="action-list-row" onclick="showNFCScreenOffSheet()">
-        <div class="action-row-text" style="flex:1">NFC With Screen Off<br><span id="setting-nfc-screenoff" style="font-size:13px;color:#8e8e93;font-weight:400">Off</span></div>
-        <i class="f7-icons row-chevron" style="color:#8e8e93; font-size:14px;">chevron_right</i>
+        <div class="action-row-text" style="flex:1">NFC With Screen Off<br><span id="setting-nfc-screenoff" style="font-size:13px;color:var(--rc-label-2);font-weight:400">Off</span></div>
+        <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
       </div>
     </div>
-    <div style="color:#8e8e93;font-size:13px;margin:8px 32px 0" id="nfc-footer">NFC scanning options.</div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 32px 0" id="nfc-footer">NFC scanning options.</div>
     <div class="action-list-header">Options</div>
     <div class="action-list-card">
       <div class="settings-row">
@@ -2195,7 +2374,7 @@
       <div class="settings-row">
         <span class="settings-label">Logging</span>
         <div class="settings-btn">
-          <select id="setting-loglevel" onchange="config.logLevel=this.value;saveConfig()" style="appearance:none;-webkit-appearance:none;background:none;border:none;color:#8e8e93;font-size:17px;font-family:inherit;text-align:right;outline:none;cursor:pointer">
+          <select id="setting-loglevel" onchange="config.logLevel=this.value;saveConfig()" style="appearance:none;-webkit-appearance:none;background:none;border:none;color:var(--rc-label-2);font-size:17px;font-family:inherit;text-align:right;outline:none;cursor:pointer">
             <option value="off">Off</option>
             <option value="minimal">Minimal</option>
             <option value="full">Full</option>
@@ -2220,35 +2399,35 @@
       <div class="settings-row">
         <span class="settings-label">Volume Sequence</span>
         <div class="settings-btn">
-          <select id="setting-volume-seq" onchange="config.volumeSequenceWindow=parseFloat(this.value);saveConfig()" style="appearance:none;-webkit-appearance:none;background:none;border:none;color:#8e8e93;font-size:17px;font-family:inherit;text-align:right;outline:none;cursor:pointer"></select>
+          <select id="setting-volume-seq" onchange="config.volumeSequenceWindow=parseFloat(this.value);saveConfig()" style="appearance:none;-webkit-appearance:none;background:none;border:none;color:var(--rc-label-2);font-size:17px;font-family:inherit;text-align:right;outline:none;cursor:pointer"></select>
         </div>
       </div>
       <div class="settings-row">
         <span class="settings-label">Power Clicks</span>
         <div class="settings-btn">
-          <select id="setting-power-click" onchange="config.powerClickWindow=parseFloat(this.value);saveConfig()" style="appearance:none;-webkit-appearance:none;background:none;border:none;color:#8e8e93;font-size:17px;font-family:inherit;text-align:right;outline:none;cursor:pointer"></select>
+          <select id="setting-power-click" onchange="config.powerClickWindow=parseFloat(this.value);saveConfig()" style="appearance:none;-webkit-appearance:none;background:none;border:none;color:var(--rc-label-2);font-size:17px;font-family:inherit;text-align:right;outline:none;cursor:pointer"></select>
         </div>
       </div>
       <div class="settings-row">
         <span class="settings-label">Home Clicks</span>
         <div class="settings-btn">
-          <select id="setting-home-click" onchange="config.homeClickWindow=parseFloat(this.value);saveConfig()" style="appearance:none;-webkit-appearance:none;background:none;border:none;color:#8e8e93;font-size:17px;font-family:inherit;text-align:right;outline:none;cursor:pointer"></select>
+          <select id="setting-home-click" onchange="config.homeClickWindow=parseFloat(this.value);saveConfig()" style="appearance:none;-webkit-appearance:none;background:none;border:none;color:var(--rc-label-2);font-size:17px;font-family:inherit;text-align:right;outline:none;cursor:pointer"></select>
         </div>
       </div>
       <div class="settings-row">
         <span class="settings-label">Volume Hold</span>
         <div class="settings-btn">
-          <select id="setting-volume-hold" onchange="config.volumeHoldTime=parseFloat(this.value);saveConfig()" style="appearance:none;-webkit-appearance:none;background:none;border:none;color:#8e8e93;font-size:17px;font-family:inherit;text-align:right;outline:none;cursor:pointer"></select>
+          <select id="setting-volume-hold" onchange="config.volumeHoldTime=parseFloat(this.value);saveConfig()" style="appearance:none;-webkit-appearance:none;background:none;border:none;color:var(--rc-label-2);font-size:17px;font-family:inherit;text-align:right;outline:none;cursor:pointer"></select>
         </div>
       </div>
       <div class="settings-row">
         <span class="settings-label">Power Hold</span>
         <div class="settings-btn">
-          <select id="setting-power-hold" onchange="config.powerHoldTime=parseFloat(this.value);saveConfig()" style="appearance:none;-webkit-appearance:none;background:none;border:none;color:#8e8e93;font-size:17px;font-family:inherit;text-align:right;outline:none;cursor:pointer"></select>
+          <select id="setting-power-hold" onchange="config.powerHoldTime=parseFloat(this.value);saveConfig()" style="appearance:none;-webkit-appearance:none;background:none;border:none;color:var(--rc-label-2);font-size:17px;font-family:inherit;text-align:right;outline:none;cursor:pointer"></select>
         </div>
       </div>
     </div>
-    <div style="color:#8e8e93;font-size:13px;margin:8px 16px 0">How long a press waits for the next one before it counts. A shorter time responds sooner and needs quicker presses.</div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">How long a press waits for the next one before it counts. A shorter time responds sooner and needs quicker presses.</div>
   </div>
 </div>
 
@@ -2298,12 +2477,12 @@
     <div class="dialog-msg" style="padding-bottom: 8px;">Paste JSON array or line-separated action commands:</div>
     <div style="position: relative; margin: 0 16px 12px; width: calc(100% - 32px); box-sizing: border-box;">
       <textarea class="dialog-input" id="import-dialog-textarea" rows="8" placeholder='["flashlight toggle", "delay 1"]' style="height:180px; text-align:left; resize:none; font-family:monospace; font-size:12px; margin: 0; width: 100%; box-sizing: border-box; padding-right: 32px;"></textarea>
-      <button onclick="clearImportTextarea()" style="position: absolute; right: 8px; top: 8px; background: none; border: none; padding: 0; color: #8e8e93; cursor: pointer; display: flex; align-items: center; justify-content: center; width: 24px; height: 24px;" title="Clear">
+      <button onclick="clearImportTextarea()" style="position: absolute; right: 8px; top: 8px; background: none; border: none; padding: 0; color: var(--rc-label-2); cursor: pointer; display: flex; align-items: center; justify-content: center; width: 24px; height: 24px;" title="Clear">
         <i class="f7-icons" style="font-size: 18px;">xmark_circle_fill</i>
       </button>
     </div>
     <div class="dialog-btns">
-      <button onclick="closeImportDialog()" style="color: #ff3b30;">Cancel</button>
+      <button onclick="closeImportDialog()" style="color: var(--rc-red);">Cancel</button>
       <button onclick="importDialogOk()" style="font-weight: 600;">Import</button>
     </div>
   </div>
@@ -2315,9 +2494,9 @@
     <div class="dialog-msg" id="complex-dialog-msg">Select Device</div>
     
     <div style="margin: 16px 0;">
-      <div style="display:flex; background:rgba(255,255,255,0.1); border-radius:8px; overflow:hidden; margin: 0 16px 12px;">
-        <div id="complex-seg-connect" onclick="setComplexSegment('connect')" style="flex:1; padding:8px; text-align:center; background:#007aff; color:#fff; font-size:14px; font-weight:500; cursor:pointer;">Connect</div>
-        <div id="complex-seg-disconnect" onclick="setComplexSegment('disconnect')" style="flex:1; padding:8px; text-align:center; color:#fff; font-size:14px; font-weight:500; cursor:pointer;">Disconnect</div>
+      <div style="display:flex; background:var(--rc-fill-raised); border-radius:8px; overflow:hidden; margin: 0 16px 12px;">
+        <div id="complex-seg-connect" onclick="setComplexSegment('connect')" style="flex:1; padding:8px; text-align:center; background:var(--rc-blue); color:#fff; font-size:14px; font-weight:500; cursor:pointer;">Connect</div>
+        <div id="complex-seg-disconnect" onclick="setComplexSegment('disconnect')" style="flex:1; padding:8px; text-align:center; color:var(--rc-label); font-size:14px; font-weight:500; cursor:pointer;">Disconnect</div>
       </div>
       
       <input list="complex-dialog-datalist" class="dialog-input" id="complex-dialog-input" type="text" placeholder="Name or SSID" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
@@ -2337,9 +2516,9 @@
     <div class="dialog-title">New Scheduled Trigger</div>
     <div style="padding:0 14px 12px;display:flex;flex-direction:column;gap:10px">
       <input class="dialog-input" id="sched-name" type="text" placeholder="Name (e.g. Morning)" autocorrect="off" autocapitalize="words" spellcheck="false" style="margin:0;width:100%">
-      <input class="dialog-input" id="sched-time" type="time" style="margin:0;width:100%;color:#fff;background:#2c2c2e">
-      <div style="background:#2c2c2e;border-radius:10px;padding:10px 12px">
-        <div style="font-size:13px;color:#8e8e93;margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em font-weight: 500;">Repeat</div>
+      <input class="dialog-input" id="sched-time" type="time" style="margin:0;width:100%;color:var(--rc-label);background:var(--rc-surface-2)">
+      <div style="background:var(--rc-surface-2);border-radius:10px;padding:10px 12px">
+        <div style="font-size:13px;color:var(--rc-label-2);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em font-weight: 500;">Repeat</div>
         <div style="display:flex;justify-content:space-between;gap:4px" id="sched-days">
           <label class="day-pill" data-day="1"><input type="checkbox" value="1"><span>S</span></label>
           <label class="day-pill" data-day="2"><input type="checkbox" value="2"><span>M</span></label>
@@ -2382,7 +2561,7 @@
     <div class="dialog-msg" id="app-launch-dialog-msg" style="text-align:center;padding:0 16px 6px">Fires when an app is opened on the device.</div>
     <div style="padding:0 14px 10px">
       <div class="app-picker-search-wrap">
-        <i class="f7-icons" style="font-size:16px;color:#8e8e93;flex-shrink:0">search</i>
+        <i class="f7-icons" style="font-size:16px;color:var(--rc-label-2);flex-shrink:0">search</i>
         <input class="app-picker-search" id="app-picker-search" type="text" placeholder="Search apps…" autocorrect="off" autocapitalize="none" spellcheck="false" oninput="filterAppPickerList()">
       </div>
       <div class="app-picker-list" id="app-picker-list">
@@ -2402,20 +2581,20 @@
     <div class="dialog-title" id="time-cond-dialog-title">Time of Day Condition</div>
     <div class="dialog-msg" style="padding-bottom: 8px;">Run actions only between these times:</div>
     <div style="padding:0 16px 14px; display:flex; flex-direction:column; gap:12px;">
-      <div style="display:flex; align-items:center; justify-content:space-between; background:rgba(255,255,255,0.06); padding:10px 14px; border-radius:10px;">
-        <span style="font-size:14px; color:#fff; font-weight:500;">Start Time</span>
+      <div style="display:flex; align-items:center; justify-content:space-between; background:var(--rc-fill-tint); padding:10px 14px; border-radius:10px;">
+        <span style="font-size:14px; color:var(--rc-label); font-weight:500;">Start Time</span>
         <input type="time" id="time-cond-start" class="dialog-input" style="margin:0; width:130px; text-align:center; font-size:15px; padding:6px 10px;" value="09:00" oninput="updateTimeCondPreview()">
       </div>
-      <div style="display:flex; align-items:center; justify-content:space-between; background:rgba(255,255,255,0.06); padding:10px 14px; border-radius:10px;">
-        <span style="font-size:14px; color:#fff; font-weight:500;">End Time</span>
+      <div style="display:flex; align-items:center; justify-content:space-between; background:var(--rc-fill-tint); padding:10px 14px; border-radius:10px;">
+        <span style="font-size:14px; color:var(--rc-label); font-weight:500;">End Time</span>
         <input type="time" id="time-cond-end" class="dialog-input" style="margin:0; width:130px; text-align:center; font-size:15px; padding:6px 10px;" value="17:00" oninput="updateTimeCondPreview()">
       </div>
-      <div id="time-cond-hint" style="font-size:12px; color:#8e8e93; text-align:center; line-height:1.3; min-height:16px;">
+      <div id="time-cond-hint" style="font-size:12px; color:var(--rc-label-2); text-align:center; line-height:1.3; min-height:16px;">
         Actions will only run if current time is between 9:00 AM and 5:00 PM.
       </div>
     </div>
     <div class="dialog-btns">
-      <button onclick="closeTimeCondDialog()" style="color:#ff3b30;">Cancel</button>
+      <button onclick="closeTimeCondDialog()" style="color:var(--rc-red);">Cancel</button>
       <button onclick="saveTimeCondDialog()" style="font-weight:600;">Save</button>
     </div>
   </div>
@@ -2462,7 +2641,7 @@
     <div class="dialog-msg" style="text-align:center;padding:0 16px 6px">Select a device or entity to control with Home Assistant.</div>
     <div style="padding:0 14px 10px">
       <div class="app-picker-search-wrap">
-        <i class="f7-icons" style="font-size:16px;color:#8e8e93;flex-shrink:0">search</i>
+        <i class="f7-icons" style="font-size:16px;color:var(--rc-label-2);flex-shrink:0">search</i>
         <input class="app-picker-search" id="ha-picker-search" type="text" placeholder="Search entities (light, switch, scene...)" autocorrect="off" autocapitalize="none" spellcheck="false" oninput="filterHAList()">
       </div>
       <div class="app-picker-list" id="ha-picker-list" style="max-height: 280px; overflow-y: auto;">
@@ -2480,23 +2659,23 @@
   <div class="dialog-box app-launch-dialog" style="max-width: 560px; width: 90%;">
     <div style="display:flex; align-items:center; justify-content:space-between; padding:14px 18px 6px;">
       <div class="dialog-title" style="margin:0; text-align:left; font-size:17px; font-weight:700;">Keyboard Maestro Macros</div>
-      <button class="km-refresh-btn" onclick="refreshKMMacros()" title="Refresh Macros" style="background:rgba(255,255,255,0.08); border:none; color:#007aff; border-radius:8px; width:32px; height:32px; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:background 0.15s;">
+      <button class="km-refresh-btn" onclick="refreshKMMacros()" title="Refresh Macros" style="background:var(--rc-fill); border:none; color:var(--rc-blue); border-radius:8px; width:32px; height:32px; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:background 0.15s;">
         <i class="f7-icons" id="km-refresh-icon" style="font-size:16px;">arrow_clockwise</i>
       </button>
     </div>
     <div class="dialog-msg" style="text-align:left; padding:0 18px 8px; font-size:13px;">Select a macro from your Mac to execute:</div>
     <div style="padding:0 14px 10px;">
       <div class="app-picker-search-wrap">
-        <i class="f7-icons" style="font-size:16px; color:#8e8e93; flex-shrink:0;">search</i>
+        <i class="f7-icons" style="font-size:16px; color:var(--rc-label-2); flex-shrink:0;">search</i>
         <input class="app-picker-search" id="km-picker-search" type="text" placeholder="Search macros and groups…" autocorrect="off" autocapitalize="none" spellcheck="false" oninput="filterKMList()">
       </div>
       <div class="app-picker-list km-macro-list" id="km-picker-list" style="max-height:320px; overflow-y:auto;">
         <div class="app-picker-loading" id="km-picker-loading">Loading macros from Mac…</div>
       </div>
     </div>
-    <div class="dialog-btns" style="border-top:1px solid rgba(255,255,255,0.08); display:flex;">
-      <button onclick="promptManualKMAction()" style="flex:1; border-right:1px solid rgba(255,255,255,0.08); font-size:14px; color:#8e8e93;">Manual Entry…</button>
-      <button onclick="closeKMDialog()" style="flex:1; font-size:14px; color:#ff3b30;">Cancel</button>
+    <div class="dialog-btns" style="border-top:1px solid var(--rc-border); display:flex;">
+      <button onclick="promptManualKMAction()" style="flex:1; border-right:1px solid var(--rc-border); font-size:14px; color:var(--rc-label-2);">Manual Entry…</button>
+      <button onclick="closeKMDialog()" style="flex:1; font-size:14px; color:var(--rc-red);">Cancel</button>
     </div>
   </div>
 </div>
@@ -2510,10 +2689,10 @@
       <textarea class="dialog-input" id="terminal-dialog-textarea" rows="4" placeholder="killall SpringBoard" style="height:100px; text-align:left; resize:vertical; font-family:monospace; font-size:13px; margin:0; width:100%; box-sizing:border-box; padding: 10px 40px 10px 10px;"></textarea>
       <button type="button" class="var-ed-insert terminal-var-insert" title="Insert Variable" onclick="terminalInsertVariable(event)"><i class="f7-icons">plus_circle</i></button>
     </div>
-    <div id="terminal-dialog-root-row" style="margin: 0 16px 16px; display: flex; align-items: center; justify-content: space-between; background: rgba(255,255,255,0.06); padding: 10px 14px; border-radius: 10px;">
+    <div id="terminal-dialog-root-row" style="margin: 0 16px 16px; display: flex; align-items: center; justify-content: space-between; background: var(--rc-fill-tint); padding: 10px 14px; border-radius: 10px;">
       <div style="display:flex; flex-direction:column; text-align:left;">
-        <span style="font-size:14px; font-weight:600; color:#fff;">Root Privileges</span>
-        <span style="font-size:12px; color:#8e8e93;">Run command as root user (`root`)</span>
+        <span style="font-size:14px; font-weight:600; color:var(--rc-label);">Root Privileges</span>
+        <span style="font-size:12px; color:var(--rc-label-2);">Run command as root user (`root`)</span>
       </div>
       <label class="toggle-switch">
         <input type="checkbox" id="terminal-dialog-root-toggle">
@@ -2521,7 +2700,7 @@
       </label>
     </div>
     <div class="dialog-btns">
-      <button onclick="closeTerminalDialog()" style="color:#ff3b30;">Cancel</button>
+      <button onclick="closeTerminalDialog()" style="color:var(--rc-red);">Cancel</button>
       <button onclick="terminalDialogOk()" style="font-weight:600;">Save</button>
     </div>
   </div>
@@ -2599,7 +2778,7 @@
     <div style="width:80px"></div>
   </div>
   <div class="panel-content">
-    <div style="color:#8e8e93;font-size:13px;margin:20px 16px 0">Checked actions show a banner whenever a trigger runs them. Toggles show their new state; other actions show their name.</div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:20px 16px 0">Checked actions show a banner whenever a trigger runs them. Toggles show their new state; other actions show their name.</div>
     <div id="banners-list"></div>
   </div>
 </div>
@@ -2690,7 +2869,7 @@
               </div>
               <div class="sys-progress-sub">
                 <span>Disk Space</span>
-                <span>Free: <strong id="sys-storage-free" style="color:#30d158;">--</strong></span>
+                <span>Free: <strong id="sys-storage-free" style="color:var(--rc-green);">--</strong></span>
               </div>
             </div>
 
@@ -2708,7 +2887,7 @@
               </div>
               <div class="sys-progress-sub">
                 <span>System Memory</span>
-                <span>Free: <strong id="sys-ram-free" style="color:#bf5af2;">--</strong></span>
+                <span>Free: <strong id="sys-ram-free" style="color:var(--rc-purple);">--</strong></span>
               </div>
             </div>
           </div>
@@ -2731,7 +2910,7 @@
                 <span class="sys-row-label">Local IP</span>
               </div>
               <div class="sys-row-right">
-                <span id="sys-ip" class="sys-value-bold sys-mono" style="color:#0a84ff;">--</span>
+                <span id="sys-ip" class="sys-value-bold sys-mono" style="color:var(--rc-blue);">--</span>
               </div>
             </div>
             <div class="sys-row">
@@ -2740,7 +2919,7 @@
                 <span class="sys-row-label">Web UI</span>
               </div>
               <div class="sys-row-right">
-                <span id="sys-webui-url" class="sys-value-bold sys-mono" style="color:#30d158; font-size:13px;">--</span>
+                <span id="sys-webui-url" class="sys-value-bold sys-mono" style="color:var(--rc-green); font-size:13px;">--</span>
                 <button onclick="copyWebUIUrl()" class="sys-action-btn">Copy</button>
               </div>
             </div>
@@ -2863,7 +3042,7 @@
                 </div>
               </div>
               <div class="sys-row-right">
-                <span id="sys-log-size" class="sys-value-bold" style="color:#0a84ff;">-- KB</span>
+                <span id="sys-log-size" class="sys-value-bold" style="color:var(--rc-blue);">-- KB</span>
               </div>
             </div>
             <div class="sys-row">
@@ -2958,12 +3137,12 @@
 
     <!-- Log Entries Table / Viewport -->
     <div class="log-viewer-wrap" id="log-container">
-      <div style="color:#8e8e93; text-align:center; padding-top:40px;">Fetching system logs…</div>
+      <div style="color:var(--rc-label-2); text-align:center; padding-top:40px;">Fetching system logs…</div>
     </div>
 
     <!-- Log Footer Bar -->
     <div class="log-footer-bar">
-      <span id="log-last-updated" style="font-size:12px; color:#8e8e93; font-weight:500;">Updated: --</span>
+      <span id="log-last-updated" style="font-size:12px; color:var(--rc-label-2); font-weight:500;">Updated: --</span>
       <div style="display:flex; align-items:center; gap:10px;">
         <span class="log-autoscroll-label">Auto-scroll to bottom</span>
         <label class="toggle-switch" title="Auto-scroll to bottom">
@@ -3277,7 +3456,7 @@ function runStepText(run) {
 
 function updateRunningButton(runs) {
   const btn = document.getElementById('nav-running-btn');
-  if (btn) btn.style.color = (runs && runs.length) ? '#30d158' : '';
+  if (btn) btn.style.color = (runs && runs.length) ? 'var(--rc-green)' : '';
 }
 
 // The last runs that ended, from Run History: fetched on opening and when a run starts or ends
@@ -3312,7 +3491,7 @@ function runDurationText(seconds) {
 function renderRecent(box) {
   if (!recentRuns.length) return;
   const head = document.createElement('div');
-  head.style.cssText = 'padding:14px 4px 6px;font-size:13px;font-weight:600;color:#8e8e93;text-transform:uppercase';
+  head.style.cssText = 'padding:14px 4px 6px;font-size:13px;font-weight:600;color:var(--rc-label-2);text-transform:uppercase';
   head.textContent = 'Recent';
   box.appendChild(head);
   recentRuns.forEach(run => {
@@ -3322,7 +3501,7 @@ function renderRecent(box) {
     row.style.cursor = 'default';
     row.innerHTML = `
       <div class="app-picker-row-inner" style="display:flex; align-items:center; gap:10px;">
-        <i class="f7-icons" style="font-size:22px;flex-shrink:0;color:${stopped ? '#ff9f0a' : '#30d158'}">${stopped ? 'stop_circle' : 'checkmark_circle'}</i>
+        <i class="f7-icons" style="font-size:22px;flex-shrink:0;color:${stopped ? 'var(--rc-orange)' : 'var(--rc-green)'}">${stopped ? 'stop_circle' : 'checkmark_circle'}</i>
         <div style="min-width:0; flex:1;">
           <div class="app-picker-name">${escHtml(nameForKey(run.key || ''))}</div>
           <div class="app-picker-bid">${escHtml(runWhenText(run.started))} · ${runDurationText(run.seconds)} · ${run.test ? 'Test · ' : ''}${stopped ? 'Stopped' : 'Finished'}</div>
@@ -3338,7 +3517,7 @@ function renderRunning() {
   if (!box) return;
   document.getElementById('running-stop-all').disabled = !runningRuns.length;
   if (!runningRuns.length) {
-    box.innerHTML = '<div style="padding:22px 16px;color:#8e8e93;text-align:center">No triggers are running</div>';
+    box.innerHTML = '<div style="padding:22px 16px;color:var(--rc-label-2);text-align:center">No triggers are running</div>';
     renderRecent(box);
     return;
   }
@@ -3356,7 +3535,7 @@ function renderRunning() {
           <div class="app-picker-bid">${run.test ? 'Test · ' : ''}${runElapsedText(run.seconds)} · ${escHtml(runStepText(run))}</div>
         </div>
       </div>
-      <button class="nav-btn" title="Stop" style="color:#ff453a;flex-shrink:0"><i class="f7-icons" style="font-size:22px">stop_circle_fill</i></button>
+      <button class="nav-btn" title="Stop" style="color:var(--rc-red);flex-shrink:0"><i class="f7-icons" style="font-size:22px">stop_circle_fill</i></button>
     `;
     row.querySelector('button').onclick = () => stopRun(run.id);
     box.appendChild(row);
@@ -4167,7 +4346,7 @@ function renderTriggerRow(key, deletable) {
     <div class="row-text">
       <div class="row-title">
         <span>${escHtml(name)}</span>
-        ${isFav ? '<i class="f7-icons" style="font-size:12px;color:#f2c350">star_fill</i>' : ''}
+        ${isFav ? '<i class="f7-icons" style="font-size:12px;color:var(--rc-gold)">star_fill</i>' : ''}
       </div>
       <div class="row-subtitle">${escHtml(subtitle)}</div>
     </div>
@@ -4428,7 +4607,7 @@ function copyTriggerUrl(key, btnEl) {
       if (icon) {
         const originalIcon = icon.innerText;
         icon.innerText = 'checkmark';
-        btnEl.style.color = '#34c759';
+        btnEl.style.color = 'var(--rc-green)';
         setTimeout(() => {
           icon.innerText = originalIcon;
           btnEl.style.color = '';
@@ -4541,7 +4720,7 @@ function renderActionList() {
   const actions = triggerData(currentKey).actions || [];
 
   if (actions.length === 0) {
-    card.innerHTML = `<div style="padding:20px 16px;color:#636366;font-size:15px;font-style:italic">No actions — tap "+" in the top right to add</div>`;
+    card.innerHTML = `<div style="padding:20px 16px;color:var(--rc-label-3);font-size:15px;font-style:italic">No actions — tap "+" in the top right to add</div>`;
     return;
   }
 
@@ -4593,8 +4772,8 @@ function renderActionList() {
       <div class="action-row-icon ${cls}" style="width:24px;height:24px;border-radius:6px;margin-right:14px;flex-shrink:0">
         <i class="f7-icons" style="font-size:13px">${icon}</i>
       </div>
-      <div style="flex:1;min-width:0;font-size:16px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${renderActionNameHtml(action, idx)}</div>
-      <i class="f7-icons drag-handle" style="color:#3a3a3c;font-size:18px;flex-shrink:0;margin-left:8px;cursor:grab;">bars</i>
+      <div style="flex:1;min-width:0;font-size:16px;color:var(--rc-label);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${renderActionNameHtml(action, idx)}</div>
+      <i class="f7-icons drag-handle" style="color: var(--rc-glyph);font-size:18px;flex-shrink:0;margin-left:8px;cursor:grab;">bars</i>
     `;
     row.appendChild(inner);
 
@@ -4744,7 +4923,7 @@ function renderActionNameHtml(action, idx) {
     const charLen = toggleInfo.currentDisplaySuffix ? toggleInfo.currentDisplaySuffix.length : 2;
     const selectWidth = (charLen + 1.8) + 'ch';
     let html = `<span>${escHtml(toggleInfo.name)}</span> `;
-    html += `<select onchange="updateToggleAction(${idx}, this.value)" onclick="event.stopPropagation()" style="appearance:none;-webkit-appearance:none;-moz-appearance:none;background:#2c2c2e;color:#0a84ff;border:none;border-radius:6px;padding:2px 4px;font-size:14px;font-weight:600;font-family:inherit;outline:none;cursor:pointer;text-align:center;text-align-last:center;width:${selectWidth};box-sizing:border-box;">`;
+    html += `<select onchange="updateToggleAction(${idx}, this.value)" onclick="event.stopPropagation()" style="appearance:none;-webkit-appearance:none;-moz-appearance:none;background:var(--rc-surface-2);color:var(--rc-blue);border:none;border-radius:6px;padding:2px 4px;font-size:14px;font-weight:600;font-family:inherit;outline:none;cursor:pointer;text-align:center;text-align-last:center;width:${selectWidth};box-sizing:border-box;">`;
     toggleInfo.suffixes.forEach((s, i) => {
       const sel = s === toggleInfo.currentSuffix ? 'selected' : '';
       html += `<option value="${s}" ${sel}>${escHtml(toggleInfo.displaySuffixes[i])}</option>`;
@@ -5394,9 +5573,9 @@ function fetchSysInfo() {
     document.getElementById('sys-battery-percent').textContent = data.battery_level >= 0 ? `${batPct}%` : 'N/A';
     const batBar = document.getElementById('sys-battery-bar');
     batBar.style.width = `${batPct}%`;
-    if (batPct <= 20) batBar.style.background = '#ff453a';
-    else if (batPct <= 50) batBar.style.background = '#ffd60a';
-    else batBar.style.background = '#30d158';
+    if (batPct <= 20) batBar.style.background = 'var(--rc-red)';
+    else if (batPct <= 50) batBar.style.background = 'var(--rc-yellow-fill)';
+    else batBar.style.background = 'var(--rc-green)';
 
     document.getElementById('sys-battery-status').textContent = data.battery_status || 'Unknown';
     document.getElementById('sys-lpm-status').textContent = `Low Power Mode: ${data.low_power_mode ? 'On' : 'Off'}`;
@@ -5425,9 +5604,9 @@ function fetchSysInfo() {
 
     const thermalEl = document.getElementById('sys-thermal');
     thermalEl.textContent = data.thermal_state || 'Normal';
-    if (data.thermal_state === 'Warm') thermalEl.style.color = '#ffd60a';
-    else if (data.thermal_state === 'Hot') thermalEl.style.color = '#ff453a';
-    else thermalEl.style.color = '#30d158';
+    if (data.thermal_state === 'Warm') thermalEl.style.color = 'var(--rc-yellow)';
+    else if (data.thermal_state === 'Hot') thermalEl.style.color = 'var(--rc-red)';
+    else thermalEl.style.color = 'var(--rc-green)';
 
   }).catch(err => {
     showToast('Failed to fetch system diagnostics');
@@ -5608,7 +5787,7 @@ function fetchLiveLogs() {
     renderLogsUI();
   }).catch(() => {
     const container = document.getElementById('log-container');
-    if (container) container.innerHTML = '<div style="color:#ff453a; text-align:center; padding-top:20px;">⚠ Log stream offline or server unavailable</div>';
+    if (container) container.innerHTML = '<div style="color:var(--rc-red); text-align:center; padding-top:20px;">⚠ Log stream offline or server unavailable</div>';
   });
 }
 
@@ -5617,7 +5796,7 @@ function renderLogsUI() {
   if (!container) return;
 
   if (!g_rawLogs) {
-    container.innerHTML = '<div style="color:#8e8e93; text-align:center; padding-top:40px;">No log entries recorded</div>';
+    container.innerHTML = '<div style="color:var(--rc-label-2); text-align:center; padding-top:40px;">No log entries recorded</div>';
     updateLogStats(0, 0, 0, 0);
     return;
   }
@@ -5668,16 +5847,16 @@ function renderLogsUI() {
         <i class="f7-icons log-row-expand-icon">chevron_right</i>
       </div>
       <div class="log-row-details">
-        <div><strong style="color:#ffffff;">Raw Entry:</strong> ${escHtml(line)}</div>
-        <div><strong style="color:#ffffff;">Category:</strong> ${parsed.cat} (${parsed.catKey.toUpperCase()})</div>
-        ${parsed.timeStr ? `<div><strong style="color:#ffffff;">Timestamp:</strong> ${escHtml(parsed.timeStr)}</div>` : ''}
+        <div><strong style="color:var(--rc-label);">Raw Entry:</strong> ${escHtml(line)}</div>
+        <div><strong style="color:var(--rc-label);">Category:</strong> ${parsed.cat} (${parsed.catKey.toUpperCase()})</div>
+        ${parsed.timeStr ? `<div><strong style="color:var(--rc-label);">Timestamp:</strong> ${escHtml(parsed.timeStr)}</div>` : ''}
       </div>
     </div>`;
   });
 
   updateLogStats(totalCount, execCount, errCount, httpCount);
 
-  container.innerHTML = html || '<div style="color:#8e8e93; text-align:center; padding-top:30px;">No matching log lines found</div>';
+  container.innerHTML = html || '<div style="color:var(--rc-label-2); text-align:center; padding-top:30px;">No matching log lines found</div>';
 
   const chk = document.getElementById('log-autoscroll-chk');
   if (chk && chk.checked) {
@@ -7750,7 +7929,7 @@ async function testMQTTConnection() {
   
   if (!host) {
     if (statusEl) {
-      statusEl.style.color = '#ff453a';
+      statusEl.style.color = 'var(--rc-red)';
       statusEl.textContent = '⚠ Missing Broker Host';
     }
     return;
@@ -7764,7 +7943,7 @@ async function testMQTTConnection() {
   saveConfig();
   
   if (statusEl) {
-    statusEl.style.color = '#8e8e93';
+    statusEl.style.color = 'var(--rc-label-2)';
     statusEl.textContent = 'Testing connection...';
   }
   if (btn) btn.disabled = true;
@@ -7778,20 +7957,20 @@ async function testMQTTConnection() {
     const data = await res.json();
     if (data.ok) {
       if (statusEl) {
-        statusEl.style.color = '#30d158';
+        statusEl.style.color = 'var(--rc-green)';
         statusEl.textContent = '✓ Connected!';
       }
       showToast('✓ MQTT connection successful');
     } else {
       if (statusEl) {
-        statusEl.style.color = '#ff453a';
+        statusEl.style.color = 'var(--rc-red)';
         statusEl.textContent = `⚠ ${data.error || 'Connection failed'}`;
       }
       showToast('⚠ MQTT connection failed');
     }
   } catch(e) {
     if (statusEl) {
-      statusEl.style.color = '#ff453a';
+      statusEl.style.color = 'var(--rc-red)';
       statusEl.textContent = '⚠ Connection error';
     }
   } finally {
@@ -7824,7 +8003,7 @@ async function testKMConnection() {
   
   if (!url) {
     if (statusEl) {
-      statusEl.style.color = '#ff453a';
+      statusEl.style.color = 'var(--rc-red)';
       statusEl.textContent = '⚠ Missing Web Server URL';
     }
     return;
@@ -7836,7 +8015,7 @@ async function testKMConnection() {
   saveConfig();
   
   if (statusEl) {
-    statusEl.style.color = '#8e8e93';
+    statusEl.style.color = 'var(--rc-label-2)';
     statusEl.textContent = 'Testing connection...';
   }
   if (btn) btn.disabled = true;
@@ -7850,20 +8029,20 @@ async function testKMConnection() {
     const data = await res.json();
     if (data.ok) {
       if (statusEl) {
-        statusEl.style.color = '#30d158';
+        statusEl.style.color = 'var(--rc-green)';
         statusEl.textContent = '✓ Connected!';
       }
       showToast('✓ Keyboard Maestro connection successful');
     } else {
       if (statusEl) {
-        statusEl.style.color = '#ff453a';
+        statusEl.style.color = 'var(--rc-red)';
         statusEl.textContent = `⚠ ${data.error || 'Connection failed'}`;
       }
       showToast('⚠ Keyboard Maestro connection failed');
     }
   } catch(e) {
     if (statusEl) {
-      statusEl.style.color = '#ff453a';
+      statusEl.style.color = 'var(--rc-red)';
       statusEl.textContent = '⚠ Server request error';
     }
   } finally {
@@ -7928,9 +8107,9 @@ async function fetchKMMacros(isRefresh = false) {
     if (loadingEl) {
       loadingEl.style.display = 'block';
       loadingEl.innerHTML = `
-        <div style="color:#ff9f0a;margin-bottom:8px;">⚠ Keyboard Maestro Web Server is not configured.</div>
-        <div style="font-size:12px;color:#8e8e93;margin-bottom:12px;">Enable and configure your Mac's Web Server in Settings.</div>
-        <button onclick="closeKMDialog();openSettings();" style="background:#007aff;color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:13px;font-weight:600;cursor:pointer;">Open Settings</button>
+        <div style="color:var(--rc-orange);margin-bottom:8px;">⚠ Keyboard Maestro Web Server is not configured.</div>
+        <div style="font-size:12px;color:var(--rc-label-2);margin-bottom:12px;">Enable and configure your Mac's Web Server in Settings.</div>
+        <button onclick="closeKMDialog();openSettings();" style="background:var(--rc-blue);color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:13px;font-weight:600;cursor:pointer;">Open Settings</button>
       `;
     }
     if (listEl) listEl.querySelectorAll('.km-group-container, .km-empty-msg').forEach(el => el.remove());
@@ -7953,11 +8132,11 @@ async function fetchKMMacros(isRefresh = false) {
         if (loadingEl) {
           loadingEl.style.display = 'block';
           loadingEl.innerHTML = `
-            <div style="color:#ff453a;margin-bottom:8px;">⚠ ${escHtml(data.error || 'Could not fetch macros')}</div>
-            <div style="font-size:12px;color:#8e8e93;margin-bottom:12px;">Check KM Web Server status and credentials.</div>
+            <div style="color:var(--rc-red);margin-bottom:8px;">⚠ ${escHtml(data.error || 'Could not fetch macros')}</div>
+            <div style="font-size:12px;color:var(--rc-label-2);margin-bottom:12px;">Check KM Web Server status and credentials.</div>
             <div style="display:flex;gap:8px;justify-content:center;">
-              <button onclick="fetchKMMacros(true)" style="background:rgba(255,255,255,0.12);color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:13px;font-weight:600;cursor:pointer;">Retry</button>
-              <button onclick="closeKMDialog();openSettings();" style="background:#007aff;color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:13px;font-weight:600;cursor:pointer;">Settings</button>
+              <button onclick="fetchKMMacros(true)" style="background:var(--rc-fill-raised);color:var(--rc-label);border:none;border-radius:8px;padding:6px 14px;font-size:13px;font-weight:600;cursor:pointer;">Retry</button>
+              <button onclick="closeKMDialog();openSettings();" style="background:var(--rc-blue);color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:13px;font-weight:600;cursor:pointer;">Settings</button>
             </div>
           `;
         }
@@ -7970,9 +8149,9 @@ async function fetchKMMacros(isRefresh = false) {
       if (loadingEl) {
         loadingEl.style.display = 'block';
         loadingEl.innerHTML = `
-          <div style="color:#ff453a;margin-bottom:8px;">⚠ Connection error</div>
-          <div style="font-size:12px;color:#8e8e93;margin-bottom:12px;">Unable to reach device server.</div>
-          <button onclick="fetchKMMacros(true)" style="background:rgba(255,255,255,0.12);color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:13px;font-weight:600;cursor:pointer;">Retry</button>
+          <div style="color:var(--rc-red);margin-bottom:8px;">⚠ Connection error</div>
+          <div style="font-size:12px;color:var(--rc-label-2);margin-bottom:12px;">Unable to reach device server.</div>
+          <button onclick="fetchKMMacros(true)" style="background:var(--rc-fill-raised);color:var(--rc-label);border:none;border-radius:8px;padding:6px 14px;font-size:13px;font-weight:600;cursor:pointer;">Retry</button>
         `;
       }
     } else if (isRefresh) {
@@ -8013,7 +8192,7 @@ function renderKMMacroList(groups) {
     header.className = 'km-group-header';
     header.innerHTML = `
       <div class="km-group-title">
-        <i class="f7-icons" style="font-size:14px;color:#007aff;">folder_fill</i>
+        <i class="f7-icons" style="font-size:14px;color:var(--rc-blue);">folder_fill</i>
         <span>${escHtml(group.name)}</span>
         <span class="km-group-badge">${group.macros.length}</span>
       </div>
@@ -8041,12 +8220,12 @@ function renderKMMacroList(groups) {
       row.dataset.group = (group.name || '').toLowerCase();
       row.innerHTML = `
         <div class="app-picker-row-inner" style="display:flex; align-items:center; gap:10px;">
-          <i class="f7-icons" style="font-size:17px; color:#ff9f0a; flex-shrink:0;">command</i>
+          <i class="f7-icons" style="font-size:17px; color:var(--rc-orange); flex-shrink:0;">command</i>
           <div style="min-width:0; flex:1;">
             <div class="app-picker-name">${escHtml(macro.name)}</div>
           </div>
         </div>
-        <i class="f7-icons" style="font-size:15px; color:#3a3a3c; flex-shrink:0;">ellipsis_circle</i>
+        <i class="f7-icons" style="font-size:15px; color: var(--rc-glyph); flex-shrink:0;">ellipsis_circle</i>
       `;
       row.onclick = () => selectKMMacro(macro);
       body.appendChild(row);
@@ -8097,7 +8276,7 @@ function filterKMList() {
       emptyMsg = document.createElement('div');
       emptyMsg.id = 'km-no-results-msg';
       emptyMsg.className = 'km-empty-msg';
-      emptyMsg.style.cssText = 'text-align:center;color:#8e8e93;padding:24px 16px;font-size:14px;';
+      emptyMsg.style.cssText = 'text-align:center;color:var(--rc-label-2);padding:24px 16px;font-size:14px;';
       emptyMsg.textContent = 'No matching macros found.';
       document.getElementById('km-picker-list').appendChild(emptyMsg);
     }
@@ -8171,7 +8350,7 @@ async function testHAConnection() {
   
   if (!url || !token) {
     if (statusEl) {
-      statusEl.style.color = '#ff453a';
+      statusEl.style.color = 'var(--rc-red)';
       statusEl.textContent = '⚠ Missing URL or Token';
     }
     return;
@@ -8182,7 +8361,7 @@ async function testHAConnection() {
   saveConfig();
   
   if (statusEl) {
-    statusEl.style.color = '#8e8e93';
+    statusEl.style.color = 'var(--rc-label-2)';
     statusEl.textContent = 'Testing connection...';
   }
   if (btn) btn.disabled = true;
@@ -8196,20 +8375,20 @@ async function testHAConnection() {
     const data = await res.json();
     if (data.ok) {
       if (statusEl) {
-        statusEl.style.color = '#30d158';
+        statusEl.style.color = 'var(--rc-green)';
         statusEl.textContent = `✓ Connected! ${data.version ? '(v' + data.version + ')' : ''}`;
       }
       showToast('✓ Home Assistant connection successful');
     } else {
       if (statusEl) {
-        statusEl.style.color = '#ff453a';
+        statusEl.style.color = 'var(--rc-red)';
         statusEl.textContent = `⚠ ${data.error || 'Connection failed'}`;
       }
       showToast('⚠ Home Assistant connection failed');
     }
   } catch(e) {
     if (statusEl) {
-      statusEl.style.color = '#ff453a';
+      statusEl.style.color = 'var(--rc-red)';
       statusEl.textContent = '⚠ Server request error';
     }
   } finally {
@@ -8300,13 +8479,13 @@ function renderHAPickerItems(entities) {
     row.dataset.eid = entityId.toLowerCase();
     row.innerHTML = `
       <div class="app-picker-row-inner" style="display:flex; align-items:center; gap: 10px;">
-        <i class="f7-icons" style="font-size:18px; color:#007aff;">${icon}</i>
+        <i class="f7-icons" style="font-size:18px; color:var(--rc-blue);">${icon}</i>
         <div>
           <div class="app-picker-name" style="font-weight:600;">${escHtml(friendlyName)}</div>
-          <div class="app-picker-bid" style="font-size:12px; color:#8e8e93;">${escHtml(entityId)} &bull; <span style="color:#30d158;">${escHtml(stateVal)}</span></div>
+          <div class="app-picker-bid" style="font-size:12px; color:var(--rc-label-2);">${escHtml(entityId)} &bull; <span style="color:var(--rc-green);">${escHtml(stateVal)}</span></div>
         </div>
       </div>
-      <i class="f7-icons" style="font-size:16px;color:#3a3a3c">chevron_right</i>
+      <i class="f7-icons" style="font-size:16px;color: var(--rc-glyph)">chevron_right</i>
     `;
     row.onclick = () => selectHAEntity(item);
     listEl.appendChild(row);
@@ -8470,13 +8649,13 @@ function renderBannersList() {
       const row = document.createElement('div');
       row.className = 'settings-row';
       row.style.cursor = 'pointer';
-      if (i > 0) row.style.borderTop = '1px solid rgba(255,255,255,0.08)';
+      if (i > 0) row.style.borderTop = '1px solid var(--rc-fill)';
       row.innerHTML = `
         <span class="settings-label" style="display:flex;align-items:center;gap:12px">
-          <i class="f7-icons" style="font-size:18px;color:#8e8e93;width:22px;text-align:center">${a.icon || 'circle'}</i>
+          <i class="f7-icons" style="font-size:18px;color:var(--rc-label-2);width:22px;text-align:center">${a.icon || 'circle'}</i>
           <span>${escHtml(a.name)}</span>
         </span>
-        <div class="settings-btn">${bannerIsSelected(a.cmd) ? '<i class="f7-icons" style="color:#007aff;font-size:18px">checkmark_alt</i>' : ''}</div>`;
+        <div class="settings-btn">${bannerIsSelected(a.cmd) ? '<i class="f7-icons" style="color:var(--rc-blue);font-size:18px">checkmark_alt</i>' : ''}</div>`;
       row.addEventListener('click', () => toggleBannerSelection(a.cmd));
       card.appendChild(row);
     });
@@ -8609,7 +8788,7 @@ function renderAppPickerItems(apps) {
         <div class="app-picker-name">${escHtml(app.name)}</div>
         <div class="app-picker-bid">${escHtml(app.bundleId)}</div>
       </div>
-      <i class="f7-icons app-picker-mark" style="font-size:16px;color:#3a3a3c">chevron_right</i>
+      <i class="f7-icons app-picker-mark" style="font-size:16px;color: var(--rc-glyph)">chevron_right</i>
     `;
     row.dataset.bundle = app.bundleId;
     row.onclick = () => selectAppFromPicker(app);
@@ -8626,10 +8805,10 @@ function markChosenApps() {
     if (appPickerMulti) {
       const on = appPickerChosen.includes(r.dataset.bundle);
       mark.textContent = on ? 'checkmark_alt' : '';
-      mark.style.color = on ? '#0a84ff' : '#3a3a3c';
+      mark.style.color = on ? 'var(--rc-blue)' : 'var(--rc-glyph)';
     } else {
       mark.textContent = 'chevron_right';
-      mark.style.color = '#3a3a3c';
+      mark.style.color = 'var(--rc-glyph)';
     }
   });
   document.getElementById('app-picker-done').disabled = appPickerMulti && appPickerChosen.length === 0;
@@ -8811,10 +8990,10 @@ function setComplexSegment(mode) {
   const connEl = document.getElementById('complex-seg-connect');
   const discEl = document.getElementById('complex-seg-disconnect');
   if (mode === 'connect') {
-    connEl.style.background = '#007aff';
+    connEl.style.background = 'var(--rc-blue)';
     discEl.style.background = 'transparent';
   } else {
-    discEl.style.background = '#007aff';
+    discEl.style.background = 'var(--rc-blue)';
     connEl.style.background = 'transparent';
   }
 }

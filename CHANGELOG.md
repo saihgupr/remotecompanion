@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Web UI light mode**: the Web UI now follows the system appearance. Every surface, card, dialog, log viewer and control has a light palette driven by `prefers-color-scheme`, and the dark theme is unchanged.
 - **Only Unlock Out of Pocket**: Settings > Advanced Settings > Options (and the Web UI's Advanced panel) has an off-by-default toggle that makes Unlock Device, `rc unlock` and lock toggle skip unlocking while the proximity sensor is covered, such as in a pocket. The check turns the sensor on briefly and blocks if it cannot confirm the phone is clear.
 - **Variables**: the Set Variable action saves a value, changes it with math or an RC command, or keeps it for one run only. `{name}` in action text becomes its value, a Variable condition compares it, and Settings > Advanced Settings > Variables lists saved values. The number, time, command and Toast editors have a + menu to insert one.
 - **Two-finger edge slide gestures**: edge swipe triggers now recognize a second finger, with distance-based firing, a widened landing zone, Control Center suppression mid-gesture, and a Lock Scrolling During Gestures toggle (off by default) that keeps lists still while gesturing.
