@@ -3,6 +3,7 @@
 #import "RCActionsViewController.h"
 #import "RCNewTriggerViewController.h"
 #import "RCSettingsViewController.h"
+#import "RCFocusTriggerViewController.h"
 #import "RCNFCTriggerViewController.h"
 #import <notify.h>
 #import "RCWiFiTriggerViewController.h"
@@ -69,6 +70,8 @@
     if ([triggerKey containsString:@"touchid"]) return @"touchid";
     if ([triggerKey hasPrefix:@"nfc_"]) return @"wave.3.right.circle.fill";
     if ([triggerKey hasPrefix:@"wifi_"]) return @"wifi";
+    if ([triggerKey hasPrefix:@"trigger_device_focus_on"]) return @"moon.fill";
+    if ([triggerKey hasPrefix:@"trigger_device_focus_off"]) return @"moon";
     if ([triggerKey hasPrefix:@"bt_"]) return @"bolt.horizontal.fill";
     if ([triggerKey hasPrefix:@"output_"]) return @"airplayaudio";
     if ([triggerKey hasPrefix:@"trigger_device_battery_above_"]) return @"battery.100";
@@ -371,6 +374,20 @@
     addSection(watchKeys, @"Apple Watch", YES);
     // Device State Section (Only show if configured, hide if empty)
     NSMutableArray *deviceStateKeys = [NSMutableArray array];
+    // Focus triggers, by name, On before Off
+    NSMutableArray *focusKeys = [NSMutableArray array];
+    for (NSString *key in [[RCConfigManager sharedManager] allConfiguredTriggerKeys]) {
+        if ([key hasPrefix:@"trigger_device_focus_"]) [focusKeys addObject:key];
+    }
+    [focusKeys sortUsingComparator:^NSComparisonResult(NSString *a, NSString *b) {
+        NSString *(^focus)(NSString *) = ^NSString *(NSString *key) {
+            NSRange r = [key rangeOfString:@"_" options:0 range:NSMakeRange(21, key.length - 21)];
+            return r.location == NSNotFound ? @"" : [key substringFromIndex:r.location + 1];
+        };
+        NSComparisonResult byName = [focus(a) localizedCaseInsensitiveCompare:focus(b)];
+        return byName != NSOrderedSame ? byName : [b compare:a]; // "on" before "off"
+    }];
+    [deviceStateKeys addObjectsFromArray:focusKeys];
     NSArray *configuredKeys = [[RCConfigManager sharedManager] allConfiguredTriggerKeys];
     // Battery Level triggers, lowest level first
     NSMutableArray *batteryKeys = [NSMutableArray array];
@@ -603,6 +620,7 @@
     [items addObjectsFromArray:systemEvents];
     [items addObject:@{ @"title": @"Battery Level", @"icon": [UIImage systemImageNamed:@"battery.50"] ? @"battery.50" : @"battery.25", @"section": @"Device", @"handler": ^{ push([[RCBatteryTriggerViewController alloc] init]); } }];
     [items addObject:@{ @"title": @"MQTT Topic", @"icon": @"antenna.radiowaves.left.and.right", @"section": @"Integrations", @"handler": ^{ push([[RCMQTTTriggerViewController alloc] init]); } }];
+    [items addObject:@{ @"title": @"Focus", @"icon": @"moon.fill", @"section": @"Device", @"handler": ^{ push([[RCFocusTriggerViewController alloc] init]); } }];
     [self.navigationController pushViewController:[[RCNewTriggerViewController alloc] initWithItems:items] animated:YES];
 }
 

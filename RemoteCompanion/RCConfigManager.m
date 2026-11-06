@@ -830,6 +830,10 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         @"trigger_bottom_swipe_up_right": @"Bottom Swipe Up (Right)"
     };
     
+    if ([triggerKey hasPrefix:@"trigger_device_focus_"]) {
+        return _config[@"triggers"][triggerKey][@"name"] ?: triggerKey;
+    }
+
     if ([triggerKey hasPrefix:@"nfc_"]) {
         // Return custom name or default
         NSString *customName = _config[@"triggers"][triggerKey][@"name"];

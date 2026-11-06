@@ -2162,6 +2162,10 @@ static NSString *get_human_name_for_trigger(NSString *key, NSDictionary *trigger
     if (builtIn) return builtIn;
     
     // 3. Prefix-based fallback
+    if ([key hasPrefix:@"trigger_device_focus_on_"]) return [NSString stringWithFormat:@"Focus On: %@", [key substringFromIndex:24]];
+    if ([key hasPrefix:@"trigger_device_focus_off_"]) return [NSString stringWithFormat:@"Focus Off: %@", [key substringFromIndex:25]];
+    if ([key isEqualToString:@"trigger_device_focus_on"]) return @"Focus On: Any";
+    if ([key isEqualToString:@"trigger_device_focus_off"]) return @"Focus Off: Any";
     if ([key hasPrefix:@"nfc_"]) return [NSString stringWithFormat:@"NFC Tag %@", [key substringFromIndex:4]];
     if ([key hasPrefix:@"wifi_connect_"]) return [NSString stringWithFormat:@"WiFi Connected: %@", [key substringFromIndex:13]];
     if ([key hasPrefix:@"wifi_disconnect_"]) return [NSString stringWithFormat:@"WiFi Disconnected: %@", [key substringFromIndex:16]];
@@ -5167,6 +5171,83 @@ static BOOL rc_device_locked(SBLockScreenManager *lsm) {
     return !known;
 }
 
+// Focus triggers. trigger_device_focus_on_<name> / trigger_device_focus_off_<name> fire when
+// that Focus turns on or off; trigger_device_focus_on fires when any Focus turns on and
+// trigger_device_focus_off when the last one turns off. Switching straight from one Focus to
+// another fires the first one's Off and the second one's On. Before iOS 15, Do Not Disturb is
+// the only one.
+static NSString *g_rcFocusActive = nil;
+static BOOL g_rcFocusReady = NO;
+static NSUInteger g_rcFocusCheck = 0;
+static id g_rcFocusStateService = nil;
+static id g_rcFocusListener = nil;
+
+static NSString *rc_focus_current_name(BOOL *known) {
+    if (rc_focus_supported()) return rc_focus_active_name(known);
+    if (known) *known = objc_getClass("DNDModeAssertionService") != nil;
+    return get_dnd_state() ? @"Do Not Disturb" : nil;
+}
+
+static void rc_focus_fire(BOOL on, NSString *name, BOOL any) {
+    NSDictionary *triggers = g_triggerConfig[@"triggers"];
+    if (![triggers isKindOfClass:[NSDictionary class]]) return;
+    NSString *anyKey = on ? @"trigger_device_focus_on" : @"trigger_device_focus_off";
+    NSString *prefix = [anyKey stringByAppendingString:@"_"];
+    NSString *wanted = rc_normalized_name(name);
+    for (NSString *key in triggers) {
+        BOOL match = (any && [key isEqualToString:anyKey]) ||
+                     ([key hasPrefix:prefix] && [rc_normalized_name([key substringFromIndex:prefix.length]) isEqualToString:wanted]);
+        if (!match) continue;
+        SRLogMin(@"🌙 [RCSystem] Focus %@ %@: %@.", name, on ? @"on" : @"off", key);
+        RCExecuteTrigger(key);
+    }
+}
+
+// Reads the Focus a moment after a change (updates come in bursts) and fires what changed
+static void rc_focus_maybe_changed(void) {
+    if (!g_rcFocusReady) return;
+    NSUInteger check = ++g_rcFocusCheck;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (check != g_rcFocusCheck) return;
+        BOOL known = NO;
+        NSString *now = rc_focus_current_name(&known);
+        if (!known) return;
+        NSString *before = g_rcFocusActive;
+        if ((!now && !before) || (now && before && [rc_normalized_name(now) isEqualToString:rc_normalized_name(before)])) return;
+        g_rcFocusActive = now;
+        if (before) rc_focus_fire(NO, before, now == nil);
+        if (now) rc_focus_fire(YES, now, YES);
+    });
+}
+
+@interface RCFocusListener : NSObject
+@end
+
+@implementation RCFocusListener
+- (void)stateService:(id)service didReceiveDoNotDisturbStateUpdate:(id)update {
+    dispatch_async(dispatch_get_main_queue(), ^{ rc_focus_maybe_changed(); });
+}
+@end
+
+static void rc_focus_start_observing(void) {
+    Class serviceClass = objc_getClass("DNDStateService");
+    SEL add = NSSelectorFromString(@"addStateUpdateListener:withCompletionHandler:");
+    if (!serviceClass || ![serviceClass instancesRespondToSelector:add]) {
+        SRLog(@"🌙 [RCSystem] DNDStateService listener not available - no Focus triggers");
+        return;
+    }
+    Protocol *protocol = objc_getProtocol("DNDStateUpdateListener");
+    if (protocol) class_addProtocol([RCFocusListener class], protocol);
+    g_rcFocusStateService = [serviceClass serviceForClientIdentifier:kRCFocusClient];
+    g_rcFocusListener = [RCFocusListener new];
+    ((void (*)(id, SEL, id, id))objc_msgSend)(g_rcFocusStateService, add, g_rcFocusListener, ^(id a, id b) {});
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        g_rcFocusActive = rc_focus_current_name(NULL);
+        g_rcFocusReady = YES;
+        SRLog(@"🌙 [RCSystem] Focus state initialized to: %@", g_rcFocusActive ?: @"OFF");
+    });
+}
+
 static void initialize_lock_state() {
     if (g_lockStateInitialized) return;
 
@@ -5477,6 +5558,8 @@ static void register_system_event_observers() {
                                     CFSTR("com.apple.system.powersources.percent"), 
                                     NULL, 
                                     CFNotificationSuspensionBehaviorDeliverImmediately);
+
+    rc_focus_start_observing();
 
     // WiFi: Track network changes (Darwin Notification)
     CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), 
