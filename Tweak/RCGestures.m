@@ -54,7 +54,7 @@ typedef struct {
 
 static NSString *const kRCGesturesPath = @"/var/mobile/Documents/rc_gestures.plist";
 static const NSTimeInterval kRCGestureMaxSeconds = 600;
-static const int kRCGestureMaxFingers = 10;
+enum { kRCGestureMaxFingers = 10 }; // enum so it is a constant array size, not a VLA
 
 #pragma mark - Library
 
