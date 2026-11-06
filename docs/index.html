@@ -254,7 +254,7 @@
                         <li class="feature-list-item"><span class="feature-check">✓</span> Lock Screen Camera Launch Trigger bridging</li>
                         <li class="feature-list-item"><span class="feature-check">✓</span> Video recording automation with custom modes & zoom</li>
                         <li class="feature-list-item"><span class="feature-check">✓</span> Native SneakyCam background photo/video triggers</li>
-                        <li class="feature-list-item"><span class="feature-check">✓</span> Haptic feedback & HUD toast overlays</li>
+                        <li class="feature-list-item"><span class="feature-check">✓</span> Haptic feedback &amp; lock screen HUD toasts</li>
                     </ul>
                 </div>
 
@@ -278,7 +278,9 @@
                         <li class="feature-list-item"><span class="feature-check">✓</span> <strong>Location Services:</strong> Native GPS toggle & status queries</li>
                         <li class="feature-list-item"><span class="feature-check">✓</span> <strong>Safe Mode:</strong> One-tap diagnostic restart via CLI & UI</li>
                         <li class="feature-list-item"><span class="feature-check">✓</span> <strong>Lua Engine:</strong> Full Objective-C runtime bridge (`objc_call`)</li>
-                        <li class="feature-list-item"><span class="feature-check">✓</span> <strong>Variables:</strong> Set Variable, <code>{name}</code> substitution & Variable conditions</li>
+                        <li class="feature-list-item"><span class="feature-check">✓</span> <strong>Variables:</strong> Set Variable, <code>{name}</code> substitution &amp; Variable conditions</li>
+                        <li class="feature-list-item"><span class="feature-check">✓</span> <strong>Loops &amp; Waits:</strong> Repeat, Repeat While, Exit Repeat and Wait Until</li>
+                        <li class="feature-list-item"><span class="feature-check">✓</span> <strong>Running &amp; History:</strong> Live runs, Stop All, and per-trigger run history</li>
                         <li class="feature-list-item"><span class="feature-check">✓</span> <strong>Reusable:</strong> Copy and paste actions across triggers</li>
                     </ul>
                 </div>
@@ -290,7 +292,7 @@
             <div class="showcase-content">
                 <div class="section-label">Desktop Web Interface</div>
                 <h2 class="section-title">Visual Workflow Hub & Live Diagnostics</h2>
-                <p class="section-subtitle">Manage triggers, build drag-and-drop action sequences, monitor system health, and copy API endpoints right from your desktop browser at <code>http://[DEVICE_IP]:8080</code>. Follows system light mode, with an optional token gating privileged API commands.</p>
+                <p class="section-subtitle">Manage triggers, build drag-and-drop action sequences, watch or stop live runs, review run history, monitor system health, and copy API endpoints right from your desktop browser at <code>http://[DEVICE_IP]:8080</code>. Follows system light mode, with an optional token gating privileged API commands.</p>
             </div>
             <div class="showcase-image-wrapper">
                 <img src="images/webui.png" alt="RemoteCompanion Web UI Workflow Editor" class="showcase-img" loading="lazy">
@@ -375,7 +377,15 @@
                 </div>
                 <div class="changelog-item">
                     <span class="changelog-tag tag-new">New</span>
-                    <p class="changelog-text"><strong>Faster Building:</strong> Compact tile layout with trigger icons, and copy and paste for actions.</p>
+                    <p class="changelog-text"><strong>Loops and Waits:</strong> Repeat, Repeat While, Exit Repeat and Wait Until blocks, <code>{round}</code> inside a loop, and nesting with If blocks in either order.</p>
+                </div>
+                <div class="changelog-item">
+                    <span class="changelog-tag tag-new">New</span>
+                    <p class="changelog-text"><strong>Running &amp; History:</strong> See every trigger running now, stop one or all, follow a run step by step, and review past runs with the actions as they ran. Keep 0 to 50 runs per trigger, on iOS and in the Web UI.</p>
+                </div>
+                <div class="changelog-item">
+                    <span class="changelog-tag tag-new">New</span>
+                    <p class="changelog-text"><strong>Faster Building:</strong> Compact tile layout with trigger icons, copy and paste for actions, and a searchable Stop Trigger picker styled like the Triggers screen.</p>
                 </div>
                 <div class="changelog-item">
                     <span class="changelog-tag tag-new">New</span>
@@ -390,8 +400,12 @@
                     <p class="changelog-text"><strong>Excluded Apps:</strong> Settings → Advanced Settings → Options lists every trigger that has actions, grouped like the Triggers page, and sets the apps where each one stays quiet.</p>
                 </div>
                 <div class="changelog-item">
+                    <span class="changelog-tag tag-new">New</span>
+                    <p class="changelog-text"><strong>Toasts on the Lock Screen:</strong> Toasts show over the lock screen, wait for the next wake when the screen is off, and can wake the screen with the new Wake Screen switch.</p>
+                </div>
+                <div class="changelog-item">
                     <span class="changelog-tag tag-improved">UI Refresh</span>
-                    <p class="changelog-text"><strong>Web UI Light Mode:</strong> The Web UI follows system appearance with a full light palette.</p>
+                    <p class="changelog-text"><strong>Web UI Light Mode:</strong> The Web UI follows system appearance with a full light palette, and the Running sheet covers live runs and recent history.</p>
                 </div>
                 <div class="changelog-item">
                     <span class="changelog-tag tag-fix">Security</span>
@@ -407,7 +421,7 @@
                 </div>
                 <div class="changelog-item">
                     <span class="changelog-tag tag-fix">Security</span>
-                    <p class="changelog-text"><strong>Fixes:</strong> Hardened <code>ssh-run</code> quoting and <code>rc-root</code> caller check, plus Bottom Swipe Up zone, SSH banner matching, and Touch ID trigger fixes.</p>
+                    <p class="changelog-text"><strong>Fixes:</strong> Hardened <code>ssh-run</code> quoting and <code>rc-root</code> caller check, Test Kit unlock is phone-only and its passcode survives a respring, DoubleTapToLock and GetDown lock again, plus Bottom Swipe Up zone, SSH banner and Touch ID trigger fixes.</p>
                 </div>
             </div>
 

@@ -6,14 +6,18 @@ RemoteCompanion provides fast, scriptable system control for modern rootless jai
 > **What’s New in v4.4.0**
 > - **New Triggers**: Rotated to Landscape / Portrait, Find My Sound, Incoming Call / Call Started / Call Ended, Battery Level (1-100%), and Focus on / off for a chosen Focus or any Focus.
 > - **Gesture Recorder**: Settings > Gestures records taps, swipes and scrolls, names the recording, and plays it back at 0.5x to 3x with trim, re-record, replace, rename, export and import.
-> - **Faster Building**: Compact layout with tile grids, trigger icons, and copy and paste for actions.
+> - **Faster Building**: compact layout with tile grids, trigger icons, copy and paste for actions, and a searchable Stop Trigger picker styled like the Triggers screen.
+> - **Loops and Waits**: Repeat, Repeat While, Exit Repeat and Wait Until blocks, `{round}` inside a loop, and nesting with If blocks in either order.
+> - **Running & History**: see every trigger running now, stop one or all, follow a run step by step, and review past runs with the actions as they ran. Keep 0 to 50 runs per trigger, on iOS and in the Web UI.
 > - **Variables**: the Set Variable action saves a value, changes it with math or an RC command, or keeps it for one run. `{name}` in action text becomes its value, a Variable condition compares it, and Settings > Advanced Settings > Variables lists what is saved.
 > - **App Quick Action**: pick an app, then one of its registered shortcuts, read live from SpringBoard so the Home Screen menu never has to be opened first.
 > - **Excluded Apps**: Settings > Advanced Settings > Options lists every trigger that has actions, grouped like the Triggers page, and sets the apps where each one should stay quiet.
-> - **Web UI Light Mode**: the Web UI follows system appearance with a full light palette.
+> - **Toasts on the Lock Screen**: toasts show over the lock screen, wait for the next wake when the screen is off, and can wake the screen with the new Wake Screen switch.
+> - **Web UI Light Mode**: the Web UI follows system appearance with a full light palette, and the Running sheet covers live runs and recent history.
 > - **API Token Gating**: an optional token in Settings > Web UI > Access gates privileged `/api/command` calls (`root`, `sudo`, `exec`).
 > - **Two-Finger Slides**: slide up from the bottom bar or down from the status bar with two fingers, each firing its own trigger, with distance-based firing, a widened landing zone, and Control Center suppression mid-gesture.
 > - **Lock Scrolling During Gestures**: an off-by-default toggle that keeps lists still while gesturing.
+> - **Fixes**: DoubleTapToLock and GetDown lock again after the first try, the Test Kit passcode survives a respring and unlock is phone-only, and the Bottom Swipe Up, SSH banner and Touch ID trigger issues are fixed.
 
 <p align="center">
   <a href="https://saihgupr.github.io/remotecompanion/">Official Website</a> •
@@ -41,6 +45,10 @@ RemoteCompanion provides fast, scriptable system control for modern rootless jai
 - **Two-Finger Slides**: two-finger slide up from the bottom bar and slide down from the status bar are their own triggers, with distance-based firing, a widened landing zone, and an optional Lock Scrolling During Gestures toggle.
 - **Compact Layout and Trigger Icons**: Triggers, Select Action and Settings > Banners can each show a grid of tiles instead of a list (Advanced Settings > Layout, list stays default). Button and gesture triggers show a small phone or screen-area icon, app triggers show the app icon, and "Screen Gestures" now reads "Status Bar".
 - **Copy and Paste Actions**: select actions in a trigger's ••• menu to copy or delete together, then paste into any trigger. An If block brings its whole block, and the clipboard survives closing the app.
+- **Loops and Waits**: Repeat and Repeat While blocks, Exit Repeat and Wait Until, with `{round}` for the current round and nesting inside If blocks.
+- **Running and Run History**: see what is running now, stop one run or all, follow a run with the current action highlighted, and keep the last 0 to 50 runs per trigger with the actions as they ran.
+- **Stop Trigger Picker**: choose the trigger to stop from a searchable list with icons and sections, instead of one long action sheet.
+- **Toasts on the Lock Screen**: toasts show over the lock screen, queue until the next wake when the screen is off, and can wake the screen with the Wake Screen switch.
 - **Variables**: the Set Variable action saves a value, `{name}` in action text becomes its value, a Variable condition compares it, and Settings > Advanced Settings > Variables lists saved values.
 - **App Quick Action**: pick an app, then one of its registered shortcuts read live from SpringBoard, with same-type shortcuts told apart and stale entries reported instead of run.
 - **Excluded Apps**: Settings > Advanced Settings > Options lists every trigger that has actions and sets the apps where each trigger does not fire.
@@ -81,6 +89,7 @@ Access the desktop-class automation hub at `http://[DEVICE_IP]:8080` from any co
 - **Device Diagnostics & Health Dashboard**: Native iOS-styled inset grouped dashboard monitoring battery, storage, RAM, thermal state, uptime, and quick maintenance actions (Respring, UICache, Flush DNS, Clear Logs).
 - **Negligible Battery Impact**: The Web UI server is extremely efficient, consuming zero CPU cycles when idle. It uses a background thread with a blocking `accept()` loop that sits dormant until a connection is made.
 - **Configuration Management**: Import and export your entire trigger database for easy backups and migration between devices.
+- **Running and History**: A Running sheet lists live runs with Stop and Stop All, plus recent runs and the actions each one took.
 
 ---
 
