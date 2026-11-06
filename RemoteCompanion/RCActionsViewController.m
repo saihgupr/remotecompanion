@@ -210,6 +210,9 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
 @interface RCActionsViewController () <UIGestureRecognizerDelegate>
 @property (nonatomic, strong) NSString *triggerKey;
 @property (nonatomic, strong) NSMutableArray *actions;
+// The title shown above the actions (a long one), and the name field for a trigger just made
+@property (nonatomic, assign) BOOL titleInHeader;
+@property (nonatomic, assign) BOOL namePromptShown;
 @property (nonatomic, strong) UIBarButtonItem *moreButton;
 // The action picker while it's open for an action that leads to another screen; closed once
 // that action is added
@@ -973,6 +976,12 @@ static id g_actionClipboard = nil;
     }];
     clearAction.attributes = UIMenuElementAttributesDestructive;
     [menuActions addObject:clearAction];
+    // A name of the user's own, or back to the default (first in the menu)
+    if ([RCConfigManager canRenameTrigger:self.triggerKey]) {
+        [menuActions insertObject:[UIAction actionWithTitle:@"Rename" image:[UIImage systemImageNamed:@"pencil"] identifier:nil handler:^(__kindof UIAction *a) {
+            [weakSelf renameTrigger];
+        }] atIndex:0];
+    }
     return [UIMenu menuWithTitle:@"" children:menuActions];
 }
 
@@ -1337,19 +1346,6 @@ static void RCSetRunWatching(BOOL watching) {
         self.navigationItem.rightBarButtonItems = @[stop];
     }
 
-    // Add tap gesture to title if it's an NFC trigger
-    if ([_triggerKey hasPrefix:@"nfc_"]) {
-        UITapGestureRecognizer *titleTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(renameTrigger)];
-        
-        // Create a custom title view to accept interactions
-        UILabel *titleLabel = [[UILabel alloc] init];
-        titleLabel.text = self.title;
-        titleLabel.font = [UIFont boldSystemFontOfSize:17];
-        titleLabel.userInteractionEnabled = YES;
-        [titleLabel addGestureRecognizer:titleTap];
-        
-        self.navigationItem.titleView = titleLabel;
-    }
 
     
     // Enable Large Titles
@@ -1402,7 +1398,6 @@ static void RCSetRunWatching(BOOL watching) {
 // can't be switched back to a large title in place (it stayed at its small size), so a name that
 // becomes short just shows in the same header at the large-title size.
 - (void)updateWrappedTitle {
-    if ([_triggerKey hasPrefix:@"nfc_"]) return; // has its own tappable title
     NSString *name = self.title ?: @"";
     // Known before the screen is laid out for the first time, so the right title is there from the start
     CGFloat width = self.tableView.bounds.size.width;
@@ -1411,25 +1406,96 @@ static void RCSetRunWatching(BOOL watching) {
     CGFloat available = width - 40.0;
     UIFont *largeFont = [UIFont systemFontOfSize:34 weight:UIFontWeightBold];
     BOOL fits = ceil([name sizeWithAttributes:@{ NSFontAttributeName: largeFont }].width) <= available;
-    BOOL showingHeader = (self.tableView.tableHeaderView != nil);
-    if (fits && !showingHeader) return; // an ordinary large title
-
-    if (!showingHeader) {
+    BOOL wrapTitle = !fits || self.titleInHeader;
+    BOOL askName = [self asksForName];
+    self.namePromptShown = askName;
+    if (!wrapTitle && !askName) {
+        self.tableView.tableHeaderView = nil; // an ordinary large title
+        return;
+    }
+    if (wrapTitle && !self.titleInHeader) {
+        self.titleInHeader = YES;
         self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
         self.navigationItem.titleView = [[UIView alloc] init];
     }
-    UILabel *label = [[UILabel alloc] init];
-    label.numberOfLines = 0;
-    label.lineBreakMode = NSLineBreakByWordWrapping;
-    label.font = fits ? largeFont : [UIFont systemFontOfSize:28 weight:UIFontWeightBold];
-    label.textColor = [UIColor labelColor];
-    label.text = name;
-    CGSize size = [label sizeThatFits:CGSizeMake(available, CGFLOAT_MAX)];
-    UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, available + 40.0, ceil(size.height) + 24.0)];
-    label.frame = CGRectMake(20.0, 4.0, available, ceil(size.height));
-    label.autoresizingMask = UIViewAutoresizingFlexibleWidth;
-    [header addSubview:label];
+    UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, available + 40.0, 10)];
+    CGFloat y = 4.0;
+    if (wrapTitle) {
+        UILabel *label = [[UILabel alloc] init];
+        label.numberOfLines = 0;
+        label.lineBreakMode = NSLineBreakByWordWrapping;
+        label.font = fits ? largeFont : [UIFont systemFontOfSize:28 weight:UIFontWeightBold];
+        label.textColor = [UIColor labelColor];
+        label.text = name;
+        CGSize size = [label sizeThatFits:CGSizeMake(available, CGFLOAT_MAX)];
+        label.frame = CGRectMake(20.0, y, available, ceil(size.height));
+        label.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+        [header addSubview:label];
+        y += ceil(size.height) + 14.0;
+    }
+    if (askName) {
+        [header addSubview:[self namePromptViewAt:y width:available]];
+        y += 46.0 + 14.0;
+    }
+    header.frame = CGRectMake(0, 0, available + 40.0, y + 6.0);
     self.tableView.tableHeaderView = header;
+}
+
+// A trigger just made (one the user makes, without a name or actions yet) offers a name at the top
+- (BOOL)asksForName {
+    RCConfigManager *config = [RCConfigManager sharedManager];
+    if (![RCConfigManager canRenameTrigger:self.triggerKey] || [config customNameForTrigger:self.triggerKey]) return NO;
+    if (self.actions.count > 0) return NO;
+    return ![[config triggerDataForKey:self.triggerKey][@"namePromptDone"] boolValue];
+}
+
+// The name field: its default name as the placeholder, Done to keep it, × to go on without one
+- (UIView *)namePromptViewAt:(CGFloat)y width:(CGFloat)width {
+    RCConfigManager *config = [RCConfigManager sharedManager];
+    UIView *box = [[UIView alloc] initWithFrame:CGRectMake(20.0, y, width, 46.0)];
+    box.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    box.backgroundColor = [config tweakColorForKey:@"blockBackground" defaultVal:0.12];
+    box.layer.cornerRadius = 12.0;
+    box.layer.cornerCurve = kCACornerCurveContinuous;
+    UITextField *field = [[UITextField alloc] initWithFrame:CGRectMake(14.0, 0, width - 58.0, 46.0)];
+    field.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    field.placeholder = [NSString stringWithFormat:@"Name (optional): %@", [config defaultNameForTrigger:self.triggerKey]];
+    field.font = [UIFont systemFontOfSize:17];
+    field.textColor = [UIColor labelColor];
+    field.autocapitalizationType = UITextAutocapitalizationTypeWords;
+    field.returnKeyType = UIReturnKeyDone;
+    field.clearButtonMode = UITextFieldViewModeWhileEditing;
+    field.accessibilityLabel = @"Name";
+    [field addTarget:self action:@selector(nameFieldDone:) forControlEvents:UIControlEventEditingDidEndOnExit];
+    [box addSubview:field];
+    UIButton *close = [UIButton buttonWithType:UIButtonTypeSystem];
+    close.frame = CGRectMake(width - 44.0, 0, 44.0, 46.0);
+    close.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
+    [close setImage:[UIImage systemImageNamed:@"xmark.circle.fill"] forState:UIControlStateNormal];
+    close.tintColor = [UIColor tertiaryLabelColor];
+    close.accessibilityLabel = @"No Name";
+    [close addTarget:self action:@selector(dismissNamePrompt) forControlEvents:UIControlEventTouchUpInside];
+    [box addSubview:close];
+    return box;
+}
+
+- (void)nameFieldDone:(UITextField *)field {
+    RCConfigManager *config = [RCConfigManager sharedManager];
+    NSString *name = [field.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (name.length) [config setCustomName:name forTrigger:self.triggerKey];
+    [self dismissNamePrompt];
+}
+
+- (void)dismissNamePrompt {
+    RCConfigManager *config = [RCConfigManager sharedManager];
+    NSMutableDictionary *data = [[config triggerDataForKey:self.triggerKey] mutableCopy];
+    if (data) {
+        data[@"namePromptDone"] = @YES;
+        [config updateTrigger:self.triggerKey withData:data];
+    }
+    [self.view endEditing:YES];
+    self.title = [config displayNameForTrigger:self.triggerKey];
+    [UIView animateWithDuration:0.25 animations:^{ [self updateWrappedTitle]; }];
 }
 
 - (void)viewDidLayoutSubviews {
@@ -1550,33 +1616,37 @@ static void RCSetRunWatching(BOOL watching) {
     }
 }
 
+// Any trigger can have a name of its own; left empty, it goes back to its default
 - (void)renameTrigger {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Rename Tag" 
-                                                                   message:@"Enter a new name for this NFC tag:" 
+    RCConfigManager *config = [RCConfigManager sharedManager];
+    NSString *defaultName = [config defaultNameForTrigger:self.triggerKey];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Rename Trigger"
+                                                                   message:[NSString stringWithFormat:@"Leave empty for its default name, “%@”.", defaultName]
                                                             preferredStyle:UIAlertControllerStyleAlert];
-    
-    [alert addTextFieldWithConfigurationHandler:^(UITextField * _Nonnull textField) {
-        textField.placeholder = @"My Tag";
-        textField.text = self.title;
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
+        textField.placeholder = defaultName;
+        textField.text = [config customNameForTrigger:self.triggerKey];
         textField.autocapitalizationType = UITextAutocapitalizationTypeWords;
+        textField.clearButtonMode = UITextFieldViewModeWhileEditing;
+        textField.returnKeyType = UIReturnKeyDone;
     }];
-    
     [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    
-    [alert addAction:[UIAlertAction actionWithTitle:@"Save" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
-        NSString *newName = alert.textFields.firstObject.text;
-        if (newName.length > 0) {
-            [[RCConfigManager sharedManager] renameTrigger:self.triggerKey toName:newName];
-            self.title = newName;
-            
-            // Update custom title view text
-            if ([self.navigationItem.titleView isKindOfClass:[UILabel class]]) {
-                ((UILabel *)self.navigationItem.titleView).text = newName;
-                [self.navigationItem.titleView sizeToFit];
-            }
+    __weak typeof(self) weakSelf = self;
+    UIAlertAction *save = [UIAlertAction actionWithTitle:@"Save" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        [config setCustomName:alert.textFields.firstObject.text forTrigger:strongSelf.triggerKey];
+        NSString *name = [config displayNameForTrigger:strongSelf.triggerKey];
+        strongSelf.title = name;
+        // The NFC tag's tappable title, or the wrapped title above the actions
+        if ([strongSelf.navigationItem.titleView isKindOfClass:[UILabel class]]) {
+            ((UILabel *)strongSelf.navigationItem.titleView).text = name;
+            [strongSelf.navigationItem.titleView sizeToFit];
         }
-    }]];
-    
+        [strongSelf updateWrappedTitle];
+    }];
+    [alert addAction:save];
+    alert.preferredAction = save;
     [self presentViewController:alert animated:YES completion:nil];
 }
 
@@ -2005,6 +2075,7 @@ static void RCSetRunWatching(BOOL watching) {
 - (void)saveActions {
     [self finishAdding]; // closes the picker once this save is done
     [[RCConfigManager sharedManager] setActions:_actions forTrigger:_triggerKey];
+    if (self.namePromptShown && _actions.count > 0) [self updateWrappedTitle];
 }
 
 - (NSString *)actionTypeForItem:(id)item {

@@ -4,6 +4,7 @@
 #import "RCBannersViewController.h"
 #import "RCExcludedAppsViewController.h"
 #import "RCConfigManager+AppExclusions.h"
+#import "RCActionTile.h"
 
 @interface RCAdvancedSettingsViewController ()
 @property (nonatomic, strong) UITableView *tableView;
@@ -16,8 +17,10 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
     RCAdvancedSettingsSectionBanners,
     RCAdvancedSettingsSectionNFC,
     RCAdvancedSettingsSectionOptions,
+    RCAdvancedSettingsSectionLayout,
     RCAdvancedSettingsSectionButtons,
     RCAdvancedSettingsSectionSecurity,
+    RCAdvancedSettingsSectionCount,
 };
 
 @implementation RCAdvancedSettingsViewController
@@ -100,7 +103,7 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
 #pragma mark - Table View Data Source
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    return 5;
+    return RCAdvancedSettingsSectionCount;
 }
 
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
@@ -108,6 +111,7 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
     if (section == RCAdvancedSettingsSectionBanners) title = @"Banners";
     else if (section == RCAdvancedSettingsSectionNFC) title = @"NFC";
     else if (section == RCAdvancedSettingsSectionOptions) title = @"Options";
+    else if (section == RCAdvancedSettingsSectionLayout) title = @"Layout";
     else if (section == RCAdvancedSettingsSectionButtons) title = @"Buttons";
     else title = @"Security";
     
@@ -135,6 +139,8 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
         return @"NFC scanning options.";
     } else if (section == RCAdvancedSettingsSectionOptions) {
         return nil;
+    } else if (section == RCAdvancedSettingsSectionLayout) {
+        return @"Compact shows a grid of tiles instead of a list. Triggers per Row applies to Triggers in Compact.";
     } else if (section == RCAdvancedSettingsSectionButtons) {
         return @"How long a press waits for the next one before it counts. A shorter time responds sooner and needs quicker presses.";
     } else if (section == RCAdvancedSettingsSectionSecurity) {
@@ -147,12 +153,17 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
     if (section == RCAdvancedSettingsSectionBanners) return 2; // Banners, Wake Screen
     if (section == RCAdvancedSettingsSectionNFC) return 3;
     if (section == RCAdvancedSettingsSectionButtons) return (NSInteger)[self timingRows].count;
+    if (section == RCAdvancedSettingsSectionLayout) return (NSInteger)RCLayoutScreens().count;
     if (section == RCAdvancedSettingsSectionSecurity) return 1;
     return 5; // Excluded Apps, Wrap Long Names, Logging, Freeze Lists During Gestures, Only Unlock Out of Pocket
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     RCConfigManager *cm = [RCConfigManager sharedManager];
+    if (indexPath.section == RCAdvancedSettingsSectionLayout) {
+        NSArray *screen = RCLayoutScreens()[indexPath.row];
+        return RCLayoutSettingCell(screen[0], screen[1]);
+    }
     
     BOOL isValueRow = (indexPath.section == RCAdvancedSettingsSectionBanners) ||
                       (indexPath.section == RCAdvancedSettingsSectionNFC && indexPath.row == 2) ||

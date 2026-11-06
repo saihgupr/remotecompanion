@@ -77,6 +77,12 @@
 - (NSArray<NSString *> *)allTriggerKeys;
 - (NSArray<NSString *> *)allConfiguredTriggerKeys;
 - (NSString *)displayNameForTrigger:(NSString *)triggerKey;
+// Whether a trigger can have a name of its own: the ones the user makes, not the built-in ones
++ (BOOL)canRenameTrigger:(NSString *)triggerKey;
+// A name the user gave a trigger, or nil; setting nil or "" goes back to its default
+- (NSString *)customNameForTrigger:(NSString *)triggerKey;
+- (void)setCustomName:(NSString *)name forTrigger:(NSString *)triggerKey;
+- (NSString *)defaultNameForTrigger:(NSString *)triggerKey;
 - (BOOL)isTriggerEnabled:(NSString *)triggerKey;
 - (void)setTriggerEnabled:(BOOL)enabled forTrigger:(NSString *)triggerKey;
 - (BOOL)isTriggerFavorite:(NSString *)triggerKey;

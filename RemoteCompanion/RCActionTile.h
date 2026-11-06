@@ -1,0 +1,91 @@
+#import <UIKit/UIKit.h>
+
+// The action picker's and Banners' grid: square tiles (an icon over a name) under section titles.
+
+@interface RCActionTileCell : UICollectionViewCell
+@property (nonatomic, strong, readonly) UIImageView *iconView;
+@property (nonatomic, strong, readonly) UILabel *nameLabel;
+// A small chevron in the corner: tapping opens another screen or asks for more
+@property (nonatomic, assign) BOOL opensMore;
+// Banners: a tinted tile with a checkmark
+@property (nonatomic, assign) BOOL checked;
+- (void)setName:(NSString *)name icon:(NSString *)icon;
+// image: a picture of its own (an add-on's), shown instead of the symbol
+- (void)setName:(NSString *)name icon:(NSString *)icon image:(UIImage *)image;
+// Triggers in Compact: a trigger with no actions yet gets a quieter tile
+@property (nonatomic, assign) BOOL dimmed;
+// Triggers in Compact: how many actions it runs, in a small badge at the top right (0: none)
+@property (nonatomic, assign) NSInteger count;
+// Triggers in Compact, Edit mode: a star (filled for a favorite) at the top left and, for a
+// trigger that can be deleted, a minus at the top right
+- (void)showEditBadgesFavorite:(BOOL)favorite deletable:(BOOL)deletable onFavorite:(void (^)(void))onFavorite onDelete:(void (^)(void))onDelete;
+- (void)hideEditBadges;
+@end
+
+// A section's title over its tiles, or (as a footer) a note under them
+@interface RCActionGridHeader : UICollectionReusableView
+@property (nonatomic, strong, readonly) UILabel *label;
+- (void)setTitle:(NSString *)title;
+// The same, with an icon before the title (nil: none)
+- (void)setTitle:(NSString *)title icon:(UIImage *)icon;
+- (void)setNote:(NSString *)note;
+@end
+
+// The layout both grids use
+UICollectionViewFlowLayout *RCActionGridLayout(void);
+// One tile's size for a grid this wide: as many columns as fit, at least three
+CGSize RCActionTileSize(CGFloat gridWidth);
+// A footer note's height for this text and grid width
+CGFloat RCActionGridNoteHeight(NSString *note, CGFloat gridWidth);
+
+#pragma mark - List rows
+
+// The List layout of the same screens: a row per action (an icon, its name, a chevron or a
+// checkmark), grouped into rounded cards like an inset-grouped table
+@interface RCActionRowCell : UICollectionViewCell
+@property (nonatomic, assign) BOOL opensMore;
+@property (nonatomic, assign) BOOL checked;
+- (void)setName:(NSString *)name icon:(NSString *)icon image:(UIImage *)image;
+// Its place in its section: the first and last rows round their corners, the others get a separator
+- (void)setFirst:(BOOL)first last:(BOOL)last;
+@end
+
+// The width a grid lays out in: its own, less the safe area at the sides (the Dynamic Island and
+// rounded corners in landscape)
+CGFloat RCGridWidth(UIScrollView *view);
+
+// A row's size in a list this wide
+CGSize RCActionRowSize(CGFloat listWidth, CGFloat height);
+
+#pragma mark - Layout setting (List or Compact, per screen)
+
+extern NSString *const RCLayoutTriggers;
+extern NSString *const RCLayoutActionPicker;
+extern NSString *const RCLayoutBanners;
+// Triggers in Compact: how many per row, 2, 3 or 4 (its setting row is keyed by this)
+extern NSString *const RCLayoutTriggerColumns;
+NSInteger RCLayoutTriggerColumnCount(void);
+// Triggers in Compact: one continuous grid without section titles ("Compact" here means hidden)
+extern NSString *const RCLayoutTriggerSections;
+// Category bars: 1, 2 or 3 lines of chips (its setting row and change notice are keyed by this)
+extern NSString *const RCLayoutCategoryBarLines;
+NSInteger RCLayoutCategoryBarLineCount(void);
+void RCLayoutSetCategoryBarLineCount(NSInteger count);
+void RCLayoutSetTriggerColumnCount(NSInteger count);
+// Posted when a screen's layout changes (object: the screen's key)
+extern NSString *const RCLayoutChangedNotification;
+
+BOOL RCLayoutIsCompact(NSString *screen);
+void RCLayoutSetCompact(NSString *screen, BOOL compact);
+// The screens, in order: @[title, key]
+NSArray<NSArray<NSString *> *> *RCLayoutScreens(void);
+// A settings row for one screen: its title and a List / Compact control (2 / 3 / 4 for Triggers per Row)
+UITableViewCell *RCLayoutSettingCell(NSString *title, NSString *screen);
+
+#pragma mark - App icons
+
+// An app's icon, rounded, this many points square; nil when the app isn't installed
+UIImage *RCAppIconImage(NSString *bundleId, CGFloat side);
+// The same, for an App Launch or App Exit trigger: a green checkmark (launch) or a red x (exit) in a
+// white circle at its top right
+UIImage *RCAppTriggerIconImage(NSString *bundleId, CGFloat side, BOOL exit);
