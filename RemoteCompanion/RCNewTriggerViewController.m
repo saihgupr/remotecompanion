@@ -2,9 +2,14 @@
 #import "RCConfigManager.h"
 #import "RCActionsViewController.h"
 
-@interface RCNewTriggerViewController ()
+@interface RCNewTriggerViewController () <UISearchResultsUpdating>
+// Everything the picker was given, and the part currently shown (the search filters it)
+@property (nonatomic, strong) NSArray<NSString *> *allSectionTitles;
+@property (nonatomic, strong) NSArray<NSArray<NSDictionary *> *> *allSections;
 @property (nonatomic, strong) NSArray<NSString *> *sectionTitles;
 @property (nonatomic, strong) NSArray<NSArray<NSDictionary *> *> *sections;
+@property (nonatomic, strong) UISearchController *searchController;
+@property (nonatomic, strong) UILabel *emptyLabel;
 @end
 
 @implementation RCNewTriggerViewController
@@ -22,6 +27,8 @@
         }
         NSMutableArray *sections = [NSMutableArray array];
         for (NSString *section in titles) [sections addObject:groups[section]];
+        _allSectionTitles = titles;
+        _allSections = sections;
         _sectionTitles = titles;
         _sections = sections;
     }
@@ -38,6 +45,20 @@
     self.view.backgroundColor = bg;
     self.tableView.backgroundColor = bg;
     self.tableView.separatorColor = [cm tweakColorForKey:@"separators" defaultVal:0.30];
+
+    self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
+    self.searchController.searchResultsUpdater = self;
+    self.searchController.obscuresBackgroundDuringPresentation = NO;
+    self.searchController.searchBar.placeholder = @"Search Trigger Types";
+    self.navigationItem.searchController = self.searchController;
+    self.navigationItem.hidesSearchBarWhenScrolling = NO;
+    self.definesPresentationContext = YES;
+
+    self.emptyLabel = [[UILabel alloc] init];
+    self.emptyLabel.text = @"No Trigger Types Found";
+    self.emptyLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+    self.emptyLabel.textColor = [UIColor secondaryLabelColor];
+    self.emptyLabel.textAlignment = NSTextAlignmentCenter;
 }
 
 - (void)viewWillAppear:(BOOL)animated {
@@ -59,6 +80,60 @@
     [vcs removeObject:self];
     nav.delegate = nil;
     [nav setViewControllers:vcs animated:NO];
+}
+
+#pragma mark - Search
+
+// Letters and numbers only, lowercased, so "wifi" finds "Wi-Fi Network" and
+// "applaunch" finds "App Launch"
+- (NSString *)normalizedText:(NSString *)text {
+    if (![text isKindOfClass:[NSString class]]) return @"";
+    NSString *folded = [[text stringByFoldingWithOptions:NSDiacriticInsensitiveSearch | NSCaseInsensitiveSearch
+                                                  locale:nil] lowercaseString];
+    NSMutableString *letters = [NSMutableString stringWithCapacity:folded.length];
+    NSCharacterSet *lettersAndNumbers = [NSCharacterSet alphanumericCharacterSet];
+    for (NSUInteger i = 0; i < folded.length; i++) {
+        unichar character = [folded characterAtIndex:i];
+        if ([lettersAndNumbers characterIsMember:character]) [letters appendFormat:@"%C", character];
+    }
+    return letters;
+}
+
+- (BOOL)item:(NSDictionary *)item matchesSearch:(NSString *)query {
+    NSMutableString *text = [NSMutableString string];
+    for (NSString *key in @[@"title", @"section", @"detail", @"keywords"]) {
+        id value = item[key];
+        if ([value isKindOfClass:[NSString class]] && [value length] > 0) {
+            if (text.length > 0) [text appendString:@" "];
+            [text appendString:value];
+        }
+    }
+    return [[self normalizedText:text] containsString:query];
+}
+
+- (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
+    NSString *query = [self normalizedText:searchController.searchBar.text];
+    if (query.length == 0) {
+        self.sectionTitles = self.allSectionTitles;
+        self.sections = self.allSections;
+    } else {
+        NSMutableArray<NSString *> *titles = [NSMutableArray array];
+        NSMutableArray<NSArray<NSDictionary *> *> *sections = [NSMutableArray array];
+        for (NSUInteger i = 0; i < self.allSections.count; i++) {
+            NSMutableArray<NSDictionary *> *matches = [NSMutableArray array];
+            for (NSDictionary *item in self.allSections[i]) {
+                if ([self item:item matchesSearch:query]) [matches addObject:item];
+            }
+            if (matches.count > 0) {
+                [titles addObject:i < self.allSectionTitles.count ? self.allSectionTitles[i] : @""];
+                [sections addObject:matches];
+            }
+        }
+        self.sectionTitles = titles;
+        self.sections = sections;
+    }
+    self.tableView.backgroundView = self.sections.count == 0 ? self.emptyLabel : nil;
+    [self.tableView reloadData];
 }
 
 #pragma mark - Table view
@@ -98,7 +173,10 @@
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     NSDictionary *item = self.sections[indexPath.section][indexPath.row];
     void (^handler)(void) = item[@"handler"];
-    if (handler) handler();
+    if (!handler) return;
+    // The setup screen is pushed under a clean navigation bar, not an active search
+    if (self.searchController.isActive) self.searchController.active = NO;
+    handler();
 }
 
 @end
