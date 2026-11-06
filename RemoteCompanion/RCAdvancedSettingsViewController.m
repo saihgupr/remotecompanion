@@ -148,7 +148,7 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
     if (section == RCAdvancedSettingsSectionNFC) return 3;
     if (section == RCAdvancedSettingsSectionButtons) return (NSInteger)[self timingRows].count;
     if (section == RCAdvancedSettingsSectionSecurity) return 1;
-    return 5; // Wrap Long Names, Logging, Freeze Lists During Gestures, Only Unlock Out of Pocket, Excluded Apps
+    return 5; // Excluded Apps, Wrap Long Names, Logging, Freeze Lists During Gestures, Only Unlock Out of Pocket
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -156,7 +156,7 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
     
     BOOL isValueRow = (indexPath.section == RCAdvancedSettingsSectionBanners) ||
                       (indexPath.section == RCAdvancedSettingsSectionNFC && indexPath.row == 2) ||
-                      (indexPath.section == RCAdvancedSettingsSectionOptions && (indexPath.row == 1 || indexPath.row == 4)) ||
+                      (indexPath.section == RCAdvancedSettingsSectionOptions && (indexPath.row == 2 || indexPath.row == 0)) ||
                       (indexPath.section == RCAdvancedSettingsSectionButtons);
     UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:isValueRow ? UITableViewCellStyleValue1 : UITableViewCellStyleDefault reuseIdentifier:nil];
     cell.backgroundColor = [cm tweakColorForKey:@"blockBackground" defaultVal:0.12];
@@ -209,31 +209,6 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
         }
     } else if (indexPath.section == RCAdvancedSettingsSectionOptions) {
         if (indexPath.row == 0) {
-            cell.textLabel.text = @"Wrap Long Names";
-            _wrapLongNamesSwitch = [[UISwitch alloc] init];
-            _wrapLongNamesSwitch.on = [[NSUserDefaults standardUserDefaults] boolForKey:@"RCWrapLongNamesEnabled"];
-            [_wrapLongNamesSwitch addTarget:self action:@selector(wrapLongNamesToggleChanged:) forControlEvents:UIControlEventValueChanged];
-            cell.accessoryView = _wrapLongNamesSwitch;
-            cell.selectionStyle = UITableViewCellSelectionStyleNone;
-        } else if (indexPath.row == 1) {
-            cell.textLabel.text = @"Logging";
-            cell.detailTextLabel.text = [cm.logLevel capitalizedString];
-            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-        } else if (indexPath.row == 2) {
-            cell.textLabel.text = @"Lock Scrolling During Gestures";
-            UISwitch *freezeSwitch = [[UISwitch alloc] init];
-            freezeSwitch.on = cm.freezeListsDuringGestures;
-            [freezeSwitch addTarget:self action:@selector(freezeListsToggleChanged:) forControlEvents:UIControlEventValueChanged];
-            cell.accessoryView = freezeSwitch;
-            cell.selectionStyle = UITableViewCellSelectionStyleNone;
-        } else if (indexPath.row == 3) {
-            cell.textLabel.text = @"Only Unlock Out of Pocket";
-            UISwitch *proximityUnlockSwitch = [[UISwitch alloc] init];
-            proximityUnlockSwitch.on = cm.onlyUnlockOutOfPocket;
-            [proximityUnlockSwitch addTarget:self action:@selector(onlyUnlockOutOfPocketChanged:) forControlEvents:UIControlEventValueChanged];
-            cell.accessoryView = proximityUnlockSwitch;
-            cell.selectionStyle = UITableViewCellSelectionStyleNone;
-        } else if (indexPath.row == 4) {
             cell.textLabel.text = @"Excluded Apps";
             NSUInteger excludedCount = 0;
             for (NSString *key in [cm allConfiguredTriggerKeys]) {
@@ -241,6 +216,31 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
             }
             cell.detailTextLabel.text = excludedCount ? [NSString stringWithFormat:@"%lu", (unsigned long)excludedCount] : @"None";
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        } else if (indexPath.row == 1) {
+            cell.textLabel.text = @"Wrap Long Names";
+            _wrapLongNamesSwitch = [[UISwitch alloc] init];
+            _wrapLongNamesSwitch.on = [[NSUserDefaults standardUserDefaults] boolForKey:@"RCWrapLongNamesEnabled"];
+            [_wrapLongNamesSwitch addTarget:self action:@selector(wrapLongNamesToggleChanged:) forControlEvents:UIControlEventValueChanged];
+            cell.accessoryView = _wrapLongNamesSwitch;
+            cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        } else if (indexPath.row == 2) {
+            cell.textLabel.text = @"Logging";
+            cell.detailTextLabel.text = [cm.logLevel capitalizedString];
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        } else if (indexPath.row == 3) {
+            cell.textLabel.text = @"Lock Scrolling During Gestures";
+            UISwitch *freezeSwitch = [[UISwitch alloc] init];
+            freezeSwitch.on = cm.freezeListsDuringGestures;
+            [freezeSwitch addTarget:self action:@selector(freezeListsToggleChanged:) forControlEvents:UIControlEventValueChanged];
+            cell.accessoryView = freezeSwitch;
+            cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        } else if (indexPath.row == 4) {
+            cell.textLabel.text = @"Only Unlock Out of Pocket";
+            UISwitch *proximityUnlockSwitch = [[UISwitch alloc] init];
+            proximityUnlockSwitch.on = cm.onlyUnlockOutOfPocket;
+            [proximityUnlockSwitch addTarget:self action:@selector(onlyUnlockOutOfPocketChanged:) forControlEvents:UIControlEventValueChanged];
+            cell.accessoryView = proximityUnlockSwitch;
+            cell.selectionStyle = UITableViewCellSelectionStyleNone;
         }
     } else if (indexPath.section == RCAdvancedSettingsSectionButtons) {
         NSDictionary *row = [self timingRows][indexPath.row];
@@ -267,10 +267,10 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
         [self.navigationController pushViewController:[[RCBannersViewController alloc] init] animated:YES];
     } else if (indexPath.section == RCAdvancedSettingsSectionNFC && indexPath.row == 2) {
         [self chooseNFCWindowFromView:[tableView cellForRowAtIndexPath:indexPath]];
-    } else if (indexPath.section == RCAdvancedSettingsSectionOptions && indexPath.row == 1) {
-        [self chooseLogLevelFromView:[tableView cellForRowAtIndexPath:indexPath]];
-    } else if (indexPath.section == RCAdvancedSettingsSectionOptions && indexPath.row == 4) {
+    } else if (indexPath.section == RCAdvancedSettingsSectionOptions && indexPath.row == 0) {
         [self.navigationController pushViewController:[[RCExcludedAppsViewController alloc] init] animated:YES];
+    } else if (indexPath.section == RCAdvancedSettingsSectionOptions && indexPath.row == 2) {
+        [self chooseLogLevelFromView:[tableView cellForRowAtIndexPath:indexPath]];
     } else if (indexPath.section == RCAdvancedSettingsSectionButtons) {
         NSDictionary *row = [self timingRows][indexPath.row];
         double (^get)(void) = row[@"get"];
