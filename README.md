@@ -6,7 +6,10 @@ RemoteCompanion provides fast, scriptable system control for modern rootless jai
 > **What’s New in v4.4.0**
 > - **New Triggers**: Rotated to Landscape / Portrait, Find My Sound, Incoming Call / Call Started / Call Ended, Battery Level (1-100%), and Focus on / off for a chosen Focus or any Focus.
 > - **Gesture Recorder**: Settings > Gestures records taps, swipes and scrolls, names the recording, and plays it back at 0.5x to 3x with trim, re-record, replace, rename, export and import.
-> - **Faster Building**: Compact layout with tile grids, trigger icons, copy and paste for actions, Variables with `{name}` substitution, App Quick Action picker, and Excluded Apps per trigger.
+> - **Faster Building**: Compact layout with tile grids, trigger icons, and copy and paste for actions.
+> - **Variables**: the Set Variable action saves a value, changes it with math or an RC command, or keeps it for one run. `{name}` in action text becomes its value, a Variable condition compares it, and Settings > Advanced Settings > Variables lists what is saved.
+> - **App Quick Action**: pick an app, then one of its registered shortcuts, read live from SpringBoard so the Home Screen menu never has to be opened first.
+> - **Excluded Apps**: Settings > Advanced Settings > Options lists every trigger that has actions, grouped like the Triggers page, and sets the apps where each one should stay quiet.
 > - **Web UI and API**: Web UI follows system light mode, and `/api/command` supports an optional token that gates privileged commands (`root`, `sudo`, `exec`).
 > - **Edge Gestures**: Edge swipes accept a second finger with distance-based firing and an optional Lock Scrolling During Gestures toggle.
 
