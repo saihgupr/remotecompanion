@@ -19,7 +19,7 @@ THEOS_PACKAGE_SCHEME ?= rootless
 
 include $(THEOS)/makefiles/common.mk
 
-TWEAK_NAME = RemoteCommand RCShortcutsHelper RCNFCReader RCWatchPing
+TWEAK_NAME = RemoteCommand RCShortcutsHelper RCNFCReader RCWatchPing RCFindMyPing
 
 # Lua source files
 LUA_FILES = $(wildcard lua/*.c)
@@ -46,6 +46,11 @@ RCNFCReader_CFLAGS = -fobjc-arc
 # (Watch Ping triggers, see RCWatchPing.m)
 RCWatchPing_FILES = RCWatchPing.m
 RCWatchPing_CFLAGS = -fobjc-arc
+
+# Loaded into findmydeviced, where it passes Play Sound from Find My to SpringBoard
+# (Find My Sound trigger, see RCFindMyPing.m)
+RCFindMyPing_FILES = RCFindMyPing.m
+RCFindMyPing_CFLAGS = -fobjc-arc
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 

@@ -2296,6 +2296,79 @@ static void rc_watch_ping_received(CFNotificationCenterRef center, void *observe
 }
 NSString *RCNFCScannerCommand(NSString *what);
 
+// Find My Sound trigger: Play Sound from Find My on another device or iCloud.com (see
+// RCFindMyPing.m, loaded into findmydeviced). The daemon's sandbox keeps it from posting
+// notifications, so it writes a line to a file ("ready <count>", "ping <method>"), and this watches
+// the file: nothing runs until it changes. The folder it may write differs (/var/mobile/tmp on
+// iOS 17, /var/tmp on iOS 14), so both are used.
+static NSArray<NSString *> *rc_findmy_folders(void) {
+    return @[@"/var/mobile/tmp", @"/var/tmp"];
+}
+
+static void rc_findmy_signal_changed(NSString *path) {
+    NSString *line = [[NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil]
+                      stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    // One write can be heard twice (iOS 14): each signal ends with its time, so a line already
+    // acted on is skipped
+    static NSString *lastLine = nil;
+    if (!line.length || [line isEqualToString:lastLine]) return;
+    lastLine = line;
+    NSRange stamp = [line rangeOfString:@" @" options:NSBackwardsSearch];
+    if (stamp.location != NSNotFound) line = [line substringToIndex:stamp.location];
+    if ([line hasPrefix:@"ready "]) {
+        SRLogMin(@"[FindMy] findmydeviced loaded: watching %@ methods for Play Sound", [line substringFromIndex:6]);
+    } else if ([line hasPrefix:@"ping "]) {
+        SRLogMin(@"[FindMy] Play Sound from Find My (seen by %@)", [line substringFromIndex:5]);
+        RCExecuteTrigger(@"trigger_device_findmy_sound");
+    }
+}
+
+// Tells the daemon whether a Play Sound should be silent: the trigger has actions and its Keep
+// Default Action is switched off (it's on unless set otherwise)
+static void RCFindMyConfigChanged(void) {
+    BOOL quiet = NO;
+    if (RC_MasterEnabled()) {
+        NSDictionary *triggers = g_triggerConfig[@"triggers"];
+        NSDictionary *trigger = [triggers isKindOfClass:[NSDictionary class]] ? triggers[@"trigger_device_findmy_sound"] : nil;
+        if ([trigger isKindOfClass:[NSDictionary class]] && [trigger[@"enabled"] boolValue]) {
+            id keep = trigger[@"keepDefault"];
+            NSArray *actions = trigger[@"actions"];
+            quiet = (keep && ![keep boolValue]) && [actions isKindOfClass:[NSArray class]] && actions.count > 0;
+        }
+    }
+    for (NSString *folder in rc_findmy_folders()) {
+        mkdir(folder.fileSystemRepresentation, 0755); // iOS 14 has no /var/mobile/tmp until something makes it
+        int fd = open([folder stringByAppendingPathComponent:@"rc_findmy_quiet"].fileSystemRepresentation, O_WRONLY | O_TRUNC | O_CREAT, 0666);
+        if (fd < 0) continue;
+        fchmod(fd, 0666);
+        write(fd, quiet ? "1" : "0", 1);
+        close(fd);
+    }
+}
+
+static NSMutableArray *g_findMySources = nil;
+
+static void rc_findmy_start_watching(void) {
+    g_findMySources = [NSMutableArray array];
+    for (NSString *folder in rc_findmy_folders()) {
+        // The file must already exist to be watched; the daemon only rewrites it
+        mkdir(folder.fileSystemRepresentation, 0755);
+        NSString *path = [folder stringByAppendingPathComponent:@"rc_findmy_signal"];
+        int fd = open(path.fileSystemRepresentation, O_RDONLY | O_CREAT, 0666);
+        if (fd < 0) {
+            SRLogMin(@"[FindMy] Can't watch %@", path);
+            continue;
+        }
+        fchmod(fd, 0666);
+        dispatch_source_t source = dispatch_source_create(DISPATCH_SOURCE_TYPE_VNODE, (uintptr_t)fd,
+                                                          DISPATCH_VNODE_WRITE | DISPATCH_VNODE_EXTEND, dispatch_get_main_queue());
+        dispatch_source_set_event_handler(source, ^{ rc_findmy_signal_changed(path); });
+        dispatch_source_set_cancel_handler(source, ^{ close(fd); });
+        dispatch_resume(source);
+        [g_findMySources addObject:source];
+    }
+}
+
 static void config_changed_callback(CFNotificationCenterRef center, void *observer,
                                     CFStringRef name, const void *object, CFDictionaryRef userInfo) {
     SRLog(@"Config changed notification received.");
@@ -2311,6 +2384,7 @@ static void config_changed_callback(CFNotificationCenterRef center, void *observ
             update_edge_gestures(); 
             RCNFCConfigChanged();
             RCWatchPingConfigChanged();
+            RCFindMyConfigChanged();
             SRLog(@"Edge gestures updated. Checking schedule timer...");
             start_schedule_timer();
             SRLog(@"Checking MQTT subscriber...");
@@ -5598,6 +5672,8 @@ static void register_system_event_observers() {
                                     CFSTR(kRCWatchPing), NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
     if (!g_triggerConfig) load_trigger_config();
     RCWatchPingConfigChanged();
+    RCFindMyConfigChanged();
+    rc_findmy_start_watching();
 
     // Media State changes (Darwin Notifications)
     CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), 
