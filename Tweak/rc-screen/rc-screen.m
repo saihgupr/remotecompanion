@@ -1,6 +1,7 @@
-// rc-screen: what's on the screen, as text, from the accessibility tree (what VoiceOver reads).
-// For scripts and assistants that drive the phone: read the screen, find an element, press it,
-// wait for something to appear.
+// rc-screen: what's on the screen, as text, from the accessibility tree (what VoiceOver reads),
+// plus what on-device text recognition (OCR) sees that the tree doesn't - "(seen)" lines, which
+// can be tapped but not pressed. For scripts and assistants that drive the phone: read the
+// screen, find an element, press it, wait for something to appear.
 //
 //   rc-screen [--json|--outline]    the app in front and the elements on screen; --outline lays
 //                                   them out for reading: alerts and keyboard first, top bar,
@@ -133,6 +134,7 @@ static NSString *rc_kind(uint64_t traits) {
 @property (nonatomic) uint64_t traits;
 @property (nonatomic) NSUInteger number;
 @property (nonatomic) BOOL web; // from a web page (rc_web_elements)
+@property (nonatomic) BOOL ocr; // seen by text recognition only - tap it, don't press it
 @end
 @implementation RCScreenElement
 @end
@@ -215,9 +217,27 @@ static NSArray<RCScreenElement *> *rc_web_elements(id app) {
 static BOOL g_skipWeb = NO;
 // Whether the last read left out elements that aren't laid out yet (see rc_elements)
 static BOOL g_unplaced = NO;
+static BOOL g_wantOcr = NO, g_noOcr = NO, g_ocrRan = NO, g_debug = NO, g_confirmOcrOnly = NO, g_keepAllOcr = NO;
+static double g_ocrSafeTop = 0;
+static double g_ocrMs = 0;
+static const unsigned kShiftResidualMax = 8; // a shift pair this different didn't really line up
+static void rc_merge_ocr(NSMutableArray<RCScreenElement *> *list, id app);
 
 static NSString *rc_box(CGRect f) {
     return [NSString stringWithFormat:@"%.1f,%.1f,%.1f,%.1f", f.origin.x, f.origin.y, f.size.width, f.size.height];
+}
+// OCR text as a match key: lowercased, whitespace collapsed
+static NSString *rc_ocr_key(NSString *s) {
+    NSArray *w = [[s lowercaseString] componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    return [[w filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"length > 0"]] componentsJoinedByString:@" "];
+}
+// For matching reads: also strip leading and trailing punctuation
+static NSString *rc_norm(NSString *s) {
+    return [rc_ocr_key(s) stringByTrimmingCharactersInSet:[NSCharacterSet punctuationCharacterSet]];
+}
+static CGRect rc_unbox(NSString *s) {
+    NSArray *p = [s componentsSeparatedByString:@","];
+    return p.count == 4 ? CGRectMake([p[0] doubleValue], [p[1] doubleValue], [p[2] doubleValue], [p[3] doubleValue]) : CGRectZero;
 }
 
 static NSArray<RCScreenElement *> *rc_elements(id app) {
@@ -244,6 +264,7 @@ static NSArray<RCScreenElement *> *rc_elements(id app) {
         e.number = ++number;
         [list addObject:e];
     }
+    if (g_wantOcr && !g_noOcr) rc_merge_ocr((NSMutableArray *)list, app);
     return list;
 }
 
@@ -268,27 +289,128 @@ static NSArray<RCScreenElement *> *rc_tree_elements(id app, BOOL *truncated) {
 static NSString *rc_line(RCScreenElement *e);
 
 // The screen once it has stopped changing (the same on two reads in a row), or as it is after
-// `seconds`
+// `seconds`. The reads in the loop are accessibility-only (OCR every pass costs ~260 ms); the
+// caller's OCR is merged once into the settled list when it's wanted
 static NSArray<RCScreenElement *> *rc_settled_elements(double seconds) {
     NSString *last = nil;
     NSArray<RCScreenElement *> *list = @[];
     NSDate *until = [NSDate dateWithTimeIntervalSinceNow:seconds];
+    BOOL ocr = g_wantOcr && !g_noOcr;
+    g_wantOcr = NO;
     do {
         list = rc_elements(rc_primary_app());
         NSMutableString *screen = [NSMutableString string];
         for (RCScreenElement *e in list) [screen appendFormat:@"%@\n", rc_line(e)];
-        if ([screen isEqualToString:last]) return list;
+        if ([screen isEqualToString:last]) { g_wantOcr = ocr; if (ocr) rc_merge_ocr((NSMutableArray *)list, rc_primary_app()); return list; }
         last = screen;
         [NSThread sleepForTimeInterval:0.15];
     } while ([until timeIntervalSinceNow] > 0);
+    g_wantOcr = ocr;
+    if (ocr) rc_merge_ocr((NSMutableArray *)list, rc_primary_app());
     return list;
 }
 
 // What's on screen, ignoring where: a list bouncing at its end moves but shows nothing new
 static NSSet<NSString *> *rc_screen_items(NSArray<RCScreenElement *> *list) {
     NSMutableSet *items = [NSMutableSet set];
-    for (RCScreenElement *e in list) [items addObject:[NSString stringWithFormat:@"%@|%@|%@", e.kind, e.label, e.value]];
+    for (RCScreenElement *e in list) {
+        if (e.ocr) continue; // recognition varies between reads - only stable content says end
+        [items addObject:[NSString stringWithFormat:@"%@|%@|%@", e.kind, e.label, e.value]];
+    }
     return items;
+}
+
+// ---- OCR merge ----
+// "screen ocr --json" in the tweak catches text apps draw without exposing to accessibility
+// (Sileo's package lists, Flutter apps…). Any failure - no Vision, an older tweak, a busy
+// SpringBoard - just leaves the read accessibility-only; it never fails the command.
+static NSArray<NSDictionary *> *rc_ocr_items(void) {
+    NSString *client = rc_tool_path(@"rc-client");
+    if (!client) return nil;
+    for (int try = 0; try < 2; try++) {
+        NSString *out = nil;
+        if (rc_run_tool(client, @[@"screen ocr --json"], 5, &out) != 0 || !out) return nil;
+        NSDictionary *j = [NSJSONSerialization JSONObjectWithData:[out dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+        if (![j isKindOfClass:[NSDictionary class]]) return nil;
+        if ([j[@"ok"] boolValue]) {
+            g_ocrRan = YES;
+            g_ocrMs = [j[@"ocrMs"] doubleValue];
+            g_ocrSafeTop = [j[@"safeTop"] doubleValue]; // absent on an older tweak = no filter
+            return [j[@"items"] isKindOfClass:[NSArray class]] ? j[@"items"] : nil;
+        }
+        if (![j[@"error"] isEqualToString:@"busy"] || try == 1) return nil;
+        usleep(200000);
+    }
+    return nil;
+}
+
+// Text Vision saw that the tree didn't: kept unless most of its box is already covered by a
+// labeled element (the status bar, a row and its values) or it wasn't read clearly
+static void rc_merge_ocr(NSMutableArray<RCScreenElement *> *list, id app) {
+    NSArray<NSDictionary *> *items = rc_ocr_items();
+    if (!items) return;
+    CGRect screen = rc_frame(app);
+    if (CGRectIsEmpty(screen)) screen = CGRectMake(0, 0, 390, 844);
+    double screenArea = screen.size.width * screen.size.height;
+    NSUInteger number = list.lastObject.number;
+    for (NSDictionary *item in items) {
+        if (![item isKindOfClass:[NSDictionary class]] || [item[@"conf"] doubleValue] < 0.5) continue;
+        NSString *text = rc_text(item[@"text"]);
+        NSArray *f = item[@"frame"];
+        if (!text.length || ![f isKindOfClass:[NSArray class]] || f.count < 4) continue;
+        CGRect box = CGRectMake([f[0] doubleValue], [f[1] doubleValue], [f[2] doubleValue], [f[3] doubleValue]);
+        if (CGRectIsEmpty(box)) continue;
+        if (g_ocrSafeTop > 0 && box.origin.y + box.size.height <= g_ocrSafeTop + 2) continue; // status bar
+        BOOL covered = NO;
+        for (RCScreenElement *e in list) {
+            if (!(e.label.length || e.value.length) || CGRectIsEmpty(e.frame)) continue;
+            if (e.frame.size.width * e.frame.size.height > screenArea * 0.25) continue;
+            CGRect over = CGRectIntersection(e.frame, box);
+            // RC_SCREEN_OCR_KEEPALL=1 keeps covered items for the confirmer test path
+            if (!g_keepAllOcr && over.size.width * over.size.height >= box.size.width * box.size.height * 0.5) { covered = YES; break; }
+        }
+        if (covered) continue;
+        // A wrapped line's box may not sit inside the message's frame (Discord's are offset),
+        // but its text is always part of it - the same rule the other way
+        NSString *norm = rc_norm(text);
+        if (norm.length >= 4) {
+            for (RCScreenElement *e in list) {
+                if (e.ocr) continue;
+                if ([rc_norm(e.label) containsString:norm] || [rc_norm(e.value) containsString:norm]) { covered = YES; break; }
+            }
+            if (covered) continue;
+        }
+        RCScreenElement *e = [RCScreenElement new];
+        e.kind = @"text";
+        e.label = text;
+        e.value = @""; // nil would match every search - [nil rangeOfString:] returns 0
+        e.frame = box;
+        e.ocr = YES;
+        e.number = ++number;
+        [list addObject:e];
+    }
+}
+
+// "screen shift": the content's move since the last call, in points, or NO when it's not there
+static BOOL rc_shift(double *dx, double *dy, unsigned *residual) {
+    NSString *client = rc_tool_path(@"rc-client");
+    NSString *out = nil;
+    if (!client || rc_run_tool(client, @[@"screen shift --json"], 8, &out) != 0 || !out) return NO;
+    NSDictionary *j = [NSJSONSerialization JSONObjectWithData:[out dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+    if (![j[@"ok"] boolValue] || [j[@"baseline"] boolValue]) return NO;
+    if (dx) *dx = [j[@"dx"] doubleValue];
+    if (dy) *dy = [j[@"dy"] doubleValue];
+    if (residual) *residual = [j[@"residual"] unsignedIntValue];
+    return YES;
+}
+// Every "screen shift" call captures a new baseline: any successful reply (a measurement or a
+// first store) readies the next one
+static BOOL rc_shift_baseline(void) {
+    NSString *client = rc_tool_path(@"rc-client");
+    NSString *out = nil;
+    if (!client || rc_run_tool(client, @[@"screen shift --json"], 8, &out) != 0 || !out) return NO;
+    NSDictionary *j = [NSJSONSerialization JSONObjectWithData:[out dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+    return [j[@"ok"] boolValue];
 }
 
 static NSString *rc_quote(NSString *text) {
@@ -300,6 +422,7 @@ static NSString *rc_line(RCScreenElement *e) {
     if (e.value.length) [line appendFormat:@" = %@", rc_quote(e.value)];
     if (e.traits & 0x100) [line appendString:@" (dimmed)"];
     if (e.traits & 0x8) [line appendString:@" (selected)"];
+    if (e.ocr) [line appendString:@" (seen)"];
     CGRect f = e.frame;
     [line appendFormat:@" at %.0f,%.0f (%.0fx%.0f)", round(CGRectGetMidX(f)), round(CGRectGetMidY(f)), f.size.width, f.size.height];
     return line;
@@ -315,6 +438,8 @@ static NSDictionary *rc_json(RCScreenElement *e) {
         @"traits": @(e.traits),
         @"dimmed": (e.traits & 0x100) ? @YES : @NO,
         @"selected": (e.traits & 0x8) ? @YES : @NO,
+        @"ocr": @(e.ocr),
+        @"source": e.ocr ? @"ocr" : @"ax",
         @"x": @(round(CGRectGetMidX(f))), @"y": @(round(CGRectGetMidY(f))),
         @"frame": @[@(round(f.origin.x)), @(round(f.origin.y)), @(round(f.size.width)), @(round(f.size.height))],
     };
@@ -378,7 +503,7 @@ static void rc_quit(int sig) {
 }
 
 static int rc_usage(void) {
-    fprintf(stderr, "Usage: rc-screen [--json|--outline] | find TEXT [--json] | press TEXT|#N | wait TEXT [SECONDS] | tap TEXT|#N | hold TEXT|#N [SECONDS] | menu TEXT|#N | type TEXT | scroll-to TEXT [up|left|right] | adjust TEXT|#N up|down [STEPS] | adjust TEXT|#N PERCENT%% | set TEXT|#N on|off | clear | pinch TEXT|#N SCALE | rotate TEXT|#N DEGREES | watch [SECONDS] [--every S] | notifications [--keep-open]\n");
+    fprintf(stderr, "Usage: rc-screen [--json|--outline] [--no-ocr] | find TEXT [--json] | press TEXT|#N | wait TEXT [SECONDS] | tap TEXT|#N | hold TEXT|#N [SECONDS] | menu TEXT|#N | type TEXT | scroll-to TEXT [up|left|right] | adjust TEXT|#N up|down [STEPS] | adjust TEXT|#N PERCENT%% | set TEXT|#N on|off | clear | pinch TEXT|#N SCALE | rotate TEXT|#N DEGREES | watch [SECONDS] [--every S] | notifications [--keep-open]\n");
     return 2;
 }
 
@@ -995,12 +1120,22 @@ int main(int argc, char **argv) {
             if ([a isEqualToString:@"--json"]) json = YES;
             else if ([a isEqualToString:@"--replace"]) replace = YES;
             else if ([a isEqualToString:@"--outline"]) outline = YES;
+            else if ([a isEqualToString:@"--no-ocr"]) g_noOcr = YES;
+            else if ([a isEqualToString:@"--debug"]) g_debug = YES;
             else if ([a isEqualToString:@"--springboard"]) g_springboard = YES;
             else if ([a isEqualToString:@"-h"] || [a isEqualToString:@"--help"]) return rc_usage();
             else [args addObject:a];
         }
+        if (getenv("RC_SCREEN_DEBUG")) g_debug = YES;
+        // RC_SCREEN_CONFIRM=ocr exercises the OCR confirmer alone (shift and AX don't count)
+        if (getenv("RC_SCREEN_CONFIRM") && !strcmp(getenv("RC_SCREEN_CONFIRM"), "ocr")) g_confirmOcrOnly = YES;
+        // RC_SCREEN_OCR_KEEPALL=1 keeps OCR items AX already covers, for the same test
+        if (getenv("RC_SCREEN_OCR_KEEPALL")) g_keepAllOcr = YES;
         NSString *verb = args.count ? args[0] : @"list";
         g_acted = [@[@"press", @"tap", @"hold", @"menu", @"type", @"clear", @"set", @"adjust", @"scroll-to", @"pinch", @"rotate"] containsObject:verb];
+        // list/find/wait merge OCR into every read; the single-target verbs try accessibility
+        // first and merge once only on a miss; scroll-to decides per phase (see there)
+        g_wantOcr = [verb isEqualToString:@"list"] || [verb isEqualToString:@"find"] || [verb isEqualToString:@"wait"];
         if (![@[@"list", @"find", @"press", @"wait", @"tap", @"hold", @"menu", @"type", @"scroll-to", @"adjust", @"set", @"clear", @"pinch", @"rotate", @"watch", @"notifications"] containsObject:verb]) return rc_usage();
         if (![verb isEqualToString:@"list"] && ![verb isEqualToString:@"clear"] && ![verb isEqualToString:@"watch"] && ![verb isEqualToString:@"notifications"] && args.count < 2) return rc_usage();
 
@@ -1054,7 +1189,7 @@ int main(int argc, char **argv) {
                 NSMutableString *screen = [NSMutableString string];
                 for (RCScreenElement *e in list) {
                     if (!found && rc_matches(e, text)) found = e;
-                    [screen appendFormat:@"%@\n", rc_line(e)];
+                    [screen appendFormat:@"%@\n", e.ocr ? [@"ocr|" stringByAppendingString:e.label] : rc_line(e)];
                 }
                 if (found && [screen isEqualToString:last]) {
                     // The list settles a moment before the transition ends; a press then is lost
@@ -1112,6 +1247,7 @@ int main(int argc, char **argv) {
             CGRect screen = rc_frame(app);
             if (CGRectIsEmpty(screen)) screen = CGRectMake(0, 0, 390, 844);
             double x = CGRectGetMidX(screen), y = CGRectGetMidY(screen);
+            g_wantOcr = YES; // the first read may already see an OCR-only target
             NSArray<RCScreenElement *> *list = rc_settled_elements(2);
             // Reads during the search can skip the web hit-tests when there's no web content
             BOOL anyWeb = NO;
@@ -1133,8 +1269,10 @@ int main(int argc, char **argv) {
             // Steer: the target may already be in the tree off screen, and the walk says which
             // way it is (frames between walks update too slowly to track mid-search). Then
             // it's a directed scan: 60% drags that way, the same gap guard as the scan, until
-            // the target shows on screen
+            // the target shows on screen. Found in the tree means accessibility has it, so
+            // these step reads skip OCR entirely
             {
+                g_wantOcr = NO;
                 BOOL truncated = NO;
                 NSArray<RCScreenElement *> *tree = rc_tree_elements(app, &truncated);
                 RCScreenElement *hit = pick(tree);
@@ -1179,6 +1317,7 @@ int main(int argc, char **argv) {
                         if (rc_command(drag) != 0) return 2;
                         list = rc_settled_elements(1.2);
                         found = pick(list);
+                        if (g_debug) fprintf(stderr, "[dbg] steer %d drag(%s) items=%lu found=%d\n", t, drag.UTF8String, (unsigned long)list.count, found != nil);
                         if (found) break;
                         if ([rc_screen_items(list) isSubsetOfSet:[NSSet setWithArray:beforeFrames.allKeys]]) { stuck++; continue; }
                         BOOL moved = NO;
@@ -1206,7 +1345,10 @@ int main(int argc, char **argv) {
             }
 
             // Pages run sideways, and are few; the home screen's live edges (Today View, App
-            // Library) never look like an end, so a sideways search stops sooner
+            // Library) never look like an end, so a sideways search stops sooner. The scan's
+            // settled read merges OCR once per step (lazy lists show OCR-only text)
+            g_wantOcr = YES;
+            BOOL shiftReady = NO;
             while (!found && swipes < (sideways ? 12 : 24)) {
                 found = pick(list);
                 if (!found) {
@@ -1218,10 +1360,21 @@ int main(int argc, char **argv) {
                 // that moved proves the scroll kept the last screen's content in view
                 NSMutableDictionary<NSString *, NSString *> *beforeFrames = [NSMutableDictionary dictionary];
                 for (RCScreenElement *e in list) {
+                    if (e.ocr) continue;
                     NSString *k = [NSString stringWithFormat:@"%@|%@|%@", e.kind, e.label, e.value];
                     if (!beforeFrames[k]) beforeFrames[k] = rc_box(e.frame);
                 }
                 NSSet<NSString *> *before = [NSSet setWithArray:beforeFrames.allKeys];
+                // OCR texts can confirm too, but only ones seen once (a repeated "GET" could be
+                // any row's); the same rule holds for the read after the step
+                NSCountedSet *ocrBefore = [NSCountedSet set];
+                for (RCScreenElement *e in list) if (e.ocr && e.label.length >= 3) [ocrBefore addObject:rc_ocr_key(e.label)];
+                NSMutableDictionary<NSString *, NSString *> *beforeOcr = [NSMutableDictionary dictionary];
+                for (RCScreenElement *e in list) {
+                    if (!e.ocr || e.label.length < 3) continue;
+                    NSString *k = rc_ocr_key(e.label);
+                    if ([ocrBefore countForObject:k] == 1) beforeOcr[k] = rc_box(e.frame);
+                }
                 // 40% drags: the list can't coast past the next screen
                 double h = screen.size.height, w = screen.size.width;
                 NSString *drag;
@@ -1234,10 +1387,64 @@ int main(int argc, char **argv) {
                     drag = down ? [NSString stringWithFormat:@"gesture drag %.0f %.0f %.0f %.0f 0.62", x, lo, x, hi]
                                 : [NSString stringWithFormat:@"gesture drag %.0f %.0f %.0f %.0f 0.62", x, hi, x, lo];
                 }
+                // "screen shift" measures the move: the capture before the drag is the baseline,
+                // the reading after the settle - and a good reading already baselined the next
+                // step, so a fresh one is only needed after a failure
+                if (!shiftReady) shiftReady = rc_shift_baseline();
                 if (rc_command(drag) != 0) return 2;
                 swipes++;
                 list = rc_settled_elements(2);
-                if ([rc_screen_items(list) isSubsetOfSet:before]) {
+                double sdx = 0, sdy = 0;
+                unsigned residual = 0;
+                BOOL shiftOK = shiftReady && rc_shift(&sdx, &sdy, &residual);
+                shiftReady = shiftOK;
+                BOOL endHere, gap;
+                double expected = 0.93 * (sideways ? w : h) * 0.4;
+                double disp = sideways ? sdx : sdy;
+                double move = down ? -disp : disp; // signed: the way the drag pushed it
+                NSString *src = nil; // the confirmer that overruled the shift reading
+                if (shiftOK) {
+                    // Registration can lock onto a repeating row instead of the real offset (it
+                    // aliased +195 for -316 on Sileo's 73 pt rows). The elements say what moved:
+                    // one shared item that went the expected way overrules a bad reading
+                    BOOL shiftMoved = residual <= kShiftResidualMax && fabs(disp) >= 5;
+                    BOOL shiftTrusted = residual <= kShiftResidualMax && move >= expected * 0.5 && move <= expected * 1.3;
+                    BOOL confirmed = shiftTrusted && !g_confirmOcrOnly;
+                    if (!confirmed && !g_confirmOcrOnly) {
+                        for (RCScreenElement *e in list) {
+                            NSString *bf = beforeFrames[[NSString stringWithFormat:@"%@|%@|%@", e.kind, e.label, e.value]];
+                            if (!bf) continue;
+                            CGRect old = rc_unbox(bf);
+                            double d = sideways ? e.frame.origin.x - old.origin.x : e.frame.origin.y - old.origin.y;
+                            double m = down ? -d : d;
+                            if (m >= expected * 0.5 && m <= expected * 1.3) { confirmed = YES; src = @"ax"; break; }
+                        }
+                    }
+                    if (!confirmed) {
+                        NSCountedSet *ocrAfter = [NSCountedSet set];
+                        for (RCScreenElement *e in list) if (e.ocr && e.label.length >= 3) [ocrAfter addObject:rc_ocr_key(e.label)];
+                        for (RCScreenElement *e in list) {
+                            if (!e.ocr || e.label.length < 3) continue;
+                            NSString *k = rc_ocr_key(e.label);
+                            if ([ocrAfter countForObject:k] != 1) continue;
+                            NSString *bf = beforeOcr[k];
+                            if (!bf) continue;
+                            CGRect old = rc_unbox(bf);
+                            double d = sideways ? e.frame.origin.x - old.origin.x : e.frame.origin.y - old.origin.y;
+                            double m = down ? -d : d;
+                            if (m >= expected * 0.5 && m <= expected * 1.3) { confirmed = YES; src = @"ocr"; break; }
+                        }
+                    }
+                    endHere = (fabs(disp) < 5 && residual <= kShiftResidualMax)
+                        || (!shiftMoved && [rc_screen_items(list) isSubsetOfSet:before]);
+                    gap = !endHere && !confirmed;
+                } else {
+                    endHere = [rc_screen_items(list) isSubsetOfSet:before];
+                    gap = !endHere;
+                }
+                if (g_debug) fprintf(stderr, "[dbg] scan %d shift=%.0f,%.0f r%u ok=%d endHere=%d gap=%d overruled=%s items=%lu down=%d\n",
+                    swipes, sdx, sdy, residual, shiftOK, endHere, gap, src ? src.UTF8String : "-", (unsigned long)list.count, down);
+                if (endHere) {
                     // The end of the list: the other way, once (checked first, so a list stopped
                     // at its end doesn't look like a gap)
                     if (++turns > 1) break;
@@ -1245,13 +1452,21 @@ int main(int argc, char **argv) {
                 } else {
                     // Nothing of the last screen is still moving on this one: the step skipped a
                     // screen of rows, so back off halfway and look again before going on. Static
-                    // chrome (nav bar, tab bar) doesn't count - it never moves
+                    // chrome (nav bar, tab bar) doesn't count - it never moves. A trusted shift
+                    // reading stands in for the AX check; a suspected skip backs off either way
                     BOOL moved = NO;
-                    for (RCScreenElement *e in list) {
-                        NSString *bf = beforeFrames[[NSString stringWithFormat:@"%@|%@|%@", e.kind, e.label, e.value]];
-                        if (bf && ![bf isEqualToString:rc_box(e.frame)]) { moved = YES; break; }
+                    if (shiftOK) {
+                        moved = !gap;
+                    } else {
+                        for (RCScreenElement *e in list) {
+                            NSString *bf = beforeFrames[[NSString stringWithFormat:@"%@|%@|%@", e.kind, e.label, e.value]];
+                            if (bf && ![bf isEqualToString:rc_box(e.frame)]) { moved = YES; break; }
+                        }
                     }
                     if (!moved) {
+                        // Backing off moves the list after the baseline was taken: the next
+                        // step needs a fresh one or it measures backoff+drag together
+                        shiftReady = NO;
                         NSString *back;
                         if (sideways) {
                             double lx = screen.origin.x + w * 0.4, rx = screen.origin.x + w * 0.6;
@@ -1311,6 +1526,11 @@ int main(int argc, char **argv) {
                     if (match) e = x;
                 }
             }
+            if (!e && !g_noOcr) { rc_merge_ocr((NSMutableArray *)list, app); e = rc_pick(list, args[1]); }
+            if (e && e.ocr) {
+                fprintf(stderr, "Only seen on screen (text recognition): use tap\n");
+                return 1;
+            }
             if (!e || ![e.kind isEqualToString:@"switch"]) {
                 fprintf(stderr, "No switch on screen: %s\n", args[1].UTF8String);
                 return 1;
@@ -1343,8 +1563,13 @@ int main(int argc, char **argv) {
             // element's own (a volume slider moves 10%)
             if (args.count < 3) return rc_usage();
             RCScreenElement *e = rc_pick(list, args[1]);
+            if (!e && !g_noOcr) { rc_merge_ocr((NSMutableArray *)list, app); e = rc_pick(list, args[1]); }
             if (!e) {
                 fprintf(stderr, "Not on screen: %s\n", args[1].UTF8String);
+                return 1;
+            }
+            if (e.ocr) {
+                fprintf(stderr, "Only seen on screen (text recognition): use tap\n");
                 return 1;
             }
             if (!(e.traits & 0x1000)) {
@@ -1413,8 +1638,13 @@ int main(int argc, char **argv) {
         if ([verb isEqualToString:@"pinch"] || [verb isEqualToString:@"rotate"]) {
             if (args.count < 3) return rc_usage();
             RCScreenElement *e = rc_pick(list, args[1]);
+            if (!e && !g_noOcr) { rc_merge_ocr((NSMutableArray *)list, app); e = rc_pick(list, args[1]); }
             if (!e) {
                 fprintf(stderr, "Not on screen: %s\n", args[1].UTF8String);
+                return 1;
+            }
+            if (e.ocr) {
+                fprintf(stderr, "Only seen on screen (text recognition): use tap\n");
                 return 1;
             }
             CGRect f = e.frame;
@@ -1427,6 +1657,7 @@ int main(int argc, char **argv) {
 
         if ([verb isEqualToString:@"tap"] || [verb isEqualToString:@"hold"]) {
             RCScreenElement *e = rc_pick(list, args[1]);
+            if (!e && !g_noOcr) { rc_merge_ocr((NSMutableArray *)list, app); e = rc_pick(list, args[1]); }
             if (!e) {
                 fprintf(stderr, "Not on screen: %s\n", args[1].UTF8String);
                 return 1;
@@ -1441,8 +1672,13 @@ int main(int argc, char **argv) {
 
         if ([verb isEqualToString:@"press"] || [verb isEqualToString:@"menu"]) {
             RCScreenElement *e = rc_pick(list, args[1]);
+            if (!e && !g_noOcr) { rc_merge_ocr((NSMutableArray *)list, app); e = rc_pick(list, args[1]); }
             if (!e) {
                 fprintf(stderr, "Not on screen: %s\n", args[1].UTF8String);
+                return 1;
+            }
+            if (e.ocr) {
+                fprintf(stderr, "Only seen on screen (text recognition): use tap\n");
                 return 1;
             }
             BOOL menu = [verb isEqualToString:@"menu"];
@@ -1475,7 +1711,8 @@ int main(int argc, char **argv) {
         } else if (json) {
             NSMutableArray *out = [NSMutableArray array];
             for (RCScreenElement *e in list) [out addObject:rc_json(e)];
-            rc_print_json(@{ @"app": appName, @"bundleID": bundleID, @"elements": out });
+            rc_print_json(@{ @"app": appName, @"bundleID": bundleID, @"elements": out,
+                             @"ocr": @{ @"used": @(g_ocrRan), @"ms": @(g_ocrMs) } });
         } else {
             if (bundleID.length) printf("%s (%s)\n", appName.UTF8String, bundleID.UTF8String);
             else printf("%s\n", appName.UTF8String);
