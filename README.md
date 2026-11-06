@@ -6,7 +6,7 @@ RemoteCompanion provides fast, scriptable system control for modern rootless jai
 > **What’s New in v4.4.0**
 > - **New Triggers**: Rotated to Landscape / Portrait, Find My Sound, Incoming Call / Call Started / Call Ended, Battery Level (1-100%), and Focus on / off for a chosen Focus or any Focus.
 > - **Gesture Recorder**: Settings > Gestures records taps, swipes and scrolls, names the recording, and plays it back at 0.5x to 3x with trim, re-record, replace, rename, export and import.
-> - **Faster Building**: compact layout with tile grids, trigger icons, copy and paste for actions, and a searchable Stop Trigger picker styled like the Triggers screen.
+> - **Faster Building**: compact layout with tile grids, trigger icons, copy and paste for actions, search in the New Trigger screen, and a searchable Stop Trigger picker styled like the Triggers screen.
 > - **Loops and Waits**: Repeat, Repeat While, Exit Repeat and Wait Until blocks, `{round}` inside a loop, and nesting with If blocks in either order.
 > - **Running & History**: see every trigger running now, stop one or all, follow a run step by step, and review past runs with the actions as they ran. Keep 0 to 50 runs per trigger, on iOS and in the Web UI.
 > - **Variables**: the Set Variable action saves a value, changes it with math or an RC command, or keeps it for one run. `{name}` in action text becomes its value, a Variable condition compares it, and Settings > Advanced Settings > Variables lists what is saved.
@@ -51,7 +51,7 @@ RemoteCompanion provides fast, scriptable system control for modern rootless jai
 - **Variables**: the Set Variable action saves a value, `{name}` in action text becomes its value, a Variable condition compares it, and Settings > Advanced Settings > Variables lists saved values.
 - **App Quick Action**: pick an app, then one of its registered shortcuts read live from SpringBoard, with same-type shortcuts told apart and stale entries reported instead of run.
 - **Excluded Apps**: Settings > Advanced Settings > Options lists every trigger that has actions and sets the apps where each trigger does not fire.
-- **Universal Search**: Instantly find actions, shortcuts, and devices with integrated search bars in every picker.
+- **Universal Search**: Instantly find triggers, actions, shortcuts, and devices with integrated search bars in every picker.
 - **Cross-Version Support**: Supports iOS 14 through iOS 17, with partial iOS 26 support, across Rootless, Rootful, and RootHide environments.
 - **Advanced Automation**: Full support for NFC tags, custom Lua scripts (with `objc_call` support), and native Siri integration.
 - **iPad Experience**: Native landscape orientation and optimized layouts for iPad power users.
