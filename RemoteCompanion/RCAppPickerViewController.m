@@ -26,6 +26,7 @@
 @property (nonatomic, strong) UISearchController *searchController;
 @property (nonatomic, strong) NSMutableArray<NSString *> *chosen; // multi-select: bundle ids, in the order ticked
 @property (nonatomic, strong) UIBarButtonItem *doneItem;
+@property (nonatomic, strong) UIBarButtonItem *clearItem;
 @end
 
 @implementation RCAppPickerViewController
@@ -44,12 +45,10 @@
         self.doneItem = [[UIBarButtonItem alloc] initWithTitle:@"Done" style:UIBarButtonItemStyleDone target:self action:@selector(donePressed)];
         self.doneItem.enabled = self.allowsEmptySelection || self.chosen.count > 0;
         if (self.allowsEmptySelection) {
-            // Centered between Back and Done via the title slot.
-            UIButton *clearButton = [UIButton buttonWithType:UIButtonTypeSystem];
-            [clearButton setTitle:@"Clear All" forState:UIControlStateNormal];
-            [clearButton addTarget:self action:@selector(clearAllApps) forControlEvents:UIControlEventTouchUpInside];
-            [clearButton sizeToFit];
-            self.navigationItem.titleView = clearButton;
+            // Left of Done.
+            self.clearItem = [[UIBarButtonItem alloc] initWithTitle:@"Clear All"
+                style:UIBarButtonItemStylePlain target:self action:@selector(clearAllApps)];
+            self.navigationItem.rightBarButtonItems = @[self.doneItem, self.clearItem];
         }
     }
     
@@ -79,6 +78,41 @@
     [self loadApps];
 }
 
+// SpringBoard-hidden view services (SBAppTags hidden) that declare no icons
+// of their own are not real apps — AAUIViewService, AppSettings,
+// AccountAuthenticationDialog and the like, which show up with a template
+// icon and a raw id. Hidden items that do declare icons (Apple TV Remote,
+// Apple Media Services) are real launchable apps, so those stay.
+- (BOOL)isHiddenServiceWithoutIcons:(LSApplicationProxy *)app {
+    NSArray *tags = nil;
+    @try { tags = [app valueForKey:@"appTags"]; } @catch (NSException *e) {}
+    BOOL hidden = NO;
+    for (id tag in tags) {
+        if ([tag isKindOfClass:[NSString class]] && [(NSString *)tag caseInsensitiveCompare:@"hidden"] == NSOrderedSame) {
+            hidden = YES;
+            break;
+        }
+    }
+    if (!hidden) return NO;
+    NSURL *infoURL = [app.bundleURL URLByAppendingPathComponent:@"Info.plist"];
+    NSDictionary *info = [NSDictionary dictionaryWithContentsOfURL:infoURL];
+    if (![info isKindOfClass:[NSDictionary class]]) return NO; // unreadable: keep it
+    if ([(NSString *)info[@"CFBundleIconName"] length] > 0) return NO;
+    if ([(NSArray *)info[@"CFBundleIconFiles"] count] > 0) return NO;
+    NSDictionary *icons = info[@"CFBundleIcons"];
+    if ([icons isKindOfClass:[NSDictionary class]]) {
+        NSMutableArray *entries = [NSMutableArray arrayWithObject:icons];
+        NSDictionary *alternate = icons[@"CFBundleAlternateIcons"];
+        if ([alternate isKindOfClass:[NSDictionary class]]) [entries addObjectsFromArray:[alternate allValues]];
+        for (id entry in entries) {
+            if (![entry isKindOfClass:[NSDictionary class]]) continue;
+            if ([(NSArray *)entry[@"CFBundleIconFiles"] count] > 0) return NO;
+            if ([(NSString *)entry[@"CFBundleIconName"] length] > 0) return NO;
+        }
+    }
+    return YES;
+}
+
 - (void)loadApps {
     UIActivityIndicatorView *spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
     [spinner startAnimating];
@@ -99,6 +133,7 @@
             if (![[path pathExtension] isEqualToString:@"app"]) continue;
             if ([path hasPrefix:@"/System/"]) continue;
             if (!app.localizedName.length) continue;
+            if ([self isHiddenServiceWithoutIcons:app]) continue;
             [visible addObject:app];
         }
         
@@ -109,7 +144,10 @@
         
         dispatch_async(dispatch_get_main_queue(), ^{
             [self.tableView reloadData];
-            self.navigationItem.rightBarButtonItem = self.doneItem; // nil unless several apps can be ticked
+            NSMutableArray *items = [NSMutableArray array]; // nil unless several apps can be ticked
+            if (self.doneItem) [items addObject:self.doneItem];
+            if (self.clearItem) [items addObject:self.clearItem];
+            self.navigationItem.rightBarButtonItems = items;
         });
     });
 }
