@@ -4894,14 +4894,18 @@ function onEditTriggerSettings() {
 // sounds, and with a Home button the Accessibility Shortcut, App Switcher, Siri and screenshot,
 // otherwise Siri, the Accessibility Shortcut, a screenshot and Wallet
 function keepDefaultKeys() {
-  const pings = ['trigger_watch_ping', 'trigger_watch_ping_hold'];
+  const pings = ['trigger_device_findmy_sound', 'trigger_watch_ping', 'trigger_watch_ping_hold'];
   const home = typeof serverCapabilities === 'undefined' || serverCapabilities.home_button !== false;
   return pings.concat(home
     ? ['trigger_home_triple_click', 'trigger_home_double_click', 'trigger_home_hold', 'trigger_home_power']
     : ['power_long_press', 'power_triple_click', 'power_volume_up', 'power_double_tap']);
 }
 function canKeepDefault(key) { return keepDefaultKeys().includes(key); }
-function keepsDefault(key) { return !!triggerData(key).keepDefault; }
+function keepsDefault(key) {
+  const stored = triggerData(key).keepDefault;
+  // Find My Sound keeps the system ping unless turned off, as in the app
+  return stored === undefined ? key === 'trigger_device_findmy_sound' : !!stored;
+}
 function setKeepsDefault(key, keep) {
   const data = triggerData(key);
   if (keep) data.keepDefault = true; else delete data.keepDefault;
