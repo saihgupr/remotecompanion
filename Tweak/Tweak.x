@@ -3397,6 +3397,43 @@ static void rc_banner_now_playing(void (^completion)(NSString *subtitle)) {
     });
 }
 
+// The request a REST API Call action holds: its JSON, or a bare URL for a GET
+static NSDictionary *rc_http_request_parse(NSString *action, NSString **problem) {
+    NSString *payload = [[action description] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if ([payload hasPrefix:@"http-request"]) {
+        payload = [[payload substringFromIndex:MIN(payload.length, 12)] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    }
+    if (payload.length == 0) {
+        if (problem) *problem = @"no request given (use http-request {\"url\":\"https://example.com\"})";
+        return nil;
+    }
+    id parsed = nil;
+    if ([payload hasPrefix:@"http://"] || [payload hasPrefix:@"https://"]) {
+        parsed = @{ @"url": payload };
+    } else {
+        parsed = [NSJSONSerialization JSONObjectWithData:[payload dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+    }
+    if (![parsed isKindOfClass:[NSDictionary class]]) {
+        if (problem) *problem = @"the request isn't valid JSON";
+        return nil;
+    }
+    return parsed;
+}
+
+// "POST 192.168.1.50:8080/api/command" for the banner, from the request's method and URL
+static NSString *rc_http_request_banner_subtitle(NSString *action) {
+    NSDictionary *request = rc_http_request_parse(action, NULL);
+    NSString *url = [request[@"url"] description];
+    if (url.length == 0) return nil;
+    NSString *method = [[request[@"method"] description] uppercaseString];
+    if (method.length == 0) method = @"GET";
+    NSURL *parsed = [NSURL URLWithString:url];
+    NSString *shown = parsed.host.length ? parsed.host : url;
+    if (parsed.port && parsed.host.length) shown = [NSString stringWithFormat:@"%@:%@", shown, parsed.port];
+    if (parsed.path.length > 1) shown = [shown stringByAppendingString:parsed.path];
+    return [NSString stringWithFormat:@"%@ %@", method, shown];
+}
+
 static void rc_maybe_show_action_banner(NSString *action) {
     load_trigger_config();
     NSString *cmd = [[action lowercaseString] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
@@ -3461,6 +3498,7 @@ static void rc_maybe_show_action_banner(NSString *action) {
     }
     else if ([cmd hasPrefix:@"kill "]) subtitle = rc_banner_app_name([original substringFromIndex:5]);
     else if ([cmd hasPrefix:@"shortcut:"]) subtitle = rc_parse_shortcut_args([original substringFromIndex:9], NULL, NULL);
+    else if ([cmd hasPrefix:@"http-request"]) subtitle = rc_http_request_banner_subtitle(original);
     else if ([cmd hasPrefix:@"set-vol "] || [cmd hasPrefix:@"ringer volume "] || [cmd hasPrefix:@"brightness "]) {
         // All take 0-100
         float level = [[cmd substringFromIndex:[cmd rangeOfString:@" " options:NSBackwardsSearch].location + 1] floatValue];
@@ -9261,6 +9299,90 @@ BOOL RCCommandFromLocalSocket(void) {
     return g_rcCommandFromLocalSocket;
 }
 
+// REST API Call: makes one HTTP request, as the action's JSON says. It runs in the background,
+// so the actions after it go on right away; the reply is written to the log.
+//   http-request {"method":"POST","url":"https://example.com/hook","headers":{"X-Key":"…"},"body":"…"}
+// A bare URL is a GET, and "body" can be a JSON object instead of text.
+static NSString *rc_handle_http_request(NSString *action) {
+    NSString *problem = nil;
+    NSDictionary *request = rc_http_request_parse(action, &problem);
+    if (!request) return [NSString stringWithFormat:@"Error: %@\n", problem ?: @"invalid request"];
+
+    NSString *method = [[request[@"method"] description] uppercaseString];
+    if (method.length == 0) method = @"GET";
+    NSSet *methods = [NSSet setWithArray:@[@"GET", @"POST", @"PUT", @"PATCH", @"DELETE", @"HEAD", @"OPTIONS"]];
+    if (![methods containsObject:method]) {
+        return [NSString stringWithFormat:@"Error: unsupported method '%@'\n", method];
+    }
+
+    NSString *urlString = [[request[@"url"] description] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    NSURL *url = [NSURL URLWithString:urlString];
+    if (urlString.length == 0 || !url || url.host.length == 0 ||
+        !([url.scheme.lowercaseString isEqualToString:@"http"] || [url.scheme.lowercaseString isEqualToString:@"https"])) {
+        return [NSString stringWithFormat:@"Error: invalid http(s) URL '%@'\n", urlString ?: @""];
+    }
+
+    double timeout = 20.0;
+
+    NSMutableURLRequest *httpRequest = [NSMutableURLRequest requestWithURL:url
+                                                              cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
+                                                          timeoutInterval:timeout];
+    httpRequest.HTTPMethod = method;
+
+    // Headers: names and values as given, so an empty value can unset a default one
+    id headers = request[@"headers"];
+    if ([headers isKindOfClass:[NSDictionary class]]) {
+        for (id key in (NSDictionary *)headers) {
+            NSString *name = [key description];
+            id value = ((NSDictionary *)headers)[key];
+            if (name.length == 0 || ![value isKindOfClass:[NSString class]]) continue;
+            [httpRequest setValue:value forHTTPHeaderField:name];
+        }
+    }
+
+    // Body: text exactly as written, or a JSON object / array / number sent as JSON
+    id body = request[@"body"];
+    NSData *bodyData = nil;
+    if ([body isKindOfClass:[NSString class]] && [(NSString *)body length] > 0) {
+        bodyData = [(NSString *)body dataUsingEncoding:NSUTF8StringEncoding];
+    } else if (body && ![body isKindOfClass:[NSNull class]]) {
+        bodyData = [NSJSONSerialization dataWithJSONObject:body options:NSJSONWritingFragmentsAllowed error:nil];
+    }
+    if (bodyData.length > 0) {
+        httpRequest.HTTPBody = bodyData;
+        if (![httpRequest valueForHTTPHeaderField:@"Content-Type"]) {
+            NSString *text = [[[NSString alloc] initWithData:bodyData encoding:NSUTF8StringEncoding]
+                stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            if ([text hasPrefix:@"{"] || [text hasPrefix:@"["]) {
+                [httpRequest setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+            }
+        }
+    }
+
+    SRLog(@"[REST] %@ %@", method, urlString);
+
+    NSURLSessionConfiguration *sessionConfig = [NSURLSessionConfiguration ephemeralSessionConfiguration];
+    sessionConfig.timeoutIntervalForRequest = timeout;
+    sessionConfig.timeoutIntervalForResource = timeout;
+    NSURLSession *session = [NSURLSession sessionWithConfiguration:sessionConfig
+                                                         delegate:[RCInsecureSessionDelegate sharedDelegate]
+                                                    delegateQueue:nil];
+    NSURLSessionDataTask *task = [session dataTaskWithRequest:httpRequest completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        if (error) {
+            SRLogMin(@"[REST] %@ %@ failed: %@", method, urlString, error.localizedDescription ?: @"connection failed");
+        } else {
+            NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse *)response;
+            NSString *reply = data.length > 0 ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : @"";
+            if (reply.length > 800) reply = [[reply substringToIndex:800] stringByAppendingString:@"…"];
+            SRLog(@"[REST] %@ %@ -> %ld %@", method, urlString, (long)httpResponse.statusCode, reply ?: @"");
+        }
+        [session finishTasksAndInvalidate];
+    }];
+    [task resume];
+
+    return [NSString stringWithFormat:@"REST %@ %@\n", method, urlString];
+}
+
 #import "RCGestures.h"
 
 static NSString *handle_command(NSString *cmd) {
@@ -11851,6 +11973,8 @@ static NSString *handle_command(NSString *cmd) {
         [task resume];
 
         return [NSString stringWithFormat:@"Executing remote RC command on %@: %@\n", clientName, remoteCmd];
+    } else if ([cleanCmd isEqualToString:@"http-request"] || [cleanCmd hasPrefix:@"http-request "]) {
+        return rc_handle_http_request(cleanCmd);
     } else if ([cleanCmd hasPrefix:@"ssh-run "]) {
         NSString *payload = [[cleanCmd substringFromIndex:8] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         NSRange firstSpace = [payload rangeOfString:@" "];
@@ -13640,6 +13764,7 @@ static void start_web_server() {
 
                                     // Automations & Discovery
                                     @{@"command": @"shortcut \"Name\"", @"desc": @"Automation: Run a Siri Shortcut"},
+                                    @{@"command": @"http-request {\"method\":\"GET\",\"url\":\"https://…\"}", @"desc": @"Automation: Call a REST API endpoint with optional headers and body"},
                                     @{@"command": @"trigger <ID>", @"desc": @"Automation: Fire a configured RemoteCompanion trigger"}
                                 ];
                                 NSDictionary *resp = @{@"ok": @YES, @"commands": commandList};
