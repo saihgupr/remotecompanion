@@ -2,6 +2,8 @@
 #import "RCConfigManager.h"
 #import "RCActionPickerViewController.h"
 #import "RCSSHActionEditorViewController.h"
+#import "RCHTTPRequestEditorViewController.h"
+#import "RCHTTPAction.h"
 #import "RCShortcutPickerViewController.h"
 #import "RCAppPickerViewController.h"
 #import "RCConditionPickerViewController.h"
@@ -1814,6 +1816,21 @@ static void RCSetRunWatching(BOOL watching) {
                 [self presentViewController:nav animated:YES completion:nil];
             });
             
+        } else if ([action isEqualToString:@"__HTTP_REQUEST__"]) {
+            RCHTTPRequestEditorViewController *editor = [[RCHTTPRequestEditorViewController alloc] initWithActionString:@""];
+            __weak typeof(self) weakSelf = self;
+            __weak RCHTTPRequestEditorViewController *weakEditor = editor;
+            editor.onSave = ^(NSString *actionString) {
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                if (!strongSelf) return;
+                [strongSelf storeCommand:actionString atIndex:NSNotFound];
+                [weakEditor.navigationController dismissViewControllerAnimated:YES completion:nil];
+            };
+            UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:editor];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self presentViewController:nav animated:YES completion:nil];
+            });
+
         } else if ([action isEqualToString:@"__CUSTOM__"]) {
             // Show custom text input for command
             RCTextInputViewController *inputVC = [[RCTextInputViewController alloc] init];
@@ -3619,6 +3636,9 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         [self showToastEditorWithTitle:toastTitle message:toastSub icon:toastIcon isNew:NO onSave:^(NSString *cmd) {
             [weakSelf storeCommand:cmd atIndex:index]; // keeps any settings around the command
         }];
+    } else if ([currentAction isEqualToString:@"http-request"] || [currentAction hasPrefix:@"http-request "]) {
+        [self promptEditHTTPRequestActionAtIndex:indexPath.row];
+        return;
     } else if ([currentAction hasPrefix:@"ssh-run "]) {
         [self promptEditSSHRunActionAtIndex:indexPath.row];
         return;
@@ -3634,6 +3654,33 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:inputVC];
         [self presentViewController:nav animated:YES completion:nil];
     }
+}
+
+- (void)promptEditHTTPRequestActionAtIndex:(NSInteger)index {
+    if (index < 0 || index >= (NSInteger)self.actions.count) return;
+
+    id actionData = self.actions[index];
+    NSString *action = [actionData isKindOfClass:[NSDictionary class]] ? ((NSDictionary *)actionData)[@"command"] : actionData;
+    if (![action isKindOfClass:[NSString class]]) return;
+
+    RCHTTPRequestEditorViewController *editor = [[RCHTTPRequestEditorViewController alloc] initWithActionString:action];
+    __weak typeof(self) weakSelf = self;
+    editor.onSave = ^(NSString *newAction) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        id existing = strongSelf.actions[index];
+        if ([existing isKindOfClass:[NSDictionary class]]) {
+            NSMutableDictionary *dict = [(NSDictionary *)existing mutableCopy];
+            dict[@"command"] = newAction;
+            strongSelf.actions[index] = dict;
+        } else {
+            strongSelf.actions[index] = newAction;
+        }
+        [strongSelf saveActions];
+        [strongSelf.tableView reloadData];
+        [strongSelf.navigationController popViewControllerAnimated:YES];
+    };
+    [self.navigationController pushViewController:editor animated:YES];
 }
 
 - (void)promptEditSSHRunActionAtIndex:(NSInteger)index {
@@ -4281,6 +4328,12 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             if ([action hasPrefix:@"exec "]) {
                 cell.textLabel.text = [action substringFromIndex:5];
                 subtitle = @"Terminal Command";
+            } else if ([action hasPrefix:@"http-request"]) {
+                NSDictionary *components = [RCHTTPAction componentsFromActionString:action];
+                NSString *method = components[@"method"] ?: @"GET";
+                NSString *url = components[@"url"] ?: @"";
+                cell.textLabel.text = url.length ? url : action;
+                subtitle = [NSString stringWithFormat:@"REST API Call · %@", method];
             } else if ([action hasPrefix:@"ssh-run "]) {
                 NSString *payload = [action substringFromIndex:8];
                 NSRange firstSpace = [payload rangeOfString:@" "];
@@ -4342,7 +4395,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
 
         // Use monospace for code-like things
-        if ([action hasPrefix:@"exec "] || [action hasPrefix:@"root "] || [action hasPrefix:@"Lua "] || [action hasPrefix:@"lua "] || [action hasPrefix:@"ssh-run "]) {
+        if ([action hasPrefix:@"exec "] || [action hasPrefix:@"root "] || [action hasPrefix:@"Lua "] || [action hasPrefix:@"lua "] || [action hasPrefix:@"ssh-run "] || [action hasPrefix:@"http-request"]) {
             cell.textLabel.font = [UIFont monospacedSystemFontOfSize:15 weight:UIFontWeightRegular];
             cell.textLabel.numberOfLines = wrapLongNames ? 0 : 1;
             cell.textLabel.lineBreakMode = NSLineBreakByTruncatingTail;

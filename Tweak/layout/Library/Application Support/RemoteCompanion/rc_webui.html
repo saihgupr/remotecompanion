@@ -2729,6 +2729,34 @@
   </div>
 </div>
 
+<!-- ══ REST API CALL ACTION DIALOG ═════════════════════════════════════ -->
+<div class="dialog-backdrop" id="rest-dialog-backdrop">
+  <div class="dialog-box" style="max-width: 520px; width: 92%;">
+    <div class="dialog-title">REST API Call</div>
+    <div class="dialog-msg" style="padding-bottom: 8px;">Calls any http:// or https:// endpoint when the action runs.</div>
+    <div style="margin: 0 16px 12px; text-align:left;">
+      <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+        <select class="dialog-input" id="rest-method" style="width:112px; margin:0; height:40px; padding:0 8px; text-align:left;">
+          <option>GET</option>
+          <option>POST</option>
+          <option>PUT</option>
+          <option>PATCH</option>
+          <option>DELETE</option>
+        </select>
+        <input class="dialog-input" id="rest-url" type="text" placeholder="http://127.0.0.1:8080/api/command?cmd=play" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" style="flex:1; margin:0; height:40px; text-align:left; font-family:monospace; font-size:13px;">
+      </div>
+      <div style="font-size:12px; font-weight:600; color:var(--rc-label-2); margin:0 0 4px 2px;">Headers <span style="font-weight:400;">(optional, one Name: Value per line)</span></div>
+      <textarea class="dialog-input" id="rest-headers" rows="3" placeholder="Authorization: Bearer …" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" style="height:76px; margin:0 0 10px; width:100%; box-sizing:border-box; text-align:left; resize:vertical; font-family:monospace; font-size:12px;"></textarea>
+      <div style="font-size:12px; font-weight:600; color:var(--rc-label-2); margin:0 0 4px 2px;">Body <span style="font-weight:400;">(optional)</span></div>
+      <textarea class="dialog-input" id="rest-body" rows="4" placeholder='{"key": "value"}' autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" style="height:96px; margin:0; width:100%; box-sizing:border-box; text-align:left; resize:vertical; font-family:monospace; font-size:12px;"></textarea>
+    </div>
+    <div class="dialog-btns">
+      <button onclick="closeRestDialog()" style="color: var(--rc-red);">Cancel</button>
+      <button onclick="saveRestDialog()" style="font-weight: 600;">Save</button>
+    </div>
+  </div>
+</div>
+
 <!-- ══ TOAST ACTION DIALOG ═════════════════════════════════════════════ -->
 <div class="dialog-backdrop" id="toast-dialog-backdrop">
   <div class="dialog-box toast-dialog">
@@ -3922,6 +3950,7 @@ function nameForCmd(cmd) {
   if (lowCmd.startsWith('ha ') || lowCmd === 'ha') return formatHACommandName(cmd);
   if (lowCmd.startsWith('km ') || lowCmd === 'km') return formatKMCommandName(cmd);
   if (lowCmd.startsWith('mqtt ') || lowCmd === 'mqtt') return formatMQTTCommandName(cmd);
+  if (lowCmd.startsWith('http-request')) return formatRESTCommandName(cmd);
   // Recorded gestures
   if (lowCmd === 'gesture record-toggle' || lowCmd.startsWith('gesture record-toggle ')) return 'Record Gesture';
   const played = parseGestureCommand(cmd);
@@ -3953,6 +3982,34 @@ function formatMQTTCommandName(cmd) {
   const topic = parts[0];
   const payload = parts.slice(1).join(' ');
   return payload ? `MQTT: ${topic} (${payload})` : `MQTT: ${topic}`;
+}
+
+function formatRESTCommandName(cmd) {
+  const request = parseRESTAction(cmd);
+  const method = request.method || 'GET';
+  let shown = request.url || 'REST API Call';
+  try {
+    const parsed = new URL(request.url);
+    shown = parsed.host + (parsed.pathname && parsed.pathname !== '/' ? parsed.pathname : '');
+  } catch (e) {}
+  return `${method} ${shown}`;
+}
+
+function parseRESTAction(cmd) {
+  const raw = String(cmd || '').replace(/^http-request/i, '').trim();
+  if (!raw) return { method: 'GET', url: '', headers: {}, body: '' };
+  if (/^https?:\/\//i.test(raw)) return { method: 'GET', url: raw, headers: {}, body: '' };
+  try {
+    const request = JSON.parse(raw);
+    if (!request || typeof request !== 'object') return { method: 'GET', url: '', headers: {}, body: '' };
+    let body = '';
+    if (typeof request.body === 'string') body = request.body;
+    else if (request.body != null) body = JSON.stringify(request.body, null, 2);
+    const headers = (request.headers && typeof request.headers === 'object') ? request.headers : {};
+    return { method: String(request.method || 'GET').toUpperCase(), url: String(request.url || ''), headers, body };
+  } catch (e) {
+    return { method: 'GET', url: '', headers: {}, body: '' };
+  }
 }
 
 function formatKMCommandName(cmd) {
@@ -4197,6 +4254,7 @@ const ACTION_SECTIONS = [
     { name:'Home Assistant: Control Entity…',  cmd:'__HA_PICKER__', icon:'lightbulb_fill', needs_input:true },
     { name:'Keyboard Maestro: Trigger Macro…',cmd:'__KM_TRIGGER__', icon:'command', needs_input:true },
     { name:'MQTT: Publish Topic…',            cmd:'__MQTT_PUBLISH__', icon:'dot_radiowaves_left_right', needs_input:true },
+    { name:'REST API Call…',                  cmd:'__HTTP_REQUEST__', icon:'network', needs_input:true, keywords:'http rest api request url webhook curl' },
     { name:'Shortcuts: Run Shortcut…',        cmd:'__SHORTCUT__',  icon:'wand_stars', needs_input:true },
     { name:'Snapper: Open Area',              cmd:'snapper open',  icon:'crop' },
     { name:'Snapper: Freeze Screen',          cmd:'snapper freeze', icon:'snowflake' },
@@ -5501,6 +5559,80 @@ function terminalInsertVariable(e) {
   });
 }
 
+// ── REST API Call Modal ──
+let g_editingRestIdx = null;
+
+function openRestActionDialog(editIdx = null) {
+  g_editingRestIdx = editIdx;
+  const actions = triggerData(currentKey).actions || [];
+  const act = editIdx === null ? '' : actions[editIdx];
+  const cmd = act && typeof act === 'object' ? String(act.command || '') : String(act || '');
+  const request = parseRESTAction(cmd);
+
+  const methodSelect = document.getElementById('rest-method');
+  if (![...methodSelect.options].some(option => option.value === request.method)) {
+    const option = document.createElement('option');
+    option.textContent = request.method;
+    methodSelect.appendChild(option);
+  }
+  methodSelect.value = request.method;
+  document.getElementById('rest-url').value = request.url;
+  document.getElementById('rest-headers').value = Object.keys(request.headers).sort()
+    .map(name => `${name}: ${request.headers[name]}`).join('\n');
+  document.getElementById('rest-body').value = request.body;
+  document.getElementById('rest-dialog-backdrop').classList.add('visible');
+  setTimeout(() => document.getElementById('rest-url').focus(), 100);
+}
+
+function closeRestDialog() {
+  document.getElementById('rest-dialog-backdrop').classList.remove('visible');
+  g_editingRestIdx = null;
+}
+
+function saveRestDialog() {
+  const url = document.getElementById('rest-url').value.trim();
+  const hasVariable = /\{[A-Za-z_][A-Za-z0-9_]*\}/.test(url);
+  let parsedURL = null;
+  try { parsedURL = new URL(url); } catch (e) {}
+  const validURL = parsedURL && /^https?:$/.test(parsedURL.protocol) && parsedURL.hostname;
+  if (!hasVariable && !validURL) {
+    showToast('Enter a full http:// or https:// URL');
+    return;
+  }
+
+  const headers = {};
+  let invalid = null;
+  for (const rawLine of document.getElementById('rest-headers').value.split('\n')) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+    const colon = line.indexOf(':');
+    if (colon <= 0) { invalid = line; break; }
+    const name = line.slice(0, colon).trim();
+    if (!name) { invalid = line; break; }
+    headers[name] = line.slice(colon + 1).trim();
+  }
+  if (invalid) {
+    showToast(`Header needs a name and a colon: ${invalid}`);
+    return;
+  }
+
+  const request = { method: document.getElementById('rest-method').value, url };
+  if (Object.keys(headers).length) request.headers = headers;
+  const body = document.getElementById('rest-body').value;
+  if (body.length) request.body = body;
+
+  const command = 'http-request ' + JSON.stringify(request);
+  const actions = triggerData(currentKey).actions || [];
+  if (g_editingRestIdx !== null && g_editingRestIdx < actions.length) {
+    storeCommandAt(actions, g_editingRestIdx, command);
+  } else {
+    addActionToCurrent(command);
+  }
+  closeRestDialog();
+  saveConfig();
+  renderActionList();
+}
+
 // Puts a command at idx, keeping any settings around it
 function storeCommandAt(actions, idx, command) {
   if (actions[idx] && typeof actions[idx] === 'object' && typeof actions[idx].command === 'string') actions[idx].command = command;
@@ -6232,6 +6364,8 @@ function editAction(idx) {
       });
     } else if (low.startsWith('km ') || low === 'km') {
       editKMAction(idx);
+    } else if (low.startsWith('http-request')) {
+      openRestActionDialog(idx);
     } else {
       promptTerminalModal(act, idx, true); // any other command, as text with the + menu
     }
@@ -6559,6 +6693,8 @@ function selectPickerAction(act) {
     openKMDialog();
   } else if (c === '__MQTT_PUBLISH__') {
     promptMQTTActionPicker();
+  } else if (c === '__HTTP_REQUEST__') {
+    openRestActionDialog(null);
   } else if (c === 'unlock') {
     promptUnlockDialog('', val => {
       addActionToCurrent(val);
@@ -8825,6 +8961,7 @@ const BANNER_PLACEHOLDERS = {
   '__SHORTCUT_PICKER__': ['shortcut:'],
   '__LUA_SCRIPT__': ['lua ', 'lua_eval '],
   '__SSH_COMMAND__': ['ssh-run '],
+  '__HTTP_REQUEST__': ['http-request '],
   '__CUSTOM__': ['exec ', 'root ', 'sudo ']
 };
 

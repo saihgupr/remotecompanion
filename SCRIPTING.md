@@ -164,6 +164,29 @@ Run arbitrary Lua code on the device.
 "Lua rc.execute('play')"
 ```
 
+### REST API Call
+Call any HTTP endpoint. The action is one `http-request` string holding the request as JSON:
+
+```json
+"http-request {\"method\":\"POST\",\"url\":\"https://example.com/hook\",\"headers\":{\"Authorization\":\"Bearer TOKEN\"},\"body\":\"{\\\"event\\\":\\\"ping\\\"}\"}"
+```
+
+- `method` defaults to GET. GET, POST, PUT, PATCH, DELETE, HEAD and OPTIONS work.
+- `headers` and `body` are optional. A body can also be a JSON object instead of an escaped string:
+  ```json
+  "http-request {\"method\":\"POST\",\"url\":\"https://example.com/hook\",\"body\":{\"event\":\"ping\"}}"
+  ```
+- A JSON body is sent as `application/json` unless you set a Content-Type header.
+- The request runs in the background, so the next action starts right away. The reply is written to `rc logs`.
+- HTTPS endpoints with self-signed certificates work, like the Home Assistant and Keyboard Maestro integrations.
+- A bare URL is a GET: `"http-request https://example.com/ping"`.
+- To run an RC command on this iPhone from a trigger, call the local Web UI API (the Web UI must be on):
+  ```json
+  "http-request {\"method\":\"GET\",\"url\":\"http://127.0.0.1:8080/api/command?cmd=play\"}"
+  ```
+
+In the app, pick **REST API Call...** under Integrations, which fills in this string for you.
+
 ### If / Else Condition
 Branch based on device state or time of day. Supported conditions: **front app**, **time of day (between)**, **lock status**, **player status**, **wifi**, **bluetooth**, **airplane mode**, **vibration**, etc.
 

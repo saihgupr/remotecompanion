@@ -39,6 +39,7 @@ RemoteCompanion provides fast, scriptable system control for modern rootless jai
 - **iPad Experience**: Native landscape orientation and optimized layouts for iPad power users.
 - **Live Discovery**: Discovery-based live lists for nearby AirPlay and Bluetooth hardware.
 - **Trigger Favorites**: Mark any trigger as a favorite for instant access at the top of the picker.
+- **REST API Actions**: Add a **REST API Call...** action to any trigger to call a URL of your choice, with its method, headers and body. Empty by default, so it can call a webhook, a local service, or RemoteCompanion's own API.
 - **True Multitasking**: Concurrent server handling powered by GCD—zero battery drain, zero blocking.
 
 ---
@@ -488,6 +489,9 @@ Send command strings via `GET` or `POST`:
 **3. Fire an Automation Trigger:**
 Execution URLs for your specific triggers:
 - **Example**: `http://[device_ip]:8080/api/trigger/trigger_1`
+
+**4. Call Other APIs from a Trigger:**
+The **REST API Call...** action picks any method, URL, headers and body. Point it at another device's API, a webhook, or this iPhone's own API (`http://127.0.0.1:8080/api/command?cmd=play`).
 
 #### Performance & Implementation
 * **Speed**: The HTTP API is significantly faster than SSH (~0.1s faster) by skipping the heavy SSH handshake.

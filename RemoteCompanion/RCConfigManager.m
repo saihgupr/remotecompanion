@@ -1,4 +1,5 @@
 #import "RCConfigManager.h"
+#import "RCHTTPAction.h"
 #import "RCGesturesViewController.h"
 #import <sys/sysctl.h>
 #import <LocalAuthentication/LocalAuthentication.h>
@@ -1579,6 +1580,15 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
             result = [NSString stringWithFormat:@"Open Camera (%@%@)", modeName, detStr];
         } else if ([cmd hasPrefix:@"root "]) {
             result = [NSString stringWithFormat:@"[root] %@", [cmd substringFromIndex:5]];
+        } else if ([cmd hasPrefix:@"http-request"]) {
+            NSDictionary *components = [RCHTTPAction componentsFromActionString:originalCmd];
+            if (components) {
+                NSString *method = components[@"method"] ?: @"GET";
+                NSString *url = components[@"url"] ?: @"";
+                result = [NSString stringWithFormat:@"%@ %@", method, url];
+            } else {
+                result = @"REST API Call";
+            }
         } else if ([cmd hasPrefix:@"ssh-run "]) {
             NSString *payload = [originalCmd substringFromIndex:8];
             NSRange firstSpace = [payload rangeOfString:@" "];
@@ -1886,6 +1896,7 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
 
     NSString *cmd = [[(NSString *)cmdId stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString];
     if ([cmd hasPrefix:@"ssh-run "] || [cmd hasPrefix:@"ssh "]) return @"terminal.fill";
+    if ([cmd hasPrefix:@"http-request"]) return @"network";
     if ([cmd hasPrefix:@"audiohandoff enabled "] || [cmd hasPrefix:@"audiohandoff auto "]) return @"headphones";
     if ([cmd isEqualToString:@"camera record"]) return @"video.circle.fill";
     if ([cmd isEqualToString:@"camera shutter"]) return @"camera.circle.fill";

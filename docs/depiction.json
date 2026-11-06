@@ -58,7 +58,7 @@
         },
         {
           "class": "DepictionMarkdownView",
-          "markdown": "RemoteCompanion is a free, open-source Activator replacement and automation tweak for modern jailbroken iOS (iOS 14 - 17, with partial iOS 26 support). Bind physical hardware buttons, multi-touch gestures, NFC tags, network events, and schedules to customizable action sequences.\n\n### Key Highlights\n* **Hardware Controls**: Volume, Power, and Home button clicks, holds, and combos.\n* **Modern Gestures**: Status bar swipes/holds, edge swipes, and bottom bar gestures.\n* **Integrations**: Home Assistant, Keyboard Maestro, and MQTT triggers.\n* **Browser Hub**: Full web dashboard for remote control and live diagnostics.\n* **No Battery Drain**: Built on Grand Central Dispatch to sleep when idle."
+          "markdown": "RemoteCompanion is a free, open-source Activator replacement and automation tweak for modern jailbroken iOS (iOS 14 - 17, with partial iOS 26 support). Bind physical hardware buttons, multi-touch gestures, NFC tags, network events, and schedules to customizable action sequences.\n\n### Key Highlights\n* **Hardware Controls**: Volume, Power, and Home button clicks, holds, and combos.\n* **Modern Gestures**: Status bar swipes/holds, edge swipes, and bottom bar gestures.\n* **Integrations**: Home Assistant, Keyboard Maestro, MQTT triggers, and REST API calls.\n* **Browser Hub**: Full web dashboard for remote control and live diagnostics.\n* **No Battery Drain**: Built on Grand Central Dispatch to sleep when idle."
         },
         {
           "class": "DepictionTableButtonView",
