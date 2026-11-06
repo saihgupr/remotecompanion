@@ -18,6 +18,7 @@
 #import "RCScheduledTriggerViewController.h"
 #import "RCNotificationTriggerViewController.h"
 #import "RCWiFiTriggerViewController.h"
+#import "RCActionsViewController+Selection.h"
 #import "RCBluetoothTriggerViewController.h"
 #import "RCAudioOutputTriggerViewController.h"
 #import "RCWrapSizing.h"
@@ -891,6 +892,7 @@ static id g_actionClipboard = nil;
     [menuActions addObject:[UIAction actionWithTitle:@"Export Actions" image:[UIImage systemImageNamed:@"square.and.arrow.up"] identifier:nil handler:^(__kindof UIAction *a) {
         [weakSelf exportActions];
     }]];
+    [self rc_addActionsSectionToMenuItems:menuActions]; // Select Actions, Paste, Import, Export
     UIAction *clearAction = [UIAction actionWithTitle:@"Clear All Actions" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(__kindof UIAction *a) {
         [weakSelf clearAllActions];
     }];
@@ -3143,6 +3145,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (self.rc_isSelectingActions) { [self rc_selectionChanged]; return; } // a tap only selects
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     if ([self runShown]) return;
     id actionData = self.actions[indexPath.row];
@@ -4598,7 +4601,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 }
 
 - (BOOL)tableView:(UITableView *)tableView shouldIndentWhileEditingRowAtIndexPath:(NSIndexPath *)indexPath {
-    return NO;
+    return self.rc_isSelectingActions; // room for the selection circles
 }
 
 
