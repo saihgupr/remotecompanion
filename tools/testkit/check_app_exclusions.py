@@ -40,9 +40,9 @@ class ExclusionWiring(unittest.TestCase):
 
     def test_excluded_rows_wrap_actions_only_when_enabled(self):
         ui = source("RemoteCompanion/RCExcludedAppsViewController.m")
-        self.assertIn("cell.nameLabel.numberOfLines = wrapLongNames ? 0 : 1;", ui)
-        self.assertIn("cell.actionsLabel.numberOfLines = wrapLongNames ? 0 : 1;", ui)
-        self.assertIn("cell.excludedLabel.attributedText", ui)
+        self.assertIn("cell.textLabel.numberOfLines = wrapLongNames ? 0 : 1;", ui)
+        self.assertIn("RCFitOneLine(actionsLine", ui)
+        self.assertIn('@"Excluded: %@ (%lu)"', ui)
         self.assertNotIn("systemRedColor", ui)
 
     def test_dispatch_guard_before_action_execution(self):
