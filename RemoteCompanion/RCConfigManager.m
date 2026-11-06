@@ -6,6 +6,13 @@
 #include <unistd.h>
 #include <errno.h>
 
+static NSDictionary *RCNativeQuickShortcutRequest(NSString *command) {
+    if (![command hasPrefix:@"quickactions run "] || command.length > 32785) return nil;
+    NSData *data = [[NSData alloc] initWithBase64EncodedString:[command substringFromIndex:17] options:0];
+    id value = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+    return [value isKindOfClass:NSDictionary.class] ? value : nil;
+}
+
 // Use absolute path that both TrollStore app and tweak can access
 #define kConfigPath @"/var/mobile/Documents/rc_triggers.plist"
 #define kConfigChangedNotification "com.pizzaman.rc.configchanged"
@@ -1283,6 +1290,13 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
     }
 
     NSString *originalCmd = [(NSString *)cmdId stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if ([originalCmd hasPrefix:@"quickactions run "]) {
+        NSDictionary *request = RCNativeQuickShortcutRequest(originalCmd);
+        NSString *title = [request[@"title"] isKindOfClass:NSString.class] ? request[@"title"] : nil;
+        NSString *app = [request[@"appName"] isKindOfClass:NSString.class] ? request[@"appName"] : nil;
+        if (!app.length && [request[@"bundle"] isKindOfClass:NSString.class]) app = request[@"bundle"];
+        return title.length ? [NSString stringWithFormat:@"%@: %@", app.length ? app : @"App Quick Shortcut", title] : @"App Quick Shortcut";
+    }
     NSString *cmd = [originalCmd lowercaseString];
     NSDictionary *names = @{
         @"play": @"Play",
@@ -1846,6 +1860,11 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
     if ([cmd hasPrefix:@"Lua "] || [cmd hasPrefix:@"lua_eval "] || [cmd hasPrefix:@"lua-eval "] || [cmd hasPrefix:@"lua "]) return @"scroll.fill";
     if ([cmd hasPrefix:@"spotify "]) return @"music.note";
     if ([cmd isEqualToString:@"home"]) return @"house.fill";
+    if ([cmd hasPrefix:@"quickactions run "]) {
+        NSDictionary *request = RCNativeQuickShortcutRequest(cmd);
+        NSString *bundle = [request[@"bundle"] isKindOfClass:NSString.class] ? request[@"bundle"] : nil;
+        return bundle.length ? [@"USER_APP:" stringByAppendingString:bundle] : @"bolt.fill";
+    }
     if ([cmd hasPrefix:@"uiopen "]) return [NSString stringWithFormat:@"USER_APP:%@", [cmd substringFromIndex:7]];
     if ([cmd isEqualToString:@"kill current"] || [cmd isEqualToString:@"kill front"] ||
         [cmd isEqualToString:@"kill foreground"] || [cmd isEqualToString:@"kill current app"] ||

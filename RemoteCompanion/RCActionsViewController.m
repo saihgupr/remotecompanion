@@ -612,6 +612,75 @@ static UIImage *RCGrabberImage(void) {
     return [UIImage systemImageNamed:@"line.3.horizontal"] ?: [UIImage systemImageNamed:@"line.horizontal.3"];
 }
 
+// Kept in this translation unit so both app build paths include the picker.
+@interface RCNativeQuickShortcutPicker : UITableViewController
+@property (nonatomic, copy) NSString *bundleIdentifier;
+@property (nonatomic, copy) NSString *appName;
+@property (nonatomic, copy) void (^onPick)(NSDictionary *item);
+@property (nonatomic, copy) NSArray<NSDictionary *> *items;
+@property (nonatomic, copy) NSString *statusText;
+@end
+
+@implementation RCNativeQuickShortcutPicker
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = self.appName;
+    self.items = @[];
+    self.tableView.rowHeight = UITableViewAutomaticDimension;
+    self.tableView.estimatedRowHeight = 60;
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh target:self action:@selector(loadShortcuts)];
+    [self loadShortcuts];
+}
+- (void)loadShortcuts {
+    self.statusText = @"Loading registered app shortcuts...";
+    self.items = @[];
+    self.navigationItem.rightBarButtonItem.enabled = NO;
+    [self.tableView reloadData];
+    __weak typeof(self) weakSelf = self;
+    [[RCServerClient sharedClient] executeCommand:[@"quickactions list " stringByAppendingString:self.bundleIdentifier] completion:^(NSString *output, NSError *error) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            __strong typeof(weakSelf) self = weakSelf;
+            if (!self) return;
+            self.navigationItem.rightBarButtonItem.enabled = YES;
+            NSData *data = [output dataUsingEncoding:NSUTF8StringEncoding];
+            id response = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+            NSString *status = [response isKindOfClass:NSDictionary.class] && [response[@"status"] isKindOfClass:NSString.class] ? response[@"status"] : nil;
+            NSArray *raw = status && [response[@"items"] isKindOfClass:NSArray.class] ? response[@"items"] : @[];
+            NSMutableArray *valid = [NSMutableArray array];
+            for (id item in raw) {
+                if (valid.count >= 256) break;
+                if (![item isKindOfClass:NSDictionary.class] || ![item[@"type"] isKindOfClass:NSString.class] || ![item[@"type"] length] ||
+                    ![item[@"identity"] isKindOfClass:NSString.class] || [item[@"identity"] length] != 67 ||
+                    ![item[@"title"] isKindOfClass:NSString.class] || ![item[@"subtitle"] isKindOfClass:NSString.class]) continue;
+                [valid addObject:item];
+            }
+            self.items = valid;
+            NSString *detail = status && [response[@"error"] isKindOfClass:NSString.class] ? response[@"error"] : nil;
+            if (error || !status) self.statusText = @"Unable to load native app shortcuts. Check the SpringBoard connection and retry.";
+            else if (![status isEqualToString:@"ok"]) self.statusText = detail.length ? detail : @"Native app shortcuts are unavailable on this device.";
+            else self.statusText = valid.count ? @"Choose a registered app shortcut. Its current native payload is resolved again when the action runs." : @"This app currently has no registered Quick Shortcuts. Apps may register dynamic shortcuts after being opened. Open the app, then refresh here.";
+            [self.tableView reloadData];
+        });
+    }];
+}
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return self.items.count; }
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section { return self.statusText; }
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"NativeQuickShortcut"];
+    if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"NativeQuickShortcut"];
+    NSDictionary *item = self.items[indexPath.row];
+    cell.textLabel.text = [item[@"title"] length] ? item[@"title"] : item[@"type"];
+    cell.textLabel.numberOfLines = 0;
+    cell.detailTextLabel.text = item[@"subtitle"];
+    cell.detailTextLabel.numberOfLines = 0;
+    cell.imageView.image = [UIImage systemImageNamed:@"bolt.fill"];
+    return cell;
+}
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    if (self.onPick) self.onPick(self.items[indexPath.row]);
+}
+@end
 
 @implementation RCActionsViewController
 
@@ -1772,6 +1841,33 @@ static void RCSetRunWatching(BOOL watching) {
             });
         } else if ([action isEqualToString:@"__DELAY__"]) {
             [self presentDelayForIndex:NSNotFound current:nil after:0];
+        } else if ([action isEqualToString:@"__APP_QUICK_SHORTCUT__"]) {
+            RCAppPickerViewController *appPicker = [[RCAppPickerViewController alloc] init];
+            appPicker.title = @"Open Apps quick shortcuts";
+            appPicker.suppressAutoPop = YES;
+            __weak RCAppPickerViewController *weakAppPicker = appPicker;
+            __weak typeof(self) weakSelf = self;
+            appPicker.onAppSelected = ^(NSString *name, NSString *bundle) {
+                RCNativeQuickShortcutPicker *shortcuts = [[RCNativeQuickShortcutPicker alloc] initWithStyle:UITableViewStyleInsetGrouped];
+                shortcuts.bundleIdentifier = bundle;
+                shortcuts.appName = name;
+                shortcuts.onPick = ^(NSDictionary *item) {
+                    __strong typeof(weakSelf) self = weakSelf;
+                    if (!self) return;
+                    NSDictionary *request = @{@"bundle": bundle, @"appName": name ?: bundle, @"type": item[@"type"], @"identity": item[@"identity"], @"title": item[@"title"]};
+                    NSData *data = [NSJSONSerialization dataWithJSONObject:request options:0 error:nil];
+                    if (!data || data.length > 24576) return;
+                    [self.actions addObject:[@"quickactions run " stringByAppendingString:[data base64EncodedStringWithOptions:0]]];
+                    [self saveActions];
+                    [self.tableView reloadData];
+                    [self dismissViewControllerAnimated:YES completion:nil];
+                };
+                [weakAppPicker.navigationController pushViewController:shortcuts animated:YES];
+            };
+            UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:appPicker];
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                [self presentViewController:nav animated:YES completion:nil];
+            });
         } else if ([action isEqualToString:@"__OPEN_APP__"]) {
             RCAppPickerViewController *appPicker = [[RCAppPickerViewController alloc] init];
             appPicker.onAppSelected = ^(NSString *name, NSString *bundleId) {
@@ -4121,6 +4217,9 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             } else if ([action hasPrefix:@"shortcut:"]) {
                 cell.textLabel.text = cleanName;
                 subtitle = @"Siri Shortcut";
+            } else if ([action hasPrefix:@"quickactions run "]) {
+                cell.textLabel.text = cleanName;
+                subtitle = @"App Quick Shortcut";
             } else if ([action hasPrefix:@"uiopen "]) {
                 cell.textLabel.text = cleanName;
                 subtitle = @"Application";

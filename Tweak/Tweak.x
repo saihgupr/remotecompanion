@@ -29,9 +29,11 @@
 #import "native_curl.h"
 #import "RCTestKit.h"
 #import "RCToastPill.h"
+#import "RCTriggerAppExclusions.h"
 #import <CoreFoundation/CoreFoundation.h>
 #import <CoreLocation/CoreLocation.h>
 #import <objc/message.h>
+#import "RCQuickActions.h"
 
 @interface CLLocationManager (RemoteCompanionPrivate)
 + (BOOL)locationServicesEnabled;
@@ -106,7 +108,6 @@ static UIWindow *g_rcTapRecordWindow = nil;
 
 void SRLog(NSString *format, ...);
 void SRLogMin(NSString *format, ...);
-#import <objc/message.h>
 
 static IOHIDEventSystemClientRef (*_IOHIDEventSystemClientCreate)(CFAllocatorRef allocator);
 static IOHIDEventRef (*_IOHIDEventCreateKeyboardEvent)(CFAllocatorRef allocator, uint64_t timestamp, uint32_t usagePage, uint32_t usage, boolean_t down, IOHIDEventOptionBits flags);
@@ -2096,6 +2097,40 @@ static BOOL RC_IsForegroundAppExcluded() {
         cachedResult = result;
         return result;
     }
+}
+
+// Per-behavior exclusions are independent of the legacy all-trigger blacklist.
+// Query the foreground owner only for eligible triggers with an actual list.
+// Do not cache the bundle ID: switching apps must not suppress the next app's gesture.
+static BOOL RC_IsTriggerExcludedForForegroundApp(NSString *key) {
+    if (!RCTriggerSupportsAppExclusions(key)) return NO;
+    id trigger = g_triggerConfig[@"triggers"][key];
+    if (![trigger isKindOfClass:[NSDictionary class]] ||
+        !RCNormalizedExcludedApps(trigger[@"excludedApps"]).count) return NO;
+
+    __block NSString *bundleID = nil;
+    void (^readForeground)(void) = ^{
+        @try {
+            SpringBoard *sb = (SpringBoard *)[UIApplication sharedApplication];
+            if ([sb respondsToSelector:@selector(_accessibilityFrontMostApplication)]) {
+                SBApplication *app = [sb _accessibilityFrontMostApplication];
+                if ([app respondsToSelector:@selector(bundleIdentifier)]) bundleID = [[app bundleIdentifier] copy];
+            }
+        } @catch (__unused NSException *exception) { }
+    };
+    if ([NSThread isMainThread]) {
+        readForeground();
+    } else {
+        // Simulation/other off-main dispatch must not stall input behind SpringBoard.
+        // Unknown identity fails open rather than disabling unrelated gestures.
+        dispatch_semaphore_t answered = dispatch_semaphore_create(0);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            readForeground();
+            dispatch_semaphore_signal(answered);
+        });
+        if (dispatch_semaphore_wait(answered, dispatch_time(DISPATCH_TIME_NOW, 25 * NSEC_PER_MSEC)) != 0) return NO;
+    }
+    return RCTriggerExcludesBundleID(key, trigger, bundleID);
 }
 
 static NSString *get_human_name_for_trigger(NSString *key, NSDictionary *triggerData) {
@@ -4321,6 +4356,11 @@ void RCExecuteTrigger(NSString *triggerKey) {
     
     if (![trigger[@"enabled"] boolValue]) {
         SRLog(@"Trigger '%@' is DISABLED in config", triggerKey);
+        return;
+    }
+
+    if (RC_IsTriggerExcludedForForegroundApp(triggerKey)) {
+        SRLog(@"Trigger '%@' SUPPRESSED for its excluded foreground app", triggerKey);
         return;
     }
     
@@ -9164,6 +9204,8 @@ static NSString *handle_command(NSString *cmd) {
     }
     NSString *cleanCmd = [cmd stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     if (cleanCmd.length == 0) return @"Error: Empty command\n";
+    // Resolve app-owned native shortcut payloads afresh; do not log encoded data.
+    if ([cleanCmd hasPrefix:@"quickactions "]) return RCQACommand(cleanCmd);
     // The test kit's passcode never reaches the log (see RCTestKit.x)
     if ([cleanCmd hasPrefix:@"testkit passcode/set"]) {
         SRLog(@"Received command: testkit passcode/set (redacted)");
@@ -13848,6 +13890,7 @@ static BOOL RC_TriggerIsActionable(NSString *key) {
     id trigger = g_triggerConfig[@"triggers"][key];
     if (![trigger isKindOfClass:[NSDictionary class]]) return NO;
     if (![trigger[@"enabled"] boolValue]) return NO;
+    if (RC_IsTriggerExcludedForForegroundApp(key)) return NO;
     NSArray *actions = trigger[@"actions"];
     return actions.count > 0;
 }
@@ -17024,7 +17067,8 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                     
                     load_trigger_config();
                     BOOL enabled = RC_MasterEnabled() && 
-                                   [g_triggerConfig[@"triggers"][@"trigger_statusbar_double_tap"][@"enabled"] boolValue];
+                                   [g_triggerConfig[@"triggers"][@"trigger_statusbar_double_tap"][@"enabled"] boolValue] &&
+                                   !RC_IsTriggerExcludedForForegroundApp(@"trigger_statusbar_double_tap");
                     
                     if (enabled) {
                         NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
@@ -17064,7 +17108,8 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                         if (g_pendingStatusBarTrigger) {
                             load_trigger_config();
                             BOOL enabled = RC_MasterEnabled() && 
-                                           [g_triggerConfig[@"triggers"][g_pendingStatusBarTrigger][@"enabled"] boolValue];
+                                           [g_triggerConfig[@"triggers"][g_pendingStatusBarTrigger][@"enabled"] boolValue] &&
+                                           !RC_IsTriggerExcludedForForegroundApp(g_pendingStatusBarTrigger);
                             
                             if (enabled) {
                                 g_statusBarHoldTriggered = YES;
@@ -17222,7 +17267,8 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                     if (isHoz && abs_udx > 15 && !g_statusBarSwipeHapticFired) {
                         NSString *trigger = (user_dx > 0) ? @"trigger_statusbar_swipe_right" : @"trigger_statusbar_swipe_left";
                         load_trigger_config();
-                        if (RC_MasterEnabled() && [g_triggerConfig[@"triggers"][trigger][@"enabled"] boolValue]) {
+                        if (RC_MasterEnabled() && [g_triggerConfig[@"triggers"][trigger][@"enabled"] boolValue] &&
+                            !RC_IsTriggerExcludedForForegroundApp(trigger)) {
                             RCTriggerHapticFor(trigger);
                         }
                         if (RC_TriggerIsActionable(trigger)) RC_FreezeGestureScrolling();
