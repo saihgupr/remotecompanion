@@ -38,11 +38,16 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     
-    self.title = self.allowsMultipleApps ? @"Select Apps" : @"Select App";
+    if (!self.title.length) self.title = self.allowsMultipleApps ? @"Select Apps" : @"Select App";
     self.chosen = [NSMutableArray arrayWithArray:self.selectedBundleIds ?: @[]];
     if (self.allowsMultipleApps) {
         self.doneItem = [[UIBarButtonItem alloc] initWithTitle:@"Done" style:UIBarButtonItemStyleDone target:self action:@selector(donePressed)];
-        self.doneItem.enabled = self.chosen.count > 0;
+        self.doneItem.enabled = self.allowsEmptySelection || self.chosen.count > 0;
+        if (self.allowsEmptySelection) {
+            self.navigationItem.leftItemsSupplementBackButton = YES;
+            self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Clear All"
+                style:UIBarButtonItemStylePlain target:self action:@selector(clearAllApps)];
+        }
     }
     
     // Enable Large Titles
@@ -98,6 +103,14 @@
 
 #pragma mark - Table View
 
+- (NSUInteger)chosenIndexForBundleID:(NSString *)bundleID {
+    // Exclusions are normalized case-insensitively, whereas Launch Services may
+    // return mixed-case IDs (for example com.apple.MobileSMS).
+    return [self.chosen indexOfObjectPassingTest:^BOOL(NSString *chosenID, NSUInteger index, BOOL *stop) {
+        return [chosenID caseInsensitiveCompare:bundleID] == NSOrderedSame;
+    }];
+}
+
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     return self.filteredApps.count;
 }
@@ -119,7 +132,7 @@
     // Let's try standard UIImage private method
     UIImage *icon = [UIImage _applicationIconImageForBundleIdentifier:app.applicationIdentifier format:0 scale:[UIScreen mainScreen].scale];
     cell.imageView.image = icon;
-    cell.accessoryType = (self.allowsMultipleApps && [self.chosen containsObject:app.applicationIdentifier]) ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+    cell.accessoryType = (self.allowsMultipleApps && [self chosenIndexForBundleID:app.applicationIdentifier] != NSNotFound) ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
     
     return cell;
 }
@@ -132,9 +145,10 @@
     NSString *name = app.localizedName ?: bundleId;
 
     if (self.allowsMultipleApps) {
-        if ([self.chosen containsObject:bundleId]) [self.chosen removeObject:bundleId];
+        NSUInteger selectedIndex = [self chosenIndexForBundleID:bundleId];
+        if (selectedIndex != NSNotFound) [self.chosen removeObjectAtIndex:selectedIndex];
         else [self.chosen addObject:bundleId];
-        self.doneItem.enabled = self.chosen.count > 0;
+        self.doneItem.enabled = self.allowsEmptySelection || self.chosen.count > 0;
         [tableView reloadRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationNone];
         return;
     }
@@ -165,13 +179,20 @@
 }
 
 
+- (void)clearAllApps {
+    // Also removes selected IDs for apps that are no longer installed/visible.
+    [self.chosen removeAllObjects];
+    self.doneItem.enabled = YES;
+    [self.tableView reloadData];
+}
+
 // Multi-select: hands the ticked apps over
 - (void)donePressed {
     NSMutableArray<NSString *> *names = [NSMutableArray array];
     for (NSString *bundleId in self.chosen) {
         NSString *name = bundleId; // an app that is no longer installed keeps its id
         for (LSApplicationProxy *app in self.allApps) {
-            if ([app.applicationIdentifier isEqualToString:bundleId]) { name = app.localizedName ?: bundleId; break; }
+            if ([app.applicationIdentifier caseInsensitiveCompare:bundleId] == NSOrderedSame) { name = app.localizedName ?: bundleId; break; }
         }
         [names addObject:name];
     }

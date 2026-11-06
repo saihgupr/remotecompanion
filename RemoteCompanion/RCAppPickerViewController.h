@@ -10,6 +10,8 @@ NS_ASSUME_NONNULL_BEGIN
 // Several apps can be ticked; Done hands them over, in the order they were ticked.
 // selectedBundleIds are ticked to begin with.
 @property (nonatomic, assign) BOOL allowsMultipleApps;
+// Exclusion lists may be empty; action pickers still require at least one app.
+@property (nonatomic, assign) BOOL allowsEmptySelection;
 @property (nonatomic, copy, nullable) NSArray<NSString *> *selectedBundleIds;
 @property (nonatomic, copy, nullable) void (^onAppsSelected)(NSArray<NSString *> *names, NSArray<NSString *> *bundleIds);
 
