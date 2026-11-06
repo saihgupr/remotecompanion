@@ -3314,6 +3314,8 @@ function iconForKey(key) {
   if (key.startsWith('wifi_connect_')) return { icon:'wifi', cls:'icon-green' };
   if (key.startsWith('wifi_disconnect_')) return { icon:'wifi_slash', cls:'icon-orange' };
   if (key.startsWith('wifi_'))       return { icon:'wifi',                          cls:'icon-blue' };
+  if (key.startsWith('trigger_device_battery_above_')) return { icon:'battery_100', cls:'icon-green' };
+  if (key.startsWith('trigger_device_battery_below_')) return { icon:'battery_25', cls:'icon-orange' };
   if (key.startsWith('output_set_')) return { icon:'airplayaudio', cls:'icon-green' };
   if (key.startsWith('output_')) return { icon:'airplayaudio', cls:'icon-indigo' };
   if (key.startsWith('bt_connect_')) return { icon:'bolt_horizontal_fill', cls:'icon-green' };
@@ -3335,6 +3337,8 @@ function nameForKey(key) {
   if (key.startsWith('wifi_connect_')) return `WiFi Connect: ${key.slice(13)}`;
   if (key.startsWith('wifi_disconnect_')) return `WiFi Disconnect: ${key.slice(16)}`;
   if (key.startsWith('wifi_'))       return `WiFi: ${key.slice(5)}`;
+  if (key.startsWith('trigger_device_battery_below_')) return `Battery Drops to ${key.slice(29)}%`;
+  if (key.startsWith('trigger_device_battery_above_')) return `Battery Rises to ${key.slice(29)}%`;
   if (key.startsWith('output_set_')) return `Output Set: ${key.slice(11)}`;
   if (key.startsWith('output_unset_')) return `Output Unset: ${key.slice(13)}`;
   if (key.startsWith('bt_connect_')) return `BT Connect: ${key.slice(11)}`;
@@ -8892,6 +8896,27 @@ function promptAudioOutputName(mode) {
   });
 }
 
+// ── Battery Level Trigger Setup ─────────────────────────────────────────────
+function promptBatteryTrigger() {
+  showSheet('Battery Level', [
+    { label: 'Drops To', action: () => promptBatteryLevel('below') },
+    { label: 'Rises To', action: () => promptBatteryLevel('above') },
+  ]);
+}
+function promptBatteryLevel(mode) {
+  showDialog('Battery Level', 'Level (1-100%):', mode === 'below' ? '20' : '80', 'Add', val => {
+    const level = parseInt(val, 10);
+    if (!(level >= 1 && level <= 100)) return;
+    const key = `trigger_device_battery_${mode}_${level}`;
+    if (!config.triggers[key]) {
+      config.triggers[key] = { enabled: true, actions: [], name: `Battery ${mode === 'below' ? 'Drops' : 'Rises'} to ${level}%` };
+      saveConfig();
+    }
+    renderAll();
+    openActionsPanel(key);
+  }, true);
+}
+
 // ── Add Trigger Sheet System ──────────────────────────────────────────────────
 function showAddTriggerSheet() {
   showSheet('Add New Trigger', [
@@ -8902,6 +8927,7 @@ function showAddTriggerSheet() {
     { label: 'App Launch Trigger', action: () => promptAppLaunchPicker() },
     { label: 'App Exit Trigger', action: () => promptAppLaunchPicker(null, 'exit') },
     { label: 'Scheduled Trigger', action: () => promptSchedTrigger() },
+    { label: 'Battery Level Trigger', action: () => promptBatteryTrigger() },
     { label: 'MQTT Topic Trigger', action: () => promptMqttTrigger() },
     { label: 'NFC Tag Trigger', action: () => promptNfcTrigger() },
   ]);
