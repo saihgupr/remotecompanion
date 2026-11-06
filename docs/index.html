@@ -79,7 +79,7 @@
                 <h1 class="hero-title">RemoteCompanion</h1>
                 <p class="hero-tagline">Scriptable system control, gesture automation, and desktop hub for modern jailbroken iOS.</p>
                 <div class="badge-group">
-                    <span class="compat-badge"><span class="badge-dot"></span> v4.1.0 Latest</span>
+                    <span class="compat-badge"><span class="badge-dot"></span> v4.4.0 Latest</span>
                     <span class="compat-badge">iOS 14 – 17 • Partial iOS 26</span>
                     <span class="compat-badge secondary">Rootless (Dopamine / Palera1n)</span>
                     <span class="compat-badge secondary">Rootful & RootHide</span>
@@ -144,7 +144,7 @@
                 </div>
                 <div class="meta-item">
                     <span class="meta-label">Latest Version</span>
-                    <span class="meta-value">4.1.0</span>
+                    <span class="meta-value">4.4.0</span>
                 </div>
                 <div class="meta-item">
                     <span class="meta-label">Architectures</span>
@@ -165,7 +165,7 @@
         <section id="screenshots" class="glass-card screenshots-section">
             <div class="section-title-group">
                 <div class="section-label">iOS Interface</div>
-                <h2 class="section-title">v4.1.0 Interface & Experience</h2>
+                <h2 class="section-title">Interface & Experience</h2>
                 <p class="section-subtitle">Take a look at the modern iOS design, trigger builder, action pickers, and settings.</p>
             </div>
             <p align="center" class="screenshots-container">
@@ -206,6 +206,8 @@
                         <li class="feature-list-item"><span class="feature-check">✓</span> Touch ID tap / long-press & Ringer switch</li>
                         <li class="feature-list-item"><span class="feature-check">✓</span> NFC background tags & Proximity pocket detection</li>
                         <li class="feature-list-item"><span class="feature-check">✓</span> Power connect/disconnect & Status Bar double-tap</li>
+                        <li class="feature-list-item"><span class="feature-check">✓</span> Rotation, Find My Sound, Calls, Battery Level & Focus triggers</li>
+                        <li class="feature-list-item"><span class="feature-check">✓</span> Two-finger edge swipes & recorded gestures at 0.5x to 3x</li>
                     </ul>
                 </div>
 
@@ -229,6 +231,7 @@
                         <li class="feature-list-item"><span class="feature-check">✓</span> <strong>Keyboard Maestro:</strong> Visual macro picker & params</li>
                         <li class="feature-list-item"><span class="feature-check">✓</span> <strong>Native MQTT:</strong> Publish actions & background subscription triggers</li>
                         <li class="feature-list-item"><span class="feature-check">✓</span> <strong>Siri Shortcuts:</strong> Deep native workflow integration</li>
+                        <li class="feature-list-item"><span class="feature-check">✓</span> <strong>App Quick Action:</strong> App shortcuts read live from SpringBoard</li>
                     </ul>
                 </div>
 
@@ -275,6 +278,8 @@
                         <li class="feature-list-item"><span class="feature-check">✓</span> <strong>Location Services:</strong> Native GPS toggle & status queries</li>
                         <li class="feature-list-item"><span class="feature-check">✓</span> <strong>Safe Mode:</strong> One-tap diagnostic restart via CLI & UI</li>
                         <li class="feature-list-item"><span class="feature-check">✓</span> <strong>Lua Engine:</strong> Full Objective-C runtime bridge (`objc_call`)</li>
+                        <li class="feature-list-item"><span class="feature-check">✓</span> <strong>Variables:</strong> Set Variable, <code>{name}</code> substitution & Variable conditions</li>
+                        <li class="feature-list-item"><span class="feature-check">✓</span> <strong>Reusable:</strong> Copy and paste actions across triggers</li>
                     </ul>
                 </div>
             </div>
@@ -285,7 +290,7 @@
             <div class="showcase-content">
                 <div class="section-label">Desktop Web Interface</div>
                 <h2 class="section-title">Visual Workflow Hub & Live Diagnostics</h2>
-                <p class="section-subtitle">Manage triggers, build drag-and-drop action sequences, monitor system health, and copy API endpoints right from your desktop browser at <code>http://[DEVICE_IP]:8080</code>.</p>
+                <p class="section-subtitle">Manage triggers, build drag-and-drop action sequences, monitor system health, and copy API endpoints right from your desktop browser at <code>http://[DEVICE_IP]:8080</code>. Follows system light mode, with an optional token gating privileged API commands.</p>
             </div>
             <div class="showcase-image-wrapper">
                 <img src="images/webui.png" alt="RemoteCompanion Web UI Workflow Editor" class="showcase-img" loading="lazy">
@@ -354,38 +359,42 @@
             <div class="changelog-header">
                 <div>
                     <div class="section-label">Release Notes</div>
-                    <h2 class="section-title">What's New in v4.1</h2>
+                    <h2 class="section-title">What's New in v4.4</h2>
                 </div>
-                <span class="version-badge">October 2026</span>
+                <span class="version-badge">November 2026</span>
             </div>
 
             <div class="changelog-list">
                 <div class="changelog-item">
                     <span class="changelog-tag tag-new">New</span>
-                    <p class="changelog-text"><strong>Web UI Access Control:</strong> Settings → General → Access limits where the Web UI can be reached from — Any Network (default), Trusted Networks, or This iPhone Only. Covers <code>/api/*</code> too.</p>
+                    <p class="changelog-text"><strong>New Triggers:</strong> Rotated to Landscape / Portrait, Find My Sound, Incoming Call / Call Started / Call Ended, Battery Level (1-100%), and Focus on / off for a chosen Focus or any Focus.</p>
                 </div>
                 <div class="changelog-item">
                     <span class="changelog-tag tag-new">New</span>
-                    <p class="changelog-text"><strong>New Triggers:</strong> CarPlay Connected/Disconnected, Ping iPhone from Apple Watch, Home Button (Hold) and Home + Power — plus a per-trigger Keep Default Action option and retrigger control (Run Alongside / Restart / Ignore) with a Stop Trigger action.</p>
+                    <p class="changelog-text"><strong>Gesture Recorder:</strong> Settings → Gestures records taps, swipes and scrolls, plays back at 0.5x to 3x, with trim, re-record, replace, rename, export and import.</p>
                 </div>
                 <div class="changelog-item">
                     <span class="changelog-tag tag-new">New</span>
-                    <p class="changelog-text"><strong>Focus & Button Control:</strong> Set Focus action + Focus condition, Accessibility Shortcut action, and a Button Triggers action to pause hardware buttons while event triggers keep working.</p>
+                    <p class="changelog-text"><strong>Faster Building:</strong> Compact tile layout with trigger icons, copy and paste for actions, Variables with <code>{name}</code> substitution, App Quick Action picker, and Excluded Apps per trigger.</p>
                 </div>
                 <div class="changelog-item">
                     <span class="changelog-tag tag-improved">UI Refresh</span>
-                    <p class="changelog-text"><strong>NFC, Shortcuts & Test Kit:</strong> Opt-in Experimental NFC mode (Apple Pay keeps working), Shortcuts run with no SpringCuts install required, and a new on-device Test Kit in Settings → Diagnostics.</p>
+                    <p class="changelog-text"><strong>Web UI & Edge Gestures:</strong> Web UI follows system light mode, edge swipes accept a second finger, and <code>/api/command</code> supports an optional token gating privileged commands.</p>
                 </div>
                 <div class="changelog-item">
                     <span class="changelog-tag tag-fix">Security</span>
-                    <p class="changelog-text"><strong>Fixes:</strong> Web UI unreachable-no-more API hole when the UI is off, long commands over 1KB no longer truncated, unlock passcode hardening, and Control Center from Bottom Swipe Up.</p>
+                    <p class="changelog-text"><strong>Fixes:</strong> Hardened <code>ssh-run</code> quoting and <code>rc-root</code> caller check, plus Bottom Swipe Up zone, SSH banner matching, and Touch ID trigger fixes.</p>
                 </div>
             </div>
 
             <!-- Expandable Past Releases -->
             <details class="history-accordion">
-                <summary>View Previous Version History (v4.0.0 – v3.0.0)</summary>
+                <summary>View Previous Version History (v4.1.0 – v3.4.0)</summary>
                 <div class="history-content">
+                    <div class="changelog-item">
+                        <span class="changelog-tag tag-new">v4.1.0</span>
+                        <p class="changelog-text"><strong>Web UI Access Control, New Triggers & Retrigger Control:</strong> Any / Trusted / This iPhone Only access, CarPlay Connected/Disconnected, Ping iPhone from Apple Watch, Home Button (Hold) and Home + Power, Keep Default Action, When Triggered Again with Stop Trigger, Set Focus action, Button Triggers pause, Experimental NFC mode, Shortcuts without SpringCuts, and on-device Test Kit.</p>
+                    </div>
                     <div class="changelog-item">
                         <span class="changelog-tag tag-new">v4.0.0</span>
                         <p class="changelog-text"><strong>Button Timing Engine & Settings:</strong> Dedicated settings menu for Power Clicks, Home Clicks, Volume Sequences, and Holds. <strong>Sound & Haptics Category:</strong> Silent Mode, Ringer Volume %, Haptics modes, unified Noise Control (ANC). <strong>New Navigation & Triggers:</strong> New Trigger screen, auto-hiding category bar, AirPlay/Bluetooth pickers, configurable banners. <strong>Expanded Automations:</strong> 13 new If Conditions and Auto-Lock controls. <strong>iOS 17 Compatibility.</strong></p>

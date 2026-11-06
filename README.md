@@ -3,14 +3,12 @@
 RemoteCompanion provides fast, scriptable system control for modern rootless jailbreaks. It lets you bind physical gestures and hardware buttons, or send commands remotely from your computer, to trigger system actions, control media playback, and run custom scripts.
 
 > [!IMPORTANT]
-> **What’s New in v4.1**
-> - **Web UI Access Control**: Settings → General → Access limits where the Web UI can be reached from — Any Network (default), Trusted Networks, or This iPhone Only. Covers `/api/*` too (`rc webui access any|networks|local`, `rc webui wifi`).
-> - **New Triggers**: CarPlay Connected/Disconnected, Ping iPhone (tap/hold from Apple Watch), Home Button (Hold) and Home + Power, plus a per-trigger Keep Default Action option so actions run alongside stock behavior.
-> - **Retrigger Control**: "When Triggered Again" option (Run Alongside / Restart / Ignore) plus a Stop Trigger action to cancel another trigger's running sequence.
-> - **Focus & Button Control**: Set Focus action + Focus condition, Accessibility Shortcut action, and a Button Triggers action to pause hardware buttons (15 min / 1 hour / until resumed).
-> - **NFC Improvements**: Opt-in Experimental NFC mode (Apple Pay keeps working), NFC Scanner action, and Apple Pay/Wallet coexist with tag scanning.
-> - **Shortcuts Without SpringCuts**: Shortcuts run in the background with no extra install required, with an optional Run Silently mode.
-> - **On-Device Test Kit**: Settings → Diagnostics → Test Kit self-tests conditions, toggles, gestures, and buttons with a shareable report.
+> **What’s New in v4.4.0**
+> - **New Triggers**: Rotated to Landscape / Portrait, Find My Sound, Incoming Call / Call Started / Call Ended, Battery Level (1-100%), and Focus on / off for a chosen Focus or any Focus.
+> - **Gesture Recorder**: Settings > Gestures records taps, swipes and scrolls, names the recording, and plays it back at 0.5x to 3x with trim, re-record, replace, rename, export and import.
+> - **Faster Building**: Compact layout with tile grids, trigger icons, copy and paste for actions, Variables with `{name}` substitution, App Quick Action picker, and Excluded Apps per trigger.
+> - **Web UI and API**: Web UI follows system light mode, and `/api/command` supports an optional token that gates privileged commands (`root`, `sudo`, `exec`).
+> - **Edge Gestures**: Edge swipes accept a second finger with distance-based firing and an optional Lock Scrolling During Gestures toggle.
 
 <p align="center">
   <a href="https://saihgupr.github.io/remotecompanion/">Official Website</a> •
@@ -33,12 +31,22 @@ RemoteCompanion provides fast, scriptable system control for modern rootless jai
 ## Features
 - **Hardware Triggers**: Bind actions to Power/Volume buttons, Home button, Touch ID (Tap/Hold), or the Ringer Switch.
 - **Only Unlock Out of Pocket**: an off-by-default option in Settings > Advanced Settings > Options that makes Unlock Device and lock toggle skip unlocking while the proximity sensor is covered, such as in a pocket.
+- **New Triggers in 4.4.0**: Rotated to Landscape / Portrait, Find My Sound (with optional silent ping), Incoming Call / Call Started / Call Ended, Battery Level (fires once at 1-100%), and Focus on / off for a chosen Focus or any Focus.
+- **Gesture Recorder**: Settings > Gestures records a mix of taps, swipes and scrolls, saves it under a name, and plays it back at 0.5x to 3x. Each recording can be trimmed, re-recorded, replaced, renamed, exported and imported.
+- **Two-Finger Edge Slides**: edge swipe triggers recognize a second finger, with distance-based firing, a widened landing zone, and an optional Lock Scrolling During Gestures toggle.
+- **Compact Layout and Trigger Icons**: Triggers, Select Action and Settings > Banners can each show a grid of tiles instead of a list (Advanced Settings > Layout, list stays default). Button and gesture triggers show a small phone or screen-area icon, app triggers show the app icon, and "Screen Gestures" now reads "Status Bar".
+- **Copy and Paste Actions**: select actions in a trigger's ••• menu to copy or delete together, then paste into any trigger. An If block brings its whole block, and the clipboard survives closing the app.
+- **Variables**: the Set Variable action saves a value, `{name}` in action text becomes its value, a Variable condition compares it, and Settings > Advanced Settings > Variables lists saved values.
+- **App Quick Action**: pick an app, then one of its registered shortcuts read live from SpringBoard, with same-type shortcuts told apart and stale entries reported instead of run.
+- **Excluded Apps**: Settings > Advanced Settings > Options lists every trigger that has actions and sets the apps where each trigger does not fire.
 - **Universal Search**: Instantly find actions, shortcuts, and devices with integrated search bars in every picker.
 - **Cross-Version Support**: Supports iOS 14 through iOS 17, with partial iOS 26 support, across Rootless, Rootful, and RootHide environments.
 - **Advanced Automation**: Full support for NFC tags, custom Lua scripts (with `objc_call` support), and native Siri integration.
 - **iPad Experience**: Native landscape orientation and optimized layouts for iPad power users.
 - **Live Discovery**: Discovery-based live lists for nearby AirPlay and Bluetooth hardware.
 - **Trigger Favorites**: Mark any trigger as a favorite for instant access at the top of the picker.
+- **Web UI Light Mode**: the Web UI follows system appearance with a full light palette, dark theme unchanged.
+- **API Token Gating**: optional token in Settings > Web UI > Access (and `rc webui token`) that gates privileged `/api/command` calls such as `root`, `sudo` and `exec`, while safe commands and `/api/trigger/<key>` stay open.
 - **True Multitasking**: Concurrent server handling powered by GCD—zero battery drain, zero blocking.
 
 ---
@@ -175,7 +183,7 @@ Configure these in the `RemoteCompanion` app for custom action sequences. Tip: *
 - **Ringer Switch**: Mute, Unmute, or Toggle triggers.
 - **Gestures**: 
   - **Status Bar**: Hold (Left/Center/Right), Double-Tap, or Swipe Left/Right.
-  - **Edge Gestures**: Vertical swipe on left/right edges.
+  - **Edge Gestures**: Vertical swipe on left/right edges, with optional second finger.
   - **Bottom Bar Gestures**: Swipe Left/Right, or **3-Zone Swipe Up** (Left 33%, Center 34%, Right 33%).
 - **Motion Gestures**:
   - **Shake**: Fire actions when the device is physically shaken.
@@ -185,6 +193,11 @@ Configure these in the `RemoteCompanion` app for custom action sequences. Tip: *
   - **App Launch**: Fire actions when a specific app is opened.
   - **App Exit**: Fire actions when a specific app is switched away from.
   - **Audio Output**: Fire actions when an AirPlay, Bluetooth, or iPhone output is set or unset.
+  - **Calls**: Incoming Call, Call Started and Call Ended, for Phone, FaceTime and other calling apps.
+  - **Battery Level**: Fire once when the battery drops to or rises to a chosen level from 1 to 100%.
+  - **Focus**: Run when a chosen Focus, or any Focus, turns on or off.
+  - **Find My Sound**: Run when Play Sound is sent to the phone from Find My or iCloud.com.
+  - **Rotation**: Rotated to Landscape / Portrait, after a half-second settle.
 
 </details>
 
@@ -209,6 +222,7 @@ Combine status queries with actions for smart automation:
 - **Orientation-Awareness**: `If Orientation is Landscape` -> `Flashlight Toggle`.
 - **Bluetooth/Wi-Fi State**: `If Wi-Fi is OFF` -> `Wi-Fi ON`.
 - **Time of Day**: `If Time is Between 22:00 and 07:00` -> `Do Not Disturb ON`.
+- **Variables**: `If Variable score is above 10` -> `Toast "High score"` (set with the Set Variable action, used as `{score}` in action text).
 
 > [!NOTE]
 > **Proximity Sensor Cooldown**: To conserve battery, the proximity sensor is only powered on dynamically during button holds and is shut off immediately on release. Due to iOS kernel-level hardware power-gating, rapid consecutive clicks (within ~5 seconds) may temporarily bypass proximity evaluation until the sensor's hardware cooldown window resets.
@@ -485,6 +499,8 @@ Send command strings via `GET` or `POST`:
 - **Example (GET)**: `http://[device_ip]:8080/api/command?cmd=play`
 - **Example (POST)**: `curl -X POST "http://[device_ip]:8080/api/command" -d "haptic"`
 
+If an API token is set in Settings > Web UI > Access, privileged commands (`root`, `sudo`, `exec`) need it as `Authorization: Bearer <TOKEN>`, `X-API-Key: <TOKEN>`, `?token=` or `?key=`.
+
 **3. Fire an Automation Trigger:**
 Execution URLs for your specific triggers:
 - **Example**: `http://[device_ip]:8080/api/trigger/trigger_1`
@@ -522,7 +538,7 @@ A pause from a tweak left on for 4 hours ends by itself.
 RemoteCompanion implements several measures to ensure your device remains secure:
 
 - **Local Execution**: Local apps and the `rc` CLI communicate securely via a local UNIX socket file, ensuring zero network exposure.
-- **Web UI & Automations API**: When enabled, the Automations Hub server transmits data in **plain-text** over your local network. No authentication is required for API access. It is **highly recommended** to only enable the Web UI on trusted, private networks.
+- **Web UI & Automations API**: When enabled, the Automations Hub server transmits data in **plain-text** over your local network. Privileged `/api/command` calls (`root`, `sudo`, `exec`) can be gated behind an optional API token in Settings > Web UI > Access (`rc webui token`), while safe commands and `/api/trigger/<key>` stay open. It is **highly recommended** to only enable the Web UI on trusted, private networks.
 
 ---
 

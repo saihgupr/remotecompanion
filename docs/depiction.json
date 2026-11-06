@@ -58,7 +58,7 @@
         },
         {
           "class": "DepictionMarkdownView",
-          "markdown": "RemoteCompanion is a free, open-source Activator replacement and automation tweak for modern jailbroken iOS (iOS 14 - 17, with partial iOS 26 support). Bind physical hardware buttons, multi-touch gestures, NFC tags, network events, and schedules to customizable action sequences.\n\n### Key Highlights\n* **Hardware Controls**: Volume, Power, and Home button clicks, holds, and combos.\n* **Modern Gestures**: Status bar swipes/holds, edge swipes, and bottom bar gestures.\n* **Integrations**: Home Assistant, Keyboard Maestro, and MQTT triggers.\n* **Browser Hub**: Full web dashboard for remote control and live diagnostics.\n* **No Battery Drain**: Built on Grand Central Dispatch to sleep when idle."
+          "markdown": "RemoteCompanion is a free, open-source Activator replacement and automation tweak for modern jailbroken iOS (iOS 14 - 17, with partial iOS 26 support). Bind physical hardware buttons, multi-touch gestures, NFC tags, network events, and schedules to customizable action sequences.\n\n### Key Highlights\n* **Hardware Controls**: Volume, Power, and Home button clicks, holds, and combos.\n* **Modern Gestures**: Status bar swipes/holds, edge swipes with second-finger support, bottom bar gestures, and a gesture recorder with 0.5x to 3x playback.\n* **New Triggers**: Rotation, Find My Sound, Calls, Battery Level, and Focus on/off.\n* **Faster Building**: Compact tile layout with trigger icons, copy and paste for actions, Variables, App Quick Action picker, and Excluded Apps per trigger.\n* **Integrations**: Home Assistant, Keyboard Maestro, MQTT triggers.\n* **Browser Hub**: Full web dashboard with light mode, remote control, live diagnostics, and optional API token gating for privileged commands.\n* **No Battery Drain**: Built on Grand Central Dispatch to sleep when idle."
         },
         {
           "class": "DepictionTableButtonView",
@@ -78,6 +78,19 @@
       "class": "DepictionStackView",
       "tabname": "Changelog",
       "views": [
+        {
+          "class": "DepictionHeaderView",
+          "title": "Version 4.4.0",
+          "useBoldText": true
+        },
+        {
+          "class": "DepictionSubheaderView",
+          "title": "November 2026"
+        },
+        {
+          "class": "DepictionMarkdownView",
+          "markdown": "### Added\n* **New Triggers**: Rotated to Landscape / Portrait (#111), Find My Sound (#112), Incoming Call / Call Started / Call Ended (#113), Battery Level 1-100% (#114), Focus on/off for a chosen or any Focus (#115).\n* **Gesture Recorder**: Record taps, swipes and scrolls in Settings > Gestures, play back at 0.5x to 3x, with trim, re-record, replace, rename, export and import (#120).\n* **Compact Layout and Trigger Icons**: Tile grids for Triggers, Select Action and Banners with 2-4 per row, favorites and reorder, plus phone and screen-area icons (#110).\n* **App Quick Action**: Pick an app then a live shortcut from SpringBoard, with duplicates told apart (#126).\n* **Excluded Apps**: Per-trigger app exclusions in Advanced Settings > Options (#126).\n* **Copy and Paste Actions**: Multi-select copy and delete, paste into any trigger, If blocks included (#116).\n* **Variables**: Set Variable action, `{name}` substitution, Variable condition, saved list in Advanced Settings.\n* **Two-Finger Edge Slides**: Second-finger edge swipes with distance firing and lock-scrolling toggle.\n* **Web UI Light Mode**: Follows system appearance.\n* **API Token Gating**: Optional token for privileged `/api/command` calls (`root`, `sudo`, `exec`).\n\n### Security\n* Hardened `ssh-run` quoting and `rc-root` SpringBoard caller check."
+        },
         {
           "class": "DepictionHeaderView",
           "title": "Version 4.1.0",
