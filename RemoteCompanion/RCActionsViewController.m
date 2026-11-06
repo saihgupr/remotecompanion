@@ -1843,7 +1843,7 @@ static void RCSetRunWatching(BOOL watching) {
             [self presentDelayForIndex:NSNotFound current:nil after:0];
         } else if ([action isEqualToString:@"__APP_QUICK_SHORTCUT__"]) {
             RCAppPickerViewController *appPicker = [[RCAppPickerViewController alloc] init];
-            appPicker.title = @"Open Apps quick shortcuts";
+            appPicker.title = @"App Quick Action";
             appPicker.suppressAutoPop = YES;
             __weak RCAppPickerViewController *weakAppPicker = appPicker;
             __weak typeof(self) weakSelf = self;
@@ -4219,7 +4219,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
                 subtitle = @"Siri Shortcut";
             } else if ([action hasPrefix:@"quickactions run "]) {
                 cell.textLabel.text = cleanName;
-                subtitle = @"App Quick Shortcut";
+                subtitle = @"App Quick Action";
             } else if ([action hasPrefix:@"uiopen "]) {
                 cell.textLabel.text = cleanName;
                 subtitle = @"Application";

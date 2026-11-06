@@ -81,7 +81,7 @@ clang -fobjc-arc -framework Foundation tools/testkit/quickactions_model.m -o /tm
 Required device matrix before claiming the feature works:
 
 1. Assign two different status bar behaviors and leave one unassigned; only assigned
-   ones appear, with readable action labels (including Open Apps quick shortcuts).
+   ones appear, with readable action labels (including App Quick Action).
 2. Exclude a game for only one behavior: that behavior must not fire/haptic/freeze
    there; the other behavior must still work. Native scrolling/touch delivery remains.
 3. Switch immediately to an unrestricted app and Home Screen: no stale exclusion.

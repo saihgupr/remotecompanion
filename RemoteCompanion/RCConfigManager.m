@@ -1295,7 +1295,7 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         NSString *title = [request[@"title"] isKindOfClass:NSString.class] ? request[@"title"] : nil;
         NSString *app = [request[@"appName"] isKindOfClass:NSString.class] ? request[@"appName"] : nil;
         if (!app.length && [request[@"bundle"] isKindOfClass:NSString.class]) app = request[@"bundle"];
-        return title.length ? [NSString stringWithFormat:@"%@: %@", app.length ? app : @"App Quick Shortcut", title] : @"App Quick Shortcut";
+        return title.length ? [NSString stringWithFormat:@"%@: %@", app.length ? app : @"App Quick Action", title] : @"App Quick Action";
     }
     NSString *cmd = [originalCmd lowercaseString];
     NSDictionary *names = @{

@@ -175,7 +175,7 @@
         // Apps & Navigation
         @[
             @{ @"name": @"Open App...", @"command": @"__OPEN_APP__", @"icon": @"square.grid.2x2.fill" },
-            @{ @"name": @"Open Apps quick shortcuts", @"command": @"__APP_QUICK_SHORTCUT__", @"icon": @"bolt.fill" },
+            @{ @"name": @"App Quick Action", @"command": @"__APP_QUICK_SHORTCUT__", @"icon": @"bolt.fill" },
             @{ @"name": @"Kill App...", @"command": @"__KILL_APP__", @"icon": @"xmark.square.fill" },
             @{ @"name": @"Kill Current App", @"command": @"kill current", @"icon": @"xmark.square.fill" },
             @{ @"name": @"Home Button", @"command": @"home", @"icon": @"house.fill" },
