@@ -26,7 +26,6 @@
 @property (nonatomic, strong) UISearchController *searchController;
 @property (nonatomic, strong) NSMutableArray<NSString *> *chosen; // multi-select: bundle ids, in the order ticked
 @property (nonatomic, strong) UIBarButtonItem *doneItem;
-@property (nonatomic, strong) UIBarButtonItem *clearItem;
 @end
 
 @implementation RCAppPickerViewController
@@ -44,12 +43,7 @@
     if (self.allowsMultipleApps) {
         self.doneItem = [[UIBarButtonItem alloc] initWithTitle:@"Done" style:UIBarButtonItemStyleDone target:self action:@selector(donePressed)];
         self.doneItem.enabled = self.allowsEmptySelection || self.chosen.count > 0;
-        if (self.allowsEmptySelection) {
-            // Left of Done.
-            self.clearItem = [[UIBarButtonItem alloc] initWithTitle:@"Clear All"
-                style:UIBarButtonItemStylePlain target:self action:@selector(clearAllApps)];
-            self.navigationItem.rightBarButtonItems = @[self.doneItem, self.clearItem];
-        }
+        self.navigationItem.rightBarButtonItem = self.doneItem;
     }
     
     // Enable Large Titles
@@ -144,10 +138,7 @@
         
         dispatch_async(dispatch_get_main_queue(), ^{
             [self.tableView reloadData];
-            NSMutableArray *items = [NSMutableArray array]; // nil unless several apps can be ticked
-            if (self.doneItem) [items addObject:self.doneItem];
-            if (self.clearItem) [items addObject:self.clearItem];
-            self.navigationItem.rightBarButtonItems = items;
+            self.navigationItem.rightBarButtonItem = self.doneItem; // nil unless several apps can be ticked
         });
     });
 }
@@ -229,13 +220,6 @@
     }
 }
 
-
-- (void)clearAllApps {
-    // Also removes selected IDs for apps that are no longer installed/visible.
-    [self.chosen removeAllObjects];
-    self.doneItem.enabled = YES;
-    [self.tableView reloadData];
-}
 
 // Multi-select: hands the ticked apps over
 - (void)donePressed {

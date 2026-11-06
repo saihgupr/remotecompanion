@@ -13,6 +13,61 @@
 - (NSArray<LSApplicationProxy *> *)allInstalledApplications;
 @end
 
+// Two detail lines per row: the action sequence (one line unless long names
+// may wrap) and the excluded apps, which always keeps its own line so the
+// names stay visible, in red.
+@interface RCExcludedAppCell : UITableViewCell
+@property (nonatomic, strong) UILabel *nameLabel;
+@property (nonatomic, strong) UILabel *actionsLabel;
+@property (nonatomic, strong) UILabel *excludedLabel;
+@end
+
+@implementation RCExcludedAppCell
+
+- (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier {
+    self = [super initWithStyle:UITableViewCellStyleDefault reuseIdentifier:reuseIdentifier];
+    if (self) {
+        _nameLabel = [[UILabel alloc] init];
+        _nameLabel.font = [UIFont systemFontOfSize:17];
+        _nameLabel.textColor = [UIColor labelColor];
+        _nameLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+
+        _actionsLabel = [[UILabel alloc] init];
+        _actionsLabel.font = [UIFont systemFontOfSize:13];
+        _actionsLabel.textColor = [UIColor secondaryLabelColor];
+        _actionsLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+
+        _excludedLabel = [[UILabel alloc] init];
+        _excludedLabel.font = [UIFont systemFontOfSize:13];
+        _excludedLabel.textColor = [UIColor secondaryLabelColor];
+        _excludedLabel.numberOfLines = 0;
+
+        for (UILabel *label in @[_nameLabel, _actionsLabel, _excludedLabel]) {
+            label.translatesAutoresizingMaskIntoConstraints = NO;
+            [self.contentView addSubview:label];
+        }
+
+        UILayoutGuide *margins = self.contentView.layoutMarginsGuide;
+        [NSLayoutConstraint activateConstraints:@[
+            [_nameLabel.topAnchor constraintEqualToAnchor:margins.topAnchor constant:2],
+            [_nameLabel.leadingAnchor constraintEqualToAnchor:margins.leadingAnchor],
+            [_nameLabel.trailingAnchor constraintEqualToAnchor:margins.trailingAnchor],
+
+            [_actionsLabel.topAnchor constraintEqualToAnchor:_nameLabel.bottomAnchor constant:2],
+            [_actionsLabel.leadingAnchor constraintEqualToAnchor:margins.leadingAnchor],
+            [_actionsLabel.trailingAnchor constraintEqualToAnchor:margins.trailingAnchor],
+
+            [_excludedLabel.topAnchor constraintEqualToAnchor:_actionsLabel.bottomAnchor constant:1],
+            [_excludedLabel.leadingAnchor constraintEqualToAnchor:margins.leadingAnchor],
+            [_excludedLabel.trailingAnchor constraintEqualToAnchor:margins.trailingAnchor],
+            [_excludedLabel.bottomAnchor constraintEqualToAnchor:margins.bottomAnchor constant:-2],
+        ]];
+    }
+    return self;
+}
+
+@end
+
 @interface RCExcludedAppsViewController () <UISearchResultsUpdating>
 @property (nonatomic, copy) NSArray<NSArray<NSString *> *> *sections;
 @property (nonatomic, copy) NSArray<NSString *> *sectionTitles;
@@ -34,7 +89,7 @@
     [super viewDidLoad];
     self.title = @"Excluded Apps";
     self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
-    self.tableView.rowHeight = [[NSUserDefaults standardUserDefaults] boolForKey:@"RCWrapLongNamesEnabled"] ? UITableViewAutomaticDimension : 64.0;
+    self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 90;
     RCConfigManager *cm = [RCConfigManager sharedManager];
     self.tableView.backgroundColor = [cm tweakColorForKey:@"settingsBackground"
@@ -80,7 +135,6 @@
 }
 
 - (void)wrapLongNamesSettingChanged:(NSNotification *)note {
-    self.tableView.rowHeight = [[NSUserDefaults standardUserDefaults] boolForKey:@"RCWrapLongNamesEnabled"] ? UITableViewAutomaticDimension : 64.0;
     [self.tableView reloadData];
 }
 
@@ -270,55 +324,51 @@
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
-    // Rows with excluded apps need room for the second line even when
-    // Wrap Long Names is off.
-    NSString *key = [self triggerKeyAtIndexPath:indexPath];
-    if ([[RCConfigManager sharedManager] excludedAppsForTrigger:key].count > 0) {
-        return UITableViewAutomaticDimension;
-    }
-    return [[NSUserDefaults standardUserDefaults] boolForKey:@"RCWrapLongNamesEnabled"] ? UITableViewAutomaticDimension : 64.0;
+    // The actions line is one line unless names may wrap; the excluded line
+    // keeps its own line, so rows size themselves.
+    return UITableViewAutomaticDimension;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     RCConfigManager *cm = [RCConfigManager sharedManager];
     NSString *key = [self triggerKeyAtIndexPath:indexPath];
-    UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:nil];
     BOOL wrapLongNames = [[NSUserDefaults standardUserDefaults] boolForKey:@"RCWrapLongNamesEnabled"];
+    RCExcludedAppCell *cell = [[RCExcludedAppCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
     cell.backgroundColor = [cm tweakColorForKey:@"blockBackground" defaultVal:0.12];
-    cell.textLabel.text = [cm displayNameForTrigger:key];
-    cell.textLabel.textColor = [UIColor labelColor];
-    cell.textLabel.numberOfLines = wrapLongNames ? 0 : 1;
+    cell.nameLabel.text = [cm displayNameForTrigger:key];
+    cell.nameLabel.numberOfLines = wrapLongNames ? 0 : 1;
+
     NSMutableArray<NSString *> *labels = [NSMutableArray array];
     for (id action in [cm actionsForTrigger:key]) {
         [labels addObject:[cm nameForCommand:action truncate:YES] ?: @"Action"];
     }
-    NSUInteger count = [cm excludedAppsForTrigger:key].count;
     NSString *actionsLine = [labels componentsJoinedByString:@" · "];
     if (![cm isTriggerEnabled:key]) actionsLine = [@"Disabled · " stringByAppendingString:actionsLine];
-    NSMutableAttributedString *detail = [[NSMutableAttributedString alloc] initWithString:actionsLine
-        attributes:@{NSForegroundColorAttributeName: [UIColor secondaryLabelColor]}];
+    cell.actionsLabel.text = actionsLine;
+    cell.actionsLabel.numberOfLines = wrapLongNames ? 0 : 1;
+
+    NSArray<NSString *> *excluded = [cm excludedAppsForTrigger:key];
+    NSUInteger count = excluded.count;
     if (count > 0) {
         NSMutableArray<NSString *> *names = [NSMutableArray array];
-        for (NSString *bundleID in [cm excludedAppsForTrigger:key]) {
+        for (NSString *bundleID in excluded) {
             NSString *name = self.appNames[[bundleID lowercaseString]];
             [names addObject:name.length ? name : bundleID];
         }
-        NSString *excludedLine = [NSString stringWithFormat:@"Excluded: %@ (%lu)",
-            [names componentsJoinedByString:@", "], (unsigned long)count];
-        NSMutableAttributedString *excluded = [[NSMutableAttributedString alloc] initWithString:excludedLine
+        NSString *joined = [names componentsJoinedByString:@", "];
+        NSString *excludedLine = [NSString stringWithFormat:@"Excluded: %@ (%lu)", joined, (unsigned long)count];
+        NSMutableAttributedString *excludedText = [[NSMutableAttributedString alloc] initWithString:excludedLine
             attributes:@{NSForegroundColorAttributeName: [UIColor secondaryLabelColor]}];
-        NSRange namesRange = [excludedLine rangeOfString:[names componentsJoinedByString:@", "]];
+        NSRange namesRange = [excludedLine rangeOfString:joined];
         if (namesRange.location != NSNotFound) {
-            [excluded addAttribute:NSForegroundColorAttributeName value:[UIColor systemRedColor] range:namesRange];
+            [excludedText addAttribute:NSForegroundColorAttributeName value:[UIColor systemRedColor] range:namesRange];
         }
-        // Always its own line: squeezed onto the actions line it truncates
-        // before the names ever show when Wrap Long Names is off.
-        [detail appendAttributedString:[[NSAttributedString alloc] initWithString:@"\n"]];
-        [detail appendAttributedString:excluded];
+        cell.excludedLabel.attributedText = excludedText;
+        cell.excludedLabel.hidden = NO;
+    } else {
+        cell.excludedLabel.attributedText = nil;
+        cell.excludedLabel.hidden = YES;
     }
-    cell.detailTextLabel.attributedText = detail;
-    cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
-    cell.detailTextLabel.numberOfLines = (count > 0 || wrapLongNames) ? 0 : 1;
     cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     return cell;
 }

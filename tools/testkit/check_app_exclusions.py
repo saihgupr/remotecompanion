@@ -28,14 +28,22 @@ class ExclusionWiring(unittest.TestCase):
         self.assertNotIn("statusBarExcludedApps", config)
         self.assertNotIn("blacklist.plist", config)
 
-    def test_empty_picker_and_mixed_case_ids(self):
+    def test_picker_has_no_clear_all_and_mixed_case_ids(self):
         picker = source("RemoteCompanion/RCAppPickerViewController.m")
         self.assertEqual(picker.count("self.allowsEmptySelection || self.chosen.count > 0"), 2)
-        self.assertIn("[self.chosen removeAllObjects]", picker)
+        self.assertNotIn("Clear All", picker)
+        self.assertNotIn("clearAllApps", picker)
         self.assertIn("[chosenID caseInsensitiveCompare:bundleID]", picker)
         ui = source("RemoteCompanion/RCExcludedAppsViewController.m")
         self.assertIn("picker.allowsEmptySelection = YES", ui)
         self.assertIn("[cm nameForCommand:action truncate:YES]", ui)
+
+    def test_excluded_rows_wrap_actions_only_when_enabled(self):
+        ui = source("RemoteCompanion/RCExcludedAppsViewController.m")
+        self.assertIn("cell.nameLabel.numberOfLines = wrapLongNames ? 0 : 1;", ui)
+        self.assertIn("cell.actionsLabel.numberOfLines = wrapLongNames ? 0 : 1;", ui)
+        self.assertIn("cell.excludedLabel.attributedText", ui)
+        self.assertIn("[UIColor systemRedColor]", ui)
 
     def test_dispatch_guard_before_action_execution(self):
         tweak = source("Tweak/Tweak.x")
