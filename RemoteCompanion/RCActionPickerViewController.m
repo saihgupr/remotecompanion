@@ -2,6 +2,8 @@
 #import "RCServerClient.h"
 #import "RCDevicePickerViewController.h"
 #import "RCFocusPickerViewController.h"
+#import "RCGesturesViewController.h"
+#import "RCPlayGestureViewController.h"
 #import "RCConfigManager.h"
 #import "RCHAEntityPickerViewController.h"
 #import "RCKMMacroPickerViewController.h"
@@ -187,6 +189,8 @@
             @{ @"name": @"Previous App", @"command": @"previous app", @"icon": @"arrow.uturn.backward" },
             @{ @"name": @"Control Center", @"command": @"open control center", @"icon": @"switch.2" },
             @{ @"name": @"Activate Siri", @"command": @"siri", @"icon": @"mic.circle.fill" },
+            @{ @"name": @"Play Gesture...", @"command": @"__PLAY_GESTURE__", @"icon": @"hand.draw.fill" },
+            @{ @"name": @"Record Gesture", @"command": @"__RECORD_GESTURE__", @"icon": @"record.circle" },
             @{ @"name": @"Accessibility Shortcut", @"command": @"accessibility shortcut", @"icon": ([UIImage systemImageNamed:@"accessibility"] ? @"accessibility" : @"figure.stand") }
         ],
         // Device Controls
@@ -582,6 +586,15 @@ static BOOL RCPickerActionOpensMore(NSString *command) {
         return;
     }
     
+    if ([command isEqualToString:@"__PLAY_GESTURE__"]) {
+        [self handlePlayGesture];
+        return;
+    }
+    if ([command isEqualToString:@"__RECORD_GESTURE__"]) {
+        [self finishWithFocusCommand:[RCGesturesViewController recordCommand]];
+        return;
+    }
+
     // Existing special handlers
     if ([command isEqualToString:@"__AIRPLAY_CONNECT__"]) {
         [self handleAirPlayConnect];
@@ -1004,6 +1017,16 @@ static BOOL RCPickerActionOpensMore(NSString *command) {
     } else {
         [self dismissViewControllerAnimated:YES completion:nil];
     }
+}
+
+// A new Play Gesture action: its own page, which gesture and how fast
+- (void)handlePlayGesture {
+    RCPlayGestureViewController *page = [[RCPlayGestureViewController alloc] init];
+    __weak typeof(self) weakSelf = self;
+    page.onSave = ^(NSString *command) {
+        [weakSelf finishWithFocusCommand:command];
+    };
+    [self.navigationController pushViewController:page animated:YES];
 }
 
 #pragma mark - Search

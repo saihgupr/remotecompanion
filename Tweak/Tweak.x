@@ -9197,6 +9197,8 @@ BOOL RCCommandFromLocalSocket(void) {
     return g_rcCommandFromLocalSocket;
 }
 
+#import "RCGestures.h"
+
 static NSString *handle_command(NSString *cmd) {
     if (!cmd || ![cmd isKindOfClass:[NSString class]]) {
         SRLogMin(@"ERROR: handle_command received nil or invalid command string");
@@ -11818,6 +11820,10 @@ static NSString *handle_command(NSString *cmd) {
     } else if ([cleanCmd isEqualToString:@"taptest"] || [cleanCmd hasPrefix:@"taptest "]) {
         return rc_handle_taptest_command(cleanCmd);
 
+    // gesture record|play|list|delete|rename ... (RCGestures.m)
+    } else if ([cleanCmd hasPrefix:@"gesture "]) {
+        return RCGestureCommand(cleanCmd);
+
     // taprecord
     } else if ([cleanCmd isEqualToString:@"taprecord"]) {
         rc_taprecord_start();
@@ -13204,6 +13210,16 @@ static void start_web_server() {
                                     NSString *jsonStr = [[NSString alloc] initWithData:respData encoding:NSUTF8StringEncoding];
                                     responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)[jsonStr lengthOfBytesUsingEncoding:NSUTF8StringEncoding], jsonStr];
                                 }
+                            } else if ([path isEqualToString:@"/api/gestures"] && [method isEqualToString:@"GET"]) {
+                                // The gesture library, for the web UI's Play Gesture picker
+                                load_trigger_config();
+                                if (![g_triggerConfig[@"webUIEnabled"] boolValue]) {
+                                    responseString = [NSString stringWithFormat:@"HTTP/1.1 403 Forbidden\r\n%@Content-Length: 17\r\n\r\nWeb UI is disabled", cors];
+                                } else {
+                                    NSData *gesturesData = [NSJSONSerialization dataWithJSONObject:RCGestureList() options:0 error:nil];
+                                    NSString *gesturesJson = [[NSString alloc] initWithData:gesturesData encoding:NSUTF8StringEncoding];
+                                    responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)gesturesData.length, gesturesJson];
+                                }
                             } else if ([path isEqualToString:@"/api/apps"] && [method isEqualToString:@"GET"]) {
                                 // What the web UI's app pickers fetch (the same list as "apps" in /api/devices)
                                 load_trigger_config();
@@ -13223,6 +13239,9 @@ static void start_web_server() {
                                     @{@"command": @"home", @"desc": @"System: Simulate a Home Button press"},
                                     @{@"command": @"screenshot", @"desc": @"System: Take a screenshot"},
                                     @{@"command": @"stop trigger <key>", @"desc": @"Automation: Stop a trigger's actions that are still running (in a wait)"},
+                                    @{@"command": @"gesture play \"Name\" [speed]", @"desc": @"Gestures: Play a recorded gesture (speed like 2x)"},
+                                    @{@"command": @"gesture play-latest [speed]", @"desc": @"Gestures: Play the most recent recording"},
+                                    @{@"command": @"gesture record-toggle", @"desc": @"Gestures: Start recording, or stop and name the recording"},
                                     @{@"command": @"screenrecord [toggle|start|stop]", @"desc": @"System: Control system screen recording"},
                                     @{@"command": @"snapper [open|freeze|instant|close]", @"desc": @"Integrations: Control Snapper 2 / Snapper 3"},
                                     @{@"command": @"camera video [zoom] [flash]", @"desc": @"Camera: Open Camera in Video mode (e.g. 2x, 2x flash)"},
@@ -15295,6 +15314,7 @@ static void RC_CheckAndFirePower() {
 static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientRef service, IOHIDEventRef event) {
     // Before the exclusion check: a touch is a touch whatever app is in front
     if (IOHIDEventGetType(event) == 11) g_lastTouchAt = CFAbsoluteTimeGetCurrent(); // kIOHIDEventTypeDigitizer
+    if (IOHIDEventGetType(event) == 11) RCGestureHIDEvent(event); // gestures: recording, and the touchscreen's sender ID
     if (RC_IsForegroundAppExcluded()) return;
     int type = IOHIDEventGetType(event);
     

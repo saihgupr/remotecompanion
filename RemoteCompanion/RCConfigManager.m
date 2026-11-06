@@ -1,4 +1,5 @@
 #import "RCConfigManager.h"
+#import "RCGesturesViewController.h"
 #import <sys/sysctl.h>
 #import <LocalAuthentication/LocalAuthentication.h>
 #import <notify.h>
@@ -1777,6 +1778,13 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         } else if ([cmd hasPrefix:@"spotify "]) {
             result = @"Spotify";
         // Touch gestures with coordinates
+        } else if ([cmd hasPrefix:@"gesture record-toggle"]) {
+            result = @"Record Gesture";
+        } else if ([RCGesturesViewController gestureForCommand:originalCmd]) {
+            NSString *name = [RCGesturesViewController gestureForCommand:originalCmd]; // as named, not lowercased
+            double speed = [RCGesturesViewController speedForCommand:originalCmd];
+            result = [NSString stringWithFormat:@"Gesture: %@", name.length ? name : @"Latest Recording"];
+            if (fabs(speed - 1) > 0.01) result = [result stringByAppendingFormat:@" at %@", [RCGesturesViewController titleForSpeed:speed]];
         } else if ([cmd hasPrefix:@"tap "]) {
             NSString *coords = [[cmd substringFromIndex:4] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
             result = [NSString stringWithFormat:@"Tap at %@", coords];
@@ -1927,6 +1935,8 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         [cmd isEqualToString:@"kill front app"]) return @"xmark.square.fill";
     if ([cmd hasPrefix:@"kill "]) return [NSString stringWithFormat:@"USER_APP:%@", [cmd substringFromIndex:5]];
     // Touch gesture prefix icons
+    if ([cmd hasPrefix:@"gesture play"]) return @"hand.draw.fill";
+    if ([cmd hasPrefix:@"gesture record-toggle"]) return @"record.circle";
     if ([cmd hasPrefix:@"tap "]) return @"hand.tap.fill";
     if ([cmd hasPrefix:@"hold "]) return @"hand.point.up.left.fill";
     if ([cmd hasPrefix:@"swipe "]) return @"hand.draw.fill";

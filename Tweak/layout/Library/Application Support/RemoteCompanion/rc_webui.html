@@ -3922,6 +3922,13 @@ function nameForCmd(cmd) {
   if (lowCmd.startsWith('ha ') || lowCmd === 'ha') return formatHACommandName(cmd);
   if (lowCmd.startsWith('km ') || lowCmd === 'km') return formatKMCommandName(cmd);
   if (lowCmd.startsWith('mqtt ') || lowCmd === 'mqtt') return formatMQTTCommandName(cmd);
+  // Recorded gestures
+  if (lowCmd === 'gesture record-toggle' || lowCmd.startsWith('gesture record-toggle ')) return 'Record Gesture';
+  const played = parseGestureCommand(cmd);
+  if (played) {
+    const title = `Gesture: ${played.name || 'Latest Recording'}`;
+    return played.speed !== 1 ? `${title} at ${played.speed}\u00D7` : title;
+  }
   // Touch gesture display names
   if (lowCmd.startsWith('tap '))   { const p=cmd.slice(4).trim().split(/\s+/); return `Tap (${p[0]||'?'}, ${p[1]||'?'})`; }
   if (lowCmd.startsWith('hold '))  { const p=cmd.slice(5).trim().split(/\s+/); return `Hold (${p[0]||'?'}, ${p[1]||'?'})${p[2]?` ${p[2]}ms`:''}`; }
@@ -4100,6 +4107,9 @@ function iconForCmd(cmd) {
   if (lowCmd.startsWith('exec ') || lowCmd.startsWith('root ')) return { icon:'chevron_right_square_fill', cls:'icon-dark' };
   if (lowCmd.startsWith('trigger_bottom_swipe_up')) return { icon:'arrow_up_to_line', cls:'icon-indigo' };
   if (lowCmd.startsWith('trigger_bottombar')) return { icon:'square_stack_3d_up_fill', cls:'icon-gray' };
+  // Recorded gestures
+  if (lowCmd.startsWith('gesture record-toggle')) return { icon:'record_circle_fill', cls:'icon-red' };
+  if (lowCmd.startsWith('gesture play')) return { icon:'hand_draw', cls:'icon-teal' };
   // Touch gestures
   if (lowCmd.startsWith('tap '))   return { icon:'hand_tap',         cls:'icon-teal' };
   if (lowCmd.startsWith('hold '))  return { icon:'hand_tap_fill',    cls:'icon-teal' };
@@ -4149,6 +4159,8 @@ const ACTION_SECTIONS = [
     { name:'Previous App',      cmd:'previous app',  icon:'arrow_uturn_backward' },
     { name:'Control Center',    cmd:'open control center',icon:'gear' },
     { name:'Activate Siri',     cmd:'siri',          icon:'mic_fill' },
+    { name:'Play Gesture…',     cmd:'__PLAY_GESTURE__', icon:'hand_draw', needs_input:true },
+    { name:'Record Gesture',    cmd:'gesture record-toggle', icon:'record_circle_fill' },
     { name:'Accessibility Shortcut', cmd:'accessibility shortcut', icon:'person_crop_circle' },
   ]},
   { title:'Device Controls', actions:[
@@ -6161,6 +6173,11 @@ function editAction(idx) {
         actions[idx] = `delay ${n}`;
         saveConfig(); renderActionList();
       }, idx);
+    } else if (parseGestureCommand(act)) {
+      promptPlayGesture(act, cmd => {
+        actions[idx] = cmd;
+        saveConfig(); renderActionList();
+      });
     } else if (low.startsWith('toast ')) {
       promptToastModal(act, idx);
     } else if (low.startsWith('exec ') || low.startsWith('root ')) {
@@ -6462,6 +6479,8 @@ function selectPickerAction(act) {
     showDialog('Connect Bluetooth', 'Device name or MAC address:', '', 'Add', val => {
       if (val) addActionToCurrent(`bt connect ${val}`);
     });
+  } else if (c === '__PLAY_GESTURE__') {
+    promptPlayGesture(null, cmd => addActionToCurrent(cmd));
   } else if (c === '__FOCUS__') {
     showDialog('Set Focus', 'Focus name, or Off:', '', 'Next', val => {
       const name = (val || '').trim();
@@ -8793,6 +8812,7 @@ const BANNER_PLACEHOLDERS = {
   '__BT_DISCONNECT__': ['bt disconnect ', 'bluetooth disconnect '],
   '__AIRPLAY_CONNECT__': ['airplay connect '],
   '__FOCUS__': ['focus on ', 'focus toggle ', 'focus off'],
+  '__PLAY_GESTURE__': ['gesture play ', 'gesture play-latest'],
   '__OPEN_APP__': ['uiopen '],
   '__KILL_APP__': ['kill '],
   '__HA_PICKER__': ['ha '],
@@ -9498,6 +9518,57 @@ function showSheet(title, buttons) {
   });
   document.getElementById('sheet-backdrop').classList.add('visible');
   document.getElementById('sheet').classList.add('open');
+}
+
+// ── Recorded gestures ─────────────────────────────────────────────────────────
+// A Play Gesture action: gesture play "Name" [2x], or gesture play-latest [2x] (name '')
+function parseGestureCommand(cmd) {
+  if (typeof cmd !== 'string') return null;
+  const speedOf = rest => {
+    const v = parseFloat((rest || '').trim().toLowerCase().replace('x', ''));
+    return v > 0 ? v : 1;
+  };
+  if (cmd === 'gesture play-latest' || cmd.startsWith('gesture play-latest ')) return { name: '', speed: speedOf(cmd.slice(19)) };
+  if (!cmd.startsWith('gesture play ')) return null;
+  const rest = cmd.slice(13).trim();
+  if (rest.startsWith('"')) {
+    const close = rest.indexOf('"', 1);
+    if (close > 0) return { name: rest.slice(1, close), speed: speedOf(rest.slice(close + 1)) };
+  }
+  return { name: rest, speed: 1 };
+}
+
+function buildGestureCommand(name, speed) {
+  const suffix = speed && Math.abs(speed - 1) > 0.01 ? ` ${speed}x` : '';
+  return name ? `gesture play "${name.replace(/"/g, '')}"${suffix}` : `gesture play-latest${suffix}`;
+}
+
+// Pick the gesture (from the phone's library), then the speed
+async function promptPlayGesture(current, onDone) {
+  const was = parseGestureCommand(current) || { name: null, speed: 1 };
+  let list = [];
+  try {
+    const res = await fetch('/api/gestures');
+    if (res.status === 403) { showToast('\u26A0 Enable Web UI in Settings first'); return; }
+    if (res.ok) list = await res.json();
+  } catch (e) { showToast('\u26A0 Could not connect to device'); return; }
+  const tick = name => (was.name !== null && name.toLowerCase() === was.name.toLowerCase()) ? ' \u2713' : '';
+  const choose = name => {
+    setTimeout(() => {
+      const speeds = [0.5, 1, 1.5, 2, 3];
+      showSheet('Playback Speed', speeds.map(v => ({
+        label: `${v}\u00D7${Math.abs(v - was.speed) < 0.01 ? ' \u2713' : ''}`,
+        action() { onDone(buildGestureCommand(name, v)); }
+      })));
+    }, 250);
+  };
+  const buttons = [{ label: `Latest Recording${tick('')}`, action() { choose(''); } }];
+  list.forEach(g => buttons.push({ label: `${g.name}${tick(g.name)}`, action() { choose(g.name); } }));
+  if (was.name && !list.some(g => g.name.toLowerCase() === was.name.toLowerCase())) {
+    buttons.push({ label: `${was.name} (Not Found) \u2713`, action() { choose(was.name); } });
+  }
+  if (!list.length) showToast('No recorded gestures yet. Record them in the app.');
+  showSheet('Play Gesture', buttons);
 }
 
 function closeSheet() {

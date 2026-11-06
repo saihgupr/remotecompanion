@@ -7,6 +7,7 @@
 #import "RCRunningViewController.h"
 #import "RCWebUIAccessViewController.h"
 #import "RCVariablesViewController.h"
+#import "RCGesturesViewController.h"
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #include <ifaddrs.h>
 #include <arpa/inet.h>
@@ -23,6 +24,7 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     RCSettingsSectionGeneral,
     RCSettingsSectionIntegrations,
     RCSettingsSectionAdvanced,
+    RCSettingsSectionGestures,
     RCSettingsSectionDiagnostics,
     RCSettingsSectionBackup,
 };
@@ -198,7 +200,7 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
 #pragma mark - Table View Data Source
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    return 5;
+    return RCSettingsSectionBackup + 1;
 }
 
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
@@ -206,6 +208,7 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     if (section == RCSettingsSectionGeneral) title = @"General";
     else if (section == RCSettingsSectionIntegrations) title = @"Integrations";
     else if (section == RCSettingsSectionAdvanced) title = @"Advanced Settings";
+    else if (section == RCSettingsSectionGestures) title = @"Gestures";
     else if (section == RCSettingsSectionDiagnostics) title = @"Diagnostics";
     else title = @"Backup";
     
@@ -229,6 +232,8 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
         return @"Configure connections to external services and automations.";
     } else if (section == RCSettingsSectionAdvanced) {
         return @"NFC, banners, logging, and display options, and the variables that Set Variable actions save.";
+    } else if (section == RCSettingsSectionGestures) {
+        return @"Recorded gestures and the recording tab's options.";
     } else if (section == RCSettingsSectionDiagnostics) {
         return @"See what's running on this device, and run tests that share their results.";
     } else if (section == RCSettingsSectionBackup) {
@@ -247,7 +252,7 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     if (section == RCSettingsSectionDiagnostics) {
         return 2; // Running, Test Kit
     }
-    return 1; // Integrations
+    return 1; // Integrations, Gestures
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -316,6 +321,11 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
         cell.imageView.image = img;
         cell.imageView.tintColor = [UIColor systemPurpleColor];
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    } else if (indexPath.section == RCSettingsSectionGestures) {
+        cell.textLabel.text = @"Gestures";
+        cell.imageView.image = [UIImage systemImageNamed:@"hand.draw.fill"];
+        cell.imageView.tintColor = [UIColor systemRedColor];
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     } else if (indexPath.section == RCSettingsSectionBackup) {
         if (indexPath.row == 0) {
             cell.textLabel.text = @"Export Configuration";
@@ -358,6 +368,8 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
         [self.navigationController pushViewController:[[RCVariablesViewController alloc] init] animated:YES];
     } else if (indexPath.section == RCSettingsSectionAdvanced) {
         [self.navigationController pushViewController:[[RCAdvancedSettingsViewController alloc] init] animated:YES];
+    } else if (indexPath.section == RCSettingsSectionGestures) {
+        [self.navigationController pushViewController:[[RCGesturesViewController alloc] init] animated:YES];
     } else if (indexPath.section == RCSettingsSectionDiagnostics) {
         if (indexPath.row == 0) {
             [self.navigationController pushViewController:[[RCRunningViewController alloc] init] animated:YES];
