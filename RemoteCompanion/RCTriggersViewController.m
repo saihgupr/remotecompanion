@@ -80,6 +80,8 @@
     if ([triggerKey isEqualToString:@"trigger_power_disconnect"]) return @"bolt.slash.fill";
     if ([triggerKey isEqualToString:@"trigger_carplay_connect"]) return @"car.fill";
     if ([triggerKey isEqualToString:@"trigger_carplay_disconnect"]) return @"car";
+    if ([triggerKey isEqualToString:@"trigger_device_rotated_landscape"]) return @"iphone.landscape";
+    if ([triggerKey isEqualToString:@"trigger_device_rotated_portrait"]) return @"iphone";
     if ([triggerKey isEqualToString:@"trigger_device_lock"]) return @"lock.fill";
     if ([triggerKey isEqualToString:@"trigger_device_unlock"]) return @"lock.open.fill";
     if ([triggerKey isEqualToString:@"trigger_media_play"]) return @"play.fill";
@@ -376,6 +378,9 @@
     if ([configuredKeys containsObject:@"trigger_power_disconnect"]) {
         [deviceStateKeys addObject:@"trigger_power_disconnect"];
     }
+    for (NSString *key in @[@"trigger_device_rotated_landscape", @"trigger_device_rotated_portrait"]) {
+        if ([configuredKeys containsObject:key]) [deviceStateKeys addObject:key];
+    }
     if ([configuredKeys containsObject:@"trigger_carplay_connect"]) {
         [deviceStateKeys addObject:@"trigger_carplay_connect"];
     }
@@ -502,6 +507,8 @@
                              @[@"trigger_device_unlock", @"Device Unlocked", @"lock.open.fill", @"Device"],
                              @[@"trigger_power_connect", @"Power Connected", @"bolt.fill", @"Device"],
                              @[@"trigger_power_disconnect", @"Power Disconnected", @"bolt.slash.fill", @"Device"],
+                             @[@"trigger_device_rotated_landscape", @"Rotated to Landscape", @"iphone.landscape", @"Device"],
+                             @[@"trigger_device_rotated_portrait", @"Rotated to Portrait", @"iphone", @"Device"],
                              @[@"trigger_carplay_connect", @"CarPlay Connected", @"car.fill", @"Device"],
                              @[@"trigger_carplay_disconnect", @"CarPlay Disconnected", @"car", @"Device"],
                              @[@"trigger_media_play", @"Media Playing", @"play.fill", @"Media"],

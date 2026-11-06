@@ -5080,6 +5080,40 @@ static void rc_carplay_start_observing(void) {
     });
 }
 
+// Orientation triggers: the screen turning to landscape or back to portrait. SpringBoard says when
+// its active orientation changes (only on a rotation, so nothing runs while the phone is still);
+// the check waits half a second for it to settle, so a quick turn and back fires nothing.
+// Upside down counts as portrait.
+static BOOL g_rcLandscape = NO;
+static BOOL g_rcOrientationReady = NO;
+static NSUInteger g_rcOrientationCheck = 0;
+
+static BOOL rc_screen_is_landscape(void) {
+    id sb = [UIApplication sharedApplication];
+    if (![sb respondsToSelector:@selector(activeInterfaceOrientation)]) return NO;
+    return UIInterfaceOrientationIsLandscape((UIInterfaceOrientation)((long (*)(id, SEL))objc_msgSend)(sb, @selector(activeInterfaceOrientation)));
+}
+
+static void rc_orientation_maybe_changed(void) {
+    if (!g_rcOrientationReady) return;
+    NSUInteger check = ++g_rcOrientationCheck;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (check != g_rcOrientationCheck) return; // a newer turn: that one decides
+        BOOL landscape = rc_screen_is_landscape();
+        if (landscape == g_rcLandscape) return;
+        g_rcLandscape = landscape;
+        SRLogMin(@"🔄 [RCSystem] Screen turned to %@.", landscape ? @"LANDSCAPE" : @"PORTRAIT");
+        RCExecuteTrigger(landscape ? @"trigger_device_rotated_landscape" : @"trigger_device_rotated_portrait");
+    });
+}
+
+static void rc_orientation_start_observing(void) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        g_rcLandscape = rc_screen_is_landscape();
+        g_rcOrientationReady = YES;
+    });
+}
+
 // Whether this phone has a Home button: SpringBoard's lock button knows the Home button
 // type (2 = none, on Face ID phones)
 static BOOL rc_has_home_button(void) {
@@ -5287,6 +5321,7 @@ static void register_system_event_observers() {
     initialize_lock_state();
     initialize_power_state();
     rc_carplay_start_observing();
+    rc_orientation_start_observing();
 
     // Power State: Cocoa Touch observers
     [nc addObserverForName:UIDeviceBatteryStateDidChangeNotification 
@@ -17460,6 +17495,11 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
 }
 
 %hook SpringBoard
+
+- (void)noteActiveInterfaceOrientationDidChangeToOrientation:(long)orientation willAnimateWithSettings:(id)settings fromOrientation:(long)fromOrientation {
+    %orig;
+    rc_orientation_maybe_changed();
+}
 
 - (void)motionEnded:(UIEventSubtype)motion withEvent:(UIEvent *)event {
     if (motion == UIEventSubtypeMotionShake) {
