@@ -17,7 +17,6 @@ RemoteCompanion provides fast, scriptable system control for modern rootless jai
 > - **API Token Gating**: an optional token in Settings > Web UI > Access gates privileged `/api/command` calls (`root`, `sudo`, `exec`).
 > - **Two-Finger Slides**: slide up from the bottom bar or down from the status bar with two fingers, each firing its own trigger, with distance-based firing, a widened landing zone, and Control Center suppression mid-gesture.
 > - **Lock Scrolling During Gestures**: an off-by-default toggle that keeps lists still while gesturing.
-> - **Fixes**: DoubleTapToLock and GetDown lock again after the first try, the Test Kit passcode survives a respring and unlock is phone-only, and the Bottom Swipe Up, SSH banner and Touch ID trigger issues are fixed.
 
 <p align="center">
   <a href="https://saihgupr.github.io/remotecompanion/">Official Website</a> •
@@ -371,10 +370,11 @@ The background listener daemon runs inside SpringBoard with automatic 60s keep-a
 
 ### 2. Installation
 
-#### Option 1: Package Manager Repository (Recommended)
-Add `https://saihgupr.github.io/remotecompanion` to your package manager (or visit the [official website](https://saihgupr.github.io/remotecompanion/) for one-tap buttons):
+#### Option 1: Package Manager (Recommended)
+Install from **[Havoc](https://havoc.app/package/remotecompanion)** without adding a source, or add the project repo `https://saihgupr.github.io/remotecompanion` to Sileo or Zebra:
 - [Add to Sileo](sileo://source/https://saihgupr.github.io/remotecompanion)
 - [Add to Zebra](zbra://sources/add/https://saihgupr.github.io/remotecompanion)
+- [Get it on Havoc](https://havoc.app/package/remotecompanion)
 
 #### Option 2: Manual .deb Installation
 Download the latest `.deb` package from [Releases](https://github.com/saihgupr/remotecompanion/releases) and install via Sileo, Filza, or `dpkg -i`.
