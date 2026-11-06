@@ -1,15 +1,9 @@
 #import <Foundation/Foundation.h>
 
-// Shared by Settings and SpringBoard. This first version deliberately covers only
-// status-bar gestures: other trigger families have their own native-event policies.
-static inline NSArray<NSString *> *RCAppExclusionTriggerKeys(void) {
-    return @[@"trigger_statusbar_left_hold", @"trigger_statusbar_center_hold",
-             @"trigger_statusbar_right_hold", @"trigger_statusbar_swipe_left",
-             @"trigger_statusbar_swipe_right", @"trigger_statusbar_double_tap"];
-}
-
+// Shared by Settings and SpringBoard. Any configured trigger can carry exclusions;
+// enforcement is generic in the central dispatch and actionable checks.
 static inline BOOL RCTriggerSupportsAppExclusions(id key) {
-    return [key isKindOfClass:[NSString class]] && [RCAppExclusionTriggerKeys() containsObject:key];
+    return [key isKindOfClass:[NSString class]];
 }
 
 // Imported plists/JSON may contain arbitrary types. Only nonempty bundle IDs are

@@ -5,7 +5,7 @@
 
 - (NSArray<NSString *> *)assignedAppExclusionTriggerKeys {
     NSMutableArray<NSString *> *keys = [NSMutableArray array];
-    for (NSString *key in RCAppExclusionTriggerKeys()) {
+    for (NSString *key in [self allConfiguredTriggerKeys]) {
         id trigger = [self triggerDataForKey:key];
         if (![trigger isKindOfClass:[NSDictionary class]]) continue;
         id actions = trigger[@"actions"];

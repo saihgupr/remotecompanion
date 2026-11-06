@@ -11,13 +11,10 @@ int main(void) {
     @autoreleasepool {
         NSString *left = @"trigger_statusbar_swipe_left";
         NSString *right = @"trigger_statusbar_swipe_right";
-        expect(RCAppExclusionTriggerKeys().count == 6, "six supported status bar behaviors");
-        for (NSString *key in RCAppExclusionTriggerKeys()) {
-            expect(RCTriggerSupportsAppExclusions(key), "UI/runtime share the same eligible keys");
-        }
-        expect(!RCTriggerSupportsAppExclusions(@"volume_up_hold"), "button policies unchanged");
-        expect(!RCTriggerSupportsAppExclusions(@"trigger_bottombar_swipe_left"), "bottom policies unchanged");
-        expect(!RCTriggerSupportsAppExclusions(@"trigger_statusbar_unknown"), "not an unrestricted prefix");
+        expect(RCTriggerSupportsAppExclusions(left), "status bar triggers are supported");
+        expect(RCTriggerSupportsAppExclusions(@"volume_up_hold"), "button triggers are supported");
+        expect(RCTriggerSupportsAppExclusions(@"trigger_bottombar_swipe_left"), "bottom bar triggers are supported");
+        expect(RCTriggerSupportsAppExclusions(@"trigger_statusbar_unknown"), "any string key is supported");
         expect(!RCTriggerSupportsAppExclusions(@42), "invalid key type");
         expect(RCNormalizedExcludedApps(nil).count == 0, "missing list");
         expect(RCNormalizedExcludedApps(@"com.example.game").count == 0, "scalar list rejected");
@@ -37,7 +34,7 @@ int main(void) {
         expect(!RCTriggerExcludesBundleID(left, triggers[left], @42), "invalid foreground fails open");
         expect(!RCTriggerExcludesBundleID(left, @[], @"com.example.game"), "malformed trigger rejected");
         expect(!RCTriggerExcludesBundleID(left, @{ @"excludedApps": @[@42, [NSNull null]] }, @"com.example.game"), "malformed entries rejected");
-        expect(!RCTriggerExcludesBundleID(@"volume_up_hold", excluded, @"com.example.game"), "unsupported trigger ignores field");
+        expect(RCTriggerExcludesBundleID(@"volume_up_hold", excluded, @"com.example.game"), "any assigned trigger honors its own field");
         expect(!RCTriggerExcludesBundleID(left, @{ @"excludedApps": @[] }, @"com.example.game"), "cleared list permits behavior");
         puts("PASS: app exclusion model");
     }

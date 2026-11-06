@@ -12,9 +12,11 @@ def source(path):
 class ExclusionWiring(unittest.TestCase):
     def test_settings_available_without_web_ui(self):
         settings = source("RemoteCompanion/RCSettingsViewController.m")
-        self.assertIn("webUIEnabled ? 5 : 3", settings)
-        self.assertIn('cell.textLabel.text = @"Excluded Apps"', settings)
-        self.assertIn("[[RCExcludedAppsViewController alloc] init]", settings)
+        self.assertIn("webUIEnabled ? 4 : 2", settings)
+        self.assertNotIn("RCExcludedAppsViewController", settings)
+        advanced = source("RemoteCompanion/RCAdvancedSettingsViewController.m")
+        self.assertIn('cell.textLabel.text = @"Excluded Apps"', advanced)
+        self.assertIn("[[RCExcludedAppsViewController alloc] init]", advanced)
         self.assertNotIn("RCExcludedAppsViewController", source("RemoteCompanion/RCTriggersViewController.m"))
 
     def test_per_trigger_storage_preserves_other_fields(self):
