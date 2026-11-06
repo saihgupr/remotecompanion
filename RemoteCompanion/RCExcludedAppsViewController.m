@@ -2,10 +2,22 @@
 #import "RCConfigManager+AppExclusions.h"
 #import "RCAppPickerViewController.h"
 
+// Private API Declarations (same as the app picker)
+@interface LSApplicationProxy : NSObject
+@property (nonatomic, readonly) NSString *applicationIdentifier;
+@property (nonatomic, readonly) NSString *localizedName;
+@end
+
+@interface LSApplicationWorkspace : NSObject
++ (instancetype)defaultWorkspace;
+- (NSArray<LSApplicationProxy *> *)allInstalledApplications;
+@end
+
 @interface RCExcludedAppsViewController () <UISearchResultsUpdating>
 @property (nonatomic, copy) NSArray<NSArray<NSString *> *> *sections;
 @property (nonatomic, copy) NSArray<NSString *> *sectionTitles;
 @property (nonatomic, strong) UISearchController *searchController;
+@property (nonatomic, copy) NSDictionary<NSString *, NSString *> *appNames; // lowercase bundle id -> display name
 @end
 
 @implementation RCExcludedAppsViewController
@@ -39,6 +51,27 @@
     self.definesPresentationContext = YES;
 
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(wrapLongNamesSettingChanged:) name:@"RCWrapLongNamesSettingChanged" object:nil];
+
+    [self loadAppNames];
+}
+
+// Bundle id -> display name, so excluded apps show by name instead of by id.
+// Loaded once; ids without a match (uninstalled apps) fall back to the id.
+- (void)loadAppNames {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        Class workspaceClass = NSClassFromString(@"LSApplicationWorkspace");
+        NSArray<LSApplicationProxy *> *apps = [[workspaceClass defaultWorkspace] allInstalledApplications];
+        NSMutableDictionary<NSString *, NSString *> *names = [NSMutableDictionary dictionary];
+        for (LSApplicationProxy *app in apps) {
+            if (app.applicationIdentifier.length && app.localizedName.length) {
+                names[app.applicationIdentifier.lowercaseString] = app.localizedName;
+            }
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.appNames = names;
+            [self.tableView reloadData];
+        });
+    });
 }
 
 - (void)viewWillAppear:(BOOL)animated {
@@ -250,9 +283,28 @@
         [labels addObject:[cm nameForCommand:action truncate:YES] ?: @"Action"];
     }
     NSUInteger count = [cm excludedAppsForTrigger:key].count;
-    cell.detailTextLabel.text = [NSString stringWithFormat:@"%@\n%@%lu excluded app%@",
-        [labels componentsJoinedByString:@" · "], [cm isTriggerEnabled:key] ? @"" : @"Disabled · ",
-        (unsigned long)count, count == 1 ? @"" : @"s"];
+    NSString *actionsLine = [labels componentsJoinedByString:@" · "];
+    if (![cm isTriggerEnabled:key]) actionsLine = [@"Disabled · " stringByAppendingString:actionsLine];
+    NSMutableAttributedString *detail = [[NSMutableAttributedString alloc] initWithString:actionsLine
+        attributes:@{NSForegroundColorAttributeName: [UIColor secondaryLabelColor]}];
+    if (count > 0) {
+        NSMutableArray<NSString *> *names = [NSMutableArray array];
+        for (NSString *bundleID in [cm excludedAppsForTrigger:key]) {
+            NSString *name = self.appNames[[bundleID lowercaseString]];
+            [names addObject:name.length ? name : bundleID];
+        }
+        NSString *excludedLine = [NSString stringWithFormat:@"Excluded: %@ (%lu)",
+            [names componentsJoinedByString:@", "], (unsigned long)count];
+        NSMutableAttributedString *excluded = [[NSMutableAttributedString alloc] initWithString:excludedLine
+            attributes:@{NSForegroundColorAttributeName: [UIColor secondaryLabelColor]}];
+        NSRange namesRange = [excludedLine rangeOfString:[names componentsJoinedByString:@", "]];
+        if (namesRange.location != NSNotFound) {
+            [excluded addAttribute:NSForegroundColorAttributeName value:[UIColor systemRedColor] range:namesRange];
+        }
+        [detail appendAttributedString:[[NSAttributedString alloc] initWithString:wrapLongNames ? @"\n" : @" · "]];
+        [detail appendAttributedString:excluded];
+    }
+    cell.detailTextLabel.attributedText = detail;
     cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
     cell.detailTextLabel.numberOfLines = wrapLongNames ? 0 : 1;
     cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
