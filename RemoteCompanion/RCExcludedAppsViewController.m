@@ -269,6 +269,16 @@
     return self.sections[section].count;
 }
 
+- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
+    // Rows with excluded apps need room for the second line even when
+    // Wrap Long Names is off.
+    NSString *key = [self triggerKeyAtIndexPath:indexPath];
+    if ([[RCConfigManager sharedManager] excludedAppsForTrigger:key].count > 0) {
+        return UITableViewAutomaticDimension;
+    }
+    return [[NSUserDefaults standardUserDefaults] boolForKey:@"RCWrapLongNamesEnabled"] ? UITableViewAutomaticDimension : 64.0;
+}
+
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     RCConfigManager *cm = [RCConfigManager sharedManager];
     NSString *key = [self triggerKeyAtIndexPath:indexPath];
@@ -301,12 +311,14 @@
         if (namesRange.location != NSNotFound) {
             [excluded addAttribute:NSForegroundColorAttributeName value:[UIColor systemRedColor] range:namesRange];
         }
-        [detail appendAttributedString:[[NSAttributedString alloc] initWithString:wrapLongNames ? @"\n" : @" · "]];
+        // Always its own line: squeezed onto the actions line it truncates
+        // before the names ever show when Wrap Long Names is off.
+        [detail appendAttributedString:[[NSAttributedString alloc] initWithString:@"\n"]];
         [detail appendAttributedString:excluded];
     }
     cell.detailTextLabel.attributedText = detail;
     cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
-    cell.detailTextLabel.numberOfLines = wrapLongNames ? 0 : 1;
+    cell.detailTextLabel.numberOfLines = (count > 0 || wrapLongNames) ? 0 : 1;
     cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     return cell;
 }
