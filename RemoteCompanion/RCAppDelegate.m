@@ -6,6 +6,7 @@
 #import "RCKMSettingsViewController.h"
 #import "RCMQTTSettingsViewController.h"
 #import "RCAdvancedSettingsViewController.h"
+#import "RCExcludedAppsViewController.h"
 #import "RCTestKitViewController.h"
 #import "RCWebUIAccessViewController.h"
 #import "RCActionsViewController.h"
@@ -163,6 +164,14 @@
         return;
     }
     
+    if ([destination isEqualToString:@"excluded"] || [destination isEqualToString:@"excludedapps"]) {
+        [rootNav presentViewController:settingsNav animated:NO completion:^{
+            [settingsNav pushViewController:[[RCAdvancedSettingsViewController alloc] init] animated:NO];
+            [settingsNav pushViewController:[[RCExcludedAppsViewController alloc] init] animated:NO];
+        }];
+        return;
+    }
+
     if ([destination isEqualToString:@"testkit"]) {
         [rootNav presentViewController:settingsNav animated:NO completion:^{
             [settingsNav pushViewController:[[RCTestKitViewController alloc] init] animated:NO];

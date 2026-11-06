@@ -357,7 +357,8 @@
         }
         NSString *joined = [names componentsJoinedByString:@", "];
         NSString *excludedLine = [NSString stringWithFormat:@"Excluded: %@ (%lu)", joined, (unsigned long)count];
-        cell.excludedLabel.text = excludedLine;
+        cell.excludedLabel.attributedText = [[NSAttributedString alloc] initWithString:excludedLine
+            attributes:@{NSForegroundColorAttributeName: [UIColor secondaryLabelColor]}];
         cell.excludedLabel.hidden = NO;
     } else {
         cell.excludedLabel.attributedText = nil;

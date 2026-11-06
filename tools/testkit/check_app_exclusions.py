@@ -42,7 +42,7 @@ class ExclusionWiring(unittest.TestCase):
         ui = source("RemoteCompanion/RCExcludedAppsViewController.m")
         self.assertIn("cell.nameLabel.numberOfLines = wrapLongNames ? 0 : 1;", ui)
         self.assertIn("cell.actionsLabel.numberOfLines = wrapLongNames ? 0 : 1;", ui)
-        self.assertIn("cell.excludedLabel.text", ui)
+        self.assertIn("cell.excludedLabel.attributedText", ui)
         self.assertNotIn("systemRedColor", ui)
 
     def test_dispatch_guard_before_action_execution(self):
