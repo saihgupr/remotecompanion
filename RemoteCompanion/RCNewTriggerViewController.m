@@ -49,13 +49,13 @@
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
-    self.searchController.searchBar.placeholder = @"Search Trigger Types";
+    self.searchController.searchBar.placeholder = @"Search Triggers";
     self.navigationItem.searchController = self.searchController;
     self.navigationItem.hidesSearchBarWhenScrolling = NO;
     self.definesPresentationContext = YES;
 
     self.emptyLabel = [[UILabel alloc] init];
-    self.emptyLabel.text = @"No Trigger Types Found";
+    self.emptyLabel.text = @"No Triggers Found";
     self.emptyLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
     self.emptyLabel.textColor = [UIColor secondaryLabelColor];
     self.emptyLabel.textAlignment = NSTextAlignmentCenter;
