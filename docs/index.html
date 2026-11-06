@@ -207,7 +207,7 @@
                         <li class="feature-list-item"><span class="feature-check">✓</span> NFC background tags & Proximity pocket detection</li>
                         <li class="feature-list-item"><span class="feature-check">✓</span> Power connect/disconnect & Status Bar double-tap</li>
                         <li class="feature-list-item"><span class="feature-check">✓</span> Rotation, Find My Sound, Calls, Battery Level & Focus triggers</li>
-                        <li class="feature-list-item"><span class="feature-check">✓</span> Two-finger edge swipes & recorded gestures at 0.5x to 3x</li>
+                        <li class="feature-list-item"><span class="feature-check">✓</span> Two-finger slides up and down & recorded gestures at 0.5x to 3x</li>
                     </ul>
                 </div>
 
@@ -391,7 +391,19 @@
                 </div>
                 <div class="changelog-item">
                     <span class="changelog-tag tag-improved">UI Refresh</span>
-                    <p class="changelog-text"><strong>Web UI & Edge Gestures:</strong> Web UI follows system light mode, edge swipes accept a second finger, and <code>/api/command</code> supports an optional token gating privileged commands.</p>
+                    <p class="changelog-text"><strong>Web UI Light Mode:</strong> The Web UI follows system appearance with a full light palette.</p>
+                </div>
+                <div class="changelog-item">
+                    <span class="changelog-tag tag-fix">Security</span>
+                    <p class="changelog-text"><strong>API Token Gating:</strong> An optional token in Settings → Web UI → Access gates privileged <code>/api/command</code> calls such as <code>root</code>, <code>sudo</code> and <code>exec</code>.</p>
+                </div>
+                <div class="changelog-item">
+                    <span class="changelog-tag tag-new">New</span>
+                    <p class="changelog-text"><strong>Two-Finger Slides:</strong> Slide up from the bottom bar or down from the status bar with two fingers, each firing its own trigger, with distance-based firing, a widened landing zone and Control Center suppression.</p>
+                </div>
+                <div class="changelog-item">
+                    <span class="changelog-tag tag-improved">UI Refresh</span>
+                    <p class="changelog-text"><strong>Lock Scrolling During Gestures:</strong> An off-by-default toggle that keeps lists still while gesturing.</p>
                 </div>
                 <div class="changelog-item">
                     <span class="changelog-tag tag-fix">Security</span>

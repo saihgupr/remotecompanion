@@ -10,8 +10,10 @@ RemoteCompanion provides fast, scriptable system control for modern rootless jai
 > - **Variables**: the Set Variable action saves a value, changes it with math or an RC command, or keeps it for one run. `{name}` in action text becomes its value, a Variable condition compares it, and Settings > Advanced Settings > Variables lists what is saved.
 > - **App Quick Action**: pick an app, then one of its registered shortcuts, read live from SpringBoard so the Home Screen menu never has to be opened first.
 > - **Excluded Apps**: Settings > Advanced Settings > Options lists every trigger that has actions, grouped like the Triggers page, and sets the apps where each one should stay quiet.
-> - **Web UI and API**: Web UI follows system light mode, and `/api/command` supports an optional token that gates privileged commands (`root`, `sudo`, `exec`).
-> - **Edge Gestures**: Edge swipes accept a second finger with distance-based firing and an optional Lock Scrolling During Gestures toggle.
+> - **Web UI Light Mode**: the Web UI follows system appearance with a full light palette.
+> - **API Token Gating**: an optional token in Settings > Web UI > Access gates privileged `/api/command` calls (`root`, `sudo`, `exec`).
+> - **Two-Finger Slides**: slide up from the bottom bar or down from the status bar with two fingers, each firing its own trigger, with distance-based firing, a widened landing zone, and Control Center suppression mid-gesture.
+> - **Lock Scrolling During Gestures**: an off-by-default toggle that keeps lists still while gesturing.
 
 <p align="center">
   <a href="https://saihgupr.github.io/remotecompanion/">Official Website</a> •
@@ -36,7 +38,7 @@ RemoteCompanion provides fast, scriptable system control for modern rootless jai
 - **Only Unlock Out of Pocket**: an off-by-default option in Settings > Advanced Settings > Options that makes Unlock Device and lock toggle skip unlocking while the proximity sensor is covered, such as in a pocket.
 - **New Triggers in 4.4.0**: Rotated to Landscape / Portrait, Find My Sound (with optional silent ping), Incoming Call / Call Started / Call Ended, Battery Level (fires once at 1-100%), and Focus on / off for a chosen Focus or any Focus.
 - **Gesture Recorder**: Settings > Gestures records a mix of taps, swipes and scrolls, saves it under a name, and plays it back at 0.5x to 3x. Each recording can be trimmed, re-recorded, replaced, renamed, exported and imported.
-- **Two-Finger Edge Slides**: edge swipe triggers recognize a second finger, with distance-based firing, a widened landing zone, and an optional Lock Scrolling During Gestures toggle.
+- **Two-Finger Slides**: two-finger slide up from the bottom bar and slide down from the status bar are their own triggers, with distance-based firing, a widened landing zone, and an optional Lock Scrolling During Gestures toggle.
 - **Compact Layout and Trigger Icons**: Triggers, Select Action and Settings > Banners can each show a grid of tiles instead of a list (Advanced Settings > Layout, list stays default). Button and gesture triggers show a small phone or screen-area icon, app triggers show the app icon, and "Screen Gestures" now reads "Status Bar".
 - **Copy and Paste Actions**: select actions in a trigger's ••• menu to copy or delete together, then paste into any trigger. An If block brings its whole block, and the clipboard survives closing the app.
 - **Variables**: the Set Variable action saves a value, `{name}` in action text becomes its value, a Variable condition compares it, and Settings > Advanced Settings > Variables lists saved values.
@@ -185,9 +187,9 @@ Configure these in the `RemoteCompanion` app for custom action sequences. Tip: *
 - **NFC Triggers**: Scan physical NFC tags to run actions on screen wake (Optional toggle in Settings).
 - **Ringer Switch**: Mute, Unmute, or Toggle triggers.
 - **Gestures**: 
-  - **Status Bar**: Hold (Left/Center/Right), Double-Tap, or Swipe Left/Right.
-  - **Edge Gestures**: Vertical swipe on left/right edges, with optional second finger.
-  - **Bottom Bar Gestures**: Swipe Left/Right, or **3-Zone Swipe Up** (Left 33%, Center 34%, Right 33%).
+  - **Status Bar**: Hold (Left/Center/Right), Double-Tap, Swipe Left/Right, or a two-finger slide down.
+  - **Edge Gestures**: Vertical swipe on left/right edges.
+  - **Bottom Bar Gestures**: Swipe Left/Right, **3-Zone Swipe Up** (Left 33%, Center 34%, Right 33%), or a two-finger slide up.
 - **Motion Gestures**:
   - **Shake**: Fire actions when the device is physically shaken.
 - **System Events**:
