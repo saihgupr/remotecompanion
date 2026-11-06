@@ -44,9 +44,12 @@
         self.doneItem = [[UIBarButtonItem alloc] initWithTitle:@"Done" style:UIBarButtonItemStyleDone target:self action:@selector(donePressed)];
         self.doneItem.enabled = self.allowsEmptySelection || self.chosen.count > 0;
         if (self.allowsEmptySelection) {
-            self.navigationItem.leftItemsSupplementBackButton = YES;
-            self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Clear All"
-                style:UIBarButtonItemStylePlain target:self action:@selector(clearAllApps)];
+            // Centered between Back and Done via the title slot.
+            UIButton *clearButton = [UIButton buttonWithType:UIButtonTypeSystem];
+            [clearButton setTitle:@"Clear All" forState:UIControlStateNormal];
+            [clearButton addTarget:self action:@selector(clearAllApps) forControlEvents:UIControlEventTouchUpInside];
+            [clearButton sizeToFit];
+            self.navigationItem.titleView = clearButton;
         }
     }
     
@@ -85,13 +88,23 @@
         Class workspaceClass = NSClassFromString(@"LSApplicationWorkspace");
         NSArray *apps = [[workspaceClass defaultWorkspace] allInstalledApplications];
         
-        // Filter out some internals?
-        // Usually we want user visible apps.
-        // There is no easy property for "user visible" public on Proxy, but usually we filter by bundle ID prefix or just show all.
-        // Let's sort by name.
+        // Only real apps: the workspace also lists services, extensions and
+        // other non-app bundles (e.g. AAUIViewService) that show up with a
+        // template icon and a raw id. Those live outside the app folders,
+        // aren't .app bundles, or have no display name.
+        NSMutableArray *visible = [NSMutableArray array];
+        for (LSApplicationProxy *app in apps) {
+            NSString *path = app.bundleURL.path;
+            if (!path.length) continue;
+            if (![[path pathExtension] isEqualToString:@"app"]) continue;
+            if ([path hasPrefix:@"/System/"]) continue;
+            if (!app.localizedName.length) continue;
+            [visible addObject:app];
+        }
         
+        // Let's sort by name.
         NSSortDescriptor *sort = [NSSortDescriptor sortDescriptorWithKey:@"localizedName" ascending:YES selector:@selector(localizedCaseInsensitiveCompare:)];
-        self.allApps = [apps sortedArrayUsingDescriptors:@[sort]];
+        self.allApps = [visible sortedArrayUsingDescriptors:@[sort]];
         self.filteredApps = self.allApps;
         
         dispatch_async(dispatch_get_main_queue(), ^{
