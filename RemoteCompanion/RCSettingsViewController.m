@@ -3,7 +3,6 @@
 #import "RCUITweaker.h"
 #import "RCIntegrationsViewController.h"
 #import "RCAdvancedSettingsViewController.h"
-#import "RCExcludedAppsViewController.h"
 #import "RCTestKitViewController.h"
 #import "RCRunningViewController.h"
 #import "RCWebUIAccessViewController.h"
@@ -240,7 +239,7 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if (section == RCSettingsSectionGeneral) {
-        return [RCConfigManager sharedManager].webUIEnabled ? 5 : 3; // Excluded Apps is always available
+        return [RCConfigManager sharedManager].webUIEnabled ? 4 : 2;
     }
     if (section == RCSettingsSectionBackup || section == RCSettingsSectionAdvanced) {
         return 2; // Export / Import; Advanced Settings / Variables
@@ -288,13 +287,10 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
             cell.accessoryView = _webUISwitch;
             cell.selectionStyle = UITableViewCellSelectionStyleNone;
         } else if (indexPath.row == 2) {
-            cell.textLabel.text = @"Excluded Apps";
-            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-        } else if (indexPath.row == 3) {
             cell.textLabel.text = @"Access";
             cell.detailTextLabel.text = [RCWebUIAccessViewController titleForAccess:cm.webUIAccess];
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-        } else if (indexPath.row == 4) {
+        } else if (indexPath.row == 3) {
             cell.textLabel.text = @"Open Web UI";
             cell.detailTextLabel.text = [self webUIUrlString];
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
@@ -352,10 +348,8 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
 
     if (indexPath.section == RCSettingsSectionGeneral && indexPath.row == 2) {
-        [self.navigationController pushViewController:[[RCExcludedAppsViewController alloc] init] animated:YES];
-    } else if (indexPath.section == RCSettingsSectionGeneral && indexPath.row == 3) {
         [self.navigationController pushViewController:[[RCWebUIAccessViewController alloc] init] animated:YES];
-    } else if (indexPath.section == RCSettingsSectionGeneral && indexPath.row == 4) {
+    } else if (indexPath.section == RCSettingsSectionGeneral && indexPath.row == 3) {
         [self openWebUI];
     } else if (indexPath.section == RCSettingsSectionIntegrations) {
         RCIntegrationsViewController *integrationsVC = [[RCIntegrationsViewController alloc] init];

@@ -2,6 +2,8 @@
 #import "RCConfigManager.h"
 #import "RCUITweaker.h"
 #import "RCBannersViewController.h"
+#import "RCExcludedAppsViewController.h"
+#import "RCConfigManager+AppExclusions.h"
 
 @interface RCAdvancedSettingsViewController ()
 @property (nonatomic, strong) UITableView *tableView;
@@ -146,7 +148,7 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
     if (section == RCAdvancedSettingsSectionNFC) return 3;
     if (section == RCAdvancedSettingsSectionButtons) return (NSInteger)[self timingRows].count;
     if (section == RCAdvancedSettingsSectionSecurity) return 1;
-    return 4; // Wrap Long Names, Logging, Freeze Lists During Gestures, Only Unlock Out of Pocket
+    return 5; // Wrap Long Names, Logging, Freeze Lists During Gestures, Only Unlock Out of Pocket, Excluded Apps
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -154,7 +156,7 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
     
     BOOL isValueRow = (indexPath.section == RCAdvancedSettingsSectionBanners) ||
                       (indexPath.section == RCAdvancedSettingsSectionNFC && indexPath.row == 2) ||
-                      (indexPath.section == RCAdvancedSettingsSectionOptions && indexPath.row == 1) ||
+                      (indexPath.section == RCAdvancedSettingsSectionOptions && (indexPath.row == 1 || indexPath.row == 4)) ||
                       (indexPath.section == RCAdvancedSettingsSectionButtons);
     UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:isValueRow ? UITableViewCellStyleValue1 : UITableViewCellStyleDefault reuseIdentifier:nil];
     cell.backgroundColor = [cm tweakColorForKey:@"blockBackground" defaultVal:0.12];
@@ -231,6 +233,14 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
             [proximityUnlockSwitch addTarget:self action:@selector(onlyUnlockOutOfPocketChanged:) forControlEvents:UIControlEventValueChanged];
             cell.accessoryView = proximityUnlockSwitch;
             cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        } else if (indexPath.row == 4) {
+            cell.textLabel.text = @"Excluded Apps";
+            NSUInteger excludedCount = 0;
+            for (NSString *key in [cm allConfiguredTriggerKeys]) {
+                excludedCount += [cm excludedAppsForTrigger:key].count;
+            }
+            cell.detailTextLabel.text = excludedCount ? [NSString stringWithFormat:@"%lu", (unsigned long)excludedCount] : @"None";
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         }
     } else if (indexPath.section == RCAdvancedSettingsSectionButtons) {
         NSDictionary *row = [self timingRows][indexPath.row];
@@ -259,6 +269,8 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
         [self chooseNFCWindowFromView:[tableView cellForRowAtIndexPath:indexPath]];
     } else if (indexPath.section == RCAdvancedSettingsSectionOptions && indexPath.row == 1) {
         [self chooseLogLevelFromView:[tableView cellForRowAtIndexPath:indexPath]];
+    } else if (indexPath.section == RCAdvancedSettingsSectionOptions && indexPath.row == 4) {
+        [self.navigationController pushViewController:[[RCExcludedAppsViewController alloc] init] animated:YES];
     } else if (indexPath.section == RCAdvancedSettingsSectionButtons) {
         NSDictionary *row = [self timingRows][indexPath.row];
         double (^get)(void) = row[@"get"];
