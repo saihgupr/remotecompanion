@@ -856,7 +856,23 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         return _config[@"triggers"][triggerKey][@"name"] ?: triggerKey;
     }
     
-    return names[triggerKey] ?: triggerKey;
+    NSString *name = names[triggerKey];
+    if (name) return name;
+
+    // Last resort for trigger keys with no mapping (e.g. one from a newer or
+    // custom tweak build): make the key readable instead of showing it raw.
+    if ([triggerKey hasPrefix:@"trigger_"]) {
+        NSString *stripped = [triggerKey substringFromIndex:@"trigger_".length];
+        NSMutableArray<NSString *> *words = [NSMutableArray array];
+        for (NSString *word in [stripped componentsSeparatedByString:@"_"]) {
+            if (word.length == 0) continue;
+            NSString *first = [[word substringToIndex:1] uppercaseString];
+            [words addObject:[first stringByAppendingString:[word substringFromIndex:1]]];
+        }
+        if (words.count > 0) return [words componentsJoinedByString:@" "];
+    }
+
+    return triggerKey;
 }
 
 - (NSMutableDictionary *)triggerDict:(NSString *)triggerKey {
