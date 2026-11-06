@@ -3249,6 +3249,7 @@ const TRIGGER_NAMES = {
   trigger_device_rotated_landscape: 'Rotated to Landscape', trigger_device_rotated_portrait: 'Rotated to Portrait',
   trigger_carplay_connect: 'CarPlay Connected', trigger_carplay_disconnect: 'CarPlay Disconnected',
   trigger_media_play: 'Media Playing', trigger_media_pause: 'Media Paused', trigger_media_track_change: 'Media Track Changed',
+  trigger_device_call_incoming: 'Incoming Call', trigger_device_call_start: 'Call Started', trigger_device_call_end: 'Call Ended',
 };
 
 const TRIGGER_ICONS = {
@@ -3302,6 +3303,9 @@ const TRIGGER_ICONS = {
   trigger_media_play:   { icon:'play_fill',        cls:'icon-blue' },
   trigger_media_pause:  { icon:'pause_fill',       cls:'icon-orange' },
   trigger_media_track_change: { icon:'forward_fill', cls:'icon-purple' },
+  trigger_device_call_incoming: { icon:'phone_arrow_down_left', cls:'icon-green' },
+  trigger_device_call_start:    { icon:'phone_fill',            cls:'icon-green' },
+  trigger_device_call_end:      { icon:'phone_down_fill',       cls:'icon-red' },
 };
 
 function iconForKey(key) {

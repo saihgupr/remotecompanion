@@ -5314,11 +5314,93 @@ static void handle_media_state_notification(CFNotificationCenterRef center, void
     });
 }
 
+#pragma mark - Call triggers
+
+// Calls from Phone, FaceTime and other calling apps, as CallKit reports them. The triggers follow
+// the phone as a whole: Incoming Call when a call starts ringing and none was, Call Started when a
+// call connects (incoming or outgoing) and none was connected, Call Ended when the last call ends
+// (missed and declined calls too). One call can show up twice - the phone's own and the same call
+// relayed from another device on the account - and still fires each trigger once.
+typedef NS_ENUM(NSInteger, RCCallStage) {
+    RCCallStageNone = 0,
+    RCCallStageRinging,
+    RCCallStageConnected,
+    RCCallStageEnded,
+};
+
+@interface RCCallObserver : NSObject
+@end
+
+static id g_rcCallObserver = nil; // CXCallObserver
+static RCCallObserver *g_rcCallDelegate = nil;
+static NSMutableDictionary<NSUUID *, NSNumber *> *g_rcCallStages = nil; // the last stage seen per call
+
+static RCCallStage rc_call_stage(id call) {
+    if ([[call valueForKey:@"hasEnded"] boolValue]) return RCCallStageEnded;
+    if ([[call valueForKey:@"hasConnected"] boolValue]) return RCCallStageConnected;
+    if (![[call valueForKey:@"outgoing"] boolValue]) return RCCallStageRinging;
+    return RCCallStageNone; // still dialing out
+}
+
+@implementation RCCallObserver
+- (void)callObserver:(id)observer callChanged:(id)call {
+    NSUUID *uuid = [call valueForKey:@"UUID"];
+    if (!uuid) return;
+    RCCallStage stage = rc_call_stage(call);
+    RCCallStage last = (RCCallStage)[g_rcCallStages[uuid] integerValue];
+    if (stage <= last) return; // nothing new for this call
+    g_rcCallStages[uuid] = @(stage);
+    if (stage == RCCallStageEnded) {
+        // Forget the call a while later (late updates for it still find it ended)
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(60 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [g_rcCallStages removeObjectForKey:uuid];
+        });
+    }
+
+    // Another call already ringing, connected, or not over yet: nothing changes for the phone
+    for (NSUUID *other in g_rcCallStages) {
+        if ([other isEqual:uuid]) continue;
+        RCCallStage otherStage = (RCCallStage)[g_rcCallStages[other] integerValue];
+        if (stage == RCCallStageEnded ? otherStage != RCCallStageEnded : otherStage == stage) {
+            SRLog(@"📞 [RCSystem] Call %@: stage %ld, another call covers it.", uuid.UUIDString, (long)stage);
+            return;
+        }
+    }
+
+    NSString *key = nil;
+    if (stage == RCCallStageRinging) key = @"trigger_device_call_incoming";
+    else if (stage == RCCallStageConnected) key = @"trigger_device_call_start";
+    else if (stage == RCCallStageEnded) key = @"trigger_device_call_end";
+    if (!key) return;
+    SRLogMin(@"📞 [RCSystem] Call %@: %@.", uuid.UUIDString, key);
+    RCExecuteTrigger(key);
+}
+@end
+
+static void rc_calls_start_observing(void) {
+    dlopen("/System/Library/Frameworks/CallKit.framework/CallKit", RTLD_NOW);
+    Class observerClass = objc_getClass("CXCallObserver");
+    if (!observerClass) {
+        SRLog(@"📞 [RCSystem] CallKit's CXCallObserver not found - no call triggers");
+        return;
+    }
+    g_rcCallStages = [NSMutableDictionary dictionary];
+    g_rcCallObserver = [[observerClass alloc] init];
+    g_rcCallDelegate = [RCCallObserver new];
+    // Calls already going on (after a respring) count as seen, so they don't fire again
+    for (id call in [g_rcCallObserver valueForKey:@"calls"]) {
+        NSUUID *uuid = [call valueForKey:@"UUID"];
+        if (uuid) g_rcCallStages[uuid] = @(rc_call_stage(call));
+    }
+    ((void (*)(id, SEL, id, dispatch_queue_t))objc_msgSend)(g_rcCallObserver, @selector(setDelegate:queue:), g_rcCallDelegate, dispatch_get_main_queue());
+}
+
 static void register_system_event_observers() {
     NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
     
     // Initialize initial lock state & power state
     initialize_lock_state();
+    rc_calls_start_observing();
     initialize_power_state();
     rc_carplay_start_observing();
     rc_orientation_start_observing();

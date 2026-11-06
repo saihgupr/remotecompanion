@@ -87,6 +87,9 @@
     if ([triggerKey isEqualToString:@"trigger_media_play"]) return @"play.fill";
     if ([triggerKey isEqualToString:@"trigger_media_pause"]) return @"pause.fill";
     if ([triggerKey isEqualToString:@"trigger_media_track_change"]) return @"forward.fill";
+    if ([triggerKey isEqualToString:@"trigger_device_call_incoming"]) return @"phone.arrow.down.left";
+    if ([triggerKey isEqualToString:@"trigger_device_call_start"]) return @"phone.fill";
+    if ([triggerKey isEqualToString:@"trigger_device_call_end"]) return @"phone.down.fill";
     return @"hand.tap"; // Default
 }
 
@@ -396,6 +399,9 @@
     if ([configuredKeys containsObject:@"trigger_media_track_change"]) {
         [deviceStateKeys addObject:@"trigger_media_track_change"];
     }
+    for (NSString *key in @[@"trigger_device_call_incoming", @"trigger_device_call_start", @"trigger_device_call_end"]) {
+        if ([configuredKeys containsObject:key]) [deviceStateKeys addObject:key];
+    }
     addSection(deviceStateKeys, @"Device State", YES);
     addSection(@[@"shake"], @"Motion Gestures", NO);
 
@@ -514,6 +520,9 @@
                              @[@"trigger_media_play", @"Media Playing", @"play.fill", @"Media"],
                              @[@"trigger_media_pause", @"Media Paused", @"pause.fill", @"Media"],
                              @[@"trigger_media_track_change", @"Media Track Changed", @"forward.fill", @"Media"],
+                             @[@"trigger_device_call_incoming", @"Incoming Call", @"phone.arrow.down.left", @"Calls"],
+                             @[@"trigger_device_call_start", @"Call Started", @"phone.fill", @"Calls"],
+                             @[@"trigger_device_call_end", @"Call Ended", @"phone.down.fill", @"Calls"],
                              @[@"trigger_watch_ping", @"Ping iPhone", @"applewatch.radiowaves.left.and.right", @"Apple Watch"],
                              @[@"trigger_watch_ping_hold", @"Ping iPhone (Hold)", @"applewatch.radiowaves.left.and.right", @"Apple Watch"]]) {
         NSString *key = event[0], *title = event[1];
