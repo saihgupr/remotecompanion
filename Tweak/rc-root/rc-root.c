@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <spawn.h>
 #include <sys/wait.h>
+#include <signal.h>
 #include <CoreFoundation/CoreFoundation.h>
 
 #include <dlfcn.h>
@@ -307,6 +308,59 @@ int main(int argc, char *argv[]) {
         }
         fprintf(stderr, "Invalid iohid subcommand or arguments\n");
         return 1;
+    }
+
+    if (strcmp(argv[1], "exec") == 0) {
+        // Runs a program as root directly, without a shell:
+        //   rc-root exec [--timeout <seconds>] /path/tool [args...]
+        // With --timeout the program runs in a process group of its own, and the whole group (the
+        // program and anything it started) is stopped when time runs out. SpringBoard can't stop a
+        // root program itself, so this is how add-ons' root steps keep to their time limit.
+        int first = 2;
+        int timeout = 0;
+        if (argc >= 4 && strcmp(argv[2], "--timeout") == 0) {
+            timeout = atoi(argv[3]);
+            first = 4;
+        }
+        if (argc <= first || argv[first][0] != '/') {
+            fprintf(stderr, "Usage: rc-root exec [--timeout <seconds>] /full/path [args...]\n");
+            return 1;
+        }
+        setenv("HOME", "/var/root", 1);
+        if (timeout <= 0) {
+            execv(argv[first], &argv[first]);
+            perror("rc-root exec");
+            return 127;
+        }
+        pid_t child = fork();
+        if (child < 0) {
+            perror("rc-root exec");
+            return 127;
+        }
+        if (child == 0) {
+            setpgid(0, 0);
+            execv(argv[first], &argv[first]);
+            perror("rc-root exec");
+            _exit(127);
+        }
+        setpgid(child, child);   // also here, so the group exists whichever runs first
+        uint64_t start = mach_absolute_time();
+        mach_timebase_info_data_t timebase;
+        mach_timebase_info(&timebase);
+        int status = 0;
+        while (1) {
+            pid_t done = waitpid(child, &status, WNOHANG);
+            if (done == child) return WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
+            if (done < 0) return 127;
+            double elapsed = (double)(mach_absolute_time() - start) * timebase.numer / timebase.denom / 1e9;
+            if (elapsed >= timeout) break;
+            usleep(20000);
+        }
+        killpg(child, SIGKILL);
+        kill(child, SIGKILL);
+        waitpid(child, &status, 0);
+        fprintf(stderr, "rc-root exec: %s took longer than %d s and was stopped\n", argv[first], timeout);
+        return 137;
     }
 
     // Build command string from all arguments for shell execution
