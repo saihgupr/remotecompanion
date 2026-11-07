@@ -127,6 +127,11 @@
     [self updateChips];
 }
 
+- (void)scrollToStart {
+    [self.layer removeAllAnimations];
+    [self setContentOffset:CGPointMake(-self.contentInset.left, self.contentOffset.y) animated:NO];
+}
+
 - (void)updateChips {
     for (UIButton *chip in self.chips) {
         BOOL selected = (chip.tag == self.selectedIndex);

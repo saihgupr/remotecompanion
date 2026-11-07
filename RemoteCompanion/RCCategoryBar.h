@@ -20,6 +20,8 @@
 // The same, with an icon before each chip's name (icons: UIImage or NSNull, one per title; All
 // gets a grid)
 - (void)setChipTitles:(NSArray<NSString *> *)chipTitles icons:(NSArray *)icons;
+// Back to the far left (All), even if a chip was just scrolled into view
+- (void)scrollToStart;
 
 // Floats the bar over the top of the table (insetting its content by the bar's height).
 // The screen must forward scrollViewDidScroll: to -scrollViewDidScroll:, and call

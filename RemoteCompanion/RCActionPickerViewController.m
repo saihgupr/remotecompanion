@@ -1463,7 +1463,7 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
     [self rebuildSections];
     [self.categoryBar setChipTitles:self.sectionTitles];
     self.categoryBar.selectedIndex = -1;
-    [self.categoryBar setContentOffset:CGPointZero animated:NO];
+    [self.categoryBar scrollToStart];
 
     // A search that was open on the local list can leave the bar compact; ask for the
     // large title again before putting the list back at the top.
@@ -1482,6 +1482,7 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
 // first rows under the search bar and collapse the large title (and its category bar).
 - (void)scrollActionListToTop {
     [self setActionListAtTop];
+    [self.categoryBar scrollToStart];
     // The prompt change and a closing search bar both settle a moment later, and moving
     // the list before them leaves the large title collapsed. Put it back once they're done.
     __weak typeof(self) weakSelf = self;
@@ -1489,6 +1490,7 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf) return;
         [strongSelf setActionListAtTop];
+        [strongSelf.categoryBar scrollToStart];
     });
 }
 
@@ -1507,7 +1509,7 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
     [self rebuildSections];
     [self.categoryBar setChipTitles:self.sectionTitles];
     self.categoryBar.selectedIndex = -1;
-    [self.categoryBar setContentOffset:CGPointZero animated:NO];
+    [self.categoryBar scrollToStart];
     [self.collectionView reloadData];
     [self scrollActionListToTop];
 }
