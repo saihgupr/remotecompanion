@@ -252,7 +252,8 @@ static NSArray<NSString *> *RCDayNames(void) { return @[@"Monday", @"Tuesday", @
 
     if ([kind isEqualToString:@"condition"]) {
         cell.textLabel.text = condition[@"title"];
-        cell.imageView.image = [UIImage systemImageNamed:condition[@"icon"] ?: @"questionmark.circle"];
+        UIImage *custom = [condition[@"image"] isKindOfClass:[UIImage class]] ? condition[@"image"] : nil;
+        cell.imageView.image = custom ?: [UIImage systemImageNamed:condition[@"icon"] ?: @"questionmark.circle"];
         cell.imageView.tintColor = [UIColor secondaryLabelColor];
         BOOL expanded = [condition[@"key"] isEqualToString:self.expandedKey];
         UIImageView *chevron = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:expanded ? @"chevron.up" : @"chevron.down"]];

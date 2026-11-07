@@ -1,4 +1,6 @@
 #import "RCActionPickerViewController.h"
+#import "RCAddOnCatalog.h"
+#import "RCAddOnActionsViewController.h"
 #import "RCServerClient.h"
 #import "RCDevicePickerViewController.h"
 #import "RCFocusPickerViewController.h"
@@ -15,6 +17,7 @@
 @property (nonatomic, strong) NSArray<NSString *> *sectionTitles;
 @property (nonatomic, strong) NSArray<NSArray<NSDictionary *> *> *sections;
 @property (nonatomic, strong) NSArray<NSDictionary *> *filteredActions;
+@property (nonatomic, strong) NSDictionary *selectedActionOverride; // an add-on action picked in its own list
 @property (nonatomic, strong) UISearchController *searchController;
 @property (nonatomic, strong) UIAlertController *activeAlert;
 @property (nonatomic, assign) BOOL isWaitingForTapRecord;
@@ -364,6 +367,16 @@
         }
         [sections addObject:items];
     }
+    // Add-ons (add-ons, ADDONS.md): one category, a row for each add-on that opens its actions
+    NSMutableArray *titles = [_sectionTitles mutableCopy];
+    NSArray *addOns = [RCAddOnCatalog addOnRows];
+    if (addOns.count) {
+        NSUInteger at = [titles indexOfObject:@"Integrations"];
+        at = at == NSNotFound ? titles.count : at + 1;
+        [titles insertObject:@"Add-ons" atIndex:at];
+        [sections insertObject:addOns atIndex:at];
+    }
+    _sectionTitles = titles;
     _sections = sections;
 }
 
@@ -509,7 +522,7 @@ static BOOL RCPickerActionOpensMore(NSString *command) {
         if (@available(iOS 15.0, *)) {} else if ([icon isEqualToString:@"ear.badge.checkmark"]) icon = @"ear";
         UIImage *custom = [action[@"image"] isKindOfClass:[UIImage class]] ? action[@"image"] : nil;
         [row setName:action[@"name"] icon:icon image:custom];
-        row.opensMore = RCPickerActionOpensMore(action[@"command"]);
+        row.opensMore = RCPickerActionOpensMore(action[@"command"]) || [RCAddOnCatalog commandAsksForDetails:action[@"command"]];
         NSInteger count = [collectionView numberOfItemsInSection:indexPath.section];
         [row setFirst:indexPath.item == 0 last:indexPath.item == count - 1];
         return row;
@@ -518,8 +531,9 @@ static BOOL RCPickerActionOpensMore(NSString *command) {
     NSDictionary *action = [self actionAtIndexPath:indexPath];
     NSString *icon = action[@"icon"];
     if (@available(iOS 15.0, *)) {} else if ([icon isEqualToString:@"ear.badge.checkmark"]) icon = @"ear";
-    [cell setName:action[@"name"] icon:icon];
-    cell.opensMore = RCPickerActionOpensMore(action[@"command"]);
+    UIImage *custom = [action[@"image"] isKindOfClass:[UIImage class]] ? action[@"image"] : nil;   // an add-on's own picture
+    [cell setName:action[@"name"] icon:icon image:custom];
+    cell.opensMore = RCPickerActionOpensMore(action[@"command"]) || [RCAddOnCatalog commandAsksForDetails:action[@"command"]];
     return cell;
 }
 
@@ -549,10 +563,35 @@ static BOOL RCPickerActionOpensMore(NSString *command) {
 - (void)selectActionAtIndexPath:(NSIndexPath *)indexPath {
     [self.collectionView deselectItemAtIndexPath:indexPath animated:YES];
     
-    NSDictionary *action = [self actionAtIndexPath:indexPath];
+    NSDictionary *action = self.selectedActionOverride ?: [self actionAtIndexPath:indexPath];
     NSString *command = action[@"command"];
     if (self.isBeingDismissed || self.navigationController.isBeingDismissed) return; // already picked, closing
     
+
+    // An add-on opens a list of its actions; the one picked comes back through here
+    if ([command hasPrefix:@"__ADDON__"]) {
+        __weak typeof(self) weakSelf = self;
+        RCAddOnActionsViewController *vc = [[RCAddOnActionsViewController alloc] initWithAddOn:[command substringFromIndex:9] title:action[@"name"]];
+        __weak RCAddOnActionsViewController *weakList = vc;
+        vc.onSelect = ^(NSDictionary *chosen) {
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) return;
+            NSString *chosenCommand = chosen[@"command"];
+            if ([RCAddOnCatalog commandAsksForDetails:chosenCommand] && weakList) {
+                // The options open on top of this list, so Back returns to it
+                [RCAddOnCatalog presentDetailsFrom:weakList command:chosenCommand current:nil completion:^(NSString *full) {
+                    [strongSelf finishWithFocusCommand:full];
+                }];
+                return;
+            }
+            strongSelf.selectedActionOverride = chosen;
+            [strongSelf selectActionAtIndexPath:[NSIndexPath indexPathForItem:0 inSection:0]];
+            strongSelf.selectedActionOverride = nil;
+        };
+        [self.navigationController pushViewController:vc animated:YES];
+        return;
+    }
+
 
     if ([command isEqualToString:@"__UNLOCK_DEVICE__"]) {
         [self handleUnlockDevice];
@@ -643,6 +682,15 @@ static BOOL RCPickerActionOpensMore(NSString *command) {
 
     if ([command isEqualToString:@"__CAMERA_VIDEO_PICKER__"]) {
         [self handleCameraPicker:YES];
+        return;
+    }
+
+    // An add-on action with options or input asks for them first
+    if ([RCAddOnCatalog commandAsksForDetails:command]) {
+        __weak typeof(self) weakSelf = self;
+        [RCAddOnCatalog presentDetailsFrom:self command:command current:nil completion:^(NSString *chosen) {
+            [weakSelf finishWithFocusCommand:chosen];
+        }];
         return;
     }
 
@@ -1045,6 +1093,10 @@ static BOOL RCPickerActionOpensMore(NSString *command) {
             }
         }
         
+        // Add-on actions are found directly, in place of their rows
+        if (![self hasCategory] || [_sectionTitles[self.selectedCategory] isEqualToString:@"Add-ons"]) {
+            [allActions addObjectsFromArray:[RCAddOnCatalog pickerActions]];
+        }
         NSPredicate *pred = [NSPredicate predicateWithFormat:@"name CONTAINS[cd] %@ OR command CONTAINS[cd] %@ OR (keywords != nil AND keywords CONTAINS[cd] %@)", text, text, text];
         self.filteredActions = [allActions filteredArrayUsingPredicate:pred];
     }

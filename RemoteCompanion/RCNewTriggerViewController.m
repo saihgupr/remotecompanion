@@ -76,6 +76,10 @@
         return;
     }
     if (![vc isKindOfClass:[RCActionsViewController class]]) return;
+    // Only when the action list sits directly on this menu: opened from an add-on's own list (which
+    // sits between them), Back should return through that list and this menu
+    NSUInteger at = [nav.viewControllers indexOfObject:self];
+    if (at + 1 >= nav.viewControllers.count || nav.viewControllers[at + 1] != vc) return;
     NSMutableArray *vcs = [nav.viewControllers mutableCopy];
     [vcs removeObject:self];
     nav.delegate = nil;
@@ -161,7 +165,8 @@
     cell.selectedBackgroundView = selBg;
     cell.textLabel.text = item[@"title"];
     cell.textLabel.textColor = [UIColor labelColor];
-    cell.imageView.image = [UIImage systemImageNamed:item[@"icon"] ?: @"circle"];
+    UIImage *custom = [item[@"image"] isKindOfClass:[UIImage class]] ? item[@"image"] : nil;
+    cell.imageView.image = custom ?: [UIImage systemImageNamed:item[@"icon"] ?: @"circle"];
     cell.imageView.tintColor = [UIColor secondaryLabelColor];
     cell.detailTextLabel.text = item[@"detail"];
     cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
