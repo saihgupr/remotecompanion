@@ -1645,7 +1645,8 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
                 NSString *remoteCmd = [payload substringFromIndex:firstSpace.location + 1];
                 NSDictionary *client = [self rcClientForId:clientId];
                 NSString *clientName = client[@"name"] ?: client[@"host"] ?: @"Missing Client";
-                result = [NSString stringWithFormat:@"Remote [%@]: %@", clientName, remoteCmd];
+                NSString *remoteName = [self nameForCommand:remoteCmd truncate:NO];
+                result = [NSString stringWithFormat:@"Remote [%@]: %@", clientName, remoteName.length > 0 ? remoteName : remoteCmd];
             } else {
                 result = [NSString stringWithFormat:@"Remote: %@", payload];
             }
