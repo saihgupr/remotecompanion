@@ -33,6 +33,7 @@
 
   <link rel="stylesheet" href="https://unpkg.com/framework7-icons@5.0.5/css/framework7-icons.css">
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+  <script src="/rc_addon_commands.js"></script>
 
   <style>
     /* ── Theme tokens (dark is the default) ── */
@@ -1139,6 +1140,8 @@
       flex-shrink: 0; margin-right: 14px; overflow: hidden;
     }
     .picker-row-icon i { font-size: 16px; color: #fff; }
+    .picker-row-icon.icon-image, .row-icon.icon-image, .dialog-row-icon.icon-image { background: none; }
+    .addon-icon { width: 100%; height: 100%; border-radius: 7px; object-fit: cover; display: block; }
     .picker-row-text { flex: 1; font-size: 17px; color: var(--rc-label); }
     .picker-row-chevron { color: var(--rc-glyph); font-size: 14px; }
 
@@ -1230,6 +1233,21 @@
     .dialog-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
     .dialog-input[type=number] { -moz-appearance: textfield; }
     .dialog-input:focus { border-color: var(--rc-border-max); }
+    /* Add-on options: a row for each option that opens its choices underneath */
+    .ao-list { margin: 0 14px 12px; border-radius: 10px; background: var(--rc-fill); overflow: hidden; }
+    .ao-opt { border-top: 0.5px solid var(--rc-border-strong); }
+    .ao-opt:first-child { border-top: 0; }
+    .ao-head { display: flex; align-items: center; justify-content: space-between; padding: 13px 16px; cursor: pointer; font-size: 15px; }
+    .ao-val { color: var(--rc-label-2); margin-left: auto; padding: 0 10px; }
+    .ao-chev { color: var(--rc-label-3); font-size: 13px; transition: transform .25s ease; }
+    .ao-opt.open .ao-chev { transform: rotate(90deg); }
+    .ao-choices { overflow: hidden; max-height: 0; transition: max-height .25s ease; }
+    .ao-choice { display: flex; align-items: center; justify-content: space-between; height: 44px; padding: 0 16px 0 32px; border-top: 0.5px solid var(--rc-border-strong); cursor: pointer; font-size: 15px; box-sizing: border-box; }
+    .ao-choice .f7-icons { color: var(--rc-blue); font-size: 16px; visibility: hidden; }
+    .ao-choice.on .f7-icons { visibility: visible; }
+    .ao-opt.gone { display: none; }
+    .ao-input { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; gap: 12px; font-size: 15px; }
+    .ao-input input { flex: 1; max-width: 55%; margin: 0; text-align: right; }
     .dialog-btns {
       display: flex; border-top: 0.5px solid var(--rc-border-heavy);
       margin-top: 0;
@@ -2635,6 +2653,19 @@
   </div>
 </div>
 
+<!-- ══ ADD-ON OPTIONS DIALOG ═════════════════════════════════════════════ -->
+<div class="dialog-backdrop" id="addon-options-backdrop">
+  <div class="dialog-box" style="max-width: 440px; width: 90%;">
+    <div class="dialog-title" id="addon-options-title">Add-on</div>
+    <div class="dialog-msg" style="padding-bottom: 8px;">Options left on Keep Current stay as they are.</div>
+    <div class="ao-list" id="addon-options-list"></div>
+    <div class="dialog-btns">
+      <button onclick="closeAddonOptions()">Cancel</button>
+      <button id="addon-options-add">Add</button>
+    </div>
+  </div>
+</div>
+
 <!-- ══ ICON PICKER (Toast) ═════════════════════════════════════════════ -->
 <div class="dialog-backdrop" id="symbol-picker-backdrop" onclick="if (event.target === this) closeSymbolPicker()">
   <div class="dialog-box sym-box">
@@ -3241,6 +3272,7 @@ const TRIGGER_SECTIONS = [
   { title: 'Notification Triggers',  id: 'notif',     keys: [], dynamic: true, prefix: 'notif_', prefix2: 'notify_', deletable: true },
   { title: 'App Launch Triggers',    id: 'app',       keys: [], dynamic: true, prefix: 'app_launch_', deletable: true },
   { title: 'App Exit Triggers',      id: 'appexit',   keys: [], dynamic: true, prefix: 'app_exit_',   deletable: true },
+  { title: 'Add-on Triggers',         id: 'addon',     keys: [], dynamic: true, prefix: 'addon_', deletable: true },
   { title: 'Scheduled Triggers',     id: 'sched',     keys: [], dynamic: true, prefix: 'sched_',      deletable: true },
   { title: 'MQTT Subscription Triggers', id: 'mqtt', keys: [], dynamic: true, prefix: 'mqtt_sub_', prefix2: 'mqtt_', deletable: true },
 ];
@@ -3477,6 +3509,7 @@ function iconForKey(key) {
   if (key.startsWith('app_launch_')) return { icon:'app_badge_fill',                cls:'icon-pink' };
   if (key.startsWith('app_exit_')) return { icon:'app_badge_fill',                cls:'icon-pink' };
   if (key.startsWith('notif_') || key.startsWith('notify_'))      return { icon:'bell_circle_fill',              cls:'icon-red' };
+  if (key.startsWith('addon_')) { const e = addOnTriggerEvents().find(x => x.key === key); return { icon: symbolId(e && e.icon), iconUrl: e && e.iconUrl, cls: e && e.iconUrl ? 'icon-image' : 'icon-purple' }; }
   if (key.startsWith('sched_'))      return { icon:'clock_fill',                    cls:'icon-orange' };
   if (key.startsWith('mqtt_sub_') || key.startsWith('mqtt_')) return { icon:'antenna_radiowaves_left_right', cls:'icon-blue' };
   return { icon:'hand_tap', cls:'icon-gray' };
@@ -3824,6 +3857,12 @@ function variableNameValid(name) {
 
 function nameForCmd(cmd) {
   if (!cmd) return 'Unknown';
+  const addOn = addOnMatch(cmd);
+  if (addOn) {
+    const summary = addOnSummary(addOn);
+    const name = `${addOn.addOn.name}: ${addOn.action.name}`;
+    return summary ? `${name} (${summary})` : name;
+  }
   if (typeof cmd === 'object') {
     if (cmd.command && typeof cmd.command === 'string') {
       return nameForCmd(cmd.command);
@@ -4028,6 +4067,8 @@ function formatHACommandName(cmd) {
 
 function iconForCmd(cmd) {
   if (!cmd) return { icon:'questionmark', cls:'icon-gray' };
+  const addOn = addOnMatch(cmd);
+  if (addOn) return { icon: symbolId(addOn.action.icon), cls: 'icon-purple' };
   if (typeof cmd === 'object') {
     if (cmd.command && typeof cmd.command === 'string') {
       return iconForCmd(cmd.command);
@@ -4260,6 +4301,206 @@ const CONDITION_DEFS = [
 ];
 
 let serverCapabilities = { snapper: false, sneakycam: false, audiostream: false, audiohandoff: false };
+// ── Add-ons (ADDONS.md) ──────────────────────────────────────────────────────
+let addOnCatalog = [];
+let addOnConditionDefs = [];   // the If picker's entries for add-on conditions
+
+function symbolId(symbol) { return (symbol || 'puzzlepiece_extension').replace(/\./g, '_'); }
+// An add-on's own icon (an SF Symbol), or the puzzle piece
+function iconIsImage(icon) { return /\.(png|jpe?g)$/i.test(icon || ''); }
+function addOnIcon(p) { return symbolId(p && !iconIsImage(p.icon) ? p.icon : null); }
+// A picture for an add-on whose icon names an image file (served by the tweak), else null
+function addOnImageUrl(p) { return p && iconIsImage(p.icon) ? `/api/addons/icon?id=${encodeURIComponent(p.id)}` : null; }
+// The picture for something's own icon when it names an image file, else the add-on's picture when it has no icon of its own
+function ownImageUrl(p, icon) {
+  if (icon) return iconIsImage(icon) ? `/api/addons/icon?id=${encodeURIComponent(p.id)}&file=${encodeURIComponent(icon)}` : null;
+  return addOnImageUrl(p);
+}
+// The symbol for something's own icon: itself, or the add-on's symbol, or the puzzle piece
+function ownSymbol(p, icon) {
+  if (icon && !iconIsImage(icon)) return icon;
+  return (!icon && p.icon && !iconIsImage(p.icon)) ? p.icon : 'puzzlepiece.extension';
+}
+// The icon markup for a list row: the add-on's picture, or the symbol
+function iconMarkup(act) { return act.iconUrl ? `<img class="addon-icon" src="${act.iconUrl}" alt="">` : `<i class="f7-icons">${act.icon}</i>`; }
+
+// The add-on and action a command runs, and the words after the action's own
+// Add-on commands are read by rc_addon_commands.js (RCAddOnCommands), the same file the app uses
+function addOnMatch(cmd) {
+  if (typeof cmd !== 'string' || typeof RCAddOnCommands === 'undefined') return null;
+  const m = RCAddOnCommands.match(addOnCatalog, cmd);
+  return m ? { addOn: addOnCatalog[m.addOn], action: addOnCatalog[m.addOn].actions[m.action], rest: m.rest } : null;
+}
+
+// The choices (option id -> choice) and input in an add-on command's words after its action's own
+function addOnSplit(action, words) {
+  const split = RCAddOnCommands.split(action, words);
+  const chosen = {};
+  for (const o of action.options || []) {
+    if (!Object.prototype.hasOwnProperty.call(split.choices, o.id)) continue;
+    chosen[o.id] = (o.choices || []).find(c => String(c.word).toLowerCase() === String(split.choices[o.id]).toLowerCase()) || null;
+  }
+  return { chosen, input: split.input || '' };
+}
+
+// Typed input as it goes in a command ("--" in front when it starts with a choice word)
+function addOnInputWords(action, text) {
+  return RCAddOnCommands.inputWords(action, text) || text;
+}
+
+function addOnSummary(m) {
+  const parts = [];
+  const split = addOnSplit(m.action, m.rest);
+  for (const o of m.action.options || []) { const c = split.chosen[o.id]; if (c) parts.push(c.label || c.word); }
+  if (split.input) parts.push(split.input);
+  return parts.join(' · ');
+}
+
+// Triggers from add-on events: one for the event and one for each state its banner names
+// (the same keys and names as the app and the tweak)
+function addOnTriggerEvents() {
+  const items = [];
+  for (const p of addOnCatalog) {
+    for (const ev of p.events || []) {
+      const t = ev.trigger;
+      if (!t || !t.id || !t.name) continue;
+      const key = `addon_${p.id}_${t.id}`;
+      const icon = ownSymbol(p, t.icon), iconUrl = ownImageUrl(p, t.icon);
+      items.push({ key, name: `${p.name}: ${t.name}`, icon, iconUrl });
+      // The trigger's own states, else the banner's; "states": false offers none
+      const states = (t.states && typeof t.states === 'object') ? t.states : (t.states === false ? {} : ((ev.banner && ev.banner.states) || {}));
+      for (const st of Object.keys(states).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))) {
+        items.push({ key: `${key}_${st}`, name: `${p.name}: ${t.name} (${states[st]})`, icon, iconUrl });
+      }
+    }
+  }
+  return items;
+}
+
+function promptAddOnTrigger() {
+  const events = addOnTriggerEvents();
+  if (!events.length) { showSheet('Add-on Trigger', [{ label: 'None Available', action() {} }]); return; }
+  showSheet('Add-on Trigger', events.map(e => ({
+    label: e.name,
+    action() {
+      if (!config.triggers[e.key]) {
+        config.triggers[e.key] = { enabled: true, actions: [], name: e.name };
+        saveConfig();
+      }
+      renderAll();
+      openActionsPanel(e.key);
+    }
+  })));
+}
+
+async function loadAddOns() {
+  try {
+    const res = await fetch('/api/addons');
+    if (res.ok) addOnCatalog = (await res.json()).addons || [];
+  } catch (e) {
+    console.error('Failed to load add-ons', e);
+  }
+  // Add-on conditions: a number is compared as above or below, a choice by name (as in the app)
+  addOnConditionDefs = [];
+  for (const p of addOnCatalog) {
+    for (const c of p.conditions || []) {
+      if (!c.id) continue;
+      const def = { key: `addon:${p.id}:${c.id}`, title: `${p.name}: ${c.name || c.id}`, section: 'Add-ons', icon: addOnIcon(p), iconUrl: addOnImageUrl(p), fromAddOn: true };
+      if (c.type === 'number') {
+        def.number = true;
+      } else {
+        const keys = Object.keys(c.choices || {}).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+        def.values = keys.map(k => ({ value: String(c.choices[k]).toUpperCase(), title: String(c.choices[k]) }));
+      }
+      addOnConditionDefs.push(def);
+    }
+  }
+  // Add-on sections replaced on each load
+  for (let i = ACTION_SECTIONS.length - 1; i >= 0; i--) if (ACTION_SECTIONS[i].fromAddOn) ACTION_SECTIONS.splice(i, 1);
+  // One Add-ons section: a row for each add-on, opening a list of its actions
+  const addOns = { title: 'Add-ons', fromAddOn: true, actions: [] };
+  for (const p of addOnCatalog) {
+    const row = { name: p.name, cmd: `__ADDON__${p.id}`, icon: addOnIcon(p), iconUrl: addOnImageUrl(p), addon: true, fromAddOn: true, actions: [] };
+    for (const a of p.actions || []) {
+      const cmd = `${p.id} ${a.command}`;
+      row.actions.push({ name: `${p.name}: ${a.name}`, shortName: a.name, cmd, icon: symbolId(ownSymbol(p, a.icon)), iconUrl: ownImageUrl(p, a.icon), fromAddOn: true,
+                         needs_input: !!((a.options && a.options.length) || a.input) });
+      if (a.banner) BANNER_OWN.add(cmd);
+    }
+    if (row.actions.length) addOns.actions.push(row);
+  }
+  if (addOns.actions.length) ACTION_SECTIONS.splice(ACTION_SECTIONS.findIndex(s => s.title === 'Integrations') + 1 || ACTION_SECTIONS.length, 0, addOns);
+}
+
+// Asks for an add-on action's options (each with Keep Current) and input, then calls done
+// Opens the options of an add-on action: a row for each option, opening its choices underneath
+// (Keep Current first), and the action's field. Add calls done with the full command.
+function closeAddonOptions() {
+  document.getElementById('addon-options-backdrop').classList.remove('visible');
+}
+
+function askAddOnDetails(cmd, done) {
+  const m = addOnMatch(cmd);
+  if (!m) { done(cmd); return; }
+  const options = m.action.options || [];
+  const input = m.action.input;
+  if (!options.length && !input) { done(cmd); return; }
+  const chosen = {};
+  options.forEach(o => { chosen[o.id] = ''; });
+  let open = null;
+  const choicesOf = o => [{ word: '', label: 'Keep Current' }, ...(o.choices || [])];
+  const visible = o => !Object.keys(o.skipWhen || {}).some(k => chosen[k] === String(o.skipWhen[k]));
+
+  const list = document.getElementById('addon-options-list');
+  list.innerHTML = '';
+  const rows = {};
+  const update = () => {
+    for (const o of options) {
+      const r = rows[o.id];
+      const c = (o.choices || []).find(x => x.word === chosen[o.id]);
+      r.el.classList.toggle('gone', !visible(o));
+      r.el.classList.toggle('open', open === o.id);
+      r.val.textContent = c ? (c.label || c.word) : 'Keep Current';
+      r.box.style.maxHeight = open === o.id ? `${choicesOf(o).length * 44}px` : '0px';
+      choicesOf(o).forEach((ch, i) => r.items[i].classList.toggle('on', ch.word === chosen[o.id]));
+    }
+  };
+  for (const o of options) {
+    const el = document.createElement('div');
+    el.className = 'ao-opt';
+    el.innerHTML = `<div class="ao-head"><span>${escHtml(o.title || o.id)}</span><span class="ao-val"></span><i class="f7-icons ao-chev">chevron_right</i></div><div class="ao-choices"></div>`;
+    const box = el.querySelector('.ao-choices');
+    const items = choicesOf(o).map(ch => {
+      const row = document.createElement('div');
+      row.className = 'ao-choice';
+      row.innerHTML = `<span>${escHtml(ch.label || ch.word)}</span><i class="f7-icons">checkmark_alt</i>`;
+      row.onclick = () => { chosen[o.id] = ch.word; open = null; update(); };
+      box.appendChild(row);
+      return row;
+    });
+    el.querySelector('.ao-head').onclick = () => { open = open === o.id ? null : o.id; update(); };
+    list.appendChild(el);
+    rows[o.id] = { el, box, items, val: el.querySelector('.ao-val') };
+  }
+  let field = null;
+  if (input) {
+    const row = document.createElement('div');
+    row.className = 'ao-opt ao-input';
+    row.innerHTML = `<span>${escHtml(input.title || m.action.name)}</span><input class="dialog-input" type="text" placeholder="${escHtml(input.placeholder || '')}" autocapitalize="none" autocorrect="off" spellcheck="false" ${input.number ? 'inputmode="decimal"' : ''}>`;
+    field = row.querySelector('input');
+    list.appendChild(row);
+  }
+  document.getElementById('addon-options-title').textContent = m.action.name;
+  document.getElementById('addon-options-add').onclick = () => {
+    let full = cmd;
+    for (const o of options) if (visible(o) && chosen[o.id]) full += ` ${chosen[o.id]}`;
+    const text = field ? field.value.trim() : '';
+    closeAddonOptions();
+    done(text ? `${full} ${addOnInputWords(m.action, text)}` : full);
+  };
+  update();
+  document.getElementById('addon-options-backdrop').classList.add('visible');
+}
 
 async function loadCapabilities() {
   try {
@@ -4283,6 +4524,7 @@ async function loadData() {
     document.getElementById('conn-banner').classList.remove('visible');
     hasLoadedData = true;
     await loadCapabilities();
+    await loadAddOns();
     renderAll();
     loadVersion();
     refreshDatalists();
@@ -4516,7 +4758,7 @@ function closeOpenRow() {
 
 function renderTriggerRow(key, deletable) {
   const data = triggerData(key);
-  const { icon, cls } = iconForKey(key);
+  const { icon, cls, iconUrl } = iconForKey(key);
   const name = nameForKey(key);
   const isFav = (config.favoriteTriggers || []).includes(key);
   const actions = data.actions || [];
@@ -4566,7 +4808,7 @@ function renderTriggerRow(key, deletable) {
   inner.className = 'trigger-row-inner';
   inner.innerHTML = `
     <div class="row-icon ${cls}">
-      ${triggerIconHTML(key)}
+      ${iconUrl ? iconMarkup({ iconUrl }) : triggerIconHTML(key)}
     </div>
     <div class="row-text">
       <div class="row-title">
@@ -6416,7 +6658,9 @@ function renderPickerSections() {
     : ACTION_SECTIONS;
 
   sections.forEach(sec => {
-    const actions = sec.actions.filter(a => pickerActionAvailable(sec, a));
+    // Searching finds an add-on's actions themselves, in place of its row
+    const base = (sec.fromAddOn && query) ? sec.actions.flatMap(r => r.actions || [r]) : sec.actions;
+    const actions = base.filter(a => pickerActionAvailable(sec, a));
     const filtered = query
       ? actions.filter(a => a.name.toLowerCase().includes(query) || (a.cmd && a.cmd.toLowerCase().includes(query)) || (a.keywords && a.keywords.toLowerCase().includes(query)))
       : actions;
@@ -6434,8 +6678,8 @@ function renderPickerSections() {
       const row = document.createElement('div');
       row.className = 'picker-row';
       row.innerHTML = `
-        <div class="dialog-row-icon">
-          <i class="f7-icons">${act.icon}</i>
+        <div class="dialog-row-icon ${act.iconUrl ? 'icon-image' : ''}">
+          ${iconMarkup(act)}
         </div>
         <div class="picker-row-text">${escHtml(act.name)}</div>
         <i class="f7-icons picker-row-chevron">${act.needs_input ? 'ellipsis' : 'chevron_right'}</i>
@@ -6455,8 +6699,17 @@ function addActionToCurrent(cmd) {
 }
 
 function selectPickerAction(act) {
+  if (act.addon) {
+    showSheet(act.name, act.actions.map(a => ({ label: a.shortName || a.name, action() { selectPickerAction(a); } })));
+    return;
+  }
   closePickerPanel();
   const c = act.cmd;
+  if (act.fromAddOn) {
+    if (act.needs_input) askAddOnDetails(c, addActionToCurrent);
+    else addActionToCurrent(c);
+    return;
+  }
   if (c === '__DELAY__') {
     promptDelay('', 'Add', n => addActionToCurrent(`delay ${n}`));
   } else if (c === '__TOAST__') {
@@ -6673,7 +6926,8 @@ function saveTimeCondDialog() {
 
 // ── Condition picker (mirrors iOS RCConditionPickerViewController: grouped, ──
 // searchable sections; tapping a condition expands its options inline beneath it)
-const COND_SECTION_ORDER = ['Time', 'Device', 'Power', 'Sound', 'Connectivity', 'Variables', 'Other'];
+const COND_SECTION_ORDER = ['Time', 'Device', 'Power', 'Sound', 'Connectivity', 'Variables', 'Other', 'Add-ons'];
+function allCondDefs() { return CONDITION_DEFS.concat(addOnConditionDefs); }
 const COND_DAY_CODES = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
 const COND_DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 let condPickerEditIdx = null;
@@ -6718,7 +6972,7 @@ function condDaysValue() {
 function openCondPicker(editIdx = null) {
   condPickerEditIdx = editIdx;
   const exKey = condPickerExistingKey();
-  condPickerExpandedKey = (exKey && CONDITION_DEFS.some(d => d.key === exKey && d.key !== 'variable' && !d.threshold)) ? exKey : null;
+  condPickerExpandedKey = (exKey && allCondDefs().some(d => d.key === exKey && d.key !== 'variable' && !d.threshold)) ? exKey : null;
   condPickerTicked = [];
   if (condPickerExpandedKey === 'day_of_week') {
     const ex = condPickerExisting();
@@ -6756,7 +7010,7 @@ function loadCondBtDevices() {
 }
 
 function selectCond(key) {
-  const def = CONDITION_DEFS.find(d => d.key === key);
+  const def = allCondDefs().find(d => d.key === key);
   if (key === 'variable' || (def && def.threshold)) { // their own panels
     const editIdx = condPickerEditIdx;
     closeCondPicker();
@@ -7611,6 +7865,17 @@ function condOptionsFor(d, exKey, exValue, exTitle) {
     }));
     return rows;
   }
+  if (d.number) {
+    // An add-on's number (a temperature, a count...): above or below any value
+    ['Above', 'Below'].forEach(word => rows.push(condOptionRow(`${word}…`, 'blue', '', () => {
+      showDialog(`${d.title} ${word.toLowerCase()}`, 'Value:', '', 'Save', val => {
+        const n = parseFloat(val);
+        if (isNaN(n)) return;
+        finishCondValue(d, `${word.toUpperCase()} ${n}`, `${word.toLowerCase()} ${n}`);
+      });
+    })));
+    return rows;
+  }
   if (Array.isArray(d.values) && d.values.length) {
     d.values.forEach(v => rows.push(condValueRow(d, v, exKey, exValue)));
     return rows;
@@ -7631,11 +7896,11 @@ function renderCondPicker() {
   const matches = d => !q || d.title.toLowerCase().includes(q);
   const groups = [];
   if (q) {
-    const all = CONDITION_DEFS.filter(matches);
+    const all = allCondDefs().filter(matches);
     if (all.length) groups.push({ title: 'Search Results', defs: all });
   } else {
     COND_SECTION_ORDER.forEach(s => {
-      const defs = CONDITION_DEFS.filter(d => (d.section || 'Other') === s);
+      const defs = allCondDefs().filter(d => (d.section || 'Other') === s);
       if (defs.length) groups.push({ title: s, defs });
     });
   }
@@ -7656,8 +7921,8 @@ function renderCondPicker() {
       row.dataset.condKey = d.key;
       const expanded = d.key === condPickerExpandedKey;
       row.innerHTML = `
-        <div class="dialog-row-icon">
-          <i class="f7-icons">${d.icon || 'question_circle'}</i>
+        <div class="dialog-row-icon ${d.iconUrl ? 'icon-image' : ''}">
+          ${d.iconUrl ? iconMarkup(d) : `<i class="f7-icons">${d.icon || 'question_circle'}</i>`}
         </div>
         <div class="picker-row-text">${escHtml(d.title)}</div>
         <i class="f7-icons picker-row-chevron">${expanded ? 'chevron_up' : 'chevron_down'}</i>
@@ -8833,7 +9098,9 @@ function bannerIsPrefix(p) { return /[ :-]$/.test(p); }
 
 function bannerCatalog() {
   return ACTION_SECTIONS
-    .map(s => ({ title: s.title, actions: s.actions.filter(a => !BANNER_SKIP.has(a.cmd) && pickerActionAvailable(s, a)) }))
+    .flatMap(s => s.fromAddOn
+      ? s.actions.map(r => ({ title: r.name, actions: (r.actions || []).filter(a => !BANNER_SKIP.has(a.cmd)) }))
+      : [{ title: s.title, actions: s.actions.filter(a => !BANNER_SKIP.has(a.cmd) && pickerActionAvailable(s, a)) }])
     .filter(s => s.actions.length);
 }
 
@@ -9209,6 +9476,7 @@ function showAddTriggerSheet() {
     { label: 'Notification Trigger', action: () => promptNotifTrigger() },
     { label: 'App Launch Trigger', action: () => promptAppLaunchPicker() },
     { label: 'App Exit Trigger', action: () => promptAppLaunchPicker(null, 'exit') },
+    { label: 'Add-on Trigger', action: () => promptAddOnTrigger() },
     { label: 'Scheduled Trigger', action: () => promptSchedTrigger() },
     { label: 'Battery Level Trigger', action: () => promptBatteryTrigger() },
     { label: 'MQTT Topic Trigger', action: () => promptMqttTrigger() },
