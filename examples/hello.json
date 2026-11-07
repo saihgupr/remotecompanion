@@ -1,0 +1,21 @@
+{
+  "api": 1,
+  "id": "hello",
+  "name": "Hello",
+  "icon": "hand.wave.fill",
+  "actions": [
+    {
+      "command": "greet",
+      "name": "Greet",
+      "options": [
+        { "id": "greeting", "title": "Greeting", "choices": [
+          { "word": "hello",   "label": "Hello",   "value": "Hello" },
+          { "word": "goodbye", "label": "Goodbye", "value": "Goodbye" } ] }
+      ],
+      "run": [
+        { "command": "toast \"{greeting}\"" },
+        { "command": "toast \"Hello\"", "if": { "var": "greeting", "unset": true } }
+      ]
+    }
+  ]
+}
