@@ -12656,14 +12656,68 @@ static void start_web_server() {
                                 responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)jsonData.length, jsonString];
                             } else if ([path isEqualToString:@"/api/config"]) {
                                 load_trigger_config();
-                                // Allow GET/POST for config regardless of webUIEnabled to prevent lockout
-                                if ([method isEqualToString:@"GET"]) {
-                                        NSData *jsonData = [NSJSONSerialization dataWithJSONObject:g_triggerConfig options:0 error:nil];
-                                        if (jsonData) {
-                                            NSString *jsonString = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
-                                            responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)jsonData.length, jsonString];
+                                NSString *clientToken = rc_extract_token_from_headers(requestString);
+                                if (!clientToken || clientToken.length == 0) {
+                                    NSRange qMark = [path rangeOfString:@"?"];
+                                    if (qMark.location != NSNotFound) {
+                                        NSString *query = [path substringFromIndex:qMark.location + 1];
+                                        for (NSString *p in [query componentsSeparatedByString:@"&"]) {
+                                            NSArray *kv = [p componentsSeparatedByString:@"="];
+                                            if (kv.count == 2) {
+                                                NSString *k = [kv[0] lowercaseString];
+                                                if ([k isEqualToString:@"token"] || [k isEqualToString:@"key"]) {
+                                                    clientToken = [kv[1] stringByRemovingPercentEncoding];
+                                                    break;
+                                                }
+                                            }
                                         }
-                                    } else if ([method isEqualToString:@"POST"]) {
+                                    }
+                                }
+                                BOOL isLocal = rc_web_client_is_local(&client_addr) || RCCommandFromLocalSocket();
+                                BOOL isTokenValid = rc_is_api_token_valid(clientToken);
+                                
+                                if ([method isEqualToString:@"GET"]) {
+                                    NSDictionary *configToReturn = g_triggerConfig;
+                                    if (!isLocal && !isTokenValid) {
+                                        NSMutableDictionary *mConfig = [g_triggerConfig mutableCopy];
+                                        if (mConfig[@"webUIApiToken"]) {
+                                            mConfig[@"webUIApiToken"] = @"••••••••";
+                                        }
+                                        if (mConfig[@"haToken"] && [mConfig[@"haToken"] length] > 0) {
+                                            mConfig[@"haToken"] = @"••••••••";
+                                        }
+                                        if (mConfig[@"mqttPassword"] && [mConfig[@"mqttPassword"] length] > 0) {
+                                            mConfig[@"mqttPassword"] = @"••••••••";
+                                        }
+                                        NSArray *sshHosts = mConfig[@"sshHosts"];
+                                        if ([sshHosts isKindOfClass:[NSArray class]]) {
+                                            NSMutableArray *mHosts = [NSMutableArray array];
+                                            for (NSDictionary *h in sshHosts) {
+                                                if ([h isKindOfClass:[NSDictionary class]]) {
+                                                    NSMutableDictionary *mh = [h mutableCopy];
+                                                    if (mh[@"password"] && [mh[@"password"] length] > 0) {
+                                                        mh[@"password"] = @"••••••••";
+                                                    }
+                                                    [mHosts addObject:mh];
+                                                }
+                                            }
+                                            mConfig[@"sshHosts"] = mHosts;
+                                        }
+                                        configToReturn = mConfig;
+                                    }
+                                    NSData *jsonData = [NSJSONSerialization dataWithJSONObject:configToReturn options:0 error:nil];
+                                    if (jsonData) {
+                                        NSString *jsonString = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+                                        responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)jsonData.length, jsonString];
+                                    }
+                                } else if ([method isEqualToString:@"POST"]) {
+                                    NSString *expectedToken = g_triggerConfig[@"webUIApiToken"];
+                                    BOOL hasConfiguredToken = [expectedToken isKindOfClass:[NSString class]] && expectedToken.length > 0;
+                                    if (!isLocal && hasConfiguredToken && !isTokenValid) {
+                                        NSString *errJson = @"{\"ok\":false,\"error\":\"Saving configuration requires valid API token\"}";
+                                        NSData *errData = [errJson dataUsingEncoding:NSUTF8StringEncoding];
+                                        responseString = [NSString stringWithFormat:@"HTTP/1.1 403 Forbidden\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)errData.length, errJson];
+                                    } else {
                                         NSRange clRange = [requestString rangeOfString:@"Content-Length: " options:NSCaseInsensitiveSearch];
                                         int contentLength = 0;
                                         if (clRange.location != NSNotFound) {
@@ -12692,7 +12746,41 @@ static void start_web_server() {
                                             NSError *err;
                                             id jsonObj = [NSJSONSerialization JSONObjectWithData:bodyData options:NSJSONReadingMutableContainers error:&err];
                                             if (jsonObj && [jsonObj isKindOfClass:[NSDictionary class]]) {
-                                                rc_set_trigger_config([jsonObj copy]);
+                                                NSMutableDictionary *incoming = [jsonObj mutableCopy];
+                                                if ([incoming[@"webUIApiToken"] isEqualToString:@"••••••••"]) {
+                                                    incoming[@"webUIApiToken"] = g_triggerConfig[@"webUIApiToken"];
+                                                }
+                                                if ([incoming[@"haToken"] isEqualToString:@"••••••••"]) {
+                                                    incoming[@"haToken"] = g_triggerConfig[@"haToken"];
+                                                }
+                                                if ([incoming[@"mqttPassword"] isEqualToString:@"••••••••"]) {
+                                                    incoming[@"mqttPassword"] = g_triggerConfig[@"mqttPassword"];
+                                                }
+                                                NSArray *newHosts = incoming[@"sshHosts"];
+                                                NSArray *oldHosts = g_triggerConfig[@"sshHosts"];
+                                                if ([newHosts isKindOfClass:[NSArray class]] && [oldHosts isKindOfClass:[NSArray class]]) {
+                                                    NSMutableArray *updatedHosts = [NSMutableArray array];
+                                                    for (NSDictionary *nh in newHosts) {
+                                                        if ([nh isKindOfClass:[NSDictionary class]]) {
+                                                            NSMutableDictionary *mnh = [nh mutableCopy];
+                                                            if ([mnh[@"password"] isEqualToString:@"••••••••"]) {
+                                                                NSString *hostId = mnh[@"id"];
+                                                                for (NSDictionary *oh in oldHosts) {
+                                                                    if ([oh[@"id"] isEqualToString:hostId]) {
+                                                                        mnh[@"password"] = oh[@"password"] ?: @"";
+                                                                        break;
+                                                                    }
+                                                                }
+                                                            }
+                                                            [updatedHosts addObject:mnh];
+                                                        }
+                                                    }
+                                                    incoming[@"sshHosts"] = updatedHosts;
+                                                }
+                                                if (!isLocal && !isTokenValid) {
+                                                    incoming[@"allowDirectRootHelper"] = g_triggerConfig[@"allowDirectRootHelper"] ?: @NO;
+                                                }
+                                                rc_set_trigger_config([incoming copy]);
                                                 save_trigger_config();
                                                 responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: 12\r\n\r\n{\"ok\": true}", cors];
                                             } else {
@@ -12700,6 +12788,7 @@ static void start_web_server() {
                                             }
                                         }
                                     }
+                                }
                                 } else if ([path isEqualToString:@"/api/logs"] && [method isEqualToString:@"GET"]) {
                                     NSString *logPath = rc_get_log_file_path();
                                     NSString *logContent = @"";
