@@ -4068,7 +4068,7 @@ function formatHACommandName(cmd) {
 function iconForCmd(cmd) {
   if (!cmd) return { icon:'questionmark', cls:'icon-gray' };
   const addOn = addOnMatch(cmd);
-  if (addOn) return { icon: symbolId(addOn.action.icon), cls: 'icon-purple' };
+  if (addOn) return { icon: addOnIcon(addOn.addOn), cls: 'icon-purple' };
   if (typeof cmd === 'object') {
     if (cmd.command && typeof cmd.command === 'string') {
       return iconForCmd(cmd.command);
@@ -4423,7 +4423,7 @@ async function loadAddOns() {
     const row = { name: p.name, cmd: `__ADDON__${p.id}`, icon: addOnIcon(p), iconUrl: addOnImageUrl(p), addon: true, fromAddOn: true, actions: [] };
     for (const a of p.actions || []) {
       const cmd = `${p.id} ${a.command}`;
-      row.actions.push({ name: `${p.name}: ${a.name}`, shortName: a.name, cmd, icon: symbolId(ownSymbol(p, a.icon)), iconUrl: ownImageUrl(p, a.icon), fromAddOn: true,
+      row.actions.push({ name: `${p.name}: ${a.name}`, shortName: a.name, cmd, icon: addOnIcon(p), iconUrl: addOnImageUrl(p), fromAddOn: true,
                          needs_input: !!((a.options && a.options.length) || a.input) });
       if (a.banner) BANNER_OWN.add(cmd);
     }
