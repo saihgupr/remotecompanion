@@ -2723,7 +2723,7 @@ static NSDictionary *RCTKRun(NSString *command) {
 }
 
 // endpoint: the part after /api/testkit/; params: query items and/or body
-static NSDictionary *RCTKDispatch(NSString *endpoint, NSDictionary<NSString *, NSString *> *params, NSString *body, int *status) {
+static NSDictionary *RCTKDispatch(NSString *endpoint, NSDictionary<NSString *, NSString *> *params, NSString *body, NSString *clientToken, int *status) {
     *status = 200;
     if ([endpoint isEqualToString:@"info"]) return RCTKInfo();
     if ([endpoint isEqualToString:@"probe"]) return RCTKProbe();
@@ -2743,7 +2743,14 @@ static NSDictionary *RCTKDispatch(NSString *endpoint, NSDictionary<NSString *, N
         NSString *label = params[@"label"] ?: body ?: @"";
         return @{ @"label": label, @"seq": @(RCTKRecord(@"mark", @{ @"label": label })) };
     }
-    if ([endpoint isEqualToString:@"run"]) return RCTKRun(params[@"cmd"] ?: body);
+    if ([endpoint isEqualToString:@"run"]) {
+        NSString *cmd = params[@"cmd"] ?: body;
+        if (g_tkFromNetwork && RCIsPrivilegedCommand(cmd) && !RCIsApiTokenValid(clientToken)) {
+            *status = 403;
+            return @{ @"ok": @NO, @"error": @"Privileged command requires valid token" };
+        }
+        return RCTKRun(cmd);
+    }
     if ([endpoint isEqualToString:@"capture"]) {
         NSString *on = params[@"on"] ?: body;
         if (on.length) {
@@ -2759,7 +2766,13 @@ static NSDictionary *RCTKDispatch(NSString *endpoint, NSDictionary<NSString *, N
         return snapshot;
     }
     if ([endpoint isEqualToString:@"restore"]) return RCTKRestore();
-    if ([endpoint isEqualToString:@"lua"]) return RCTKLua(params[@"code"] ?: body);
+    if ([endpoint isEqualToString:@"lua"]) {
+        if (g_tkFromNetwork && !RCIsApiTokenValid(clientToken)) {
+            *status = 403;
+            return @{ @"ok": @NO, @"error": @"Executing Lua code over the network requires a valid token" };
+        }
+        return RCTKLua(params[@"code"] ?: body);
+    }
     if ([endpoint isEqualToString:@"replay"]) return RCTKReplay(params[@"seq"] ?: body, params);
     if ([endpoint isEqualToString:@"passcode"]) return RCTKPasscodeStatus();
     if ([endpoint isEqualToString:@"passcode/set"]) return RCTKSetPasscode(params[@"code"], params[@"minutes"]);
@@ -2823,30 +2836,38 @@ NSString *RCTKHandleHTTP(int fd, const char *buffer, long length, NSString *meth
 
     // Body: whatever followed the headers in the first read, plus the rest per Content-Length
     NSString *body = nil;
+    NSString *headers = nil;
     const char *headersEnd = strnstr(buffer, "\r\n\r\n", (size_t)length);
-    if (headersEnd && [method isEqualToString:@"POST"]) {
+    if (headersEnd) {
         size_t offset = (size_t)(headersEnd - buffer) + 4;
-        NSMutableData *data = [NSMutableData dataWithBytes:buffer + offset length:(size_t)length - offset];
-        NSString *headers = [[NSString alloc] initWithBytes:buffer length:offset encoding:NSUTF8StringEncoding];
-        NSRange cl = [headers rangeOfString:@"Content-Length: " options:NSCaseInsensitiveSearch];
-        NSUInteger contentLength = cl.location != NSNotFound ? (NSUInteger)[[headers substringFromIndex:NSMaxRange(cl)] integerValue] : data.length;
-        while (data.length < contentLength) {
-            char chunk[4096];
-            ssize_t n = read(fd, chunk, sizeof(chunk));
-            if (n <= 0) break;
-            [data appendBytes:chunk length:(size_t)n];
+        headers = [[NSString alloc] initWithBytes:buffer length:offset encoding:NSUTF8StringEncoding];
+        if ([method isEqualToString:@"POST"]) {
+            NSMutableData *data = [NSMutableData dataWithBytes:buffer + offset length:(size_t)length - offset];
+            NSRange cl = [headers rangeOfString:@"Content-Length: " options:NSCaseInsensitiveSearch];
+            NSUInteger contentLength = cl.location != NSNotFound ? (NSUInteger)[[headers substringFromIndex:NSMaxRange(cl)] integerValue] : data.length;
+            while (data.length < contentLength) {
+                char chunk[4096];
+                ssize_t n = read(fd, chunk, sizeof(chunk));
+                if (n <= 0) break;
+                [data appendBytes:chunk length:(size_t)n];
+            }
+            body = [[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            if (!body.length) body = nil;
         }
-        body = [[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        if (!body.length) body = nil;
+    }
+
+    NSString *clientToken = RCExtractTokenFromHeaders(headers);
+    if (!clientToken.length) {
+        clientToken = params[@"token"] ?: params[@"key"];
     }
 
     int status = 200;
     g_tkFromNetwork = YES;
-    NSDictionary *result = RCTKDispatch(endpoint, params, body, &status);
+    NSDictionary *result = RCTKDispatch(endpoint, params, body, clientToken, &status);
     g_tkFromNetwork = NO;
     NSString *json = RCTKJSON(result);
     return [NSString stringWithFormat:@"HTTP/1.1 %d %@\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@",
-            status, status == 200 ? @"OK" : @"Not Found", cors, (unsigned long)[json lengthOfBytesUsingEncoding:NSUTF8StringEncoding], json];
+            status, status == 200 ? @"OK" : (status == 403 ? @"Forbidden" : @"Not Found"), cors, (unsigned long)[json lengthOfBytesUsingEncoding:NSUTF8StringEncoding], json];
 }
 
 NSString *RCTKHandleCommand(NSString *args) {
@@ -2870,7 +2891,7 @@ NSString *RCTKHandleCommand(NSString *args) {
     int status = 200;
     // From the UNIX socket (this phone) or relayed from the network (the web server's /api/command)
     g_tkFromNetwork = !RCCommandFromLocalSocket();
-    NSString *reply = [RCTKJSON(RCTKDispatch(endpoint.length ? endpoint : @"info", params, rest, &status)) stringByAppendingString:@"\n"];
+    NSString *reply = [RCTKJSON(RCTKDispatch(endpoint.length ? endpoint : @"info", params, rest, nil, &status)) stringByAppendingString:@"\n"];
     g_tkFromNetwork = NO;
     return reply;
 }

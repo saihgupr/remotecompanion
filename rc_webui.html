@@ -2181,11 +2181,12 @@
           <input type="checkbox" class="ios-toggle" id="setting-webui" onchange="config.webUIEnabled=this.checked;saveConfig()">
         </div>
       </div>
-      <div class="settings-row" id="webui-token-row">
-        <span class="settings-label">API Token</span>
-        <div style="display:flex;align-items:center;gap:6px;">
-          <input type="password" id="setting-webui-token" placeholder="Optional token" style="background:var(--rc-surface-2);border:1px solid var(--rc-border-strong);border-radius:6px;color:var(--rc-label);padding:4px 8px;font-size:13px;width:140px;" onchange="onApiTokenChange(this.value)">
+      <div class="settings-row" onclick="openAccessPanel()" style="cursor:pointer;">
+        <div style="flex:1;">
+          <div style="font-size:17px;color:var(--rc-label);">Access</div>
+          <div id="setting-access-status" style="font-size:13px;color:var(--rc-label-2);font-weight:400;margin-top:2px;">Any Network</div>
         </div>
+        <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
       </div>
     </div>
 
@@ -2236,6 +2237,109 @@
     <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">Export your configuration to share or backup. Import to restore.</div>
     <input type="file" id="import-file-input" accept=".json" style="display:none" onchange="handleImportFile(this)">
 
+  </div>
+</div>
+
+<!-- ══ ACCESS PANEL (Settings > Access) ═══════════════════════════════════ -->
+<div class="rc-panel" id="access-panel">
+  <div class="panel-navbar">
+    <button class="panel-back" onclick="closeAccessPanel()">
+      <i class="f7-icons">chevron_left</i> Settings
+    </button>
+    <div class="panel-title">Access</div>
+    <div style="width:80px"></div>
+  </div>
+  <div class="panel-content">
+    <div class="action-list-card" style="margin-top:28px">
+      <div class="action-list-row" onclick="setWebUIAccess('any')" style="cursor:pointer;">
+        <div class="action-row-icon icon-blue"><i class="f7-icons">globe</i></div>
+        <div class="action-row-text" style="flex:1">Any Network</div>
+        <i class="f7-icons" id="access-check-any" style="color:var(--rc-blue);font-size:16px;">checkmark</i>
+      </div>
+      <div class="action-list-row" onclick="setWebUIAccess('networks')" style="cursor:pointer;">
+        <div class="action-row-icon icon-teal"><i class="f7-icons">wifi</i></div>
+        <div class="action-row-text" style="flex:1">Trusted Networks</div>
+        <i class="f7-icons" id="access-check-networks" style="color:var(--rc-blue);font-size:16px;display:none;">checkmark</i>
+      </div>
+      <div class="action-list-row" onclick="setWebUIAccess('local')" style="cursor:pointer;">
+        <div class="action-row-icon icon-gray"><i class="f7-icons">device_phone_portrait</i></div>
+        <div class="action-row-text" style="flex:1">This iPhone Only</div>
+        <i class="f7-icons" id="access-check-local" style="color:var(--rc-blue);font-size:16px;display:none;">checkmark</i>
+      </div>
+    </div>
+    <div id="access-footer-text" style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 24px">
+      The Web UI can be reached from any device on the same network as this iPhone.
+    </div>
+
+    <!-- Section: Trusted Networks (visible if config.webUIAccess === 'networks') -->
+    <div id="access-trusted-networks-section" style="display:none">
+      <div class="action-list-header">Trusted Networks</div>
+      <div class="action-list-card">
+        <div id="trusted-networks-list"></div>
+        <div class="action-list-row" onclick="promptAddTrustedNetwork()" style="cursor:pointer;">
+          <div class="action-row-icon icon-blue"><i class="f7-icons">plus_circle_fill</i></div>
+          <div class="action-row-text" style="color:var(--rc-blue);font-weight:500">Add Network…</div>
+        </div>
+      </div>
+      <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 24px">
+        Anyone can name a network the same as a trusted one, so add only private networks.
+      </div>
+    </div>
+
+    <!-- Section: API Token -->
+    <div class="action-list-header">API Token</div>
+
+    <!-- Authenticated / Open View -->
+    <div id="access-token-authenticated-view">
+      <div class="action-list-card">
+        <div class="settings-row" style="padding:10px 16px;">
+          <div style="flex:1; display:flex; align-items:center; gap:8px;">
+            <input type="password" id="setting-webui-token" placeholder="API Token (optional)" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="flex:1; background:var(--rc-surface-2); border:1px solid var(--rc-border-strong); border-radius:8px; color:var(--rc-label); padding:8px 12px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:13px;" onchange="onApiTokenChange(this.value)">
+            <button type="button" onclick="toggleWebUITokenVisibility()" style="background:none; border:none; color:var(--rc-label-2); cursor:pointer; padding:6px; display:flex; align-items:center;" title="Show/Hide Token">
+              <i class="f7-icons" id="webui-token-eye-icon" style="font-size:18px;">eye</i>
+            </button>
+            <button type="button" onclick="copyWebUIToken()" style="background:none; border:none; color:var(--rc-label-2); cursor:pointer; padding:6px; display:flex; align-items:center;" title="Copy Token">
+              <i class="f7-icons" style="font-size:18px;">doc_on_doc</i>
+            </button>
+          </div>
+        </div>
+        <div class="action-list-row" onclick="generateWebUIApiToken()" style="cursor:pointer;">
+          <div class="action-row-icon icon-blue" style="color:#fff; display:flex; align-items:center; justify-content:center;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12.65 10A5.99 5.99 0 0 0 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6a5.99 5.99 0 0 0 5.65-4H17v4h4v-4h2v-4H12.65zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/></svg>
+          </div>
+          <div class="action-row-text" style="color:var(--rc-blue);font-weight:500">Generate New Token</div>
+        </div>
+        <div id="access-token-logout-row" class="action-list-row" onclick="lockWebUISession()" style="cursor:pointer; display:none;">
+          <div class="action-row-icon icon-gray" style="display:flex; align-items:center; justify-content:center;">
+            <i class="f7-icons" style="font-size:15px; color:#fff;">lock</i>
+          </div>
+          <div class="action-row-text" style="color:var(--rc-label-2);font-size:14px;">Lock Browser Session</div>
+        </div>
+      </div>
+      <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">
+        Protects raw shell and root commands from unauthenticated local network callers.
+      </div>
+    </div>
+
+    <!-- Locked / Unauthenticated View -->
+    <div id="access-token-locked-view" style="display:none;">
+      <div class="action-list-card">
+        <div class="settings-row" style="padding:10px 16px;">
+          <div style="flex:1; display:flex; align-items:center; gap:8px;">
+            <input type="password" id="setting-webui-unlock-input" placeholder="Enter API Token to unlock..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="flex:1; background:var(--rc-surface-2); border:1px solid var(--rc-border-strong); border-radius:8px; color:var(--rc-label); padding:8px 12px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:13px;" onkeydown="if(event.key==='Enter')authenticateWebUIToken()">
+            <button type="button" onclick="toggleUnlockTokenVisibility()" style="background:none; border:none; color:var(--rc-label-2); cursor:pointer; padding:6px; display:flex; align-items:center;" title="Show/Hide">
+              <i class="f7-icons" id="unlock-token-eye-icon" style="font-size:18px;">eye</i>
+            </button>
+            <button type="button" onclick="authenticateWebUIToken()" style="background:var(--rc-blue); border:none; color:#fff; border-radius:8px; font-size:13px; font-weight:600; padding:8px 14px; cursor:pointer; white-space:nowrap;">
+              Unlock
+            </button>
+          </div>
+        </div>
+      </div>
+      <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">
+        This iPhone is protected by an API Token. Enter the token from Settings &gt; Access on your iPhone to unlock privileged commands on this computer.
+      </div>
+    </div>
   </div>
 </div>
 
@@ -4516,7 +4620,10 @@ async function loadCapabilities() {
 // ── API ───────────────────────────────────────────────────────────────────────
 async function loadData() {
   try {
-    const res = await fetch('/api/config');
+    const token = localStorage.getItem('rc_api_token');
+    const headers = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch('/api/config', { headers });
     if (!res.ok) throw new Error();
     config = await res.json();
     if (!config.triggers) config.triggers = {};
@@ -4556,11 +4663,18 @@ async function saveConfig() {
     return;
   }
   try {
+    const token = localStorage.getItem('rc_api_token');
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
     const res = await fetch('/api/config', {
       method: 'POST',
       body: JSON.stringify(config),
-      headers: { 'Content-Type': 'application/json' }
+      headers: headers
     });
+    if (res.status === 403) {
+      promptApiTokenModal(saveConfig);
+      return;
+    }
     if (!res.ok) {
         showToast('⚠ Failed to save settings');
     }
@@ -4959,9 +5073,23 @@ function deleteTrigger(key) {
 
 async function runTrigger(key) {
   try {
-    const res = await fetch(`/api/trigger/${encodeURIComponent(key)}`, { method: 'POST' });
+    const token = localStorage.getItem('rc_api_token');
+    const headers = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch(`/api/trigger/${encodeURIComponent(key)}`, { method: 'POST', headers });
     if (res.status === 403) {
-      showToast('⚠ Enable Web UI in Settings first');
+      let isTokenErr = false;
+      try {
+        const text = await res.text();
+        if (text && text.includes('requires valid token')) {
+          isTokenErr = true;
+        }
+      } catch(e) {}
+      if (isTokenErr) {
+        promptApiTokenModal(() => runTrigger(key));
+      } else {
+        showToast('⚠ Enable Web UI in Settings first');
+      }
     } else {
       showToast(res.ok ? '▶ Triggered' : '⚠ Server Error');
     }
@@ -4981,12 +5109,12 @@ async function sendCommand(cmdStr) {
   });
 }
 
-function promptApiTokenModal(retryAction) {
+function promptApiTokenModal(retryAction, msg) {
   showDialog(
     'Enter API Token',
-    'Privileged commands (root, sudo, exec) require an API Token configured in Settings > Web UI > Access on your iPhone:',
+    msg || 'Privileged commands and protected settings require an API Token configured in Settings > Web UI > Access on your iPhone:',
     localStorage.getItem('rc_api_token') || '',
-    'Save & Run',
+    'Save Token',
     async (token) => {
       const trimmed = (token || '').trim();
       if (trimmed) {
@@ -4994,8 +5122,14 @@ function promptApiTokenModal(retryAction) {
       } else {
         localStorage.removeItem('rc_api_token');
       }
+      const tokenField = document.getElementById('setting-webui-token');
+      if (tokenField) tokenField.value = trimmed;
       if (retryAction) {
-        await runSingleAction(retryAction);
+        if (typeof retryAction === 'function') {
+          await retryAction();
+        } else {
+          await runSingleAction(retryAction);
+        }
       }
     },
     false,
@@ -8149,13 +8283,254 @@ function importDialogOk() {
   showToast(`✓ Imported ${imported.length} actions`);
 }
 
+function escapeHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function onApiTokenChange(val) {
   const trimmed = (val || '').trim();
   if (trimmed) {
     localStorage.setItem('rc_api_token', trimmed);
+    config.webUIApiToken = trimmed;
   } else {
     localStorage.removeItem('rc_api_token');
+    delete config.webUIApiToken;
   }
+  saveConfig();
+  loadData();
+}
+
+function updateAccessStatus() {
+  const el = document.getElementById('setting-access-status');
+  if (!el) return;
+  const access = (config && config.webUIAccess) ? config.webUIAccess : 'any';
+  if (access === 'networks') el.textContent = 'Trusted Networks';
+  else if (access === 'local') el.textContent = 'This iPhone Only';
+  else el.textContent = 'Any Network';
+}
+
+function openAccessPanel() {
+  renderAccessPanel();
+  document.getElementById('access-panel').classList.add('active');
+}
+
+function closeAccessPanel() {
+  document.getElementById('access-panel').classList.remove('active');
+  updateAccessStatus();
+}
+
+function setWebUIAccess(mode) {
+  if (mode === 'any') {
+    delete config.webUIAccess;
+  } else {
+    config.webUIAccess = mode;
+  }
+  saveConfig();
+  renderAccessPanel();
+  updateAccessStatus();
+}
+
+function renderAccessPanel() {
+  const access = (config && config.webUIAccess) ? config.webUIAccess : 'any';
+  
+  const checkAny = document.getElementById('access-check-any');
+  const checkNetworks = document.getElementById('access-check-networks');
+  const checkLocal = document.getElementById('access-check-local');
+  if (checkAny) checkAny.style.display = (access === 'any') ? 'block' : 'none';
+  if (checkNetworks) checkNetworks.style.display = (access === 'networks') ? 'block' : 'none';
+  if (checkLocal) checkLocal.style.display = (access === 'local') ? 'block' : 'none';
+  
+  const footer = document.getElementById('access-footer-text');
+  if (footer) {
+    if (access === 'networks') {
+      footer.textContent = 'The Web UI can be reached only while this iPhone is on a trusted Wi-Fi network. This iPhone can always reach it.';
+    } else if (access === 'local') {
+      footer.textContent = 'The Web UI can be reached only from this iPhone, at localhost.';
+    } else {
+      footer.textContent = 'The Web UI can be reached from any device on the same network as this iPhone.';
+    }
+  }
+
+  const trustedSec = document.getElementById('access-trusted-networks-section');
+  if (trustedSec) {
+    trustedSec.style.display = (access === 'networks') ? 'block' : 'none';
+    renderTrustedNetworksList();
+  }
+
+  // Token Section view state
+  const isLocked = (config && config.webUIApiToken === '••••••••');
+  const authView = document.getElementById('access-token-authenticated-view');
+  const lockedView = document.getElementById('access-token-locked-view');
+  const logoutRow = document.getElementById('access-token-logout-row');
+
+  if (isLocked) {
+    if (authView) authView.style.display = 'none';
+    if (lockedView) lockedView.style.display = 'block';
+    const unlockInput = document.getElementById('setting-webui-unlock-input');
+    if (unlockInput) unlockInput.value = '';
+  } else {
+    if (authView) authView.style.display = 'block';
+    if (lockedView) lockedView.style.display = 'none';
+
+    const tokenField = document.getElementById('setting-webui-token');
+    const eyeIcon = document.getElementById('webui-token-eye-icon');
+    if (tokenField) {
+      const actualToken = (config && config.webUIApiToken) || localStorage.getItem('rc_api_token') || '';
+      tokenField.value = actualToken;
+      tokenField.type = 'password';
+      if (eyeIcon) eyeIcon.textContent = 'eye';
+    }
+    if (logoutRow) {
+      const hasClientToken = !!localStorage.getItem('rc_api_token');
+      logoutRow.style.display = hasClientToken ? 'flex' : 'none';
+    }
+  }
+}
+
+async function authenticateWebUIToken() {
+  const input = document.getElementById('setting-webui-unlock-input');
+  const token = (input ? input.value : '').trim();
+  if (!token) {
+    showToast('⚠ Please enter a token');
+    return;
+  }
+  localStorage.setItem('rc_api_token', token);
+  await loadData();
+  if (config && config.webUIApiToken === '••••••••') {
+    localStorage.removeItem('rc_api_token');
+    showToast('⚠ Invalid token');
+  } else {
+    showToast('✓ Session unlocked');
+    renderAccessPanel();
+  }
+}
+
+function toggleUnlockTokenVisibility() {
+  const input = document.getElementById('setting-webui-unlock-input');
+  const eyeIcon = document.getElementById('unlock-token-eye-icon');
+  if (!input || !eyeIcon) return;
+  if (input.type === 'password') {
+    input.type = 'text';
+    eyeIcon.textContent = 'eye_fill';
+  } else {
+    input.type = 'password';
+    eyeIcon.textContent = 'eye';
+  }
+}
+
+async function lockWebUISession() {
+  localStorage.removeItem('rc_api_token');
+  await loadData();
+  renderAccessPanel();
+  showToast('✓ Browser session locked');
+}
+
+function renderTrustedNetworksList() {
+  const container = document.getElementById('trusted-networks-list');
+  if (!container) return;
+  const networks = (config && config.webUINetworks) ? config.webUINetworks : [];
+  if (networks.length === 0) {
+    container.innerHTML = '<div style="padding:12px 16px;color:var(--rc-label-2);font-size:14px;">No trusted networks added</div>';
+    return;
+  }
+  container.innerHTML = networks.map((net, idx) => `
+    <div class="action-list-row" style="justify-content:space-between;">
+      <div style="display:flex;align-items:center;min-width:0;flex:1;">
+        <div class="action-row-icon icon-teal"><i class="f7-icons">wifi</i></div>
+        <div class="action-row-text" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(net)}</div>
+      </div>
+      <button type="button" onclick="removeTrustedNetwork(${idx})" style="background:none;border:none;color:var(--rc-red);cursor:pointer;padding:6px;display:flex;align-items:center;margin-left:8px;" title="Remove Network">
+        <i class="f7-icons" style="font-size:18px;">trash</i>
+      </button>
+    </div>
+  `).join('');
+}
+
+function promptAddTrustedNetwork() {
+  showDialog(
+    'Add Network',
+    'Enter the Wi-Fi network name exactly as it appears in Settings.',
+    '',
+    'Add',
+    (name) => {
+      const trimmed = (name || '').trim();
+      if (!trimmed) return;
+      if (!config.webUINetworks) config.webUINetworks = [];
+      if (!config.webUINetworks.includes(trimmed)) {
+        config.webUINetworks.push(trimmed);
+        saveConfig();
+        renderTrustedNetworksList();
+      }
+    }
+  );
+}
+
+function removeTrustedNetwork(index) {
+  if (config && config.webUINetworks && index >= 0 && index < config.webUINetworks.length) {
+    config.webUINetworks.splice(index, 1);
+    saveConfig();
+    renderTrustedNetworksList();
+  }
+}
+
+function toggleWebUITokenVisibility() {
+  const tokenField = document.getElementById('setting-webui-token');
+  const eyeIcon = document.getElementById('webui-token-eye-icon');
+  if (!tokenField || !eyeIcon) return;
+  if (tokenField.type === 'password') {
+    tokenField.type = 'text';
+    eyeIcon.textContent = 'eye_fill';
+  } else {
+    tokenField.type = 'password';
+    eyeIcon.textContent = 'eye';
+  }
+}
+
+function copyWebUIToken() {
+  const tokenField = document.getElementById('setting-webui-token');
+  const token = tokenField ? tokenField.value.trim() : ((config && config.webUIApiToken) || localStorage.getItem('rc_api_token') || '');
+  if (!token || token === '••••••••') {
+    showToast('⚠ No token to copy');
+    return;
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(token).then(() => {
+      showToast('✓ Token copied to clipboard');
+    }).catch(() => {
+      showToast('✓ Token copied');
+    });
+  } else {
+    showToast('✓ Token copied');
+  }
+}
+
+function generateWebUIApiToken() {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  const token = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+  
+  localStorage.setItem('rc_api_token', token);
+  const tokenField = document.getElementById('setting-webui-token');
+  if (tokenField) {
+    tokenField.value = token;
+    tokenField.type = 'password';
+    const eyeIcon = document.getElementById('webui-token-eye-icon');
+    if (eyeIcon) eyeIcon.textContent = 'eye';
+  }
+  config.webUIApiToken = token;
+  saveConfig();
+  
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(token).catch(() => {});
+  }
+  showToast('✓ Token generated & copied to clipboard');
+  renderAccessPanel();
 }
 
 // ── Settings ─────────────────────────────────────────────────────────────────
@@ -8163,10 +8538,8 @@ function openSettings() {
   document.getElementById('setting-master').checked = !!config.masterEnabled;
   document.getElementById('setting-nfc').checked    = !!config.nfcEnabled;
   document.getElementById('setting-webui').checked  = !!config.webUIEnabled;
-  const tokenField = document.getElementById('setting-webui-token');
-  if (tokenField) {
-    tokenField.value = localStorage.getItem('rc_api_token') || '';
-  }
+  updateAccessStatus();
+  renderAccessPanel();
   document.getElementById('setting-loglevel').value = ['off','minimal','full'].includes(config.logLevel) ? config.logLevel : 'minimal';
   updateBannersCount();
   updateIntegrationsStatus();
@@ -9212,6 +9585,8 @@ function closeBannersPanel() {
 
 function closeSettings() {
   document.getElementById('settings-panel').classList.remove('active');
+  const accessPanel = document.getElementById('access-panel');
+  if (accessPanel) accessPanel.classList.remove('active');
   document.getElementById('footer-settings-fixed').style.display = 'none';
 }
 
@@ -10018,7 +10393,20 @@ function showToast(msg) {
 }
 
 // ── Init ─────────────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => { applyWrapLongNames(); loadData(); });
+document.addEventListener('DOMContentLoaded', () => {
+  try {
+    const urlParams = new URLSearchParams(window.location.search);
+    const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    const urlToken = urlParams.get('token') || hashParams.get('token');
+    if (urlToken && urlToken.trim()) {
+      localStorage.setItem('rc_api_token', urlToken.trim());
+      const cleanUrl = window.location.pathname;
+      window.history.replaceState({}, document.title, cleanUrl);
+    }
+  } catch(e) {}
+  applyWrapLongNames();
+  loadData();
+});
 </script>
 </body>
 </html>

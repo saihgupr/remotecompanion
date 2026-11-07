@@ -2452,8 +2452,8 @@ static void save_trigger_config() {
         // 1. Try atomic write to shared path
         BOOL success = [data writeToFile:sharedPath atomically:YES];
         if (!success) {
-            // 2. Fallback to POSIX open/write
-            int fd = open([sharedPath UTF8String], O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            // 2. Fallback to POSIX open/write (0600: config holds SSH passwords, tokens, and passcodes)
+            int fd = open([sharedPath UTF8String], O_WRONLY | O_CREAT | O_TRUNC, 0600);
             if (fd >= 0) {
                 write(fd, [data bytes], [data length]);
                 close(fd);
@@ -2464,6 +2464,9 @@ static void save_trigger_config() {
             }
         } else {
             SRLog(@"[WebUI] Saved config to shared path: %@", sharedPath);
+        }
+        if (success) {
+            chmod([sharedPath UTF8String], 0600);
         }
         
         // 3. If we have a resolved container path, try saving there too
@@ -3002,7 +3005,7 @@ static NSString *rc_fill_action(NSString *text) {
     for (NSString *prefix in @[@"lua ", @"lua_eval ", @"lua:"]) {
         if ([lower hasPrefix:prefix]) return rc_fill_placeholders_mode(text, RCFillRoundOnly);
     }
-    for (NSString *prefix in @[@"exec ", @"root ", @"sudo "]) {
+    for (NSString *prefix in @[@"exec ", @"root ", @"sudo ", @"ssh-run "]) {
         if ([lower hasPrefix:prefix]) return rc_fill_placeholders_mode(text, RCFillShell);
     }
     // A Toast's parts are in double quotes: a " in a value would end one early
@@ -3519,15 +3522,23 @@ static BOOL rc_web_client_allowed(const struct sockaddr_storage *addr) {
     return wifi && [networks isKindOfClass:[NSArray class]] && [networks containsObject:wifi];
 }
 
-static BOOL rc_is_privileged_command(NSString *cmd) {
+BOOL RCIsPrivilegedCommand(NSString *cmd) {
     if (!cmd || ![cmd isKindOfClass:[NSString class]]) return NO;
     NSString *trimmed = [cmd stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     return [trimmed hasPrefix:@"root "] || [trimmed isEqualToString:@"root"] ||
            [trimmed hasPrefix:@"sudo "] || [trimmed isEqualToString:@"sudo"] ||
-           [trimmed hasPrefix:@"exec "] || [trimmed isEqualToString:@"exec"];
+           [trimmed hasPrefix:@"exec "] || [trimmed isEqualToString:@"exec"] ||
+           [trimmed hasPrefix:@"lua "] || [trimmed hasPrefix:@"lua_eval "] || [trimmed hasPrefix:@"Lua "] ||
+           [trimmed hasPrefix:@"ssh-run "] ||
+           [trimmed hasPrefix:@"tap "] || [trimmed hasPrefix:@"hold "] || [trimmed hasPrefix:@"swipe "] ||
+           [trimmed hasPrefix:@"gesture "];
 }
 
-static BOOL rc_is_api_token_valid(NSString *providedToken) {
+static BOOL rc_is_privileged_command(NSString *cmd) {
+    return RCIsPrivilegedCommand(cmd);
+}
+
+BOOL RCIsApiTokenValid(NSString *providedToken) {
     load_trigger_config();
     NSString *expectedToken = g_triggerConfig[@"webUIApiToken"];
     if (!expectedToken || ![expectedToken isKindOfClass:[NSString class]] || expectedToken.length == 0) {
@@ -3549,7 +3560,11 @@ static BOOL rc_is_api_token_valid(NSString *providedToken) {
     return diff == 0;
 }
 
-static NSString *rc_extract_token_from_headers(NSString *requestHeaders) {
+static BOOL rc_is_api_token_valid(NSString *providedToken) {
+    return RCIsApiTokenValid(providedToken);
+}
+
+NSString *RCExtractTokenFromHeaders(NSString *requestHeaders) {
     if (!requestHeaders || ![requestHeaders isKindOfClass:[NSString class]]) return nil;
     NSArray *lines = [requestHeaders componentsSeparatedByString:@"\r\n"];
     for (NSUInteger i = 1; i < lines.count; i++) {
@@ -3573,6 +3588,10 @@ static NSString *rc_extract_token_from_headers(NSString *requestHeaders) {
         }
     }
     return nil;
+}
+
+static NSString *rc_extract_token_from_headers(NSString *requestHeaders) {
+    return RCExtractTokenFromHeaders(requestHeaders);
 }
 
 // A trigger's runs. Each firing runs the actions on a thread of its own; a run carries its
@@ -12498,6 +12517,48 @@ static NSDictionary* get_system_diagnostics(void) {
     };
 }
 
+static NSString *rc_cors_headers_for_request(NSString *requestString, BOOL *outOriginBlocked) {
+    if (outOriginBlocked) *outOriginBlocked = NO;
+    NSString *origin = nil;
+    NSArray *lines = [requestString componentsSeparatedByString:@"\r\n"];
+    for (NSUInteger i = 1; i < lines.count; i++) {
+        NSString *line = lines[i];
+        if (line.length == 0) break;
+        if ([line.lowercaseString hasPrefix:@"origin:"]) {
+            origin = [[line substringFromIndex:7] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            break;
+        }
+    }
+    
+    if (!origin.length) {
+        return @"Access-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization, X-API-Key\r\n";
+    }
+    
+    BOOL isAllowedOrigin = NO;
+    NSURL *originUrl = [NSURL URLWithString:origin];
+    NSString *host = originUrl.host.lowercaseString;
+    if (host.length > 0) {
+        if ([host isEqualToString:@"localhost"] || [host isEqualToString:@"127.0.0.1"] || [host isEqualToString:@"::1"] || [host hasSuffix:@".local"]) {
+            isAllowedOrigin = YES;
+        } else if ([host hasPrefix:@"192.168."] || [host hasPrefix:@"10."] || [host hasPrefix:@"169.254."]) {
+            isAllowedOrigin = YES;
+        } else if ([host hasPrefix:@"172."]) {
+            NSArray *parts = [host componentsSeparatedByString:@"."];
+            if (parts.count >= 2) {
+                int secondOctet = [parts[1] intValue];
+                if (secondOctet >= 16 && secondOctet <= 31) isAllowedOrigin = YES;
+            }
+        }
+    }
+    
+    if (isAllowedOrigin) {
+        return [NSString stringWithFormat:@"Access-Control-Allow-Origin: %@\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization, X-API-Key\r\n", origin];
+    }
+    
+    if (outOriginBlocked) *outOriginBlocked = YES;
+    return @"Access-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization, X-API-Key\r\n";
+}
+
 static void start_web_server() {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         int server_fd, new_socket;
@@ -12610,8 +12671,15 @@ static void start_web_server() {
                             NSString *method = requestLine[0];
                             NSString *path = requestLine[1];
                             
-                            // CORS headers
-                            NSString *cors = @"Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization, X-API-Key\r\n";
+                            // CORS headers restricted to local/LAN origins
+                            BOOL originBlocked = NO;
+                            NSString *cors = rc_cors_headers_for_request(requestString, &originBlocked);
+                            if (originBlocked && [path hasPrefix:@"/api/"]) {
+                                static const char refused[] = "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nContent-Length: 22\r\nConnection: close\r\n\r\nCross-Origin Forbidden";
+                                write(new_socket, refused, sizeof(refused) - 1);
+                                close(new_socket);
+                                return;
+                            }
                             NSString *responseString = [NSString stringWithFormat:@"HTTP/1.1 404 Not Found\r\n%@Content-Length: 9\r\n\r\nNot Found", cors];
                             
                             if ([method isEqualToString:@"OPTIONS"]) {
@@ -12688,14 +12756,68 @@ static void start_web_server() {
                                 responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)jsonData.length, jsonString];
                             } else if ([path isEqualToString:@"/api/config"]) {
                                 load_trigger_config();
-                                // Allow GET/POST for config regardless of webUIEnabled to prevent lockout
-                                if ([method isEqualToString:@"GET"]) {
-                                        NSData *jsonData = [NSJSONSerialization dataWithJSONObject:g_triggerConfig options:0 error:nil];
-                                        if (jsonData) {
-                                            NSString *jsonString = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
-                                            responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)jsonData.length, jsonString];
+                                NSString *clientToken = rc_extract_token_from_headers(requestString);
+                                if (!clientToken || clientToken.length == 0) {
+                                    NSRange qMark = [path rangeOfString:@"?"];
+                                    if (qMark.location != NSNotFound) {
+                                        NSString *query = [path substringFromIndex:qMark.location + 1];
+                                        for (NSString *p in [query componentsSeparatedByString:@"&"]) {
+                                            NSArray *kv = [p componentsSeparatedByString:@"="];
+                                            if (kv.count == 2) {
+                                                NSString *k = [kv[0] lowercaseString];
+                                                if ([k isEqualToString:@"token"] || [k isEqualToString:@"key"]) {
+                                                    clientToken = [kv[1] stringByRemovingPercentEncoding];
+                                                    break;
+                                                }
+                                            }
                                         }
-                                    } else if ([method isEqualToString:@"POST"]) {
+                                    }
+                                }
+                                BOOL isLocal = rc_web_client_is_local(&client_addr) || RCCommandFromLocalSocket();
+                                BOOL isTokenValid = rc_is_api_token_valid(clientToken);
+                                
+                                if ([method isEqualToString:@"GET"]) {
+                                    NSDictionary *configToReturn = g_triggerConfig;
+                                    if (!isLocal && !isTokenValid) {
+                                        NSMutableDictionary *mConfig = [g_triggerConfig mutableCopy];
+                                        if (mConfig[@"webUIApiToken"]) {
+                                            mConfig[@"webUIApiToken"] = @"••••••••";
+                                        }
+                                        if (mConfig[@"haToken"] && [mConfig[@"haToken"] length] > 0) {
+                                            mConfig[@"haToken"] = @"••••••••";
+                                        }
+                                        if (mConfig[@"mqttPassword"] && [mConfig[@"mqttPassword"] length] > 0) {
+                                            mConfig[@"mqttPassword"] = @"••••••••";
+                                        }
+                                        NSArray *sshHosts = mConfig[@"sshHosts"];
+                                        if ([sshHosts isKindOfClass:[NSArray class]]) {
+                                            NSMutableArray *mHosts = [NSMutableArray array];
+                                            for (NSDictionary *h in sshHosts) {
+                                                if ([h isKindOfClass:[NSDictionary class]]) {
+                                                    NSMutableDictionary *mh = [h mutableCopy];
+                                                    if (mh[@"password"] && [mh[@"password"] length] > 0) {
+                                                        mh[@"password"] = @"••••••••";
+                                                    }
+                                                    [mHosts addObject:mh];
+                                                }
+                                            }
+                                            mConfig[@"sshHosts"] = mHosts;
+                                        }
+                                        configToReturn = mConfig;
+                                    }
+                                    NSData *jsonData = [NSJSONSerialization dataWithJSONObject:configToReturn options:0 error:nil];
+                                    if (jsonData) {
+                                        NSString *jsonString = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+                                        responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)jsonData.length, jsonString];
+                                    }
+                                } else if ([method isEqualToString:@"POST"]) {
+                                    NSString *expectedToken = g_triggerConfig[@"webUIApiToken"];
+                                    BOOL hasConfiguredToken = [expectedToken isKindOfClass:[NSString class]] && expectedToken.length > 0;
+                                    if (!isLocal && hasConfiguredToken && !isTokenValid) {
+                                        NSString *errJson = @"{\"ok\":false,\"error\":\"Saving configuration requires valid API token\"}";
+                                        NSData *errData = [errJson dataUsingEncoding:NSUTF8StringEncoding];
+                                        responseString = [NSString stringWithFormat:@"HTTP/1.1 403 Forbidden\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)errData.length, errJson];
+                                    } else {
                                         NSRange clRange = [requestString rangeOfString:@"Content-Length: " options:NSCaseInsensitiveSearch];
                                         int contentLength = 0;
                                         if (clRange.location != NSNotFound) {
@@ -12724,7 +12846,41 @@ static void start_web_server() {
                                             NSError *err;
                                             id jsonObj = [NSJSONSerialization JSONObjectWithData:bodyData options:NSJSONReadingMutableContainers error:&err];
                                             if (jsonObj && [jsonObj isKindOfClass:[NSDictionary class]]) {
-                                                rc_set_trigger_config([jsonObj copy]);
+                                                NSMutableDictionary *incoming = [jsonObj mutableCopy];
+                                                if ([incoming[@"webUIApiToken"] isEqualToString:@"••••••••"]) {
+                                                    incoming[@"webUIApiToken"] = g_triggerConfig[@"webUIApiToken"];
+                                                }
+                                                if ([incoming[@"haToken"] isEqualToString:@"••••••••"]) {
+                                                    incoming[@"haToken"] = g_triggerConfig[@"haToken"];
+                                                }
+                                                if ([incoming[@"mqttPassword"] isEqualToString:@"••••••••"]) {
+                                                    incoming[@"mqttPassword"] = g_triggerConfig[@"mqttPassword"];
+                                                }
+                                                NSArray *newHosts = incoming[@"sshHosts"];
+                                                NSArray *oldHosts = g_triggerConfig[@"sshHosts"];
+                                                if ([newHosts isKindOfClass:[NSArray class]] && [oldHosts isKindOfClass:[NSArray class]]) {
+                                                    NSMutableArray *updatedHosts = [NSMutableArray array];
+                                                    for (NSDictionary *nh in newHosts) {
+                                                        if ([nh isKindOfClass:[NSDictionary class]]) {
+                                                            NSMutableDictionary *mnh = [nh mutableCopy];
+                                                            if ([mnh[@"password"] isEqualToString:@"••••••••"]) {
+                                                                NSString *hostId = mnh[@"id"];
+                                                                for (NSDictionary *oh in oldHosts) {
+                                                                    if ([oh[@"id"] isEqualToString:hostId]) {
+                                                                        mnh[@"password"] = oh[@"password"] ?: @"";
+                                                                        break;
+                                                                    }
+                                                                }
+                                                            }
+                                                            [updatedHosts addObject:mnh];
+                                                        }
+                                                    }
+                                                    incoming[@"sshHosts"] = updatedHosts;
+                                                }
+                                                if (!isLocal && !isTokenValid) {
+                                                    incoming[@"allowDirectRootHelper"] = g_triggerConfig[@"allowDirectRootHelper"] ?: @NO;
+                                                }
+                                                rc_set_trigger_config([incoming copy]);
                                                 save_trigger_config();
                                                 responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: 12\r\n\r\n{\"ok\": true}", cors];
                                             } else {
@@ -12732,6 +12888,7 @@ static void start_web_server() {
                                             }
                                         }
                                     }
+                                }
                                 } else if ([path isEqualToString:@"/api/logs"] && [method isEqualToString:@"GET"]) {
                                     NSString *logPath = rc_get_log_file_path();
                                     NSString *logContent = @"";
@@ -13486,10 +13643,60 @@ static void start_web_server() {
                                     }
                                     triggerKey = [triggerKey stringByRemovingPercentEncoding];
                                     
-                                    dispatch_async(dispatch_get_main_queue(), ^{
-                                        RCExecuteTrigger(triggerKey);
-                                    });
-                                    responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: 12\r\n\r\n{\"ok\": true}", cors];
+                                    NSString *clientToken = rc_extract_token_from_headers(requestString);
+                                    if (!clientToken || clientToken.length == 0) {
+                                        NSRange qMark = [path rangeOfString:@"?"];
+                                        if (qMark.location != NSNotFound) {
+                                            NSString *query = [path substringFromIndex:qMark.location + 1];
+                                            for (NSString *p in [query componentsSeparatedByString:@"&"]) {
+                                                NSArray *kv = [p componentsSeparatedByString:@"="];
+                                                if (kv.count == 2) {
+                                                    NSString *k = [kv[0] lowercaseString];
+                                                    if ([k isEqualToString:@"token"] || [k isEqualToString:@"key"]) {
+                                                        clientToken = [kv[1] stringByRemovingPercentEncoding];
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    
+                                    BOOL hasPrivilegedAction = NO;
+                                    NSDictionary *trig = g_triggerConfig[@"triggers"][triggerKey];
+                                    if ([trig isKindOfClass:[NSDictionary class]]) {
+                                        NSArray *actions = trig[@"actions"];
+                                        if ([actions isKindOfClass:[NSArray class]]) {
+                                            for (id act in actions) {
+                                                if ([act isKindOfClass:[NSString class]] && rc_is_privileged_command(act)) {
+                                                    hasPrivilegedAction = YES;
+                                                    break;
+                                                } else if ([act isKindOfClass:[NSDictionary class]]) {
+                                                    NSString *type = act[@"type"];
+                                                    if ([type isEqualToString:@"set_variable"]) {
+                                                        NSString *op = act[@"op"];
+                                                        if ([op isEqualToString:@"command"] || [op isEqualToString:@"command_number"]) {
+                                                            if (rc_is_privileged_command(act[@"value"])) {
+                                                                hasPrivilegedAction = YES;
+                                                                break;
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    
+                                    BOOL isLocal = rc_web_client_is_local(&client_addr) || RCCommandFromLocalSocket();
+                                    if (!isLocal && hasPrivilegedAction && !rc_is_api_token_valid(clientToken)) {
+                                        NSString *errJson = @"{\"ok\":false,\"error\":\"Trigger containing privileged actions requires valid token\"}";
+                                        NSData *errData = [errJson dataUsingEncoding:NSUTF8StringEncoding];
+                                        responseString = [NSString stringWithFormat:@"HTTP/1.1 403 Forbidden\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)errData.length, errJson];
+                                    } else {
+                                        dispatch_async(dispatch_get_main_queue(), ^{
+                                            RCExecuteTrigger(triggerKey);
+                                        });
+                                        responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: 12\r\n\r\n{\"ok\": true}", cors];
+                                    }
                                 }
                             }
                             
