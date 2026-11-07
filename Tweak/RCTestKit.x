@@ -36,7 +36,9 @@
 //   POST /api/testkit/report/delete?id= delete a saved report; reports/clear deletes them all
 //   GET  /api/testkit/passcode          whether a passcode is set for unlocking during tests, and for how long
 //   POST /api/testkit/passcode/forget   forget it now
-//        testkit passcode/set code=...  (UNIX socket only - the Test Kit screen; refused over the network)
+//        testkit passcode/set code=...  (UNIX socket only - the Test Kit screen; refused over the network).
+//                                       minutes=30|60|120|240|480 picks Keep For (30 when absent)
+//        testkit passcode/renew minutes=N  same - restarts the timer on the passcode already set
 //   POST /api/testkit/unlock            unlock the phone with it (wakes the screen first)
 //   POST /api/testkit/replay            body (or ?seq=): simulated button presses at exact times, e.g.
 //                                       "vU@0 vD@7 ^D@125 ^U@147" (v = down, ^ = up; U / D = Volume Up /
@@ -2462,13 +2464,28 @@ static void RCTKSuiteReplay(NSMutableDictionary *run) {
 // - Kept here, in SpringBoard's memory, and in the Keychain so a respring keeps it (this device
 //   only, so never in a backup; readable once the phone has been unlocked since it started):
 //   never in the config, the log (handle_command redacts the command), the journal or a
-//   report, and never returned by any endpoint. kRCTKPasscodeLifetimeMs passing forgets it, and
-//   so does a restart (it's tied to this boot).
+//   report, and never returned by any endpoint. It's forgotten once its Keep For time passes -
+//   30 minutes by default, or one of 30 / 60 / 120 / 240 / 480 picked on the phone (the lifetime
+//   lives with the passcode in the Keychain, so a respring keeps it) - and on a restart (it's
+//   tied to this boot).
 // - Forgotten the moment an unlock with it doesn't work, so a wrong passcode is tried at
 //   most once - iOS disables the phone (or erases it, if set to) after repeated wrong ones.
-static const double kRCTKPasscodeLifetimeMs = 30 * 60 * 1000;
+// A minutes= value as minutes; *error set on one not on the list, 0 means "default"
+static BOOL RCTKPasscodeMinutesOK(double m) {
+    return m == 30 || m == 60 || m == 120 || m == 240 || m == 480;
+}
+static double RCTKPasscodeMinutes(NSString *value, NSString **error) {
+    if (!value.length) return 0;
+    double m = [value doubleValue];
+    if (!RCTKPasscodeMinutesOK(m)) {
+        *error = [NSString stringWithFormat:@"Keep For must be one of 30, 60, 120, 240 or 480 minutes (got %@)", value];
+        return 0;
+    }
+    return m;
+}
 static NSString *g_tkPasscode;
 static double g_tkPasscodeExpiresAt;
+static double g_tkPasscodeLifetimeMs = 30 * 60 * 1000;
 static __thread BOOL g_tkFromNetwork = NO;
 
 // When the phone last started, so a saved passcode is for this boot only
@@ -2490,9 +2507,9 @@ static void RCTKDeleteSavedPasscode(void) {
     SecItemDelete((__bridge CFDictionaryRef)RCTKPasscodeQuery());
 }
 
-static void RCTKSavePasscode(NSString *passcode, double expiresAt) {
+static void RCTKSavePasscode(NSString *passcode, double expiresAt, double lifetimeMs) {
     RCTKDeleteSavedPasscode();
-    NSDictionary *value = @{ @"code": passcode, @"expires": @(expiresAt), @"boot": RCTKBootID() };
+    NSDictionary *value = @{ @"code": passcode, @"expires": @(expiresAt), @"boot": RCTKBootID(), @"lifetime": @(lifetimeMs) };
     NSData *data = [NSJSONSerialization dataWithJSONObject:value options:0 error:nil];
     if (!data) return;
     NSMutableDictionary *item = [RCTKPasscodeQuery() mutableCopy];
@@ -2522,6 +2539,8 @@ static void RCTKLoadSavedPasscode(void) {
     }
     g_tkPasscode = [code copy];
     g_tkPasscodeExpiresAt = expires;
+    double lifetime = [value[@"lifetime"] doubleValue]; // written with it; absent = 30 minutes
+    g_tkPasscodeLifetimeMs = lifetime > 0 ? lifetime : 30 * 60 * 1000;
 }
 
 static NSString *RCTKCurrentPasscode(void) {
@@ -2539,6 +2558,7 @@ static void RCTKForgetPasscode(void) {
     @synchronized (RCTKLock()) {
         g_tkPasscode = nil;
         g_tkPasscodeExpiresAt = 0;
+        g_tkPasscodeLifetimeMs = 30 * 60 * 1000;
         RCTKDeleteSavedPasscode();
     }
 }
@@ -2546,21 +2566,41 @@ static void RCTKForgetPasscode(void) {
 static NSDictionary *RCTKPasscodeStatus(void) {
     NSString *passcode = RCTKCurrentPasscode();
     return @{ @"set": @(passcode != nil), @"expiresInSeconds": @(passcode ? round((g_tkPasscodeExpiresAt - RCTKNowMs()) / 1000) : 0),
-              @"lifetimeSeconds": @(kRCTKPasscodeLifetimeMs / 1000) };
+              @"lifetimeSeconds": @(g_tkPasscodeLifetimeMs / 1000) };
 }
 
-static NSDictionary *RCTKSetPasscode(NSString *passcode) {
+static NSDictionary *RCTKSetPasscode(NSString *passcode, NSString *minutesParam) {
     if (g_tkFromNetwork) return @{ @"error": @"the passcode can only be set on the phone (Test Kit screen), not over the network" };
+    NSString *minutesError = nil;
+    double minutes = RCTKPasscodeMinutes(minutesParam, &minutesError);
+    if (minutesError) return @{ @"error": minutesError };
     NSCharacterSet *space = [NSCharacterSet whitespaceAndNewlineCharacterSet];
     if (passcode.length < 4 || passcode.length > 64 || [passcode rangeOfCharacterFromSet:space].location != NSNotFound) {
         return @{ @"error": @"not a passcode (4-64 characters, no spaces)" };
     }
     @synchronized (RCTKLock()) {
         g_tkPasscode = [passcode copy];
-        g_tkPasscodeExpiresAt = RCTKNowMs() + kRCTKPasscodeLifetimeMs;
-        RCTKSavePasscode(g_tkPasscode, g_tkPasscodeExpiresAt);
+        g_tkPasscodeLifetimeMs = (minutes ?: 30) * 60 * 1000;
+        g_tkPasscodeExpiresAt = RCTKNowMs() + g_tkPasscodeLifetimeMs;
+        RCTKSavePasscode(g_tkPasscode, g_tkPasscodeExpiresAt, g_tkPasscodeLifetimeMs);
     }
     RCTKEvent(@"passcode", @{ @"set": @YES }); // that it was set - not what it is
+    return RCTKPasscodeStatus();
+}
+
+// Restarts the timer on the passcode already set, with a new Keep For
+static NSDictionary *RCTKRenewPasscode(NSString *minutesParam) {
+    if (g_tkFromNetwork) return @{ @"error": @"the passcode can only be set on the phone (Test Kit screen), not over the network" };
+    NSString *minutesError = nil;
+    double minutes = RCTKPasscodeMinutes(minutesParam, &minutesError);
+    if (minutesError) return @{ @"error": minutesError };
+    @synchronized (RCTKLock()) {
+        if (!RCTKCurrentPasscode()) return @{ @"error": @"no passcode set - enter it in Test Kit on the phone" };
+        g_tkPasscodeLifetimeMs = (minutes ?: 30) * 60 * 1000;
+        g_tkPasscodeExpiresAt = RCTKNowMs() + g_tkPasscodeLifetimeMs;
+        RCTKSavePasscode(g_tkPasscode, g_tkPasscodeExpiresAt, g_tkPasscodeLifetimeMs);
+    }
+    RCTKEvent(@"passcode", @{ @"renewed": @YES });
     return RCTKPasscodeStatus();
 }
 
@@ -2602,7 +2642,7 @@ static NSDictionary *RCTKInfo(void) {
         @"tweakVersion": RCTKPackageVersion(),
         @"endpoints": @[@"info", @"probe", @"journal", @"journal/clear", @"mark", @"run", @"lua", @"capture", @"snapshot", @"restore",
                         @"suites", @"suite/steps", @"suite/run", @"suite/skip", @"suite/stop", @"report", @"reports", @"report/delete", @"reports/clear",
-                        @"replay", @"passcode", @"passcode/forget", @"unlock"]
+                        @"replay", @"passcode", @"passcode/forget", @"passcode/renew", @"unlock"]
     };
 }
 
@@ -2658,7 +2698,8 @@ static NSDictionary *RCTKDispatch(NSString *endpoint, NSDictionary<NSString *, N
     if ([endpoint isEqualToString:@"lua"]) return RCTKLua(params[@"code"] ?: body);
     if ([endpoint isEqualToString:@"replay"]) return RCTKReplay(params[@"seq"] ?: body, params);
     if ([endpoint isEqualToString:@"passcode"]) return RCTKPasscodeStatus();
-    if ([endpoint isEqualToString:@"passcode/set"]) return RCTKSetPasscode(params[@"code"]);
+    if ([endpoint isEqualToString:@"passcode/set"]) return RCTKSetPasscode(params[@"code"], params[@"minutes"]);
+    if ([endpoint isEqualToString:@"passcode/renew"]) return RCTKRenewPasscode(params[@"minutes"]);
     if ([endpoint isEqualToString:@"passcode/forget"]) { RCTKForgetPasscode(); return RCTKPasscodeStatus(); }
     if ([endpoint isEqualToString:@"unlock"]) {
         // Only from this phone (rc-client, over SSH): anyone on the network could unlock it otherwise
