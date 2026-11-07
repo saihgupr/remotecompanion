@@ -16,7 +16,6 @@ All notable changes to this project will be documented in this file.
 - **Variables icon**: the Variables row uses an orange italic x, in the style of Shortcuts' variable glyph. Set Variable actions use the same x in the normal action icon color.
 - **Terminal command editor**: creating or editing an `exec` or `root` action now uses the same Settings-style screen as the SSH command editor, with the root switch in its own section above the monospaced command field.
 - **Home Assistant actions edit like the entity picker**: tapping an existing HA action in the app, or clicking one in the Web UI, shows its Toggle, Turn On and Turn Off choices with the current one ticked, plus Change Entity. Raw and custom commands keep an Edit Command option instead of being overwritten.
-- **Test Macro is gone**: the Keyboard Maestro tap and long-press menus no longer have Test Macro. Run Action in the long-press menu already runs any action, and Home Assistant gets no separate test.
 
 ## [4.4.0] - 2026-11-06
 

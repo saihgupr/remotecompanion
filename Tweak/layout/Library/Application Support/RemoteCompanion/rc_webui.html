@@ -6759,6 +6759,11 @@ function editKMAction(idx) {
     action: () => openKMDialog(idx)
   });
 
+  buttons.push({
+    label: 'Test Macro',
+    action: () => runSingleAction(cmdStr)
+  });
+
   showSheet(displayName, buttons);
 }
 

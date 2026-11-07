@@ -3217,6 +3217,10 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
                     [self.tableView reloadData];
                 }]];
             }
+            
+            [alert addAction:[UIAlertAction actionWithTitle:@"Test Macro" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+                [[RCServerClient sharedClient] executeCommand:longPressCmdStr completion:^(NSString * _Nullable output, NSError * _Nullable error) {}];
+            }]];
         }
 
         // If-specific options
@@ -3638,6 +3642,10 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:picker];
             picker.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Cancel" style:UIBarButtonItemStylePlain target:self action:@selector(dismissModalPicker)];
             [self presentViewController:nav animated:YES completion:nil];
+        }]];
+        
+        [sheet addAction:[UIAlertAction actionWithTitle:@"Test Macro" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+            [[RCServerClient sharedClient] executeCommand:currentAction completion:^(NSString * _Nullable output, NSError * _Nullable error) {}];
         }]];
         
         [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
