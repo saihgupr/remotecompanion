@@ -35,3 +35,6 @@ BOOL RCEvaluateIfCondition(NSDictionary *ifAction);
 NSDictionary *RCEvaluateLuaCapturing(NSString *code); // {output, returns, error?}
 void RCShowPrompt(NSString *title, NSString *subtitle, NSString *iconSymbol, NSTimeInterval hold);
 void RCHidePrompt(void);
+BOOL RCIsPrivilegedCommand(NSString *cmd);
+BOOL RCIsApiTokenValid(NSString *providedToken);
+NSString *RCExtractTokenFromHeaders(NSString *requestHeaders);

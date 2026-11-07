@@ -4275,7 +4275,10 @@ async function loadCapabilities() {
 // ── API ───────────────────────────────────────────────────────────────────────
 async function loadData() {
   try {
-    const res = await fetch('/api/config');
+    const token = localStorage.getItem('rc_api_token');
+    const headers = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch('/api/config', { headers });
     if (!res.ok) throw new Error();
     config = await res.json();
     if (!config.triggers) config.triggers = {};
@@ -4314,11 +4317,18 @@ async function saveConfig() {
     return;
   }
   try {
+    const token = localStorage.getItem('rc_api_token');
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
     const res = await fetch('/api/config', {
       method: 'POST',
       body: JSON.stringify(config),
-      headers: { 'Content-Type': 'application/json' }
+      headers: headers
     });
+    if (res.status === 403) {
+      promptApiTokenModal(saveConfig);
+      return;
+    }
     if (!res.ok) {
         showToast('⚠ Failed to save settings');
     }
@@ -4717,9 +4727,23 @@ function deleteTrigger(key) {
 
 async function runTrigger(key) {
   try {
-    const res = await fetch(`/api/trigger/${encodeURIComponent(key)}`, { method: 'POST' });
+    const token = localStorage.getItem('rc_api_token');
+    const headers = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch(`/api/trigger/${encodeURIComponent(key)}`, { method: 'POST', headers });
     if (res.status === 403) {
-      showToast('⚠ Enable Web UI in Settings first');
+      let isTokenErr = false;
+      try {
+        const text = await res.text();
+        if (text && text.includes('requires valid token')) {
+          isTokenErr = true;
+        }
+      } catch(e) {}
+      if (isTokenErr) {
+        promptApiTokenModal(() => runTrigger(key));
+      } else {
+        showToast('⚠ Enable Web UI in Settings first');
+      }
     } else {
       showToast(res.ok ? '▶ Triggered' : '⚠ Server Error');
     }
@@ -4739,12 +4763,12 @@ async function sendCommand(cmdStr) {
   });
 }
 
-function promptApiTokenModal(retryAction) {
+function promptApiTokenModal(retryAction, msg) {
   showDialog(
     'Enter API Token',
-    'Privileged commands (root, sudo, exec) require an API Token configured in Settings > Web UI > Access on your iPhone:',
+    msg || 'Privileged commands and protected settings require an API Token configured in Settings > Web UI > Access on your iPhone:',
     localStorage.getItem('rc_api_token') || '',
-    'Save & Run',
+    'Save Token',
     async (token) => {
       const trimmed = (token || '').trim();
       if (trimmed) {
@@ -4752,8 +4776,14 @@ function promptApiTokenModal(retryAction) {
       } else {
         localStorage.removeItem('rc_api_token');
       }
+      const tokenField = document.getElementById('setting-webui-token');
+      if (tokenField) tokenField.value = trimmed;
       if (retryAction) {
-        await runSingleAction(retryAction);
+        if (typeof retryAction === 'function') {
+          await retryAction();
+        } else {
+          await runSingleAction(retryAction);
+        }
       }
     },
     false,
@@ -7891,6 +7921,7 @@ function onApiTokenChange(val) {
   } else {
     localStorage.removeItem('rc_api_token');
   }
+  loadData();
 }
 
 // ── Settings ─────────────────────────────────────────────────────────────────
