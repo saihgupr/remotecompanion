@@ -4,6 +4,8 @@
 #import "RCNewTriggerViewController.h"
 #import "RCSettingsViewController.h"
 #import "RCFocusTriggerViewController.h"
+#import "RCAddOnCatalog.h"
+#import "RCAddOnTriggersViewController.h"
 #import "RCNFCTriggerViewController.h"
 #import <notify.h>
 #import "RCWiFiTriggerViewController.h"
@@ -102,6 +104,7 @@
     if ([triggerKey hasPrefix:@"output_"]) return @"airplayaudio";
     if ([triggerKey hasPrefix:@"trigger_device_battery_above_"]) return @"battery.100";
     if ([triggerKey hasPrefix:@"trigger_device_battery_below_"]) return @"battery.25";
+    if ([RCAddOnCatalog isAddOnTriggerKey:triggerKey]) return [RCAddOnCatalog iconForTriggerKey:triggerKey] ?: @"puzzlepiece.extension";
     if ([triggerKey hasPrefix:@"app_launch_"]) return @"app.badge";
     if ([triggerKey hasPrefix:@"app_exit_"]) return @"rectangle.portrait.and.arrow.right";
     if ([triggerKey hasPrefix:@"notif_"] || [triggerKey hasPrefix:@"notify_"]) return @"bell.badge.fill";
@@ -575,6 +578,13 @@
     }
     addSection(btKeys, @"Bluetooth Device Triggers", YES);
 
+    // Add-on triggers (ADDONS.md)
+    NSMutableArray *addOnKeys = [NSMutableArray array];
+    for (NSString *key in [[RCConfigManager sharedManager] allConfiguredTriggerKeys]) {
+        if ([RCAddOnCatalog isAddOnTriggerKey:key]) [addOnKeys addObject:key];
+    }
+    addSection(addOnKeys, @"Add-on Triggers", YES);
+
     NSMutableArray *outputKeys = [NSMutableArray array];
     for (NSString *key in [[RCConfigManager sharedManager] allConfiguredTriggerKeys]) {
         if ([key hasPrefix:@"output_"]) [outputKeys addObject:key];
@@ -663,6 +673,16 @@
         [weakSelf.navigationController pushViewController:vc animated:YES];
     };
 
+    // Opens a trigger's action list in place of the New Trigger menu, in a single transition (letting
+    // the menu be removed after the push left the bar buttons half-faded)
+    void (^replaceMenuWith)(UIViewController *) = ^(UIViewController *vc) {
+        UINavigationController *nav = weakSelf.navigationController;
+        NSMutableArray *vcs = [nav.viewControllers mutableCopy];
+        if ([vcs.lastObject isKindOfClass:[RCNewTriggerViewController class]]) [vcs removeLastObject];
+        [vcs addObject:vc];
+        [nav setViewControllers:vcs animated:YES];
+    };
+
     // System events can only be added once; one that exists just opens
     NSMutableArray *systemEvents = [NSMutableArray array];
     for (NSArray *event in @[@[@"trigger_statusbar_two_finger_swipe_down", @"2-Finger Top Slide Down", @"hand.draw", @"Gestures"],
@@ -693,7 +713,7 @@
                 data[@"enabled"] = @YES;
                 [[RCConfigManager sharedManager] updateTrigger:key withData:data];
             }
-            push([[RCActionsViewController alloc] initWithTriggerKey:key]);
+            replaceMenuWith([[RCActionsViewController alloc] initWithTriggerKey:key]);
         } } mutableCopy];
         NSDictionary *trig = [[RCConfigManager sharedManager] triggerDataForKey:key];
         if (trig && ([trig[@"enabled"] boolValue] || [trig[@"actions"] count] > 0)) {
@@ -750,6 +770,18 @@
     [items addObject:@{ @"title": @"Battery Level", @"icon": [UIImage systemImageNamed:@"battery.50"] ? @"battery.50" : @"battery.25", @"section": @"Device", @"handler": ^{ push([[RCBatteryTriggerViewController alloc] init]); } }];
     [items addObject:@{ @"title": @"MQTT Topic", @"icon": @"antenna.radiowaves.left.and.right", @"section": @"Integrations", @"handler": ^{ push([[RCMQTTTriggerViewController alloc] init]); } }];
     [items addObject:@{ @"title": @"Focus", @"icon": @"moon.fill", @"section": @"Device", @"handler": ^{ push([[RCFocusTriggerViewController alloc] init]); } }];
+    // Add-ons: a row for each one that has triggers, opening its list (last, so they come after
+    // the built-in sections)
+    for (NSDictionary *group in [RCAddOnCatalog addOnTriggerGroups]) {
+        NSString *prefix = [NSString stringWithFormat:@"addon_%@_", group[@"id"]];
+        NSUInteger added = 0;
+        for (NSString *key in [[RCConfigManager sharedManager] allConfiguredTriggerKeys]) if ([key hasPrefix:prefix]) added++;
+        NSMutableDictionary *item = [@{ @"title": group[@"title"], @"icon": group[@"icon"], @"image": group[@"image"], @"section": @"Add-ons", @"handler": ^{
+            push([[RCAddOnTriggersViewController alloc] initWithAddOn:group[@"id"] title:group[@"title"]]);
+        } } mutableCopy];
+        if (added) item[@"detail"] = [NSString stringWithFormat:@"%lu added", (unsigned long)added];
+        [items addObject:item];
+    }
     [self.navigationController pushViewController:[[RCNewTriggerViewController alloc] initWithItems:items] animated:YES];
 }
 
@@ -1052,11 +1084,10 @@
     
     // Add Icon with tint based on section or type?
     // Using dark gray tint for a "premium" but subtle look
-    UIImage *icon = [UIImage systemImageNamed:[RCTriggersViewController iconNameForTrigger:triggerKey]];
-    cell.imageView.image = icon;
-    cell.imageView.tintColor = [UIColor systemGrayColor];
+    UIImage *custom = [RCAddOnCatalog isAddOnTriggerKey:triggerKey] ? [RCAddOnCatalog imageForTriggerKey:triggerKey] : nil;   // an add-on's image icon
     // The trigger's own picture: its app's icon, the phone drawing, or its symbol with a letter
-    cell.imageView.image = [self appIconForTrigger:triggerKey side:29] ?: RCTriggerIconImage(triggerKey, 22) ?: [self symbolIconForTrigger:triggerKey size:22];
+    cell.imageView.image = custom ?: [self appIconForTrigger:triggerKey side:29] ?: RCTriggerIconImage(triggerKey, 22) ?: [self symbolIconForTrigger:triggerKey size:22];
+    cell.imageView.tintColor = custom ? nil : [UIColor systemGrayColor];
 
     cell.accessoryView = nil;
     cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
@@ -1198,7 +1229,7 @@
 // The triggers that can be deleted: the ones made for a tag, network, device, app, notification,
 // schedule, topic or state (the button and gesture triggers are always there)
 - (BOOL)canDeleteTrigger:(NSString *)triggerKey {
-    return !(![triggerKey hasPrefix:@"nfc_"] && ![triggerKey hasPrefix:@"wifi_"] && ![triggerKey hasPrefix:@"bt_"] && ![triggerKey hasPrefix:@"app_launch_"] && ![triggerKey hasPrefix:@"app_exit_"] && ![triggerKey hasPrefix:@"output_"] && ![triggerKey hasPrefix:@"notif_"] && ![triggerKey hasPrefix:@"notify_"] && ![triggerKey hasPrefix:@"sched_"] && ![triggerKey hasPrefix:@"mqtt_"] && ![triggerKey hasPrefix:@"mqtt_sub_"] && ![triggerKey hasPrefix:@"trigger_device_"] && ![triggerKey hasPrefix:@"trigger_media_"] && ![triggerKey hasPrefix:@"trigger_power_"] && ![triggerKey hasPrefix:@"trigger_carplay_"] && ![triggerKey hasPrefix:@"trigger_watch_"] && ![triggerKey containsString:@"two_finger"]);
+    return !(![triggerKey hasPrefix:@"nfc_"] && ![triggerKey hasPrefix:@"wifi_"] && ![triggerKey hasPrefix:@"bt_"] && ![triggerKey hasPrefix:@"app_launch_"] && ![triggerKey hasPrefix:@"app_exit_"] && ![triggerKey hasPrefix:@"output_"] && ![triggerKey hasPrefix:@"notif_"] && ![triggerKey hasPrefix:@"notify_"] && ![triggerKey hasPrefix:@"sched_"] && ![triggerKey hasPrefix:@"mqtt_"] && ![triggerKey hasPrefix:@"mqtt_sub_"] && ![triggerKey hasPrefix:@"trigger_device_"] && ![triggerKey hasPrefix:@"trigger_media_"] && ![triggerKey hasPrefix:@"trigger_power_"] && ![triggerKey hasPrefix:@"trigger_carplay_"] && ![triggerKey hasPrefix:@"trigger_watch_"] && ![triggerKey containsString:@"two_finger"] && ![RCAddOnCatalog isAddOnTriggerKey:triggerKey]);
 }
 
 // A created trigger's letter, telling NFC tags, networks and devices of one kind apart: the first
@@ -1312,7 +1343,8 @@
 - (UIImage *)gridImageForTrigger:(NSString *)key {
     UIImage *custom = [self customIconForTrigger:key];
     if (custom) return custom;
-    return [self appIconForTrigger:key side:30] ?: RCTriggerIconImage(key, 26) ?: [self symbolIconForTrigger:key size:26];
+    UIImage *addOnImage = [RCAddOnCatalog isAddOnTriggerKey:key] ? [RCAddOnCatalog imageForTriggerKey:key] : nil;
+    return addOnImage ?: [self appIconForTrigger:key side:30] ?: RCTriggerIconImage(key, 26) ?: [self symbolIconForTrigger:key size:26];
 }
 
 - (NSInteger)gridActionCountForTrigger:(NSString *)key {

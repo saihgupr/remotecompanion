@@ -9,7 +9,7 @@ include $(THEOS)/makefiles/common.mk
 APPLICATION_NAME = RemoteCompanion
 
 RemoteCompanion_FILES = main.m RCAppDelegate.m RCConfigManager.m RCTriggersViewController.m RCActionsViewController.m RCActionPickerViewController.m RCSettingsViewController.m RCBannersViewController.m RCIntegrationsViewController.m RCHASettingsViewController.m RCKMSettingsViewController.m RCMQTTSettingsViewController.m RCMQTTClient.m RCMQTTTriggerViewController.m RCNFCTriggerViewController.m RCShortcutPickerViewController.m RCTextInputViewController.m RCAppPickerViewController.m RCServerClient.m RCWiFiTriggerViewController.m RCBluetoothTriggerViewController.m RCAudioOutputTriggerViewController.m RCUITweaker.m RCNotificationTriggerViewController.m RCScheduledTriggerViewController.m RCHAEntityPickerViewController.m RCKMMacroPickerViewController.m
-RemoteCompanion_FRAMEWORKS = UIKit Foundation UserNotifications CoreNFC MobileCoreServices LocalAuthentication
+RemoteCompanion_FRAMEWORKS = UIKit Foundation UserNotifications CoreNFC MobileCoreServices LocalAuthentication JavaScriptCore
 RemoteCompanion_CFLAGS = -fobjc-arc
 RemoteCompanion_FILES += RCNewTriggerViewController.m
 RemoteCompanion_FILES += RCTriggerPickerViewController.m
@@ -32,6 +32,7 @@ RemoteCompanion_FILES += RCWebUIAccessViewController.m
 RemoteCompanion_FILES += RCRunningViewController.m
 RemoteCompanion_FILES += RCRunHistoryViewController.m
 RemoteCompanion_FILES += RCVariablesViewController.m RCSetVariableViewController.m RCVariableConditionViewController.m RCNumberSettingViewController.m RCSymbolPickerViewController.m RCCommandPickerViewController.m RCTimeRangeViewController.m
+RemoteCompanion_FILES += RCAddOnCatalog.m RCAddOnsViewController.m RCAddOnDetailViewController.m RCAddOnActionsViewController.m RCAddOnOptionsViewController.m RCAddOnExpandCell.m RCAddOnTriggersViewController.m
 
 # Reorganized Settings submenus
 RemoteCompanion_FILES += RCAdvancedSettingsViewController.m

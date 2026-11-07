@@ -2,6 +2,7 @@
 #import "RCActionPickerViewController.h"
 #import "RCConfigManager.h"
 #import "RCActionTile.h"
+#import "RCAddOnCatalog.h"
 
 // Lists the action picker's catalog; tapping an action adds/removes it from the
 // config's "bannerActions". Each entry tells the tweak how to recognise the action:
@@ -40,6 +41,13 @@ static NSSet<NSString *> *RCOwnBannerIds(void) {
     return ids;
 }
 
+// Actions whose banner is their own: the built-in ones, and add-on actions with a banner
+static BOOL RCHasOwnBanner(NSString *command) {
+    if ([RCOwnBannerIds() containsObject:command]) return YES;
+    for (NSDictionary *item in [RCAddOnCatalog bannerItems]) if ([item[@"id"] isEqualToString:command]) return YES;
+    return NO;
+}
+
 // The picker's catalog, minus entries that don't run an action of their own
 static NSArray<NSArray<NSDictionary *> *> *RCBannerCatalog(NSArray<NSString *> **titlesOut) {
     NSSet *skip = [NSSet setWithArray:@[@"__IF_CONDITION__", @"__REPEAT__", @"__REPEAT_WHILE__", @"__EXIT_REPEAT__", @"__WAIT_UNTIL__", @"__SET_VARIABLE__", @"__DELAY__", @"__STOP_TRIGGER__", @"__TOAST__"]];
@@ -51,12 +59,17 @@ static NSArray<NSArray<NSDictionary *> *> *RCBannerCatalog(NSArray<NSString *> *
     for (NSUInteger i = 0; i < catalog.count; i++) {
         NSMutableArray *items = [NSMutableArray array];
         for (NSDictionary *item in catalog[i]) {
-            if (![skip containsObject:item[@"command"]]) [items addObject:item];
+            // An add-on's row is replaced by its actions, below
+            if (![skip containsObject:item[@"command"]] && ![item[@"command"] hasPrefix:@"__ADDON__"]) [items addObject:item];
         }
         if (items.count) {
             [sections addObject:items];
             [sectionTitles addObject:i < titles.count ? titles[i] : @""];
         }
+    }
+    for (NSDictionary *addOn in [RCAddOnCatalog pickerSections]) {
+        [sections addObject:addOn[@"actions"]];
+        [sectionTitles addObject:addOn[@"title"]];
     }
     if (titlesOut) *titlesOut = sectionTitles;
     return sections;
@@ -129,7 +142,7 @@ static NSArray<NSArray<NSDictionary *> *> *RCBannerCatalog(NSArray<NSString *> *
     for (NSArray *section in RCBannerCatalog(NULL)) {
         for (NSDictionary *item in section) {
             NSString *command = item[@"command"];
-            BOOL own = [RCOwnBannerIds() containsObject:command];
+            BOOL own = RCHasOwnBanner(command);
             if (own ? ![optedOut containsObject:command] : [selected containsObject:command]) count++;
         }
     }
@@ -137,7 +150,7 @@ static NSArray<NSArray<NSDictionary *> *> *RCBannerCatalog(NSArray<NSString *> *
 }
 
 - (BOOL)isChecked:(NSString *)command {
-    if ([RCOwnBannerIds() containsObject:command]) return ![self.optedOutIds containsObject:command];
+    if (RCHasOwnBanner(command)) return ![self.optedOutIds containsObject:command];
     return [self.selectedIds containsObject:command];
 }
 
@@ -226,7 +239,7 @@ static BOOL RCBannerIsPrefixPattern(NSString *p) {
     NSMutableArray *entries = [NSMutableArray array];
     for (NSArray *section in self.sections) {
         for (NSDictionary *item in section) {
-            if ([RCOwnBannerIds() containsObject:item[@"command"]]) continue; // own banners: bannerOptOut instead
+            if (RCHasOwnBanner(item[@"command"])) continue; // own banners: bannerOptOut instead
             if ([self.selectedIds containsObject:item[@"command"]]) [entries addObject:[self entryForItem:item]];
         }
     }
@@ -313,7 +326,7 @@ static NSString *const RCBannersNote = @"Checked actions show a banner whenever 
 - (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)indexPath {
     [collectionView deselectItemAtIndexPath:indexPath animated:NO];
     NSString *command = self.displaySections[indexPath.section][indexPath.item][@"command"];
-    NSMutableSet *set = [RCOwnBannerIds() containsObject:command] ? self.optedOutIds : self.selectedIds;
+    NSMutableSet *set = RCHasOwnBanner(command) ? self.optedOutIds : self.selectedIds;
     NSArray *oldTitles = self.displayTitles;
     NSArray *oldSections = self.displaySections;
     if ([set containsObject:command]) [set removeObject:command];
