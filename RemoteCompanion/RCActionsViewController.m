@@ -251,6 +251,11 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
 @property (nonatomic, strong) CADisplayLink *reorderScrollLink;
 @property (nonatomic, assign) CGFloat reorderFingerY; // in the table's visible frame, for scrolling
 @property (nonatomic, strong) UISelectionFeedbackGenerator *reorderTick;
+// A Remote RC action being edited: the row and client it belongs to. The row is held
+// as its plain inner command while the editor is open, so every editor behaves exactly
+// like it does for a local action, and the wrapper is put back when the edit saves.
+@property (nonatomic, assign) NSInteger pendingRemoteEditIndex;
+@property (nonatomic, copy) NSString *pendingRemoteEditClientId;
 // The one toast editor. New toasts and edits both come through here,
 // so they always look and save the same way.
 - (void)showToastEditorWithTitle:(NSString *)title
@@ -1040,6 +1045,11 @@ static void RCSetRunWatching(BOOL watching) {
 
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
+    // Back from an editor: if it closed without saving, put the Remote RC wrapper back
+    if (!self.presentedViewController &&
+        (!self.navigationController || self.navigationController.topViewController == self)) {
+        [self finishPendingRemoteEdit];
+    }
     [self startRunWatch];
 }
 
@@ -2080,6 +2090,8 @@ static void RCSetRunWatching(BOOL watching) {
 }
 
 - (void)saveActions {
+    // A Remote RC action edited as its inner command gets its client wrapper back
+    [self finishPendingRemoteEdit];
     [self finishAdding]; // closes the picker once this save is done
     [[RCConfigManager sharedManager] setActions:_actions forTrigger:_triggerKey];
     if (self.namePromptShown && _actions.count > 0) [self updateWrappedTitle];
@@ -2891,6 +2903,68 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     return depth > 0;
 }
 
+// The client and inner command of a Remote RC action, or nil for a local one.
+// Handles the stored "rc-run <clientId> <command>" form.
+- (NSDictionary *)remotePartsForAction:(id)item {
+    NSString *command = [item isKindOfClass:[NSDictionary class]] ? ((NSDictionary *)item)[@"command"] : item;
+    if (![command isKindOfClass:[NSString class]] || ![command hasPrefix:@"rc-run "]) return nil;
+    NSString *payload = [command substringFromIndex:7];
+    NSRange firstSpace = [payload rangeOfString:@" "];
+    if (firstSpace.location == NSNotFound) return nil;
+    NSString *clientId = [payload substringToIndex:firstSpace.location];
+    NSString *inner = [payload substringFromIndex:firstSpace.location + 1];
+    if (clientId.length == 0 || inner.length == 0) return nil;
+    return @{ @"clientId": clientId, @"command": inner };
+}
+
+- (NSString *)remoteClientNameForId:(NSString *)clientId {
+    NSDictionary *client = [[RCConfigManager sharedManager] rcClientForId:clientId];
+    return client[@"name"] ?: client[@"host"] ?: @"Missing Client";
+}
+
+// While a Remote RC action is edited, the row holds its inner command so the normal
+// editors see exactly what they would for a local action. The wrapper goes back on save.
+- (void)beginRemoteEditAtIndex:(NSInteger)index {
+    if (index < 0 || index >= (NSInteger)self.actions.count) return;
+    NSDictionary *parts = [self remotePartsForAction:self.actions[index]];
+    if (!parts) return;
+    self.pendingRemoteEditIndex = index;
+    self.pendingRemoteEditClientId = parts[@"clientId"];
+    id item = self.actions[index];
+    if ([item isKindOfClass:[NSDictionary class]]) {
+        NSMutableDictionary *d = [item mutableCopy];
+        d[@"command"] = parts[@"command"];
+        self.actions[index] = d;
+    } else {
+        self.actions[index] = parts[@"command"];
+    }
+}
+
+- (void)clearPendingRemoteEdit {
+    self.pendingRemoteEditIndex = -1;
+    self.pendingRemoteEditClientId = nil;
+}
+
+- (void)finishPendingRemoteEdit {
+    if (self.pendingRemoteEditClientId.length == 0) return;
+    NSInteger index = self.pendingRemoteEditIndex;
+    if (index >= 0 && index < (NSInteger)self.actions.count) {
+        id item = self.actions[index];
+        NSString *command = [item isKindOfClass:[NSDictionary class]] ? ((NSDictionary *)item)[@"command"] : item;
+        if ([command isKindOfClass:[NSString class]] && ![command hasPrefix:@"rc-run "]) {
+            NSString *wrapped = [NSString stringWithFormat:@"rc-run %@ %@", self.pendingRemoteEditClientId, command];
+            if ([item isKindOfClass:[NSDictionary class]]) {
+                NSMutableDictionary *d = [item mutableCopy];
+                d[@"command"] = wrapped;
+                self.actions[index] = d;
+            } else {
+                self.actions[index] = wrapped;
+            }
+        }
+    }
+    [self clearPendingRemoteEdit];
+}
+
 // Puts a command at index (keeping any settings around it), or adds it at the end
 - (void)storeCommand:(NSString *)command atIndex:(NSInteger)index {
     if (index != NSNotFound && index >= 0 && index < (NSInteger)self.actions.count) {
@@ -3141,6 +3215,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 // The long-press menu (a row's options, or the page's when pressed below the rows)
 - (void)showOptionsAtPoint:(CGPoint)touchPoint {
     if ([self runShown]) return; // read-only while it runs
+    [self finishPendingRemoteEdit];
     NSIndexPath *indexPath = [self.tableView indexPathForRowAtPoint:touchPoint];
     
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:indexPath ? @"Action Options" : @"Actions"
@@ -3177,6 +3252,13 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         [alert addAction:[UIAlertAction actionWithTitle:@"Duplicate" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
             [self duplicateActionAtIndex:indexPath.row];
         }]];
+
+        // A Remote RC action edits like its inner action; this changes the target device
+        if ([self remotePartsForAction:item]) {
+            [alert addAction:[UIAlertAction actionWithTitle:@"Remote Client..." style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+                [self promptEditRemoteRunActionAtIndex:indexPath.row];
+            }]];
+        }
 
         // Paste Above/Below options
         if (g_actionClipboard) {
@@ -3413,6 +3495,13 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     }
     
     NSString *currentAction = (NSString *)actionData;
+    // Remote RC actions are edited as their inner command, with the client put back on save
+    [self finishPendingRemoteEdit];
+    NSDictionary *remoteParts = [self remotePartsForAction:self.actions[indexPath.row]];
+    if (remoteParts) {
+        [self beginRemoteEditAtIndex:indexPath.row];
+        currentAction = remoteParts[@"command"];
+    }
     NSDictionary *toggleInfo = [[RCConfigManager sharedManager] toggleInfoForCommand:currentAction];
     
     if ([RCAddOnCatalog commandAsksForDetails:currentAction]) {
@@ -4417,7 +4506,9 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     
     // Action card styling applied via applySectionCardStyleToCell: below
     id actionItem = _actions[indexPath.row];
-    NSString *cleanName = [self displayNameForCommand:actionItem];
+    NSDictionary *remoteParts = [self remotePartsForAction:actionItem];
+    NSString *displayItem = remoteParts[@"command"] ?: actionItem;
+    NSString *cleanName = [self displayNameForCommand:displayItem];
     NSString *subtitle = nil;
     NSInteger indentationLevel = [self indentationLevelForRow:indexPath.row];
 
@@ -4463,6 +4554,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     }
 
     NSString *action = [actionItem isKindOfClass:[NSDictionary class]] ? ((NSDictionary *)actionItem)[@"command"] : (NSString *)actionItem;
+    if (remoteParts[@"command"]) action = remoteParts[@"command"];
     cell.textLabel.numberOfLines = wrapLongNames ? 0 : 1;
     NSDictionary *toggleInfo = [[RCConfigManager sharedManager] toggleInfoForCommand:action];
 
@@ -4573,6 +4665,10 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
                 subtitle = nil;
             }
         }
+    }
+
+    if (remoteParts) {
+        subtitle = [NSString stringWithFormat:@"Remote: %@", [self remoteClientNameForId:remoteParts[@"clientId"]]];
     }
 
     if (subtitle) {
