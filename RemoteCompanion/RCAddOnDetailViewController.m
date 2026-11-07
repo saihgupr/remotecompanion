@@ -80,6 +80,10 @@ static BOOL rcao_is_text(id value) {
 
     NSMutableArray *sections = [NSMutableArray array];
     [sections addObject:@{ @"footer": @"When off, it adds nothing and its events stop.", @"rows": @[ @{ @"kind": @"enabled" } ] }];
+    // Root: only for an add-on that asks for it, and off until turned on here
+    if ([addOn[@"_usesRoot"] boolValue]) {
+        [sections addObject:@{ @"footer": @"Allows its programs to run with full access to the device.", @"rows": @[ @{ @"kind": @"root" } ] }];
+    }
 
     NSMutableArray *settingRows = [NSMutableArray array];
     for (NSDictionary *setting in [addOn[@"settings"] isKindOfClass:[NSArray class]] ? addOn[@"settings"] : @[]) {
@@ -270,6 +274,42 @@ static BOOL rcao_is_text(id value) {
     }];
 }
 
+// Run as Root: turning it on asks first
+- (void)rootChanged:(UISwitch *)toggle {
+    if (!toggle.isOn) {
+        [self sendRoot:NO toggle:toggle];
+        return;
+    }
+    NSString *message = [NSString stringWithFormat:@"%@ will be able to run programs with full access to the device. Allow this only for add-ons you trust.", self.addOn[@"name"]];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Run as Root?" message:message preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(UIAlertAction *a) {
+        [toggle setOn:NO animated:YES];
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Allow" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
+        [self sendRoot:YES toggle:toggle];
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)sendRoot:(BOOL)allow toggle:(UISwitch *)toggle {
+    self.switching = YES;
+    toggle.enabled = NO;
+    NSString *command = [NSString stringWithFormat:@"addons root %@ %@", self.addOnId, allow ? @"on" : @"off"];
+    [[RCServerClient sharedClient] executeCommand:command completion:^(NSString *output, NSError *error) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.switching = NO;
+            if (error || ![output isKindOfClass:[NSString class]] || [output hasPrefix:@"Error"]) {
+                UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Couldn't Change"
+                                                                               message:error.localizedDescription ?: output ?: @"RemoteCompanion didn't answer."
+                                                                        preferredStyle:UIAlertControllerStyleAlert];
+                [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+                [self presentViewController:alert animated:YES completion:nil];
+            }
+            [self readCatalog];   // the catalog says whether it's allowed
+        });
+    }];
+}
+
 - (void)bannerChanged:(UISwitch *)toggle {
     NSArray *rows = self.sections[toggle.tag >> 16][@"rows"];
     NSDictionary *action = rows[toggle.tag & 0xFFFF][@"item"];
@@ -322,6 +362,16 @@ static BOOL rcao_is_text(id value) {
         toggle.on = self.on;
         toggle.enabled = !self.switching;
         [toggle addTarget:self action:@selector(enabledChanged:) forControlEvents:UIControlEventValueChanged];
+        cell.accessoryView = toggle;
+    } else if ([kind isEqualToString:@"root"]) {
+        BOOL allowed = [self.addOn[@"_rootAllowed"] boolValue];
+        cell.textLabel.text = @"Run as Root";
+        cell.imageView.image = [UIImage systemImageNamed:allowed ? @"lock.open" : @"lock"];
+        cell.imageView.tintColor = allowed ? [UIColor systemOrangeColor] : [UIColor secondaryLabelColor];
+        UISwitch *toggle = [[UISwitch alloc] init];
+        toggle.on = allowed;
+        toggle.enabled = !self.switching;
+        [toggle addTarget:self action:@selector(rootChanged:) forControlEvents:UIControlEventValueChanged];
         cell.accessoryView = toggle;
     } else if ([kind isEqualToString:@"action"]) {
         cell.textLabel.text = item[@"name"];
