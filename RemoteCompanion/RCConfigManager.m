@@ -1,6 +1,7 @@
 #import "RCConfigManager.h"
 #import "RCGesturesViewController.h"
 #import <sys/sysctl.h>
+#import "RCAddOnCatalog.h"
 #import <LocalAuthentication/LocalAuthentication.h>
 #import <notify.h>
 #include <fcntl.h>
@@ -897,6 +898,10 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         return _config[@"triggers"][triggerKey][@"name"] ?: triggerKey;
     }
     
+    // An add-on's trigger: the add-on's wording for it, else the name saved with it
+    if ([RCAddOnCatalog isAddOnTriggerKey:triggerKey]) {
+        return [RCAddOnCatalog nameForTriggerKey:triggerKey] ?: _config[@"triggers"][triggerKey][@"name"] ?: triggerKey;
+    }
     NSString *name = names[triggerKey];
     if (name) return name;
 
@@ -1355,6 +1360,8 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         return title.length ? [NSString stringWithFormat:@"%@: %@", app.length ? app : @"App Quick Action", title] : @"App Quick Action";
     }
     NSString *cmd = [originalCmd lowercaseString];
+    NSString *addOnName = [RCAddOnCatalog nameForCommand:originalCmd];
+    if (addOnName) return addOnName;
     NSDictionary *names = @{
         @"play": @"Play",
         @"pause": @"Pause",
@@ -1884,6 +1891,8 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         return @"square.grid.2x2";
     }
 
+    NSString *addOnIcon = [RCAddOnCatalog iconForCommand:cmdId];
+    if (addOnIcon) return addOnIcon;
     NSString *cmd = [[(NSString *)cmdId stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString];
     if ([cmd hasPrefix:@"ssh-run "] || [cmd hasPrefix:@"ssh "]) return @"terminal.fill";
     if ([cmd hasPrefix:@"audiohandoff enabled "] || [cmd hasPrefix:@"audiohandoff auto "]) return @"headphones";

@@ -2,15 +2,33 @@
 #import "RCHASettingsViewController.h"
 #import "RCKMSettingsViewController.h"
 #import "RCMQTTSettingsViewController.h"
+#import "RCAddOnsViewController.h"
+#import "RCAddOnDetailViewController.h"
+#import "RCAddOnCatalog.h"
+#import <notify.h>
 #import "RCSSHSettingsViewController.h"
 #import "RCConfigManager.h"
 #import "RCUITweaker.h"
 
+// Two sections: the integrations RemoteCompanion has itself, then the add-ons other apps and
+// tweaks install (ADDONS.md), one row each, with rows for any not installed or with a problem
+typedef NS_ENUM(NSInteger, RCIntegrationsSection) {
+    RCIntegrationsSectionNative = 0,
+    RCIntegrationsSectionAddOns,
+};
+
 @interface RCIntegrationsViewController ()
 @property (nonatomic, strong) UITableView *tableView;
+@property (nonatomic, copy) NSArray<NSDictionary *> *addOnRows;   // { kind: addon|absent|problems|none, ... }
+@property (nonatomic, assign) int changeToken;
 @end
 
 @implementation RCIntegrationsViewController
+
+- (instancetype)initWithNibName:(NSString *)nibName bundle:(NSBundle *)bundle {
+    if ((self = [super initWithNibName:nibName bundle:bundle])) _changeToken = NOTIFY_TOKEN_INVALID;
+    return self;
+}
 
 - (void)viewDidLoad {
     [super viewDidLoad];
@@ -43,16 +61,58 @@
                                              selector:@selector(handleTweaksChanged:) 
                                                  name:@"RCConfigTweaksChangedNotification" 
                                                object:nil];
+    // The add-ons section follows the tweak's catalog as add-ons are installed, changed or removed
+    int token = NOTIFY_TOKEN_INVALID;
+    __weak typeof(self) weakSelf = self;
+    if (notify_register_dispatch([RCAddOnCatalog changedNotification], &token, dispatch_get_main_queue(), ^(int t) {
+        [weakSelf reloadAddOns];
+    }) == NOTIFY_STATUS_OK) self.changeToken = token;
     [self applyTweaks];
 }
 
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
-    [self.tableView reloadData];
+    [self reloadAddOns];
 }
 
 - (void)dealloc {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
+    if (_changeToken != NOTIFY_TOKEN_INVALID) notify_cancel(_changeToken);
+}
+
+// What the add-on section shows: each add-on (on or off) by name, then rows for those not
+// installed and the files with problems
+- (void)reloadAddOns {
+    NSMutableArray *rows = [NSMutableArray array];
+    NSMutableArray *addOns = [NSMutableArray array];
+    for (NSDictionary *addOn in [RCAddOnCatalog addOns]) [addOns addObject:@{ @"kind": @"addon", @"addOn": addOn, @"on": @YES }];
+    for (NSDictionary *addOn in [RCAddOnCatalog disabledAddOns]) [addOns addObject:@{ @"kind": @"addon", @"addOn": addOn, @"on": @NO }];
+    [addOns sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+        return [a[@"addOn"][@"name"] localizedCaseInsensitiveCompare:b[@"addOn"][@"name"]];
+    }];
+    [rows addObjectsFromArray:addOns];
+    NSUInteger absent = [RCAddOnCatalog absentAddOnNames].count;
+    NSUInteger problems = [RCAddOnCatalog problems].count + ([RCAddOnCatalog catalogAvailable] && ![RCAddOnCatalog commandsScriptLoaded] ? 1 : 0);
+    if (absent) [rows addObject:@{ @"kind": @"absent", @"count": @(absent) }];
+    if (problems) [rows addObject:@{ @"kind": @"problems", @"count": @(problems) }];
+    if (!rows.count) [rows addObject:@{ @"kind": @"none" }];
+    self.addOnRows = rows;
+    [self.tableView reloadData];
+}
+
+// "3 actions · 2 triggers · 1 condition"
++ (NSString *)contentsOfAddOn:(NSDictionary *)addOn {
+    NSUInteger actions = [addOn[@"actions"] isKindOfClass:[NSArray class]] ? [addOn[@"actions"] count] : 0;
+    NSUInteger triggers = 0, conditions = [addOn[@"conditions"] isKindOfClass:[NSArray class]] ? [addOn[@"conditions"] count] : 0;
+    for (NSDictionary *event in [addOn[@"events"] isKindOfClass:[NSArray class]] ? addOn[@"events"] : @[]) if ([event isKindOfClass:[NSDictionary class]] && event[@"trigger"]) triggers++;
+    NSMutableArray *parts = [NSMutableArray array];
+    void (^add)(NSUInteger, NSString *) = ^(NSUInteger n, NSString *word) {
+        if (n) [parts addObject:[NSString stringWithFormat:@"%lu %@%@", (unsigned long)n, word, n == 1 ? @"" : @"s"]];
+    };
+    add(actions, @"action");
+    add(triggers, @"trigger");
+    add(conditions, @"condition");
+    return [parts componentsJoinedByString:@" · "];
 }
 
 - (void)handleTweaksChanged:(NSNotification *)note {
@@ -82,15 +142,21 @@
 #pragma mark - Table View Data Source
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    return 1;
+    // No add-ons section until the tweak has written its catalog
+    return [RCAddOnCatalog catalogAvailable] ? 2 : 1;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    return 4;
+    return section == RCIntegrationsSectionNative ? 4 : (NSInteger)self.addOnRows.count;
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+    return section == RCIntegrationsSectionAddOns ? @"Add-ons" : nil;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    return @"Configure external service integrations to trigger actions and control third-party automations.";
+    if (section == RCIntegrationsSectionNative) return @"Configure external service integrations to trigger actions and control third-party automations.";
+    return @"Added by other apps and tweaks.";
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -112,6 +178,37 @@
     cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
     cell.detailTextLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightRegular];
     cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+
+    if (indexPath.section == RCIntegrationsSectionAddOns) {
+        NSDictionary *row = self.addOnRows[indexPath.row];
+        NSString *kind = row[@"kind"];
+        if ([kind isEqualToString:@"addon"]) {
+            NSDictionary *addOn = row[@"addOn"];
+            BOOL on = [row[@"on"] boolValue];
+            cell.textLabel.text = addOn[@"name"];
+            cell.detailTextLabel.text = on ? [RCIntegrationsViewController contentsOfAddOn:addOn] : @"Off";
+            cell.imageView.image = [RCAddOnCatalog iconImageForAddOn:addOn] ?: [UIImage systemImageNamed:[RCAddOnCatalog iconForAddOn:addOn]];
+            cell.imageView.tintColor = on ? [UIColor systemOrangeColor] : [UIColor secondaryLabelColor];
+            cell.imageView.alpha = on ? 1.0 : 0.5;
+        } else if ([kind isEqualToString:@"absent"]) {
+            cell.textLabel.text = @"Not Installed";
+            cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ add-on%@ for apps or tweaks that aren't installed", row[@"count"], [row[@"count"] integerValue] == 1 ? @"" : @"s"];
+            cell.imageView.image = [UIImage systemImageNamed:[RCAddOnCatalog defaultSymbol]];
+            cell.imageView.tintColor = [UIColor secondaryLabelColor];
+        } else if ([kind isEqualToString:@"problems"]) {
+            cell.textLabel.text = @"Problems";
+            cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ file%@ not loaded", row[@"count"], [row[@"count"] integerValue] == 1 ? @"" : @"s"];
+            cell.imageView.image = [UIImage systemImageNamed:@"exclamationmark.triangle"];
+            cell.imageView.tintColor = [UIColor systemOrangeColor];
+        } else {
+            cell.textLabel.text = @"None";
+            cell.textLabel.textColor = [UIColor secondaryLabelColor];
+            cell.detailTextLabel.text = nil;
+            cell.accessoryType = UITableViewCellAccessoryNone;
+            cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        }
+        return cell;
+    }
     
     if (indexPath.row == 0) {
         cell.textLabel.text = @"Home Assistant";
@@ -142,6 +239,16 @@
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    if (indexPath.section == RCIntegrationsSectionAddOns) {
+        NSDictionary *row = self.addOnRows[indexPath.row];
+        NSString *kind = row[@"kind"];
+        UIViewController *next = nil;
+        if ([kind isEqualToString:@"addon"]) next = [[RCAddOnDetailViewController alloc] initWithAddOnId:row[@"addOn"][@"id"]];
+        else if ([kind isEqualToString:@"absent"]) next = [[RCAddOnsViewController alloc] initShowing:RCAddOnsListNotInstalled];
+        else if ([kind isEqualToString:@"problems"]) next = [[RCAddOnsViewController alloc] initShowing:RCAddOnsListProblems];
+        if (next) [self.navigationController pushViewController:next animated:YES];
+        return;
+    }
     if (indexPath.row == 0) {
         RCHASettingsViewController *haVC = [[RCHASettingsViewController alloc] init];
         [self.navigationController pushViewController:haVC animated:YES];

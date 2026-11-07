@@ -1,4 +1,5 @@
 #import "RCActionsViewController.h"
+#import "RCAddOnCatalog.h"
 #import "RCConfigManager.h"
 #import "RCActionPickerViewController.h"
 #import "RCSSHActionEditorViewController.h"
@@ -703,7 +704,11 @@ static id g_actionClipboard = nil;
     
     UIColor *accentColor = [UIColor systemBlueColor];
     
-    if ([lower hasPrefix:@"set-vol "]) {
+    NSString *addOnSummary = [RCAddOnCatalog summaryForCommand:cmd];
+    if (addOnSummary) {
+        baseText = [NSString stringWithFormat:@"%@ ", [RCAddOnCatalog nameForCommand:cmd]];
+        paramText = addOnSummary;
+    } else if ([lower hasPrefix:@"set-vol "]) {
         baseText = @"Set Volume ";
         paramText = [NSString stringWithFormat:@"%@%%", [cmd substringFromIndex:8]];
     } else if ([lower hasPrefix:@"ringer volume "]) {
@@ -2265,7 +2270,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 }
 
 - (NSArray<NSDictionary *> *)ifConditionDefinitions {
-    return RCAdaptVibrationConditions(@[
+    return RCAdaptVibrationConditions([@[
         @{
             @"key": @"time_between",
             @"title": @"Time of Day (Between)",
@@ -2555,8 +2560,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
                 @{ @"value": @"ON", @"title": @"On" },
                 @{ @"value": @"OFF", @"title": @"Off" }
             ]
-        }
-   ,
+        },
         @{
             // A variable from Set Variable: name, comparison and value (the editor's prompts)
             @"key": @"variable",
@@ -2565,7 +2569,31 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             @"section": @"Variables",
             @"input": @"variable"
         }
-    ]);
+    ] arrayByAddingObjectsFromArray:[self addOnConditionDefinitions]]);
+}
+
+// Add-on conditions (ADDONS.md), one section per add-on
+- (NSArray<NSDictionary *> *)addOnConditionDefinitions {
+    NSMutableArray *definitions = [NSMutableArray array];
+    for (NSDictionary *condition in [RCAddOnCatalog conditions]) {
+        NSArray *parts = [condition[@"name"] componentsSeparatedByString:@": "];
+        NSMutableDictionary *definition = [@{
+            @"key": condition[@"key"],
+            @"title": parts.count > 1 ? parts[1] : condition[@"name"],
+            @"icon": condition[@"icon"] ?: [RCAddOnCatalog defaultSymbol],
+            @"image": condition[@"image"] ?: [NSNull null],
+            @"section": parts.count > 1 ? parts[0] : @"Add-ons",
+        } mutableCopy];
+        if ([condition[@"type"] isEqualToString:@"number"]) {
+            definition[@"input"] = @"threshold";
+        } else {
+            NSMutableArray *values = [NSMutableArray array];
+            for (NSString *label in condition[@"choices"]) [values addObject:@{ @"value": label.uppercaseString, @"title": label }];
+            definition[@"values"] = values;
+        }
+        [definitions addObject:definition];
+    }
+    return definitions;
 }
 
 - (void)configurePopoverSourceForAlert:(UIAlertController *)alert {
@@ -3351,7 +3379,14 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     NSString *currentAction = (NSString *)actionData;
     NSDictionary *toggleInfo = [[RCConfigManager sharedManager] toggleInfoForCommand:currentAction];
     
-    if (toggleInfo) {
+    if ([RCAddOnCatalog commandAsksForDetails:currentAction]) {
+        // An add-on action: its options and input again, the current ones ticked
+        [RCAddOnCatalog presentDetailsFrom:self command:currentAction current:currentAction completion:^(NSString *chosen) {
+            self.actions[indexPath.row] = chosen;
+            [self saveActions];
+            [self.tableView reloadData];
+        }];
+    } else if (toggleInfo) {
         UIAlertController *picker = [UIAlertController alertControllerWithTitle:toggleInfo[@"name"]
                                                                          message:@"Select desired state"
                                                                   preferredStyle:UIAlertControllerStyleActionSheet];
@@ -4368,8 +4403,9 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         cell.imageView.image = [UIImage _applicationIconImageForBundleIdentifier:bundleId format:0 scale:[UIScreen mainScreen].scale];
         cell.imageView.tintColor = nil;
     } else {
-        cell.imageView.image = [UIImage systemImageNamed:iconName];
-        cell.imageView.tintColor = [UIColor systemGrayColor];
+        UIImage *custom = [action isKindOfClass:[NSString class]] ? [RCAddOnCatalog imageForCommand:action] : nil;   // an add-on's image icon
+        cell.imageView.image = custom ?: [UIImage systemImageNamed:iconName];
+        cell.imageView.tintColor = custom ? nil : [UIColor systemGrayColor];
     }
 
     // Custom reorder handle (since editing = NO)
