@@ -21,6 +21,9 @@
 + (UIImage *)iconImageForAddOn:(NSDictionary *)addOn;
 + (NSString *)iconForAddOn:(NSDictionary *)addOn;
 
+// What an add-on adds, for its row in Settings: "3 actions · 2 triggers · 1 condition"
++ (NSString *)contentsOfAddOn:(NSDictionary *)addOn;
+
 // A thing's own icon (an action's, trigger's or condition's), else the add-on's
 + (UIImage *)imageForOwnIcon:(NSString *)icon inAddOn:(NSDictionary *)addOn;
 + (NSString *)symbolForOwnIcon:(NSString *)icon inAddOn:(NSDictionary *)addOn;

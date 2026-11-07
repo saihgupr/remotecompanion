@@ -8,6 +8,8 @@
 #import "RCWebUIAccessViewController.h"
 #import "RCVariablesViewController.h"
 #import "RCGesturesViewController.h"
+#import "RCAddOnCatalog.h"
+#import "RCAddOnsViewController.h"
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #include <ifaddrs.h>
 #include <arpa/inet.h>
@@ -252,7 +254,11 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     if (section == RCSettingsSectionDiagnostics) {
         return 2; // Running, Test Kit
     }
-    return 1; // Integrations, Gestures
+    if (section == RCSettingsSectionIntegrations) {
+        // Integrations, then Add-ons (ADDONS.md) once the tweak has written its catalog
+        return [RCAddOnCatalog catalogAvailable] ? 2 : 1;
+    }
+    return 1; // Gestures
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -300,6 +306,11 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
             cell.detailTextLabel.text = [self webUIUrlString];
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         }
+    } else if (indexPath.section == RCSettingsSectionIntegrations && indexPath.row == 1) {
+        cell.textLabel.text = @"Add-ons";
+        cell.imageView.image = [UIImage systemImageNamed:[RCAddOnCatalog defaultSymbol]];
+        cell.imageView.tintColor = [UIColor systemOrangeColor];
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     } else if (indexPath.section == RCSettingsSectionIntegrations) {
         cell.textLabel.text = @"Integrations";
         UIImage *puzzleImg = [UIImage systemImageNamed:@"puzzlepiece.extension.fill"];
@@ -361,6 +372,8 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
         [self.navigationController pushViewController:[[RCWebUIAccessViewController alloc] init] animated:YES];
     } else if (indexPath.section == RCSettingsSectionGeneral && indexPath.row == 3) {
         [self openWebUI];
+    } else if (indexPath.section == RCSettingsSectionIntegrations && indexPath.row == 1) {
+        [self.navigationController pushViewController:[[RCAddOnsViewController alloc] initShowing:RCAddOnsListAll] animated:YES];
     } else if (indexPath.section == RCSettingsSectionIntegrations) {
         RCIntegrationsViewController *integrationsVC = [[RCIntegrationsViewController alloc] init];
         [self.navigationController pushViewController:integrationsVC animated:YES];

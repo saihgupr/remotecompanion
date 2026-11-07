@@ -34,6 +34,20 @@ static const char *kRCAddOnsChanged = "com.saihgupr.remotecompanion.addons-chang
 
 // The add-on's own icon as an SF Symbol name; the puzzle piece when it has none, uses an image, or
 // names a symbol this iOS doesn't have
++ (NSString *)contentsOfAddOn:(NSDictionary *)addOn {
+    NSUInteger actions = [addOn[@"actions"] isKindOfClass:[NSArray class]] ? [addOn[@"actions"] count] : 0;
+    NSUInteger triggers = 0, conditions = [addOn[@"conditions"] isKindOfClass:[NSArray class]] ? [addOn[@"conditions"] count] : 0;
+    for (NSDictionary *event in [addOn[@"events"] isKindOfClass:[NSArray class]] ? addOn[@"events"] : @[]) if ([event isKindOfClass:[NSDictionary class]] && event[@"trigger"]) triggers++;
+    NSMutableArray *parts = [NSMutableArray array];
+    void (^add)(NSUInteger, NSString *) = ^(NSUInteger n, NSString *word) {
+        if (n) [parts addObject:[NSString stringWithFormat:@"%lu %@%@", (unsigned long)n, word, n == 1 ? @"" : @"s"]];
+    };
+    add(actions, @"action");
+    add(triggers, @"trigger");
+    add(conditions, @"condition");
+    return [parts componentsJoinedByString:@" · "];
+}
+
 + (NSString *)iconForAddOn:(NSDictionary *)addOn {
     return [self availableSymbol:addOn[@"icon"]] ?: [self defaultSymbol];
 }
