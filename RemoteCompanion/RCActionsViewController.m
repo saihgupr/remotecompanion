@@ -4521,7 +4521,8 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
                     NSString *clientId = [payload substringToIndex:firstSpace.location];
                     NSString *remoteCmd = [payload substringFromIndex:firstSpace.location + 1];
                     NSDictionary *client = [[RCConfigManager sharedManager] rcClientForId:clientId];
-                    cell.textLabel.text = remoteCmd;
+                    NSString *remoteName = [[RCConfigManager sharedManager] nameForCommand:remoteCmd truncate:NO];
+                    cell.textLabel.text = remoteName.length > 0 ? remoteName : remoteCmd;
                     subtitle = [NSString stringWithFormat:@"Remote: %@", client[@"name"] ?: client[@"host"] ?: @"Missing Client"];
                 } else {
                     cell.textLabel.text = payload;

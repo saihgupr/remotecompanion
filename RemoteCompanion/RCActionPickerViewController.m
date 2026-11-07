@@ -1464,13 +1464,37 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
     [self.categoryBar setChipTitles:self.sectionTitles];
     self.categoryBar.selectedIndex = -1;
 
+    // A search that was open on the local list can leave the bar compact; ask for the
+    // large title again before putting the list back at the top.
+    self.navigationController.navigationBar.prefersLargeTitles = YES;
+    self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeAlways;
     self.navigationItem.prompt = [NSString stringWithFormat:@"Running on %@", self.remoteClientName];
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Client"
                                                                               style:UIBarButtonItemStylePlain
                                                                              target:self
                                                                              action:@selector(changeRemoteClientTapped)];
     [self.collectionView reloadData];
-    [self.collectionView setContentOffset:CGPointZero animated:NO];
+    [self scrollActionListToTop];
+}
+
+// The top of the list sits at -adjustedContentInset.top: scrolling to 0 would tuck the
+// first rows under the search bar and collapse the large title (and its category bar).
+- (void)scrollActionListToTop {
+    [self setActionListAtTop];
+    // The prompt change and a closing search bar both settle a moment later, and moving
+    // the list before them leaves the large title collapsed. Put it back once they're done.
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        [strongSelf setActionListAtTop];
+    });
+}
+
+- (void)setActionListAtTop {
+    [self.navigationController.view layoutIfNeeded];
+    [self.collectionView layoutIfNeeded];
+    [self.collectionView setContentOffset:CGPointMake(0, -self.collectionView.adjustedContentInset.top) animated:NO];
 }
 
 - (void)leaveRemoteMode {
@@ -1483,7 +1507,8 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
     [self.categoryBar setChipTitles:self.sectionTitles];
     self.categoryBar.selectedIndex = -1;
     [self.collectionView reloadData];
-    [self.collectionView setContentOffset:CGPointZero animated:NO];
+    [self.collectionView layoutIfNeeded];
+    [self.collectionView setContentOffset:CGPointMake(0, -self.collectionView.adjustedContentInset.top) animated:NO];
 }
 
 - (void)handleRemoteShortcut {
