@@ -31,6 +31,10 @@
 // A picker opened for one integration family shows only that family, under its name
 @property (nonatomic, copy) NSString *groupTitle;
 @property (nonatomic, copy) NSArray<NSDictionary *> *groupActions;
+// Remote RC mode: the list picks a command to run on another device, and every
+// pick comes back as "rc-run <clientId> <command>".
+@property (nonatomic, copy) NSString *remoteClientId;
+@property (nonatomic, copy) NSString *remoteClientName;
 @end
 
 @implementation RCActionPickerViewController
@@ -43,8 +47,16 @@
     __block BOOL picked = NO;
     __weak typeof(self) weakSelf = self;
     void (^once)(NSString *) = ^(NSString *action) {
-        if (picked) return;
-        BOOL (^staysOpen)(NSString *) = weakSelf.staysOpenFor;
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf || picked) return;
+        if (strongSelf.remoteClientId.length > 0) {
+            // A parameter screen has finished resolving the command: send it to the client
+            if (![action isKindOfClass:[NSString class]] || [action hasPrefix:@"__"]) return;
+            picked = YES;
+            onActionSelected([NSString stringWithFormat:@"rc-run %@ %@", strongSelf.remoteClientId, action]);
+            return;
+        }
+        BOOL (^staysOpen)(NSString *) = strongSelf.staysOpenFor;
         if (!staysOpen || !staysOpen(action)) picked = YES;
         onActionSelected(action);
     };
@@ -309,6 +321,7 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
                 [integrations addObject:@{ @"name": @"MQTT: Publish Topic...", @"command": @"__MQTT_PUBLISH__", @"icon": @"dot.radiowaves.left.and.right" }];
             }
             [integrations addObject:@{ @"name": @"SSH: Run Remote Command...", @"command": @"__SSH_COMMAND__", @"icon": @"terminal.fill" }];
+            [integrations addObject:@{ @"name": @"Remote RC: Run Command...", @"command": @"__REMOTE_RC_COMMAND__", @"icon": @"iphone.radiowaves.left.and.right" }];
             [integrations addObject:@{ @"name": @"Shortcuts: Run Shortcut...", @"command": @"__SHORTCUT_PICKER__", @"icon": @"wand.and.stars" }];
             NSArray *sneakyPaths = @[
                 @"/Library/MobileSubstrate/DynamicLibraries/SneakyCam.dylib",
@@ -442,6 +455,43 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
     }
     _sectionTitles = titles;
     _sections = sections;
+
+    // Remote RC mode: only commands the other device can actually run, plus a
+    // shortcut and a free-form command at the end of Scripting & Logic
+    if (self.remoteClientId.length > 0) {
+        static NSSet *remotePlaceholders;
+        static dispatch_once_t once;
+        dispatch_once(&once, ^{
+            remotePlaceholders = [NSSet setWithArray:@[
+                @"__UNLOCK_DEVICE__", @"__LOCK_TOGGLE__", @"__TAP__", @"__HOLD__", @"__SWIPE__",
+                @"__PLAY_GESTURE__", @"__RECORD_GESTURE__", @"__AIRPLAY_CONNECT__",
+                @"__BT_CONNECT__", @"__BT_DISCONNECT__", @"__FOCUS__", @"__HA_PICKER__",
+                @"__KM_TRIGGER__", @"__MQTT_PUBLISH__", @"__CAMERA_PICKER__", @"__CAMERA_VIDEO_PICKER__"
+            ]];
+        });
+        NSMutableArray *remoteSections = [NSMutableArray array];
+        NSMutableArray *remoteTitles = [NSMutableArray array];
+        for (NSUInteger i = 0; i < sections.count; i++) {
+            NSMutableArray *items = [NSMutableArray array];
+            for (NSDictionary *item in sections[i]) {
+                NSString *command = item[@"command"];
+                if ([command isEqualToString:@"__SSH_COMMAND__"] || [command isEqualToString:@"__REMOTE_RC_COMMAND__"]) continue;
+                if ([command hasPrefix:@"__"] && ![remotePlaceholders containsObject:command]) continue;
+                [items addObject:item];
+            }
+            if ([_sectionTitles[i] isEqualToString:@"Scripting & Logic"]) {
+                [items insertObject:@{ @"name": @"Run Shortcut...", @"command": @"__REMOTE_SHORTCUT__", @"icon": @"wand.and.stars" } atIndex:0];
+                [items insertObject:@{ @"name": @"Type Remote Command...", @"command": @"__REMOTE_COMMAND_TEXT__", @"icon": @"keyboard" } atIndex:1];
+            }
+            if (items.count > 0) {
+                [remoteSections addObject:items];
+                [remoteTitles addObject:_sectionTitles[i]];
+            }
+        }
+        _sections = remoteSections;
+        _sectionTitles = remoteTitles;
+    }
+
     _browseSections = RCPickerGroupedSections(_sections, _sectionTitles);
 }
 
@@ -746,6 +796,21 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
 
     if ([command isEqualToString:@"__SSH_COMMAND__"]) {
         [self handleSSHCommand];
+        return;
+    }
+
+    if ([command isEqualToString:@"__REMOTE_RC_COMMAND__"]) {
+        [self handleRemoteRCCommand];
+        return;
+    }
+
+    if ([command isEqualToString:@"__REMOTE_SHORTCUT__"]) {
+        [self handleRemoteShortcut];
+        return;
+    }
+
+    if ([command isEqualToString:@"__REMOTE_COMMAND_TEXT__"]) {
+        [self handleRemoteCustomCommand];
         return;
     }
 
@@ -1334,6 +1399,126 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
     };
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:editor];
     [self presentViewController:nav animated:YES completion:nil];
+}
+
+#pragma mark - Remote RC
+
+- (void)handleRemoteRCCommand {
+    NSArray<NSDictionary *> *clients = [RCConfigManager sharedManager].rcClients;
+    if (clients.count == 0) {
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"No Remote RC Clients Configured"
+                                                                       message:@"Add another device before creating a Remote RC action.\nGo to Settings > Integrations > Remote RC Clients."
+                                                                preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:alert animated:YES completion:nil];
+        return;
+    }
+
+    BOOL alreadyRemote = self.remoteClientId.length > 0;
+    if (clients.count == 1 && !alreadyRemote) {
+        [self enterRemoteModeWithClient:clients.firstObject];
+        return;
+    }
+
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Remote RC Client"
+                                                                   message:@"Choose the device this command runs on"
+                                                            preferredStyle:UIAlertControllerStyleActionSheet];
+    __weak typeof(self) weakSelf = self;
+    for (NSDictionary *client in clients) {
+        NSString *title = client[@"name"] ?: client[@"host"];
+        NSString *sub = [NSString stringWithFormat:@"%@:%@", client[@"host"] ?: @"", client[@"port"] ?: @8080];
+        NSString *display = [NSString stringWithFormat:@"%@ (%@)", title, sub];
+        if ([client[@"id"] isEqualToString:self.remoteClientId]) {
+            display = [display stringByAppendingString:@" \u2713"];
+        }
+        [sheet addAction:[UIAlertAction actionWithTitle:display style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+            [weakSelf enterRemoteModeWithClient:client];
+        }]];
+    }
+    if (alreadyRemote) {
+        [sheet addAction:[UIAlertAction actionWithTitle:@"Back to Local Actions" style:UIAlertActionStyleCancel handler:^(UIAlertAction *action) {
+            [weakSelf leaveRemoteMode];
+        }]];
+    } else {
+        [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    }
+    sheet.popoverPresentationController.sourceView = self.view;
+    sheet.popoverPresentationController.sourceRect = CGRectMake(self.view.bounds.size.width / 2, self.view.bounds.size.height / 2, 1, 1);
+    [self presentViewController:sheet animated:YES completion:nil];
+}
+
+- (void)changeRemoteClientTapped {
+    [self handleRemoteRCCommand];
+}
+
+- (void)enterRemoteModeWithClient:(NSDictionary *)client {
+    if (!client[@"id"]) return;
+
+    self.remoteClientId = client[@"id"];
+    self.remoteClientName = client[@"name"] ?: client[@"host"] ?: @"Remote";
+    self.selectedCategory = -1;
+    if (self.searchController.isActive) [self.searchController setActive:NO];
+    self.searchController.searchBar.text = @"";
+
+    [self rebuildSections];
+    [self.categoryBar setChipTitles:self.sectionTitles];
+    self.categoryBar.selectedIndex = -1;
+
+    self.navigationItem.prompt = [NSString stringWithFormat:@"Running on %@", self.remoteClientName];
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Client"
+                                                                              style:UIBarButtonItemStylePlain
+                                                                             target:self
+                                                                             action:@selector(changeRemoteClientTapped)];
+    [self.collectionView reloadData];
+    [self.collectionView setContentOffset:CGPointZero animated:NO];
+}
+
+- (void)leaveRemoteMode {
+    self.remoteClientId = nil;
+    self.remoteClientName = nil;
+    self.selectedCategory = -1;
+    self.navigationItem.prompt = nil;
+    self.navigationItem.rightBarButtonItem = nil;
+    [self rebuildSections];
+    [self.categoryBar setChipTitles:self.sectionTitles];
+    self.categoryBar.selectedIndex = -1;
+    [self.collectionView reloadData];
+    [self.collectionView setContentOffset:CGPointZero animated:NO];
+}
+
+- (void)handleRemoteShortcut {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Run Shortcut"
+                                                                   message:@"Enter the shortcut name on the other device."
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
+        tf.placeholder = @"Shortcut Name";
+        tf.autocorrectionType = UITextAutocorrectionTypeNo;
+    }];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Add" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        NSString *name = [alert.textFields.firstObject.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (name.length == 0) return;
+        [self finishWithFocusCommand:[RCConfigManager shortcutActionWithName:name silent:NO input:nil]];
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)handleRemoteCustomCommand {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Remote Command"
+                                                                   message:@"Enter any RC command to run on the other device."
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
+        tf.placeholder = @"e.g. play, lock, volume 50";
+        tf.autocorrectionType = UITextAutocorrectionTypeNo;
+        tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    }];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Add" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        NSString *command = [alert.textFields.firstObject.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (command.length == 0) return;
+        [self finishWithFocusCommand:command];
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 
 @end

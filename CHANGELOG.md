@@ -7,12 +7,16 @@ All notable changes to this project will be documented in this file.
 ### Added
 - **Triggers only when added**: the Triggers screen now starts empty and lists only the triggers you add. Every built-in trigger moved into the + menu, including volume, power, status bar, edge and bottom bar gestures, multi-finger slides, Home/Touch ID, ringer, motion, device state, media, calls and Apple Watch, so the list stays short instead of showing dozens of unused rows.
 - **First-trigger onboarding**: with nothing added, the app shows a friendly invitation and a hand-drawn arrow curving up to the + button, plus an Add a Trigger button. The Web UI has the same empty state and add menu.
+- **Remote RC actions**: Settings > Integrations > Remote RC Clients stores another device's address and Web UI port (8080 by default) plus an optional API token. A new Remote RC action runs regular RC commands on that device over its Web UI, with no SSH needed. Creating one opens the normal action list filtered for the remote, so play, lock, volume, shortcuts and the rest are picked and parameterized the same way as local actions.
+- **Duplicate actions**: the long-press action menu can duplicate a row in place, and the Web UI's right-click menu has the same. If and Repeat blocks, including their Else branches, duplicate whole so a block is never split.
 
 ### Changed
 - **Built-in triggers can be deleted**: removing a button or gesture trigger puts it back in the + menu, just like a tag, network, app or schedule trigger. The list never shows a trigger that was not added.
 - **Integrations fold into their own lists**: Snapper and SneakyCam show as one row each in Select Action > Integrations with a chevron, opening just their actions, so the section stays short. Search still finds every action directly, and Settings > Banners keeps the full flat list.
 - **Variables icon**: the Variables row uses an orange italic x, in the style of Shortcuts' variable glyph. Set Variable actions use the same x in the normal action icon color.
 - **Terminal command editor**: creating or editing an `exec` or `root` action now uses the same Settings-style screen as the SSH command editor, with the root switch in its own section above the monospaced command field.
+- **Home Assistant actions edit like the entity picker**: tapping an existing HA action in the app, or clicking one in the Web UI, shows its Toggle, Turn On and Turn Off choices with the current one ticked, plus Change Entity. Raw and custom commands keep an Edit Command option instead of being overwritten.
+- **Test Macro is gone**: the Keyboard Maestro tap and long-press menus no longer have Test Macro. Run Action in the long-press menu already runs any action, and Home Assistant gets no separate test.
 
 ## [4.4.0] - 2026-11-06
 

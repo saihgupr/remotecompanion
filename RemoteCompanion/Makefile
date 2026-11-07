@@ -41,6 +41,9 @@ RemoteCompanion_FILES += RCSSHSettingsViewController.m
 RemoteCompanion_FILES += RCSSHHostEditorViewController.m
 RemoteCompanion_FILES += RCSSHActionEditorViewController.m
 RemoteCompanion_FILES += RCTerminalCommandEditorViewController.m
+RemoteCompanion_FILES += RCRCClientSettingsViewController.m
+RemoteCompanion_FILES += RCRCClientEditorViewController.m
+RemoteCompanion_FILES += RCRemoteActionEditorViewController.m
 RemoteCompanion_FILES += RCConfigManager+AppExclusions.m RCExcludedAppsViewController.m
 
 include $(THEOS_MAKE_PATH)/application.mk

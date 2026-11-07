@@ -94,6 +94,12 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         } else if (![_config[@"sshHosts"] isKindOfClass:[NSMutableArray class]]) {
             _config[@"sshHosts"] = [_config[@"sshHosts"] mutableCopy];
         }
+
+        if (!_config[@"rcClients"]) {
+            _config[@"rcClients"] = [NSMutableArray array];
+        } else if (![_config[@"rcClients"] isKindOfClass:[NSMutableArray class]]) {
+            _config[@"rcClients"] = [_config[@"rcClients"] mutableCopy];
+        }
         
         // 4.5: a trigger appears in the app only once it has been added. Older versions
         // filled in every built-in trigger as an empty, disabled entry (and could leave
@@ -198,6 +204,7 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
             @"nfcEnabled": @YES,
             @"rootEnabled": @YES,
             @"sshHosts": [NSMutableArray array],
+            @"rcClients": [NSMutableArray array],
             @"triggers": [NSMutableDictionary dictionary]
         } mutableCopy];
     }
@@ -695,6 +702,58 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
     for (NSDictionary *h in self.sshHosts) {
         if ([h[@"id"] isEqualToString:hostId]) {
             return h;
+        }
+    }
+    return nil;
+}
+
+- (NSArray<NSDictionary *> *)rcClients {
+    NSArray *clients = _config[@"rcClients"];
+    if (![clients isKindOfClass:[NSArray class]]) {
+        return @[];
+    }
+    return clients;
+}
+
+- (void)setRcClients:(NSArray<NSDictionary *> *)clients {
+    _config[@"rcClients"] = [clients mutableCopy] ?: [NSMutableArray array];
+    [self saveConfig];
+}
+
+- (void)addOrUpdateRCClient:(NSDictionary *)client {
+    if (!client || !client[@"id"]) return;
+    NSMutableArray *clients = [self.rcClients mutableCopy];
+    NSUInteger foundIdx = NSNotFound;
+    for (NSUInteger i = 0; i < clients.count; i++) {
+        if ([clients[i][@"id"] isEqualToString:client[@"id"]]) {
+            foundIdx = i;
+            break;
+        }
+    }
+    if (foundIdx != NSNotFound) {
+        clients[foundIdx] = client;
+    } else {
+        [clients addObject:client];
+    }
+    self.rcClients = clients;
+}
+
+- (void)deleteRCClientWithId:(NSString *)clientId {
+    if (!clientId) return;
+    NSMutableArray *clients = [self.rcClients mutableCopy];
+    for (NSInteger i = (NSInteger)clients.count - 1; i >= 0; i--) {
+        if ([clients[i][@"id"] isEqualToString:clientId]) {
+            [clients removeObjectAtIndex:i];
+        }
+    }
+    self.rcClients = clients;
+}
+
+- (NSDictionary *)rcClientForId:(NSString *)clientId {
+    if (!clientId) return nil;
+    for (NSDictionary *c in self.rcClients) {
+        if ([c[@"id"] isEqualToString:clientId]) {
+            return c;
         }
     }
     return nil;
@@ -1578,6 +1637,18 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
             result = [NSString stringWithFormat:@"Open Camera (%@%@)", modeName, detStr];
         } else if ([cmd hasPrefix:@"root "]) {
             result = [NSString stringWithFormat:@"[root] %@", [cmd substringFromIndex:5]];
+        } else if ([cmd hasPrefix:@"rc-run "]) {
+            NSString *payload = [originalCmd substringFromIndex:7];
+            NSRange firstSpace = [payload rangeOfString:@" "];
+            if (firstSpace.location != NSNotFound) {
+                NSString *clientId = [payload substringToIndex:firstSpace.location];
+                NSString *remoteCmd = [payload substringFromIndex:firstSpace.location + 1];
+                NSDictionary *client = [self rcClientForId:clientId];
+                NSString *clientName = client[@"name"] ?: client[@"host"] ?: @"Missing Client";
+                result = [NSString stringWithFormat:@"Remote [%@]: %@", clientName, remoteCmd];
+            } else {
+                result = [NSString stringWithFormat:@"Remote: %@", payload];
+            }
         } else if ([cmd hasPrefix:@"ssh-run "]) {
             NSString *payload = [originalCmd substringFromIndex:8];
             NSRange firstSpace = [payload rangeOfString:@" "];
@@ -1886,6 +1957,7 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
     NSString *addOnIcon = [RCAddOnCatalog iconForCommand:cmdId];
     if (addOnIcon) return addOnIcon;
     NSString *cmd = [[(NSString *)cmdId stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString];
+    if ([cmd hasPrefix:@"rc-run "]) return @"iphone.radiowaves.left.and.right";
     if ([cmd hasPrefix:@"ssh-run "] || [cmd hasPrefix:@"ssh "]) return @"terminal.fill";
     if ([cmd hasPrefix:@"audiohandoff enabled "] || [cmd hasPrefix:@"audiohandoff auto "]) return @"headphones";
     if ([cmd isEqualToString:@"camera record"]) return @"video.circle.fill";

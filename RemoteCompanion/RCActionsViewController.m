@@ -4,6 +4,7 @@
 #import "RCActionPickerViewController.h"
 #import "RCSSHActionEditorViewController.h"
 #import "RCTerminalCommandEditorViewController.h"
+#import "RCRemoteActionEditorViewController.h"
 #import "RCShortcutPickerViewController.h"
 #import "RCAppPickerViewController.h"
 #import "RCConditionPickerViewController.h"
@@ -34,6 +35,7 @@
 #import "RCFocusPickerViewController.h"
 #import "RCTriggerPickerViewController.h"
 #import "RCKMMacroPickerViewController.h"
+#import "RCHAEntityPickerViewController.h"
 #import <notify.h>
 #import <objc/runtime.h>
 #import "RCFocusTriggerViewController.h"
@@ -3171,6 +3173,11 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             g_actionClipboard = [item copy];
         }]];
         
+        // Duplicate option: a copy right below the row (a whole block for block rows)
+        [alert addAction:[UIAlertAction actionWithTitle:@"Duplicate" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+            [self duplicateActionAtIndex:indexPath.row];
+        }]];
+
         // Paste Above/Below options
         if (g_actionClipboard) {
             [alert addAction:[UIAlertAction actionWithTitle:@"Paste Above" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
@@ -3210,10 +3217,6 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
                     [self.tableView reloadData];
                 }]];
             }
-            
-            [alert addAction:[UIAlertAction actionWithTitle:@"Test Macro" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-                [[RCServerClient sharedClient] executeCommand:longPressCmdStr completion:^(NSString * _Nullable output, NSError * _Nullable error) {}];
-            }]];
         }
 
         // If-specific options
@@ -3344,6 +3347,41 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     [self configurePopoverSourceForAlert:alert];
     [self presentViewController:alert animated:YES completion:nil];
+}
+
+// A copy of the row right below it. If/Repeat blocks and their branches bring the whole block,
+// so a duplicate never splits a block in two.
+- (void)duplicateActionAtIndex:(NSInteger)index {
+    if (index < 0 || index >= (NSInteger)self.actions.count) return;
+    id item = self.actions[index];
+
+    NSInteger start = index;
+    if ([self isElseIfActionItem:item] || [self isElseActionItem:item]) {
+        NSInteger depth = 0;
+        for (NSInteger i = index - 1; i >= 0; i--) {
+            id check = self.actions[i];
+            if ([self isEndIfActionItem:check]) depth++;
+            else if ([self isIfActionItem:check]) {
+                if (depth == 0) { start = i; break; }
+                depth--;
+            }
+        }
+    }
+
+    NSRange range = [self ifBlockRangeForIndex:start];
+    if (range.location == NSNotFound || range.length == 0 || NSMaxRange(range) > self.actions.count) return;
+
+    NSArray *copies = [[NSArray alloc] initWithArray:[self.actions subarrayWithRange:range] copyItems:YES];
+    NSUInteger insertIndex = NSMaxRange(range);
+    [self.actions insertObjects:copies
+                       atIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(insertIndex, copies.count)]];
+    [self saveActions];
+    [self.tableView reloadData];
+
+    NSIndexPath *last = [NSIndexPath indexPathForRow:insertIndex + copies.count - 1 inSection:0];
+    if ([self.tableView numberOfSections] > 0 && last.row < [self.tableView numberOfRowsInSection:0]) {
+        [self.tableView scrollToRowAtIndexPath:last atScrollPosition:UITableViewScrollPositionMiddle animated:YES];
+    }
 }
 
 #pragma mark - Table View Data Source
@@ -3602,10 +3640,6 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             [self presentViewController:nav animated:YES completion:nil];
         }]];
         
-        [sheet addAction:[UIAlertAction actionWithTitle:@"Test Macro" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-            [[RCServerClient sharedClient] executeCommand:currentAction completion:^(NSString * _Nullable output, NSError * _Nullable error) {}];
-        }]];
-        
         [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
         
         sheet.popoverPresentationController.sourceView = self.view;
@@ -3615,6 +3649,9 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             sheet.popoverPresentationController.sourceView = cell;
         }
         [self presentViewController:sheet animated:YES completion:nil];
+        return;
+    } else if ([currentAction hasPrefix:@"ha "] || [currentAction isEqualToString:@"ha"]) {
+        [self presentHAActionOptionsAtIndex:indexPath.row];
         return;
     } else if ([RCGesturesViewController gestureForCommand:currentAction]) {
         // Play Gesture: its own page, with this action's gesture and speed
@@ -3649,6 +3686,9 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         }];
     } else if ([currentAction hasPrefix:@"ssh-run "]) {
         [self promptEditSSHRunActionAtIndex:indexPath.row];
+        return;
+    } else if ([currentAction hasPrefix:@"rc-run "]) {
+        [self promptEditRemoteRunActionAtIndex:indexPath.row];
         return;
     } else {
         // Any other command: the command editor, with the variable menu
@@ -3697,6 +3737,54 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf) return;
         NSString *newAction = [NSString stringWithFormat:@"ssh-run %@ %@", newHostId, newCommand];
+        id existing = strongSelf.actions[index];
+        if ([existing isKindOfClass:[NSDictionary class]]) {
+            NSMutableDictionary *dict = [(NSDictionary *)existing mutableCopy];
+            dict[@"command"] = newAction;
+            strongSelf.actions[index] = dict;
+        } else {
+            strongSelf.actions[index] = newAction;
+        }
+        [strongSelf saveActions];
+        [strongSelf.tableView reloadData];
+        [strongSelf.navigationController popViewControllerAnimated:YES];
+    };
+    [self.navigationController pushViewController:editor animated:YES];
+}
+
+- (void)promptEditRemoteRunActionAtIndex:(NSInteger)index {
+    if (index < 0 || index >= (NSInteger)self.actions.count) return;
+
+    NSArray<NSDictionary *> *clients = [RCConfigManager sharedManager].rcClients;
+    if (clients.count == 0) {
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"No Remote RC Clients"
+            message:@"Add a device in Settings > Integrations > Remote RC Clients first."
+            preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:alert animated:YES completion:nil];
+        return;
+    }
+
+    NSString *action = nil;
+    id actionData = self.actions[index];
+    if ([actionData isKindOfClass:[NSDictionary class]]) {
+        action = ((NSDictionary *)actionData)[@"command"];
+    } else if ([actionData isKindOfClass:[NSString class]]) {
+        action = (NSString *)actionData;
+    }
+    if (![action isKindOfClass:[NSString class]] || ![action hasPrefix:@"rc-run "]) return;
+
+    NSString *payload = [action substringFromIndex:7];
+    NSRange firstSpace = [payload rangeOfString:@" "];
+    NSString *clientId = firstSpace.location == NSNotFound ? payload : [payload substringToIndex:firstSpace.location];
+    NSString *command = firstSpace.location == NSNotFound ? @"" : [payload substringFromIndex:firstSpace.location + 1];
+
+    RCRemoteActionEditorViewController *editor = [[RCRemoteActionEditorViewController alloc] initWithClientId:clientId command:command];
+    __weak typeof(self) weakSelf = self;
+    editor.onSave = ^(NSString *newClientId, NSString *newCommand) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        NSString *newAction = [NSString stringWithFormat:@"rc-run %@ %@", newClientId, newCommand];
         id existing = strongSelf.actions[index];
         if ([existing isKindOfClass:[NSDictionary class]]) {
             NSMutableDictionary *dict = [(NSDictionary *)existing mutableCopy];
@@ -3867,6 +3955,105 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     alert.preferredAction = saveAction;
     
     [self presentViewController:alert animated:YES completion:nil];
+}
+
+// An existing Home Assistant action: the same choices as the entity picker, with the
+// current one ticked, plus changing the entity or editing the raw command.
+- (void)presentHAActionOptionsAtIndex:(NSInteger)index {
+    if (index < 0 || index >= (NSInteger)self.actions.count) return;
+    id item = self.actions[index];
+    NSString *command = [item isKindOfClass:[NSDictionary class]] ? ((NSDictionary *)item)[@"command"] : item;
+    if (![command isKindOfClass:[NSString class]]) return;
+
+    NSString *eid = nil;
+    NSString *service = nil;
+    BOOL parsed = [RCHAEntityPickerViewController parseCommand:command entityId:&eid service:&service];
+    NSString *domain = parsed ? [eid componentsSeparatedByString:@"."].firstObject : nil;
+
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:(parsed ? [RCHAEntityPickerViewController friendlyNameForEntity:eid] : [[RCConfigManager sharedManager] nameForCommand:command truncate:NO])
+                                                                   message:(parsed ? eid : nil)
+                                                            preferredStyle:UIAlertControllerStyleActionSheet];
+
+    NSArray<NSDictionary *> *choices = nil;
+    BOOL standardService = NO;
+    if (parsed) {
+        if ([domain isEqualToString:@"scene"]) {
+            choices = @[ @{ @"title": @"Activate Scene", @"action": @"scene.turn_on" } ];
+            standardService = [service isEqualToString:@"scene.turn_on"];
+        } else if ([domain isEqualToString:@"script"]) {
+            NSString *action = [NSString stringWithFormat:@"script.%@", [eid componentsSeparatedByString:@"."].lastObject];
+            choices = @[ @{ @"title": @"Run Script", @"action": action } ];
+            standardService = [service isEqualToString:action];
+        } else if ([domain isEqualToString:@"automation"]) {
+            choices = @[ @{ @"title": @"Trigger Automation", @"action": @"automation.trigger" } ];
+            standardService = [service isEqualToString:@"automation.trigger"];
+        } else {
+            choices = @[
+                @{ @"title": @"Toggle", @"action": @"toggle" },
+                @{ @"title": @"Turn On", @"action": @"turn_on" },
+                @{ @"title": @"Turn Off", @"action": @"turn_off" }
+            ];
+            standardService = [service isEqualToString:[NSString stringWithFormat:@"%@.toggle", domain]] ||
+                              [service isEqualToString:[NSString stringWithFormat:@"%@.turn_on", domain]] ||
+                              [service isEqualToString:[NSString stringWithFormat:@"%@.turn_off", domain]];
+        }
+    }
+
+    for (NSDictionary *choice in choices) {
+        NSString *action = choice[@"action"];
+        BOOL shortAction = [action isEqualToString:@"toggle"] || [action isEqualToString:@"turn_on"] || [action isEqualToString:@"turn_off"];
+        NSString *choiceService = shortAction ? [NSString stringWithFormat:@"%@.%@", domain, action] : action;
+        NSString *newCommand = shortAction ? [NSString stringWithFormat:@"ha %@ %@", action, eid]
+                                           : [NSString stringWithFormat:@"ha call %@ %@", action, eid];
+        UIAlertAction *choiceAction = [UIAlertAction actionWithTitle:choice[@"title"] style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
+            [self storeCommand:newCommand atIndex:index];
+        }];
+        if ([choiceService isEqualToString:service]) {
+            @try { [choiceAction setValue:@(YES) forKey:@"checked"]; } @catch (NSException *e) {}
+        }
+        [sheet addAction:choiceAction];
+    }
+
+    __weak typeof(self) weakSelf = self;
+    if (!parsed || !standardService) {
+        [sheet addAction:[UIAlertAction actionWithTitle:@"Edit Command…" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) return;
+            RCTextInputViewController *inputVC = [[RCTextInputViewController alloc] init];
+            inputVC.promptTitle = @"Edit Action";
+            inputVC.initialText = command;
+            inputVC.variableActions = strongSelf.actions;
+            inputVC.onComplete = ^(NSString *text) {
+                if (text.length > 0) [strongSelf storeCommand:text atIndex:index];
+            };
+            UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:inputVC];
+            [strongSelf presentViewController:nav animated:YES completion:nil];
+        }]];
+    }
+
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Change Entity…" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
+        // Let the sheet finish dismissing before the picker takes over
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) return;
+            RCHAEntityPickerViewController *picker = [[RCHAEntityPickerViewController alloc] init];
+            picker.editingCommand = command;
+            picker.onEntitySelected = ^(NSString *newCommand) {
+                [strongSelf storeCommand:newCommand atIndex:index];
+            };
+            [strongSelf.navigationController pushViewController:picker animated:YES];
+        });
+    }]];
+
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:index inSection:0]];
+    if (cell && sheet.popoverPresentationController) {
+        sheet.popoverPresentationController.sourceView = cell;
+        sheet.popoverPresentationController.sourceRect = cell.bounds;
+    } else {
+        [self configurePopoverSourceForAlert:sheet];
+    }
+    [self presentViewController:sheet animated:YES completion:nil];
 }
 
 - (void)promptEditKMParameterAtIndex:(NSInteger)index {
@@ -4327,6 +4514,19 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
                     cell.textLabel.text = payload;
                     subtitle = @"SSH Command";
                 }
+            } else if ([action hasPrefix:@"rc-run "]) {
+                NSString *payload = [action substringFromIndex:7];
+                NSRange firstSpace = [payload rangeOfString:@" "];
+                if (firstSpace.location != NSNotFound) {
+                    NSString *clientId = [payload substringToIndex:firstSpace.location];
+                    NSString *remoteCmd = [payload substringFromIndex:firstSpace.location + 1];
+                    NSDictionary *client = [[RCConfigManager sharedManager] rcClientForId:clientId];
+                    cell.textLabel.text = remoteCmd;
+                    subtitle = [NSString stringWithFormat:@"Remote: %@", client[@"name"] ?: client[@"host"] ?: @"Missing Client"];
+                } else {
+                    cell.textLabel.text = payload;
+                    subtitle = @"Remote Command";
+                }
             } else if ([action hasPrefix:@"root "]) {
                 cell.textLabel.text = [action substringFromIndex:5];
                 subtitle = @"Root Command";
@@ -4375,7 +4575,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
 
         // Use monospace for code-like things
-        if ([action hasPrefix:@"exec "] || [action hasPrefix:@"root "] || [action hasPrefix:@"Lua "] || [action hasPrefix:@"lua "] || [action hasPrefix:@"ssh-run "]) {
+        if ([action hasPrefix:@"exec "] || [action hasPrefix:@"root "] || [action hasPrefix:@"Lua "] || [action hasPrefix:@"lua "] || [action hasPrefix:@"ssh-run "] || [action hasPrefix:@"rc-run "]) {
             cell.textLabel.font = [UIFont monospacedSystemFontOfSize:15 weight:UIFontWeightRegular];
             cell.textLabel.numberOfLines = wrapLongNames ? 0 : 1;
             cell.textLabel.lineBreakMode = NSLineBreakByTruncatingTail;

@@ -142,6 +142,17 @@ sequence stops and starts over) or **Ignore** (the new trigger is skipped).
 |---|---|
 | `terminal ls -la` | Run any shell command (no `terminal` prefix needed in raw form — just the shell command string) |
 
+### Remote RC
+Run a command on another device through its RemoteCompanion Web UI.
+
+| Command | What it does |
+|---|---|
+| `rc-run <clientId> play` | Run an RC command on the saved client with that id |
+| `rc-run <clientId> lock` | Lock the other device |
+| `rc-run <clientId> shortcut:My Shortcut` | Run a Shortcut on the other device |
+
+Client ids come from **Settings > Integrations > Remote RC Clients** (or the `rcClients` array in `rc_triggers.plist`). The other device needs its Web UI on; privileged commands need that device's API token saved on the client.
+
 ---
 
 ## Advanced: Structured Actions

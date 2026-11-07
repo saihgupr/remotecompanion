@@ -5518,6 +5518,7 @@ function renderActionList() {
 
       items.push({ label: isDisabled ? 'Enable Action' : 'Disable Action', icon: isDisabled ? 'checkmark_circle' : 'slash_circle', action: () => toggleDisableAction(idx) });
       items.push({ label: 'Copy Action', icon: 'doc_on_doc', action: () => copyAction(idx) });
+      items.push({ label: 'Duplicate Action', icon: 'plus_square_on_square', action: () => duplicateAction(idx) });
       if (g_copiedAction !== null) {
         items.push({ label: 'Paste Action Below', icon: 'doc_on_clipboard_fill', action: () => pasteAction(idx + 1) });
       }
@@ -5815,6 +5816,48 @@ function copyAction(idx) {
     g_copiedAction = JSON.parse(JSON.stringify(actions[idx]));
     showToast('✓ Action Copied');
   }
+}
+
+// A copy of the row right below it. If/Repeat blocks and their branches bring the whole
+// block, so a duplicate never splits a block in two.
+function duplicateAction(idx) {
+  const actions = triggerData(currentKey).actions || [];
+  if (idx < 0 || idx >= actions.length) return;
+  const actionType = a => (typeof a === 'object' && a !== null) ? (a.type || '').toLowerCase() : '';
+
+  let start = idx;
+  const type = actionType(actions[idx]);
+  if (type === 'else' || type === 'else_if' || type === 'end_if' || type === 'end' || type === 'end_repeat') {
+    let depth = 0;
+    for (let i = idx - 1; i >= 0; i--) {
+      const t = actionType(actions[i]);
+      if (t === 'end_if' || t === 'end' || t === 'end_repeat') depth++;
+      else if (t === 'if' || t === 'repeat' || t === 'repeat_while') {
+        if (depth === 0) { start = i; break; }
+        depth--;
+      }
+    }
+  }
+
+  let end = start;
+  const startType = actionType(actions[start]);
+  if (startType === 'if' || startType === 'repeat' || startType === 'repeat_while') {
+    let depth = 1;
+    for (let i = start + 1; i < actions.length; i++) {
+      const t = actionType(actions[i]);
+      if (t === 'if' || t === 'repeat' || t === 'repeat_while') depth++;
+      else if (t === 'end_if' || t === 'end' || t === 'end_repeat') {
+        depth--;
+        if (depth === 0) { end = i; break; }
+      }
+    }
+  }
+
+  const copies = JSON.parse(JSON.stringify(actions.slice(start, end + 1)));
+  actions.splice(end + 1, 0, ...copies);
+  saveConfig();
+  renderActionList();
+  showToast('✓ Action Duplicated');
 }
 
 function pasteAction(insertIdx) {
@@ -6555,6 +6598,18 @@ function updateLogStats(total, exec, err, http) {
 function editAction(idx) {
   const actions = triggerData(currentKey).actions || [];
   const act = actions[idx];
+  const commandText = (typeof act === 'object' && act !== null && typeof act.command === 'string') ? act.command : act;
+  if (typeof commandText === 'string') {
+    const lowText = commandText.toLowerCase();
+    if (lowText.startsWith('ha ') || lowText === 'ha') {
+      editHAAction(idx);
+      return;
+    }
+    if (lowText.startsWith('km ') || lowText === 'km') {
+      editKMAction(idx);
+      return;
+    }
+  }
   if (typeof act === 'object') {
     const type = (act.type||'').toLowerCase();
     if (type === 'if' || type === 'else_if' || type === 'repeat_while') {
@@ -6635,6 +6690,8 @@ function editAction(idx) {
         saveConfig();
         renderActionList();
       });
+    } else if (low.startsWith('ha ') || low === 'ha') {
+      editHAAction(idx);
     } else if (low.startsWith('km ') || low === 'km') {
       editKMAction(idx);
     } else {
@@ -6700,11 +6757,6 @@ function editKMAction(idx) {
   buttons.push({
     label: 'Change Macro…',
     action: () => openKMDialog(idx)
-  });
-
-  buttons.push({
-    label: 'Test Macro',
-    action: () => runSingleAction(cmdStr)
   });
 
   showSheet(displayName, buttons);
@@ -9401,6 +9453,7 @@ async function testHAConnection() {
 }
 
 let cachedHAEntities = [];
+let g_haEditIdx = null;
 
 async function promptHAActionPicker() {
   const listEl = document.getElementById('ha-picker-list');
@@ -9439,6 +9492,7 @@ async function promptHAActionPicker() {
 
 function closeHADialog() {
   document.getElementById('ha-dialog-backdrop').classList.remove('visible');
+  g_haEditIdx = null;
 }
 
 function renderHAPickerItems(entities) {
@@ -9506,32 +9560,132 @@ function filterHAList() {
 }
 
 function selectHAEntity(item) {
+  const editIdx = g_haEditIdx;
   closeHADialog();
   const entityId = item.entity_id;
   const domain = entityId.split('.')[0];
   const friendlyName = (item.attributes && item.attributes.friendly_name) ? item.attributes.friendly_name : entityId;
 
+  const apply = (cmd, what) => {
+    if (editIdx !== null) {
+      updateHAAction(editIdx, cmd, `✓ Updated HA Action: ${friendlyName}`);
+    } else {
+      addActionToCurrent(cmd);
+      showToast(what ? `✓ Added ${what} for ${friendlyName}` : `✓ Added HA Action: ${friendlyName}`);
+    }
+  };
+
   if (domain === 'scene' || domain === 'script' || domain === 'automation') {
     let cmd = `ha call ${domain}.turn_on ${entityId}`;
     if (domain === 'script') cmd = `ha call script.${entityId.split('.')[1]} ${entityId}`;
-    addActionToCurrent(cmd);
-    showToast(`✓ Added HA Action: ${friendlyName}`);
+    apply(cmd, '');
   } else {
+    // While editing, tick whichever action the old command already used
+    const actions = triggerData(currentKey).actions || [];
+    const oldAct = editIdx !== null ? actions[editIdx] : null;
+    const oldCmd = (typeof oldAct === 'object' && oldAct !== null) ? (oldAct.command || '') : oldAct;
+    const old = editIdx !== null ? parseHACommand(oldCmd) : null;
+    const tick = (svc, verb) => old && (old.service === svc || old.service.split('.').pop() === verb) ? ' ✓' : '';
     showSheet(`Control ${friendlyName}`, [
-      { label: `Toggle (${friendlyName})`, action: () => { addActionToCurrent(`ha toggle ${entityId}`); showToast(`✓ Added Toggle for ${friendlyName}`); } },
-      { label: `Turn On (${friendlyName})`, action: () => { addActionToCurrent(`ha turn_on ${entityId}`); showToast(`✓ Added Turn On for ${friendlyName}`); } },
-      { label: `Turn Off (${friendlyName})`, action: () => { addActionToCurrent(`ha turn_off ${entityId}`); showToast(`✓ Added Turn Off for ${friendlyName}`); } }
+      { label: `Toggle (${friendlyName})${tick(`${domain}.toggle`, 'toggle')}`, action: () => apply(`ha toggle ${entityId}`, 'Toggle') },
+      { label: `Turn On (${friendlyName})${tick(`${domain}.turn_on`, 'turn_on')}`, action: () => apply(`ha turn_on ${entityId}`, 'Turn On') },
+      { label: `Turn Off (${friendlyName})${tick(`${domain}.turn_off`, 'turn_off')}`, action: () => apply(`ha turn_off ${entityId}`, 'Turn Off') }
     ]);
   }
 }
 
+function updateHAAction(idx, cmd, message) {
+  const actions = triggerData(currentKey).actions || [];
+  if (idx === null || idx < 0 || idx >= actions.length) {
+    addActionToCurrent(cmd);
+  } else {
+    storeCommandAt(actions, idx, cmd);
+    saveConfig();
+    renderActionList();
+  }
+  if (message) showToast(message);
+}
+
+function parseHACommand(cmd) {
+  if (!cmd || typeof cmd !== 'string') return null;
+  let raw = cmd.trim();
+  if (!raw.startsWith('ha ')) return null;
+  raw = raw.slice(3).trim();
+  const parts = raw.split(/\s+/).filter(Boolean);
+  if (parts.length < 2) return null;
+  const sub = parts[0].toLowerCase();
+  if (sub === 'raw') return null; // raw JSON doesn't map to an entity action
+
+  let entityId = parts[1];
+  let service;
+  if (sub === 'call') {
+    if (parts.length < 3) return null;
+    service = parts[1].toLowerCase();
+    entityId = parts[2];
+    if (!service.includes('.')) return null;
+  } else if (sub === 'toggle' || sub === 'turn_on' || sub === 'turn_off') {
+    service = `${entityId.split('.')[0]}.${sub}`;
+  } else if (sub.includes('.')) {
+    service = sub;
+  } else {
+    service = `${entityId.split('.')[0]}.${sub}`;
+  }
+  if (!entityId.includes('.') || !service) return null;
+  return { entityId, service };
+}
+
+function friendlyHAEntityName(eid) {
+  const name = (eid || '').split('.')[1] || eid || '';
+  return name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+// An existing Home Assistant action: the same choices as the picker, with the current
+// one ticked, plus changing the entity or editing the raw command.
+function editHAAction(idx) {
+  const actions = triggerData(currentKey).actions || [];
+  const act = actions[idx];
+  const cmd = (typeof act === 'object' && act !== null) ? (act.command || '') : act;
+  const parsed = parseHACommand(cmd);
+  const buttons = [];
+  let standard = false;
+
+  if (parsed) {
+    const domain = parsed.entityId.split('.')[0];
+    const mark = svc => parsed.service === svc ? ' ✓' : '';
+    if (domain === 'scene') {
+      standard = parsed.service === 'scene.turn_on';
+      buttons.push({ label: `Activate Scene${mark('scene.turn_on')}`, action: () => updateHAAction(idx, `ha call scene.turn_on ${parsed.entityId}`, '✓ Home Assistant Action Updated') });
+    } else if (domain === 'script') {
+      const svc = `script.${parsed.entityId.split('.')[1]}`;
+      standard = parsed.service === svc;
+      buttons.push({ label: `Run Script${mark(svc)}`, action: () => updateHAAction(idx, `ha call ${svc} ${parsed.entityId}`, '✓ Home Assistant Action Updated') });
+    } else if (domain === 'automation') {
+      standard = parsed.service === 'automation.trigger';
+      buttons.push({ label: `Trigger Automation${mark('automation.trigger')}`, action: () => updateHAAction(idx, `ha call automation.trigger ${parsed.entityId}`, '✓ Home Assistant Action Updated') });
+    } else {
+      standard = [`${domain}.toggle`, `${domain}.turn_on`, `${domain}.turn_off`].includes(parsed.service);
+      buttons.push({ label: `Toggle${mark(`${domain}.toggle`)}`, action: () => updateHAAction(idx, `ha toggle ${parsed.entityId}`, '✓ Home Assistant Action Updated') });
+      buttons.push({ label: `Turn On${mark(`${domain}.turn_on`)}`, action: () => updateHAAction(idx, `ha turn_on ${parsed.entityId}`, '✓ Home Assistant Action Updated') });
+      buttons.push({ label: `Turn Off${mark(`${domain}.turn_off`)}`, action: () => updateHAAction(idx, `ha turn_off ${parsed.entityId}`, '✓ Home Assistant Action Updated') });
+    }
+  }
+
+  if (!parsed || !standard) {
+    buttons.push({ label: 'Edit Command…', action: () => promptTerminalModal(cmd, idx, true) });
+  }
+  buttons.push({ label: 'Change Entity…', action: () => { g_haEditIdx = idx; promptHAActionPicker(); } });
+
+  showSheet(parsed ? friendlyHAEntityName(parsed.entityId) : formatHACommandName(cmd), buttons);
+}
+
 function promptManualHAEntity() {
+  const editIdx = g_haEditIdx;
   closeHADialog();
-  showDialog('Home Assistant Action', 'Enter command (e.g. toggle light.bedroom or call light.turn_on light.bedroom):', 'toggle light.bedroom', 'Add', val => {
+  showDialog('Home Assistant Action', 'Enter command (e.g. toggle light.bedroom or call light.turn_on light.bedroom):', 'toggle light.bedroom', editIdx !== null ? 'Save' : 'Add', val => {
     if (val) {
       let clean = val.trim();
       if (!clean.startsWith('ha ')) clean = 'ha ' + clean;
-      addActionToCurrent(clean);
+      updateHAAction(editIdx, clean, editIdx !== null ? '✓ Home Assistant Action Updated' : '✓ Added HA Action');
     }
   });
 }

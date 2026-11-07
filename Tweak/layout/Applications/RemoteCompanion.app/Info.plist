@@ -47,6 +47,13 @@
 	<string>14.0</string>
 	<key>NFCReaderUsageDescription</key>
 	<string>NFC is used to trigger RemoteCommand actions.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>RemoteCompanion connects to other devices running the RemoteCompanion Web UI.</string>
 	<key>UIDeviceFamily</key>
 	<array>
 		<integer>1</integer>
