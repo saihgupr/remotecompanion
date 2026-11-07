@@ -1463,6 +1463,7 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
     [self rebuildSections];
     [self.categoryBar setChipTitles:self.sectionTitles];
     self.categoryBar.selectedIndex = -1;
+    [self.categoryBar setContentOffset:CGPointZero animated:NO];
 
     // A search that was open on the local list can leave the bar compact; ask for the
     // large title again before putting the list back at the top.
@@ -1506,9 +1507,9 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
     [self rebuildSections];
     [self.categoryBar setChipTitles:self.sectionTitles];
     self.categoryBar.selectedIndex = -1;
+    [self.categoryBar setContentOffset:CGPointZero animated:NO];
     [self.collectionView reloadData];
-    [self.collectionView layoutIfNeeded];
-    [self.collectionView setContentOffset:CGPointMake(0, -self.collectionView.adjustedContentInset.top) animated:NO];
+    [self scrollActionListToTop];
 }
 
 - (void)handleRemoteShortcut {
