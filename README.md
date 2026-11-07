@@ -427,6 +427,10 @@ Trigger RemoteCompanion commands inside iOS Shortcuts automations:
 
 ## Developer Tools & APIs
 
+### Add-ons
+
+Another app or tweak can add its own actions, conditions, triggers and banners to RemoteCompanion with one JSON file in its package, without any change to RemoteCompanion. Start with the guide, [ADDONS-GUIDE.md](ADDONS-GUIDE.md); every key is in the reference, [ADDONS.md](ADDONS.md). [`tools/addon-lint.py`](tools/addon-lint.py) checks a file on the Mac before it's packaged.
+
 <details>
 <summary><b>Lua Scripting & Objective-C Bridge</b></summary>
 
@@ -528,7 +532,7 @@ Execution URLs for your specific triggers:
 <details>
 <summary><b>Pausing Button Triggers</b></summary>
 
-The **Button Triggers** action pauses the hardware button, Touch ID, ringer switch and screen gesture triggers for 15 minutes, an hour, or until resumed. While paused those buttons and gestures work as without RemoteCompanion; event triggers (NFC tags, Wi-Fi, Bluetooth, schedules, notifications, apps) still run. The app shows the pause above its title, with Resume. A paused button can't resume itself, so resume from the app, an NFC tag or another event trigger, the Web UI or a shortcut (`button triggers resume`).
+The **Button Triggers** action pauses the hardware button, Touch ID, ringer switch and screen gesture triggers for 15 minutes, an hour, or until resumed. While paused those buttons and gestures work as without RemoteCompanion; event triggers (NFC tags, Wi-Fi, Bluetooth, schedules, notifications, apps, add-ons) still run. The app shows the pause above its title, with Resume. A paused button can't resume itself, so resume from the app, an NFC tag or another event trigger, the Web UI or a shortcut (`button triggers resume`).
 
 Commands: `button triggers pause [minutes]`, `button triggers resume`, and `button triggers` for the state.
 
