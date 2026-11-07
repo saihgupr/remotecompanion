@@ -268,7 +268,46 @@ static NSString *RCSuiteIcon(NSString *suite) {
 - (NSString *)passcodeDetail {
     if (!self.passcodeExpiry) return @"Not set";
     NSInteger minutes = MAX(1, (NSInteger)ceil(self.passcodeExpiry.timeIntervalSinceNow / 60.0));
+    if (minutes >= 60) {
+        return minutes % 60 ? [NSString stringWithFormat:@"Forgotten in %ld h %ld min", (long)(minutes / 60), (long)(minutes % 60)]
+                            : [NSString stringWithFormat:@"Forgotten in %ld h", (long)(minutes / 60)];
+    }
     return minutes == 1 ? @"Forgotten in 1 minute" : [NSString stringWithFormat:@"Forgotten in %ld minutes", (long)minutes];
+}
+
+// The Keep For choice, kept here so the next passcode (or a renew) uses it (30 when unset)
+- (NSInteger)keepForMinutes {
+    NSInteger m = [[NSUserDefaults standardUserDefaults] integerForKey:@"RCTestKitPasscodeMinutes"];
+    return m > 0 ? m : 30;
+}
+
+- (NSString *)keepForDetail {
+    NSInteger m = [self keepForMinutes];
+    return m < 60 ? [NSString stringWithFormat:@"%ld Minutes", (long)m] : [NSString stringWithFormat:@"%ld Hour%@", (long)(m / 60), m / 60 == 1 ? @"" : @"s"];
+}
+
+// Pick a Keep For; with a passcode set it also renews it to that lifetime
+- (void)keepForRowTapped {
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Keep For" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    for (NSNumber *choice in @[@30, @60, @120, @240, @480]) {
+        NSInteger m = choice.integerValue;
+        NSString *title = m < 60 ? [NSString stringWithFormat:@"%ld Minutes", (long)m] : [NSString stringWithFormat:@"%ld Hour%@", (long)(m / 60), m / 60 == 1 ? @"" : @"s"];
+        if (m == [self keepForMinutes]) title = [@"✓ " stringByAppendingString:title];
+        [sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+            [[NSUserDefaults standardUserDefaults] setInteger:m forKey:@"RCTestKitPasscodeMinutes"];
+            if ([self.passcodeStatus[@"set"] boolValue]) {
+                [RCTestKitViewController sendRequest:[NSString stringWithFormat:@"passcode/renew minutes=%ld", (long)m] completion:^(NSDictionary *json, NSError *error) {
+                    [self refreshPasscodeStatus];
+                }];
+            } else {
+                [self refreshPasscodeStatus];
+            }
+        }]];
+    }
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    NSIndexPath *row = [NSIndexPath indexPathForRow:1 inSection:RCTestKitSectionUnlock];
+    sheet.popoverPresentationController.sourceView = [self.tableView cellForRowAtIndexPath:row] ?: self.view;
+    [self presentViewController:sheet animated:YES completion:nil];
 }
 
 - (CGFloat)passcodeFraction {
@@ -300,7 +339,7 @@ static NSString *RCSuiteIcon(NSString *suite) {
 // (see RCTestKit.x); the app doesn't keep it either
 - (void)askForPasscode {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Passcode for Tests"
-        message:@"Lets test runs unlock the phone between steps. It stays on this phone only (in its Keychain, never in a backup), and is forgotten after 30 minutes, a restart, or if it doesn't unlock the phone."
+        message:@"Lets test runs unlock the phone between steps. It stays on this phone only (in its Keychain, never in a backup), and is forgotten after its Keep For time (the row below), a restart, or if it doesn't unlock the phone."
         preferredStyle:UIAlertControllerStyleAlert];
     [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
         field.secureTextEntry = YES;
@@ -313,7 +352,7 @@ static NSString *RCSuiteIcon(NSString *suite) {
         NSString *passcode = alert.textFields.firstObject.text ?: @"";
         alert.textFields.firstObject.text = @"";
         NSString *encoded = [passcode stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet alphanumericCharacterSet]] ?: @"";
-        [RCTestKitViewController sendRequest:[@"passcode/set code=" stringByAppendingString:encoded] completion:^(NSDictionary *json, NSError *error) {
+        [RCTestKitViewController sendRequest:[NSString stringWithFormat:@"passcode/set code=%@&minutes=%ld", encoded, (long)[self keepForMinutes]] completion:^(NSDictionary *json, NSError *error) {
             if (json[@"error"] || !json) [self showMessage:@"Couldn't Set the Passcode" text:json[@"error"] ?: error.localizedDescription];
             [self refreshPasscodeStatus];
         }];
@@ -388,7 +427,7 @@ static NSString *RCSuiteIcon(NSString *suite) {
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == RCTestKitSectionSuites) return @"Your settings are put back when a test ends.";
-    if (section == RCTestKitSectionUnlock) return @"Optional. Tests that lock the phone can unlock it again with this. Kept on this phone only, until it restarts or 30 minutes pass; a passcode that doesn't work is forgotten after one try.";
+    if (section == RCTestKitSectionUnlock) return @"Optional. Tests that lock the phone can unlock it again with this. Kept on this phone only, until it restarts or its Keep For time passes; a passcode that doesn't work is forgotten after one try.";
     if (section == RCTestKitSectionReports && !self.reports.count) return @"Reports of finished tests appear here.";
     return nil;
 }
@@ -396,7 +435,7 @@ static NSString *RCSuiteIcon(NSString *suite) {
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if (section == RCTestKitSectionRun) return self.currentRun ? 2 : 0;
     if (section == RCTestKitSectionSuites) return self.suites.count;
-    if (section == RCTestKitSectionUnlock) return 1;
+    if (section == RCTestKitSectionUnlock) return 2;
     return self.reports.count;
 }
 
@@ -447,6 +486,14 @@ static NSString *RCSuiteIcon(NSString *suite) {
 
     if (indexPath.section == RCTestKitSectionUnlock) {
         UITableViewCell *cell = [self styledCellWithStyle:UITableViewCellStyleSubtitle];
+        if (indexPath.row == 1) {
+            cell.textLabel.text = @"Keep For";
+            cell.detailTextLabel.text = [self keepForDetail];
+            cell.imageView.image = [UIImage systemImageNamed:@"clock"];
+            cell.imageView.tintColor = [UIColor systemTealColor];
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+            return cell;
+        }
         cell.textLabel.text = @"Passcode for Tests";
         cell.detailTextLabel.text = [self passcodeDetail];
         if (self.passcodeExpiry) {
@@ -486,7 +533,7 @@ static NSString *RCSuiteIcon(NSString *suite) {
     } else if (indexPath.section == RCTestKitSectionSuites) {
         [self confirmSuite:self.suites[indexPath.row][@"name"]];
     } else if (indexPath.section == RCTestKitSectionUnlock) {
-        [self passcodeRowTapped];
+        if (indexPath.row == 1) [self keepForRowTapped]; else [self passcodeRowTapped];
     } else {
         [self.navigationController pushViewController:[[RCTestReportViewController alloc] initWithReportId:self.reports[indexPath.row][@"id"]] animated:YES];
     }
