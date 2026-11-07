@@ -117,7 +117,7 @@ a second. If you edit the file and copy it again, the change takes effect just a
 
 Open RemoteCompanion and add an action to any trigger. The action list now has an **Add-ons**
 section with **Uptime** in it, and inside that, **Show Uptime**. Your add-on also has its own page
-under Settings > Integrations, where people can turn it off, see what it adds, and change its
+in Settings > Add-ons, where people can turn it off, see what it adds, and change its
 settings.
 
 You can run it from the phone's command line too:
@@ -381,7 +381,7 @@ number, the step is skipped. The limit can be a variable too, as in `"below": "{
 
 ### Let people set your tweak up
 
-Settings appear on your add-on's page in Settings > Integrations, and each one is tied to one of
+Settings appear on your add-on's page in Settings > Add-ons, and each one is tied to one of
 your tweak's preferences:
 
 ```json
@@ -438,7 +438,7 @@ turn out to be one of these:
 | No banner | Each action's banner can be switched off, on your add-on's page or in Settings > Banners. An `await` banner also shows nothing if no reply arrives in time. |
 | A condition is never true | `addons check addon:<id>:<condition>` shows its current value. A program that exits with an error makes the value unknown, which counts as false. A `choice` condition is compared with the labels in `choices`, not the raw values. |
 | A trigger never fires | Check that the notification name matches exactly. Triggers also respect RemoteCompanion's master switch and excluded apps. |
-| Nothing from your add-on works | Check that it isn't switched off on its page in Settings > Integrations. |
+| Nothing from your add-on works | Check that it isn't switched off on its page in Settings > Add-ons. |
 
 RemoteCompanion's log records every file with a problem and every program that couldn't start or
 ran too long, as lines starting with `[AddOns]`. If you set Settings > Advanced Settings > Logging

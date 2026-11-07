@@ -39,11 +39,11 @@ away. Nothing is checked on a timer. You can also ask for a fresh read with `add
 Files are read in alphabetical order, the rootless folder first. If two files use the same `id`,
 the first one wins and the second is reported as a problem.
 
-In the app, each add-on gets a row in Settings > Integrations, in an Add-ons section below
-RemoteCompanion's own integrations. Its page has a switch that turns it off without uninstalling
-it (it then offers nothing, and its events stop), its settings, what it adds, a switch for each of
-its actions' banners, and where its file is. Below the add-ons, rows list any add-ons whose app or
-tweak isn't installed, and any file with a problem, with the reason.
+In the app, each add-on gets a row in Settings > Add-ons, a menu below Integrations. Its page has a
+switch that turns it off without uninstalling it (it then offers nothing, and its events stop), its
+settings, what it adds, a switch for each of its actions' banners, and where its file is. Below the
+add-ons, rows list any add-ons whose app or tweak isn't installed, and any file with a problem,
+with the reason.
 
 ## Example
 
@@ -390,7 +390,7 @@ triggers follow the usual rules, such as RemoteCompanion's master switch and exc
 
 ## Settings
 
-Settings are controls on the add-on's page in the app (Settings > Integrations). Each one is tied
+Settings are controls on the add-on's page in the app (Settings > Add-ons). Each one is tied
 to a preference, so people can set the tweak up without leaving RemoteCompanion.
 
 ```json
