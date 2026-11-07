@@ -46,8 +46,13 @@ static const char *kRCAOChanged = "com.saihgupr.remotecompanion.addons-changed";
 // Ids of the add-ons the user turned off (addons disable <id>): a JSON list, kept by the tweak
 static NSString *const kRCAOOffPath = @"/var/mobile/Documents/rc_addons_off.json";
 
-static NSArray<NSString *> *rcao_off_ids(void) {
-    NSData *data = [NSData dataWithContentsOfFile:kRCAOOffPath];
+// Ids of the add-ons allowed to run programs as root ("root": true). Off until the user turns it
+// on for that add-on (the switch on its page in the app, or addons root <id> on).
+static NSString *const kRCAORootPath = @"/var/mobile/Documents/rc_addons_root.json";
+
+// A JSON list of add-on ids kept by the tweak (kRCAOOffPath, kRCAORootPath)
+static NSArray<NSString *> *rcao_ids_at(NSString *path) {
+    NSData *data = [NSData dataWithContentsOfFile:path];
     NSArray *ids = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
     if (![ids isKindOfClass:[NSArray class]]) return @[];
     NSMutableArray *out = [NSMutableArray array];
@@ -637,6 +642,22 @@ static void rcao_watch(void);
 
 // Reads the folders again if a file was added, removed or changed (or always, when forced). The
 // folders are watched (rcao_watch), so this runs on a change, not on a timer.
+// Marks each exec step and condition that asks for root with "_rootOff" (the add-on's name) while
+// the user hasn't allowed root for the add-on; YES when any ask for it
+static BOOL rcao_mark_root(NSMutableDictionary *addOn, BOOL allowed) {
+    BOOL uses = NO;
+    NSMutableArray *parts = [NSMutableArray array];
+    for (NSDictionary *action in addOn[@"actions"]) [parts addObjectsFromArray:action[@"run"] ?: @[]];
+    [parts addObjectsFromArray:addOn[@"conditions"] ?: @[]];
+    for (NSMutableDictionary *part in parts) {
+        if (![part isKindOfClass:[NSMutableDictionary class]] || ![part[@"root"] boolValue]) continue;
+        uses = YES;
+        if (allowed) [part removeObjectForKey:@"_rootOff"];
+        else part[@"_rootOff"] = addOn[@"name"];
+    }
+    return uses;
+}
+
 static void rcao_load(BOOL force) {
     @synchronized (rcao_lock()) {
         NSArray<NSString *> *files = nil;
@@ -650,7 +671,8 @@ static void rcao_load(BOOL force) {
         NSMutableArray *problems = [NSMutableArray array];
         NSMutableArray *absent = [NSMutableArray array];
         NSMutableArray *disabled = [NSMutableArray array];
-        NSSet *off = [NSSet setWithArray:rcao_off_ids()];
+        NSSet *off = [NSSet setWithArray:rcao_ids_at(kRCAOOffPath)];
+        NSSet *rootIds = [NSSet setWithArray:rcao_ids_at(kRCAORootPath)];
         NSMutableSet *ids = [NSMutableSet set];
         for (NSString *path in files) {
             NSString *problem = nil;
@@ -665,6 +687,9 @@ static void rcao_load(BOOL force) {
             NSMutableDictionary *loaded = json;
             loaded[@"_folder"] = path.stringByDeletingLastPathComponent;   // where the file is (its icon image sits beside it)
             loaded[@"_file"] = path.lastPathComponent;
+            BOOL rootAllowed = [rootIds containsObject:json[@"id"]];
+            loaded[@"_usesRoot"] = @(rcao_mark_root(loaded, rootAllowed));
+            loaded[@"_rootAllowed"] = @(rootAllowed);
             if (!rcao_installed(json)) [absent addObject:json[@"name"]];
             else if ([off containsObject:json[@"id"]]) [disabled addObject:loaded];   // offers nothing until turned on
             else [addOns addObject:loaded];
@@ -1130,17 +1155,22 @@ static NSString *rcao_run_steps(NSArray<NSDictionary *> *steps, NSMutableDiction
             // With "as", the variable gets stdout only: a warning on stderr doesn't end up in it
             BOOL keep = rcao_is_string(step[@"as"]);
             NSString *errors = nil;
-            NSString *result = rcao_exec(args, [step[@"root"] boolValue], &status, keep ? &errors : NULL);
+            // Root that the user hasn't allowed for this add-on: not run
+            NSString *rootOff = step[@"_rootOff"];
+            NSString *result = rootOff ? nil : rcao_exec(args, [step[@"root"] boolValue], &status, keep ? &errors : NULL);
             if (!result) status = -1;
             vars[@"exit"] = [NSString stringWithFormat:@"%d", status];   // for the steps after it and the banner
             if (trace) {
-                NSString *how = !result ? @"couldn't start" : status == -1 ? @"stopped or killed" : [NSString stringWithFormat:@"exit %d", status];
-                NSString *what = [NSString stringWithFormat:@"%@, %.2f s", how, CFAbsoluteTimeGetCurrent() - started];
+                NSString *how = rootOff ? @"not run: Run as Root is off for this add-on" : !result ? @"couldn't start" : status == -1 ? @"stopped or killed" : [NSString stringWithFormat:@"exit %d", status];
+                NSString *what = rootOff ? how : [NSString stringWithFormat:@"%@, %.2f s", how, CFAbsoluteTimeGetCurrent() - started];
                 if (result.length) what = [what stringByAppendingFormat:@", output: %@", rcao_trace_output(result)];
                 if (errors.length) what = [what stringByAppendingFormat:@", stderr: %@", rcao_trace_output(errors)];
                 note(what);
             }
-            if (!result) {
+            if (rootOff) {
+                [output appendFormat:@"Error: %@ needs Run as Root (Settings > Integrations > %@)\n", rootOff, rootOff];
+                if (!trace) RCShowBanner(rootOff, @"Run as Root is off", @"lock", 3.0);
+            } else if (!result) {
                 [output appendFormat:@"Error: Could not run %@\n", args.firstObject];
             } else if (rcao_is_string(step[@"as"])) {
                 // Kept as a variable for the steps after it and the banner (lines joined), not added to the reply
@@ -1308,7 +1338,8 @@ static NSString *rcao_list(void) {
     NSMutableString *out = [NSMutableString string];
     if (addOns.count == 0 && absent.count == 0 && problems.count == 0 && disabled.count == 0) return @"No add-ons\n";
     for (NSDictionary *addOn in addOns) {
-        [out appendFormat:@"%@ (%@): %lu action%@\n", addOn[@"name"], addOn[@"id"], (unsigned long)[addOn[@"actions"] count], [addOn[@"actions"] count] == 1 ? @"" : @"s"];
+        NSString *root = [addOn[@"_usesRoot"] boolValue] ? ([addOn[@"_rootAllowed"] boolValue] ? @", Run as Root on" : @", Run as Root off") : @"";
+        [out appendFormat:@"%@ (%@): %lu action%@%@\n", addOn[@"name"], addOn[@"id"], (unsigned long)[addOn[@"actions"] count], [addOn[@"actions"] count] == 1 ? @"" : @"s", root];
     }
     for (NSDictionary *addOn in disabled) [out appendFormat:@"%@ (%@): off\n", addOn[@"name"], addOn[@"id"]];
     for (NSString *name in absent) [out appendFormat:@"%@: not installed\n", name];
@@ -1527,13 +1558,34 @@ NSString *RCAddOnsHandleCommand(NSString *cmd) {
                 for (NSDictionary *addOn in [rcao_addOns arrayByAddingObjectsFromArray:rcao_disabled ?: @[]]) if ([addOn[@"id"] isEqualToString:addOnId]) known = YES;
             }
             if (!known) return [NSString stringWithFormat:@"Error: No add-on '%@' (see addons)\n", addOnId];
-            NSMutableArray *off = [rcao_off_ids() mutableCopy];
+            NSMutableArray *off = [rcao_ids_at(kRCAOOffPath) mutableCopy];
             [off removeObject:addOnId];
             if (!enable) [off addObject:addOnId];
             NSData *data = [NSJSONSerialization dataWithJSONObject:off options:0 error:nil];
             if (![data writeToFile:kRCAOOffPath atomically:YES]) return [NSString stringWithFormat:@"Error: Could not write %@\n", kRCAOOffPath];
             rcao_load(YES);
             return [NSString stringWithFormat:@"%@ is %@\n", addOnId, enable ? @"on" : @"off"];
+        }
+        // "addons root <id> on|off": lets an add-on run programs as root ("root": true), or stops it.
+        // Off until turned on; "addons root <id>" says which it is.
+        if ((words.count == 3 || words.count == 4) && [words[1].lowercaseString isEqualToString:@"root"]) {
+            NSString *addOnId = words[2].lowercaseString;
+            NSDictionary *addOn = nil;
+            @synchronized (rcao_lock()) {
+                for (NSDictionary *a in [rcao_addOns arrayByAddingObjectsFromArray:rcao_disabled ?: @[]]) if ([a[@"id"] isEqualToString:addOnId]) addOn = a;
+            }
+            if (!addOn) return [NSString stringWithFormat:@"Error: No add-on '%@' (see addons)\n", addOnId];
+            if (![addOn[@"_usesRoot"] boolValue]) return [NSString stringWithFormat:@"%@ runs nothing as root\n", addOn[@"name"]];
+            if (words.count == 3) return [NSString stringWithFormat:@"%@: Run as Root is %@\n", addOn[@"name"], [addOn[@"_rootAllowed"] boolValue] ? @"on" : @"off"];
+            NSString *value = words[3].lowercaseString;
+            if (![value isEqualToString:@"on"] && ![value isEqualToString:@"off"]) return @"Error: Use addons root <id> on|off\n";
+            NSMutableArray *ids = [rcao_ids_at(kRCAORootPath) mutableCopy];
+            [ids removeObject:addOnId];
+            if ([value isEqualToString:@"on"]) [ids addObject:addOnId];
+            NSData *data = [NSJSONSerialization dataWithJSONObject:ids options:0 error:nil];
+            if (![data writeToFile:kRCAORootPath atomically:YES]) return [NSString stringWithFormat:@"Error: Could not write %@\n", kRCAORootPath];
+            rcao_load(YES);
+            return [NSString stringWithFormat:@"%@: Run as Root is %@\n", addOn[@"name"], value];
         }
         // "add-ons check add-on:<id>:<condition> [expected]": the value, and whether it matches
         if (words.count >= 3 && [words[1].lowercaseString isEqualToString:@"check"]) {
@@ -1592,7 +1644,7 @@ NSString *RCAddOnsHandleCommand(NSString *cmd) {
             if (trace.count == 0) return reply;   // no such action: the add-on's list
             return [NSString stringWithFormat:@"%@\nReply: %@", [trace componentsJoinedByString:@"\n"], reply];
         }
-        return @"Error: Use addons, addons reload, addons validate <file>, addons trace <command>, addons parse <command>, addons enable|disable <id>, addons settings <id>, addons set <id> <setting> <value> or addons check <condition> [expected]\n";
+        return @"Error: Use addons, addons reload, addons validate <file>, addons trace <command>, addons parse <command>, addons enable|disable <id>, addons root <id> on|off, addons settings <id>, addons set <id> <setting> <value> or addons check <condition> [expected]\n";
     }
 
     NSDictionary *addOn = rcao_addOn_for(words);
@@ -1639,6 +1691,7 @@ static NSDictionary *rcao_condition_for_key(NSString *key) {
 // A condition's raw value (before choices map it to a label), or nil when unknown
 static NSString *rcao_condition_raw(NSDictionary *condition) {
     if (condition[@"exec"]) {
+        if (condition[@"_rootOff"]) return nil;   // root the user hasn't allowed: unknown
         NSMutableArray *args = [NSMutableArray array];
         for (NSString *arg in condition[@"exec"]) [args addObject:rcao_fill(arg, @{}) ?: arg];
         int status = 0;
