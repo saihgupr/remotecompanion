@@ -18,7 +18,7 @@
 //   POST /api/testkit/restore           put them back
 //   POST /api/testkit/lua               body (or ?code=): Lua; returns what it printed and returned
 //   GET  /api/testkit/suites            the test suites
-//   POST /api/testkit/suite/run?name=   run one (conditions, toggles, all, guided, differential, replay);
+//   POST /api/testkit/suite/run?name=   run one (conditions, toggles, all, guided, differential, replay, addons);
 //                                       &wait=1 returns the report when done (or after 5 minutes);
 //                                       toggles: &disruptive=1 adds Wi-Fi etc.;
 //                                       guided / differential / replay: &steps=id,id:3 runs only those, each
@@ -1816,7 +1816,7 @@ static void RCTKSuiteDifferential(NSMutableDictionary *run) {
 
 static NSString *RCTKSuiteTitle(NSString *suite) {
     return @{ @"conditions": @"If Conditions", @"toggles": @"Toggle Actions", @"all": @"Conditions + Toggles",
-              @"guided": @"Gestures & Sensors", @"replay": @"Button Triggers", @"differential": @"Stock vs Tweak" }[suite ?: @""];
+              @"guided": @"Gestures & Sensors", @"replay": @"Button Triggers", @"differential": @"Stock vs Tweak", @"addons": @"Add-ons" }[suite ?: @""];
 }
 
 static NSDictionary *RCTKSuites(void) {
@@ -1827,6 +1827,7 @@ static NSDictionary *RCTKSuites(void) {
         @{ @"name": @"guided", @"changesState": @YES, @"description": @"Gestures & Sensors: each gesture and sensor trigger; a step passes when exactly its trigger fires. auto=1: the tweak does the steps it can (unlocking with a test passcode) and asks for the rest, first. Triggers are swapped for test ones (with capture on) and put back" },
         @{ @"name": @"replay", @"changesState": @YES, @"description": @"Button Triggers: each button trigger, with the presses sent by the tweak - exact, then with varied timing; hands off. Power presses are limited for safety. Triggers are swapped for test ones (with capture on) and put back" },
         @{ @"name": @"differential", @"changesState": @YES, @"description": @"Stock vs Tweak: each button press twice - master switch off, then with the tweak armed but not claiming it - and what iOS does must match, or match the tweak's defined behaviour. replay=1: the tweak does the presses and adds a timing sweep" },
+        @{ @"name": @"addons", @"changesState": @NO, @"description": @"Add-ons: the loader accepts a valid add-on file and refuses each kind of broken one (checked with files written for the test), and the add-ons installed load without problems" },
     ] };
 }
 
@@ -1845,11 +1846,73 @@ static NSDictionary *RCTKSummarize(NSMutableDictionary *run) {
     return report;
 }
 
+// Add-ons: the loader's rules, checked with files written for the purpose (nothing is installed,
+// and the phone's state is left alone), and that what is installed loads without problems
+static NSDictionary *RCTKSampleAddOn(void) {
+    return @{
+        @"api": @1, @"id": @"rctk-sample", @"name": @"Test Kit Sample",
+        @"actions": @[@{
+            @"command": @"go", @"name": @"Go",
+            @"options": @[
+                @{ @"id": @"mode", @"title": @"Mode", @"choices": @[@{ @"word": @"on", @"label": @"On" }, @{ @"word": @"off", @"label": @"Off" }] },
+                @{ @"id": @"level", @"title": @"Level", @"skipWhen": @{ @"mode": @"off" }, @"choices": @[@{ @"word": @"low", @"label": @"Low" }, @{ @"word": @"high", @"label": @"High" }] },
+            ],
+            @"run": @[@{ @"notify": @"com.example.rctk/go" }, @{ @"notify": @"com.example.rctk/stop", @"if": @{ @"var": @"mode", @"is": @"off" } }],
+            @"banner": @{ @"title": @"Test Kit Sample", @"await": @"com.example.rctk/state", @"states": @{ @"1": @"On", @"0": @"Off" } },
+        }],
+        @"conditions": @[@{ @"id": @"active", @"name": @"Active", @"type": @"choice", @"notifyState": @"com.example.rctk/state", @"choices": @{ @"1": @"Yes", @"0": @"No" } }],
+        @"events": @[@{ @"notify": @"com.example.rctk/state", @"action": @"go", @"trigger": @{ @"id": @"active", @"name": @"Active", @"states": @{ @"1": @"On", @"0": @"Off" } } }],
+    };
+}
+
+static void RCTKSuiteAddOns(NSMutableDictionary *run) {
+    NSString *dir = [NSTemporaryDirectory() stringByAppendingPathComponent:@"rctk-addons"];
+    [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+
+    // A copy of the sample with one change: `change` edits it, or nil leaves it as it is
+    void (^check)(NSString *, BOOL, void (^)(NSMutableDictionary *)) = ^(NSString *name, BOOL valid, void (^change)(NSMutableDictionary *)) {
+        if (g_tkStopRun) return;
+        NSMutableDictionary *file = [RCTKSampleAddOn() mutableCopy];
+        // Deep copy, so a change to an action doesn't reach the shared literal
+        file = [[NSJSONSerialization JSONObjectWithData:[NSJSONSerialization dataWithJSONObject:file options:0 error:nil] options:NSJSONReadingMutableContainers error:nil] mutableCopy];
+        if (change) change(file);
+        NSString *path = [dir stringByAppendingPathComponent:[name stringByAppendingString:@".json"]];
+        [[NSJSONSerialization dataWithJSONObject:file options:0 error:nil] writeToFile:path atomically:YES];
+        NSString *reply = RCHandleCommand([@"addons validate " stringByAppendingString:path]) ?: @"";
+        BOOL ok = valid ? [reply hasPrefix:@"OK:"] : [reply hasPrefix:@"Problem:"];
+        RCTKRecordResult(run, [@"addons.validate." stringByAppendingString:name], ok ? @"pass" : @"fail",
+                         @{ @"expected": valid ? @"valid" : @"a problem", @"got": [reply stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] }, -1);
+        [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+    };
+
+    check(@"sample", YES, nil);
+    check(@"newerApi", NO, ^(NSMutableDictionary *f) { f[@"api"] = @99; });
+    check(@"noId", NO, ^(NSMutableDictionary *f) { [f removeObjectForKey:@"id"]; });
+    check(@"upperCaseId", NO, ^(NSMutableDictionary *f) { f[@"id"] = @"Sample"; });
+    check(@"reservedId", NO, ^(NSMutableDictionary *f) { f[@"id"] = @"addons"; });
+    check(@"noActions", NO, ^(NSMutableDictionary *f) { f[@"actions"] = @[]; });
+    check(@"duplicateCommand", NO, ^(NSMutableDictionary *f) { f[@"actions"] = @[f[@"actions"][0], f[@"actions"][0]]; });
+    check(@"twoStepKinds", NO, ^(NSMutableDictionary *f) { f[@"actions"][0][@"run"] = @[@{ @"notify": @"a", @"url": @"b://c" }]; });
+    check(@"sharedChoiceWord", NO, ^(NSMutableDictionary *f) { f[@"actions"][0][@"options"][1][@"choices"][0][@"word"] = @"on"; });
+    check(@"skipWhenUnknownOption", NO, ^(NSMutableDictionary *f) { f[@"actions"][0][@"options"][1][@"skipWhen"] = @{ @"nothing": @"x" }; });
+    check(@"eventUnknownAction", NO, ^(NSMutableDictionary *f) { f[@"events"][0][@"action"] = @"missing"; });
+    check(@"wrongKind", NO, ^(NSMutableDictionary *f) { f[@"name"] = @5; });
+
+    if (g_tkStopRun) return;
+    // What is installed loads: every file is either offered or reported as not installed, none as a problem
+    NSString *list = RCHandleCommand(@"addons reload") ?: @"";
+    NSMutableArray *problems = [NSMutableArray array];
+    for (NSString *line in [list componentsSeparatedByString:@"\n"]) if ([line hasPrefix:@"Problem:"]) [problems addObject:line];
+    RCTKRecordResult(run, @"addons.installed", problems.count ? @"fail" : @"pass",
+                     @{ @"expected": @"no problems", @"got": problems.count ? problems : @[[list stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]] }, -1);
+    [[NSFileManager defaultManager] removeItemAtPath:dir error:nil];
+}
+
 static void RCTKSuiteReplay(NSMutableDictionary *run);
 
 static NSDictionary *RCTKRunSuite(NSString *name, NSDictionary *params) {
     BOOL disruptive = [params[@"disruptive"] boolValue], wait = [params[@"wait"] boolValue];
-    if (![@[@"conditions", @"toggles", @"all", @"guided", @"differential", @"replay"] containsObject:name ?: @""]) {
+    if (![@[@"conditions", @"toggles", @"all", @"guided", @"differential", @"replay", @"addons"] containsObject:name ?: @""]) {
         return @{ @"error": [NSString stringWithFormat:@"unknown suite '%@'", name ?: @""], @"suites": RCTKSuites()[@"suites"] };
     }
     NSMutableDictionary *run;
@@ -1877,13 +1940,14 @@ static NSDictionary *RCTKRunSuite(NSString *name, NSDictionary *params) {
 
     dispatch_semaphore_t done = dispatch_semaphore_create(0);
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        BOOL changesState = ![name isEqualToString:@"conditions"];
+        BOOL changesState = ![name isEqualToString:@"conditions"] && ![name isEqualToString:@"addons"];
         if (changesState) RCTKTakeSnapshot();
         if ([name isEqualToString:@"conditions"] || [name isEqualToString:@"all"]) RCTKSuiteConditions(run);
         if ([name isEqualToString:@"toggles"] || [name isEqualToString:@"all"]) RCTKSuiteToggles(run, disruptive);
         if ([name isEqualToString:@"guided"]) RCTKSuiteGuided(run);
         if ([name isEqualToString:@"differential"]) RCTKSuiteDifferential(run);
         if ([name isEqualToString:@"replay"]) RCTKSuiteReplay(run);
+        if ([name isEqualToString:@"addons"]) RCTKSuiteAddOns(run);
         if (g_tkStopRun) {
             @synchronized (run) { run[@"stopped"] = @YES; }
             RCShowPrompt(RCTKSuiteTitle(name) ?: @"Test", @"Stopped", @"stop.circle", 2.0);

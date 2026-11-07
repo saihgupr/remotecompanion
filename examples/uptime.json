@@ -1,0 +1,17 @@
+{
+  "$schema": "../addon.schema.json",
+  "api": 1,
+  "id": "uptime",
+  "name": "Uptime",
+  "icon": "clock",
+  "actions": [
+    {
+      "command": "show",
+      "name": "Show Uptime",
+      "run": [
+        { "exec": ["{jbroot}/usr/bin/uptime"], "as": "up" }
+      ],
+      "banner": { "subtitle": "{up}", "hold": 4 }
+    }
+  ]
+}

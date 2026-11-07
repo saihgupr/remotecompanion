@@ -1,0 +1,105 @@
+{
+  "$schema": "../addon.schema.json",
+  "api": 1,
+  "id": "cookbook",
+  "name": "Cookbook",
+  "icon": "book",
+  "actions": [
+    {
+      "command": "switch",
+      "name": "Switch",
+      "icon": "switch.2",
+      "options": [
+        { "id": "mode", "title": "Mode", "choices": [
+          { "word": "on",  "label": "On",  "value": "1" },
+          { "word": "off", "label": "Off", "value": "0" } ] }
+      ],
+      "run": [
+        { "defaults": { "domain": "com.example.cookbook", "key": "enabled", "toggle": true },
+          "if": { "var": "mode", "unset": true } },
+        { "defaults": { "domain": "com.example.cookbook", "key": "enabled", "value": "{mode}", "type": "bool" } },
+        { "defaults": { "domain": "com.example.cookbook", "key": "enabled", "read": true, "as": "now" } },
+        { "notify": "com.example.cookbook/changed" }
+      ],
+      "banner": { "subtitle": "{now}" }
+    },
+    {
+      "command": "say",
+      "name": "Show Text",
+      "icon": "text.bubble",
+      "input": { "title": "Text", "placeholder": "Hello" },
+      "run": [
+        { "command": "toast \"{input}\"" }
+      ]
+    },
+    {
+      "command": "state",
+      "name": "Set State",
+      "icon": "circle.lefthalf.fill",
+      "options": [
+        { "id": "to", "title": "State", "choices": [
+          { "word": "ready", "label": "Ready", "value": "1" },
+          { "word": "busy",  "label": "Busy",  "value": "2" } ] }
+      ],
+      "run": [
+        { "notify": "com.example.cookbook/state", "state": 1, "if": { "var": "to", "is": "1" } },
+        { "notify": "com.example.cookbook/state", "state": 2, "if": { "var": "to", "is": "2" } }
+      ],
+      "banner": { "await": "com.example.cookbook/state", "states": { "1": "Ready", "2": "Busy" }, "timeout": 3 }
+    },
+    {
+      "command": "find",
+      "name": "Find File",
+      "icon": "doc.text.magnifyingglass",
+      "input": { "title": "Path", "placeholder": "/var/mobile" },
+      "run": [
+        { "exec": ["{jbroot}/bin/ls", "-d", "{input}"], "stopOnError": true, "as": "found" },
+        { "command": "toast \"Found {found}\"" }
+      ],
+      "banner": { "subtitle": "{found}", "failed": "Not found (exit {exit})" }
+    },
+    {
+      "command": "minute",
+      "name": "Minute Check",
+      "icon": "clock",
+      "run": [
+        { "exec": ["{jbroot}/bin/date", "+%M"], "as": "minute" },
+        { "command": "toast \"Second half of the hour\"", "if": { "var": "minute", "above": 29 } },
+        { "command": "toast \"First half of the hour\"", "if": { "var": "minute", "below": 30 } }
+      ]
+    },
+    {
+      "command": "whoami",
+      "name": "Who Am I",
+      "icon": "lock.shield",
+      "run": [
+        { "exec": ["{jbroot}/usr/bin/id", "-un"], "as": "user" },
+        { "exec": ["{jbroot}/usr/bin/id", "-un"], "root": true, "as": "root" }
+      ],
+      "banner": { "subtitle": "{user}, and with root: {root}" }
+    }
+  ],
+  "conditions": [
+    { "id": "state", "name": "State", "type": "choice",
+      "notifyState": "com.example.cookbook/state", "choices": { "1": "Ready", "2": "Busy" } },
+    { "id": "hour", "name": "Hour", "type": "number",
+      "exec": ["{jbroot}/bin/date", "+%H"], "cache": 60 }
+  ],
+  "events": [
+    { "notify": "com.example.cookbook/state",
+      "trigger": { "id": "state", "name": "State Changed", "states": { "1": "Ready", "2": "Busy" } } }
+  ],
+  "settings": [
+    { "id": "enabled", "title": "Enabled", "type": "switch",
+      "domain": "com.example.cookbook", "key": "enabled", "default": false,
+      "note": "The same preference the Switch action changes.", "notify": "com.example.cookbook/changed" },
+    { "id": "speed", "title": "Speed", "type": "choice", "default": "normal",
+      "choices": [ { "value": "slow", "label": "Slow" }, { "value": "normal", "label": "Normal" }, { "value": "fast", "label": "Fast" } ],
+      "domain": "com.example.cookbook", "key": "speed", "notify": "com.example.cookbook/changed" },
+    { "id": "level", "title": "Level", "type": "number", "min": 0, "max": 100, "step": 10, "unit": "%",
+      "domain": "com.example.cookbook", "key": "level", "default": 50,
+      "notify": "com.example.cookbook/changed" },
+    { "id": "greeting", "title": "Greeting", "type": "text",
+      "domain": "com.example.cookbook", "key": "greeting", "default": "Hello" }
+  ]
+}
