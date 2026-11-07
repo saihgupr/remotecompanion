@@ -14,7 +14,7 @@ RemoteCompanion provides fast, scriptable system control for modern rootless jai
 > - **Excluded Apps**: Settings > Advanced Settings > Options lists every trigger that has actions, grouped like the Triggers page, and sets the apps where each one should stay quiet.
 > - **Toasts on the Lock Screen**: toasts show over the lock screen, wait for the next wake when the screen is off, and can wake the screen with the new Wake Screen switch.
 > - **Web UI Light Mode**: the Web UI follows system appearance with a full light palette, and the Running sheet covers live runs and recent history.
-> - **API Token Gating**: an optional token in Settings > Web UI > Access gates privileged `/api/command` calls (`root`, `sudo`, `exec`).
+> - **Web UI Security Hardening**: an optional token in Settings > Web UI > Access gates privileged `/api/command` calls (`root`, `sudo`, `exec`), privileged triggers, and TestKit execution. Secret credentials in `/api/config` are masked, CORS is restricted to local/private network origins, and SSH variables are POSIX single-quoted.
 > - **Two-Finger Slides**: slide up from the bottom bar or down from the status bar with two fingers, each firing its own trigger, with distance-based firing, a widened landing zone, and Control Center suppression mid-gesture.
 > - **Lock Scrolling During Gestures**: an off-by-default toggle that keeps lists still while gesturing.
 
@@ -58,7 +58,7 @@ RemoteCompanion provides fast, scriptable system control for modern rootless jai
 - **Live Discovery**: Discovery-based live lists for nearby AirPlay and Bluetooth hardware.
 - **Trigger Favorites**: Mark any trigger as a favorite for instant access at the top of the picker.
 - **Web UI Light Mode**: the Web UI follows system appearance with a full light palette, dark theme unchanged.
-- **API Token Gating**: optional token in Settings > Web UI > Access (and `rc webui token`) that gates privileged `/api/command` calls such as `root`, `sudo` and `exec`, while safe commands and `/api/trigger/<key>` stay open.
+- **Web UI Security Hardening**: optional API token in Settings > Web UI > Access (and `rc webui token`) that gates privileged `/api/command` calls, privileged triggers, and TestKit runs. Sensitive secrets in `/api/config` are masked for unauthenticated callers, CORS rejects public web origins, and trigger config is saved with restrictive `0600` permissions.
 - **True Multitasking**: Concurrent server handling powered by GCD—zero battery drain, zero blocking.
 
 ---
@@ -513,7 +513,7 @@ Send command strings via `GET` or `POST`:
 - **Example (GET)**: `http://[device_ip]:8080/api/command?cmd=play`
 - **Example (POST)**: `curl -X POST "http://[device_ip]:8080/api/command" -d "haptic"`
 
-If an API token is set in Settings > Web UI > Access, privileged commands (`root`, `sudo`, `exec`) need it as `Authorization: Bearer <TOKEN>`, `X-API-Key: <TOKEN>`, `?token=` or `?key=`.
+If an API token is set in Settings > Web UI > Access, privileged commands (`root`, `sudo`, `exec`), triggers containing privileged actions, and TestKit execution require it as `Authorization: Bearer <TOKEN>`, `X-API-Key: <TOKEN>`, `?token=` or `?key=`.
 
 **3. Fire an Automation Trigger:**
 Execution URLs for your specific triggers:
@@ -549,10 +549,15 @@ A pause from a tweak left on for 4 hours ends by itself.
 
 ## Security
 
-RemoteCompanion implements several measures to ensure your device remains secure:
+RemoteCompanion implements multiple layers of protection to ensure your device remains secure:
 
-- **Local Execution**: Local apps and the `rc` CLI communicate securely via a local UNIX socket file, ensuring zero network exposure.
-- **Web UI & Automations API**: When enabled, the Automations Hub server transmits data in **plain-text** over your local network. Privileged `/api/command` calls (`root`, `sudo`, `exec`) can be gated behind an optional API token in Settings > Web UI > Access (`rc webui token`), while safe commands and `/api/trigger/<key>` stay open. It is **highly recommended** to only enable the Web UI on trusted, private networks.
+- **Local Execution**: Local apps and the `rc` CLI communicate securely via a local UNIX socket file (`/var/mobile/Documents/rc.sock`), bypassing network exposure.
+- **Setuid Root Helper Protection**: `rc-root` verifies its calling parent process is SpringBoard before executing privileged actions. Direct execution by unprivileged mobile processes is blocked by default.
+- **API Token Authentication**: Setting an API token in Settings > Web UI > Access (`rc webui token`) gates privileged commands (`root`, `sudo`, `exec`), triggers containing privileged actions, and TestKit test runs from network clients. Everyday safe commands (`lock`, `volume`, `media`, etc.) remain accessible for local network automations.
+- **Credential Masking in API**: `GET /api/config` automatically masks sensitive passwords and tokens (`webUIApiToken`, `haToken`, `mqttPassword`, and SSH credentials) as `••••••••` for unauthenticated remote callers, and `POST /api/config` requires a valid token to save changes.
+- **Strict CORS Origin Validation**: Cross-origin requests from public websites to the Web UI API are rejected with `403 Forbidden`. CORS is strictly restricted to localhost, loopback addresses, `.local` mDNS domains, and RFC 1918 private subnets.
+- **POSIX Shell Quoting**: SSH action commands and variable substitutions are strictly POSIX single-quoted to eliminate injection vulnerabilities on target hosts.
+- **Configuration Permissions**: Sensitive trigger plists (`/var/mobile/Documents/rc_triggers.plist`) are written with `0600` permissions (readable/writable only by owner).
 
 ---
 
