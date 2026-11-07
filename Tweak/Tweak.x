@@ -2446,8 +2446,8 @@ static void save_trigger_config() {
         // 1. Try atomic write to shared path
         BOOL success = [data writeToFile:sharedPath atomically:YES];
         if (!success) {
-            // 2. Fallback to POSIX open/write
-            int fd = open([sharedPath UTF8String], O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            // 2. Fallback to POSIX open/write (0600: config holds SSH passwords, tokens, and passcodes)
+            int fd = open([sharedPath UTF8String], O_WRONLY | O_CREAT | O_TRUNC, 0600);
             if (fd >= 0) {
                 write(fd, [data bytes], [data length]);
                 close(fd);
@@ -2458,6 +2458,9 @@ static void save_trigger_config() {
             }
         } else {
             SRLog(@"[WebUI] Saved config to shared path: %@", sharedPath);
+        }
+        if (success) {
+            chmod([sharedPath UTF8String], 0600);
         }
         
         // 3. If we have a resolved container path, try saving there too
@@ -2989,7 +2992,7 @@ static NSString *rc_fill_action(NSString *text) {
     for (NSString *prefix in @[@"lua ", @"lua_eval ", @"lua:"]) {
         if ([lower hasPrefix:prefix]) return rc_fill_placeholders_mode(text, RCFillRoundOnly);
     }
-    for (NSString *prefix in @[@"exec ", @"root ", @"sudo "]) {
+    for (NSString *prefix in @[@"exec ", @"root ", @"sudo ", @"ssh-run "]) {
         if ([lower hasPrefix:prefix]) return rc_fill_placeholders_mode(text, RCFillShell);
     }
     // A Toast's parts are in double quotes: a " in a value would end one early
