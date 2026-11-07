@@ -3501,15 +3501,23 @@ static BOOL rc_web_client_allowed(const struct sockaddr_storage *addr) {
     return wifi && [networks isKindOfClass:[NSArray class]] && [networks containsObject:wifi];
 }
 
-static BOOL rc_is_privileged_command(NSString *cmd) {
+BOOL RCIsPrivilegedCommand(NSString *cmd) {
     if (!cmd || ![cmd isKindOfClass:[NSString class]]) return NO;
     NSString *trimmed = [cmd stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     return [trimmed hasPrefix:@"root "] || [trimmed isEqualToString:@"root"] ||
            [trimmed hasPrefix:@"sudo "] || [trimmed isEqualToString:@"sudo"] ||
-           [trimmed hasPrefix:@"exec "] || [trimmed isEqualToString:@"exec"];
+           [trimmed hasPrefix:@"exec "] || [trimmed isEqualToString:@"exec"] ||
+           [trimmed hasPrefix:@"lua "] || [trimmed hasPrefix:@"lua_eval "] || [trimmed hasPrefix:@"Lua "] ||
+           [trimmed hasPrefix:@"ssh-run "] ||
+           [trimmed hasPrefix:@"tap "] || [trimmed hasPrefix:@"hold "] || [trimmed hasPrefix:@"swipe "] ||
+           [trimmed hasPrefix:@"gesture "];
 }
 
-static BOOL rc_is_api_token_valid(NSString *providedToken) {
+static BOOL rc_is_privileged_command(NSString *cmd) {
+    return RCIsPrivilegedCommand(cmd);
+}
+
+BOOL RCIsApiTokenValid(NSString *providedToken) {
     load_trigger_config();
     NSString *expectedToken = g_triggerConfig[@"webUIApiToken"];
     if (!expectedToken || ![expectedToken isKindOfClass:[NSString class]] || expectedToken.length == 0) {
@@ -3531,7 +3539,11 @@ static BOOL rc_is_api_token_valid(NSString *providedToken) {
     return diff == 0;
 }
 
-static NSString *rc_extract_token_from_headers(NSString *requestHeaders) {
+static BOOL rc_is_api_token_valid(NSString *providedToken) {
+    return RCIsApiTokenValid(providedToken);
+}
+
+NSString *RCExtractTokenFromHeaders(NSString *requestHeaders) {
     if (!requestHeaders || ![requestHeaders isKindOfClass:[NSString class]]) return nil;
     NSArray *lines = [requestHeaders componentsSeparatedByString:@"\r\n"];
     for (NSUInteger i = 1; i < lines.count; i++) {
@@ -3555,6 +3567,10 @@ static NSString *rc_extract_token_from_headers(NSString *requestHeaders) {
         }
     }
     return nil;
+}
+
+static NSString *rc_extract_token_from_headers(NSString *requestHeaders) {
+    return RCExtractTokenFromHeaders(requestHeaders);
 }
 
 // A trigger's runs. Each firing runs the actions on a thread of its own; a run carries its
@@ -13416,10 +13432,60 @@ static void start_web_server() {
                                     }
                                     triggerKey = [triggerKey stringByRemovingPercentEncoding];
                                     
-                                    dispatch_async(dispatch_get_main_queue(), ^{
-                                        RCExecuteTrigger(triggerKey);
-                                    });
-                                    responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: 12\r\n\r\n{\"ok\": true}", cors];
+                                    NSString *clientToken = rc_extract_token_from_headers(requestString);
+                                    if (!clientToken || clientToken.length == 0) {
+                                        NSRange qMark = [path rangeOfString:@"?"];
+                                        if (qMark.location != NSNotFound) {
+                                            NSString *query = [path substringFromIndex:qMark.location + 1];
+                                            for (NSString *p in [query componentsSeparatedByString:@"&"]) {
+                                                NSArray *kv = [p componentsSeparatedByString:@"="];
+                                                if (kv.count == 2) {
+                                                    NSString *k = [kv[0] lowercaseString];
+                                                    if ([k isEqualToString:@"token"] || [k isEqualToString:@"key"]) {
+                                                        clientToken = [kv[1] stringByRemovingPercentEncoding];
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    
+                                    BOOL hasPrivilegedAction = NO;
+                                    NSDictionary *trig = g_triggerConfig[@"triggers"][triggerKey];
+                                    if ([trig isKindOfClass:[NSDictionary class]]) {
+                                        NSArray *actions = trig[@"actions"];
+                                        if ([actions isKindOfClass:[NSArray class]]) {
+                                            for (id act in actions) {
+                                                if ([act isKindOfClass:[NSString class]] && rc_is_privileged_command(act)) {
+                                                    hasPrivilegedAction = YES;
+                                                    break;
+                                                } else if ([act isKindOfClass:[NSDictionary class]]) {
+                                                    NSString *type = act[@"type"];
+                                                    if ([type isEqualToString:@"set_variable"]) {
+                                                        NSString *op = act[@"op"];
+                                                        if ([op isEqualToString:@"command"] || [op isEqualToString:@"command_number"]) {
+                                                            if (rc_is_privileged_command(act[@"value"])) {
+                                                                hasPrivilegedAction = YES;
+                                                                break;
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    
+                                    BOOL isLocal = rc_web_client_is_local(&client_addr) || RCCommandFromLocalSocket();
+                                    if (!isLocal && hasPrivilegedAction && !rc_is_api_token_valid(clientToken)) {
+                                        NSString *errJson = @"{\"ok\":false,\"error\":\"Trigger containing privileged actions requires valid token\"}";
+                                        NSData *errData = [errJson dataUsingEncoding:NSUTF8StringEncoding];
+                                        responseString = [NSString stringWithFormat:@"HTTP/1.1 403 Forbidden\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)errData.length, errJson];
+                                    } else {
+                                        dispatch_async(dispatch_get_main_queue(), ^{
+                                            RCExecuteTrigger(triggerKey);
+                                        });
+                                        responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: 12\r\n\r\n{\"ok\": true}", cors];
+                                    }
                                 }
                             }
                             
