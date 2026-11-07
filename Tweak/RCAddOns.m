@@ -1168,7 +1168,7 @@ static NSString *rcao_run_steps(NSArray<NSDictionary *> *steps, NSMutableDiction
                 note(what);
             }
             if (rootOff) {
-                [output appendFormat:@"Error: %@ needs Run as Root (Settings > Integrations > %@)\n", rootOff, rootOff];
+                [output appendFormat:@"Error: %@ needs Run as Root (Settings > Add-ons > %@)\n", rootOff, rootOff];
                 if (!trace) RCShowBanner(rootOff, @"Run as Root is off", @"lock", 3.0);
             } else if (!result) {
                 [output appendFormat:@"Error: Could not run %@\n", args.firstObject];
