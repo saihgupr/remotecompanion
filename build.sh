@@ -9,6 +9,12 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Add-ons: the built-in commands an add-on can't use are listed in Tweak/RCAddOnsBuiltins.h and the
+# Mac checker; stop when that list no longer matches Tweak.x (a built-in command was added)
+if command -v python3 >/dev/null 2>&1; then
+    python3 tools/addon-builtins.py --check
+fi
+
 # Defaults
 THEOS="${THEOS:-/opt/theos}"
 SCHEME="rootless"

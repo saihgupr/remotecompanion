@@ -30,6 +30,7 @@
 #import "RCTestKit.h"
 #import "RCToastPill.h"
 #import "RCTriggerAppExclusions.h"
+#import "RCAddOns.h"
 #import <CoreFoundation/CoreFoundation.h>
 #import <CoreLocation/CoreLocation.h>
 #import <objc/message.h>
@@ -1378,6 +1379,11 @@ void RCShowPrompt(NSString *title, NSString *subtitle, NSString *iconSymbol, NST
 
 void RCHidePrompt(void) {
     rc_hide_hud_toast();
+}
+
+// For add-ons (RCAddOns.m)
+void RCShowBanner(NSString *title, NSString *subtitle, NSString *iconSymbol, NSTimeInterval hold) {
+    rc_show_hud_toast_ex(title, subtitle, iconSymbol, hold, NO);
 }
 
 // Settings > Banners switches for actions that show a banner of their own (defined below)
@@ -2780,7 +2786,14 @@ static BOOL rc_condition_direct_match(NSString *key, NSString *expected, BOOL *h
     *handled = YES;
     __block NSString *actual = nil;
 
-    if ([key isEqualToString:@"lpm"]) {
+    if ([key hasPrefix:@"addon:"]) {
+        // An add-on's condition: a number compared like battery level, or a choice by name
+        BOOL isNumber = NO;
+        NSString *value = RCAddOnsConditionValue(key, &isNumber);
+        if (!value) return NO;
+        if (isNumber) return rc_threshold_matches(expected, value.floatValue);
+        return [value caseInsensitiveCompare:expected] == NSOrderedSame;
+    } else if ([key isEqualToString:@"lpm"]) {
         actual = [[NSProcessInfo processInfo] isLowPowerModeEnabled] ? @"ON" : @"OFF";
     } else if ([key isEqualToString:@"flashlight"]) {
         AVCaptureDevice *device = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
@@ -3331,11 +3344,16 @@ static void rc_toast_wake_screen_if_set(void) {
     inject_hid_event(kHIDPage_Consumer, kHIDUsage_Csmr_Power, 0, 0);
 }
 
+BOOL RCBannerEnabled(NSString *bannerId) {
+    return rc_own_banner_enabled(bannerId);
+}
+
 // Actions that already show a banner of their own (Camera, Home Assistant, Keyboard
 // Maestro, MQTT, AudioMix, SneakyCam, the music-queue actions). Settings > Banners
 // doesn't offer them; this also keeps an older or hand-edited selection from adding
 // a second banner.
 static BOOL rc_action_shows_own_banner(NSString *cmd) {
+    if (RCAddOnsCommandShowsOwnBanner(cmd)) return YES;
     if ([cmd hasPrefix:@"camera"] || [cmd hasPrefix:@"open camera"]) {
         // Opening the camera shows a banner; the shutter / record toggle don't
         NSSet *quiet = [NSSet setWithArray:@[@"camera shutter", @"camera snap", @"camera capture", @"camera record toggle", @"camera record-toggle"]];
@@ -3833,6 +3851,16 @@ static BOOL rc_run_wait(double seconds) {
     return !rc_run_stopped();
 }
 
+// For add-ons (RCAddOns.m): a wait that ends early when the trigger run is stopped (NO then), and
+// whether it was. Outside a trigger run (a command from the Web UI, say) these just sleep / say NO.
+BOOL RCRunWait(double seconds) {
+    return rc_run_wait(seconds);
+}
+
+BOOL RCRunStopped(void) {
+    return rc_run_stopped();
+}
+
 static BOOL RC_IsToastsEnabledForTrigger(NSString *triggerKey) {
     if (!triggerKey.length) return YES;
     NSString *cleanKey = triggerKey;
@@ -4084,9 +4112,25 @@ static void rc_execute_action_sequence_body(NSArray *actions, NSString *triggerK
             limit = MIN(limit, 24 * 3600);
             CFAbsoluteTime started = CFAbsoluteTimeGetCurrent();
             BOOL met = rc_evaluate_if_condition(dictAction);
+            // An add-on condition read from a notification's state: woken when it's posted, rather
+            // than checked twice a second (and still every 30 s, should a post be missed)
+            dispatch_semaphore_t runWait = [NSThread currentThread].threadDictionary[@"rcRunWait"];
+            NSString *waitKey = [dictAction[@"conditionKey"] description];
+            int watch = -1;
+            if (!met && runWait && [waitKey hasPrefix:@"addon:"]) {
+                watch = RCAddOnsConditionWatch(waitKey, ^{ dispatch_semaphore_signal(runWait); });
+            }
+            double interval = watch >= 0 ? 30 : 0.5;
             while (!met && CFAbsoluteTimeGetCurrent() - started < limit) {
-                if (!rc_run_wait(0.5)) break; // stopped
+                double left = limit - (CFAbsoluteTimeGetCurrent() - started);
+                if (!rc_run_wait(MAX(MIN(interval, left), 0.05))) break; // stopped
                 met = rc_evaluate_if_condition(dictAction);
+            }
+            if (watch >= 0) {
+                RCAddOnsConditionStopWatching(watch);
+                // Wake-ups from posts no wait used up would end the next wait early. (A stop isn't
+                // lost: it's kept in the run's state, which every wait checks.)
+                while (dispatch_semaphore_wait(runWait, DISPATCH_TIME_NOW) == 0) {}
             }
             if (rc_run_stopped()) continue; // the top of the loop ends the run
             rc_run_trace(idx, @"met", @(met));
@@ -12235,7 +12279,8 @@ static NSString *handle_command(NSString *cmd) {
         });
         return [NSString stringWithFormat:@"Executing trigger: %@\n", key];
     }
-    return nil;
+    // Add-ons (RCAddOns.m), after every built-in command so those always come first
+    return RCAddOnsHandleCommand(cleanCmd);
 }
 
 static char** rc_shell_env(void) {
@@ -12591,7 +12636,7 @@ static void start_web_server() {
                                     NSData *htmlData = [html dataUsingEncoding:NSUTF8StringEncoding];
                                     responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: text/html\r\nCache-Control: no-cache, no-store, must-revalidate\r\nPragma: no-cache\r\nExpires: 0\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)htmlData.length, html];
                                 }
-                            } else if ([path isEqualToString:@"/favicon.ico"] || [path isEqualToString:@"/apple-touch-icon.png"] || [path hasPrefix:@"/favicon-"] || [path hasPrefix:@"/android-chrome-"] || [path isEqualToString:@"/site.webmanifest"]) {
+                            } else if ([path isEqualToString:@"/favicon.ico"] || [path isEqualToString:@"/apple-touch-icon.png"] || [path hasPrefix:@"/favicon-"] || [path hasPrefix:@"/android-chrome-"] || [path isEqualToString:@"/site.webmanifest"] || [path isEqualToString:@"/rc_addon_commands.js"]) {
                                 NSString *filename = [path lastPathComponent];
                                 NSString *assetPath = [NSString stringWithFormat:@"%@/Library/Application Support/RemoteCompanion/%@", root_prefix(), filename];
                                 NSData *assetData = [NSData dataWithContentsOfFile:assetPath];
@@ -12609,8 +12654,11 @@ static void start_web_server() {
                                     if ([path hasSuffix:@".ico"]) contentType = @"image/x-icon";
                                     else if ([path hasSuffix:@".png"]) contentType = @"image/png";
                                     else if ([path hasSuffix:@".webmanifest"] || [path hasSuffix:@".json"]) contentType = @"application/manifest+json";
+                                    else if ([path hasSuffix:@".js"]) contentType = @"text/javascript; charset=utf-8";
                                     
-                                    NSString *header = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: %@\r\nContent-Length: %lu\r\n\r\n", cors, contentType, (unsigned long)assetData.length];
+                                    // The add-on command script changes with RemoteCompanion, like the page: never kept
+                                    NSString *caching = [path hasSuffix:@".js"] ? @"Cache-Control: no-cache, no-store, must-revalidate\r\n" : @"";
+                                    NSString *header = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: %@\r\n%@Content-Length: %lu\r\n\r\n", cors, contentType, caching, (unsigned long)assetData.length];
                                     write(new_socket, [header UTF8String], [header lengthOfBytesUsingEncoding:NSUTF8StringEncoding]);
                                     write(new_socket, [assetData bytes], [assetData length]);
                                     responseString = nil; // Skip default write
@@ -12700,6 +12748,28 @@ static void start_web_server() {
                                     }
                                     NSData *jsonData = [NSJSONSerialization dataWithJSONObject:@{@"logs": logContent ?: @""} options:0 error:nil];
                                     NSString *jsonStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+                                    responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)[jsonStr lengthOfBytesUsingEncoding:NSUTF8StringEncoding], jsonStr];
+                                } else if ([path hasPrefix:@"/api/addons/icon"] && [method isEqualToString:@"GET"]) {
+                                    // /api/add-ons/icon?id=<add-on id>[&file=<icon>]: the image an icon names
+                                    // (&file=<icon name> picks one of its other icons)
+                                    NSURLComponents *iconQuery = [NSURLComponents componentsWithString:[@"http://x" stringByAppendingString:path]];
+                                    NSString *addOnId = nil, *iconName = nil;
+                                    for (NSURLQueryItem *item in iconQuery.queryItems) {
+                                        if ([item.name isEqualToString:@"id"]) addOnId = item.value;
+                                        else if ([item.name isEqualToString:@"file"]) iconName = item.value;
+                                    }
+                                    NSString *iconType = nil;
+                                    NSData *iconData = addOnId.length ? RCAddOnsIconData(addOnId, iconName, &iconType) : nil;
+                                    if (iconData) {
+                                        NSString *header = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: %@\r\nCache-Control: max-age=60\r\nContent-Length: %lu\r\n\r\n", cors, iconType, (unsigned long)iconData.length];
+                                        write(new_socket, [header UTF8String], [header lengthOfBytesUsingEncoding:NSUTF8StringEncoding]);
+                                        write(new_socket, [iconData bytes], [iconData length]);
+                                        responseString = nil;
+                                    } else {
+                                        responseString = [NSString stringWithFormat:@"HTTP/1.1 404 Not Found\r\n%@Content-Length: 0\r\n\r\n", cors];
+                                    }
+                                } else if ([path isEqualToString:@"/api/addons"] && [method isEqualToString:@"GET"]) {
+                                    NSString *jsonStr = RCAddOnsCatalogJSON();
                                     responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)[jsonStr lengthOfBytesUsingEncoding:NSUTF8StringEncoding], jsonStr];
                                 } else if ([path isEqualToString:@"/api/capabilities"] && [method isEqualToString:@"GET"]) {
                                     NSDictionary *caps = @{
@@ -18883,6 +18953,7 @@ static NSTimeInterval s_last_camera_launch_notify = 0;
             start_web_server();
             start_schedule_timer();
             start_mqtt_subscriber();
+            RCAddOnsStart();
             
             // Conditionally register edge gestures based on config
             update_edge_gestures();
