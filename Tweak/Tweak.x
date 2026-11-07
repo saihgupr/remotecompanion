@@ -12469,6 +12469,48 @@ static NSDictionary* get_system_diagnostics(void) {
     };
 }
 
+static NSString *rc_cors_headers_for_request(NSString *requestString, BOOL *outOriginBlocked) {
+    if (outOriginBlocked) *outOriginBlocked = NO;
+    NSString *origin = nil;
+    NSArray *lines = [requestString componentsSeparatedByString:@"\r\n"];
+    for (NSUInteger i = 1; i < lines.count; i++) {
+        NSString *line = lines[i];
+        if (line.length == 0) break;
+        if ([line.lowercaseString hasPrefix:@"origin:"]) {
+            origin = [[line substringFromIndex:7] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            break;
+        }
+    }
+    
+    if (!origin.length) {
+        return @"Access-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization, X-API-Key\r\n";
+    }
+    
+    BOOL isAllowedOrigin = NO;
+    NSURL *originUrl = [NSURL URLWithString:origin];
+    NSString *host = originUrl.host.lowercaseString;
+    if (host.length > 0) {
+        if ([host isEqualToString:@"localhost"] || [host isEqualToString:@"127.0.0.1"] || [host isEqualToString:@"::1"] || [host hasSuffix:@".local"]) {
+            isAllowedOrigin = YES;
+        } else if ([host hasPrefix:@"192.168."] || [host hasPrefix:@"10."] || [host hasPrefix:@"169.254."]) {
+            isAllowedOrigin = YES;
+        } else if ([host hasPrefix:@"172."]) {
+            NSArray *parts = [host componentsSeparatedByString:@"."];
+            if (parts.count >= 2) {
+                int secondOctet = [parts[1] intValue];
+                if (secondOctet >= 16 && secondOctet <= 31) isAllowedOrigin = YES;
+            }
+        }
+    }
+    
+    if (isAllowedOrigin) {
+        return [NSString stringWithFormat:@"Access-Control-Allow-Origin: %@\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization, X-API-Key\r\n", origin];
+    }
+    
+    if (outOriginBlocked) *outOriginBlocked = YES;
+    return @"Access-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization, X-API-Key\r\n";
+}
+
 static void start_web_server() {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         int server_fd, new_socket;
@@ -12581,8 +12623,15 @@ static void start_web_server() {
                             NSString *method = requestLine[0];
                             NSString *path = requestLine[1];
                             
-                            // CORS headers
-                            NSString *cors = @"Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization, X-API-Key\r\n";
+                            // CORS headers restricted to local/LAN origins
+                            BOOL originBlocked = NO;
+                            NSString *cors = rc_cors_headers_for_request(requestString, &originBlocked);
+                            if (originBlocked && [path hasPrefix:@"/api/"]) {
+                                static const char refused[] = "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nContent-Length: 22\r\nConnection: close\r\n\r\nCross-Origin Forbidden";
+                                write(new_socket, refused, sizeof(refused) - 1);
+                                close(new_socket);
+                                return;
+                            }
                             NSString *responseString = [NSString stringWithFormat:@"HTTP/1.1 404 Not Found\r\n%@Content-Length: 9\r\n\r\nNot Found", cors];
                             
                             if ([method isEqualToString:@"OPTIONS"]) {
