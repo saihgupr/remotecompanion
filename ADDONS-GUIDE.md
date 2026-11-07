@@ -402,8 +402,10 @@ preference the way it already does. The cookbook has one of each type.
 { "exec": ["{jbroot}/usr/bin/id", "-un"], "root": true, "as": "root" }
 ```
 
-Root steps go through RemoteCompanion's `rc-root` helper. Only use root when the work really
-needs it.
+Root steps go through RemoteCompanion's `rc-root` helper. They don't run until the user turns on
+Run as Root on your add-on's page in the app, so say so in your package's description. Until it's
+on, a root step is skipped with a banner saying Run as Root is off. Only use root when the work
+really needs it.
 
 ### Pick icons that work on older iOS
 

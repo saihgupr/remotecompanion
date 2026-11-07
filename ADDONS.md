@@ -236,8 +236,11 @@ Any step can have these:
 ### `exec`
 
 The program runs as mobile; add `"root": true` to run it as root through RemoteCompanion's
-`rc-root` helper. Its `PATH` includes the jailbreak's tool folders, and each argument is filled
-from variables.
+`rc-root` helper. Root is off for each add-on until the user turns on Run as Root on its page in
+the app (or runs `addons root <id> on`). Until then a root step doesn't run: the action stops
+there if the step has `stopOnError`, its exit status is -1, a banner says Run as Root is off, and
+`addons trace` says why. Its `PATH` includes the jailbreak's tool folders, and each argument is
+filled from variables.
 
 Normally the program's output (both standard output and standard error) is added to the action's
 reply. With `"as": "name"`, its standard output goes into the variable `{name}` instead, for later
@@ -338,7 +341,7 @@ They're listed as "Add-on: Name".
 | `id`, `name` | required | The condition's id (unique in the add-on) and its name. |
 | `icon` | | An SF Symbol or an image file, as for the add-on. Default: the add-on's icon. |
 | `type` | required | `number` or `choice`. |
-| `exec` | one of these | A program, as in a step. The value is its trimmed standard output; standard error is left out. A non-zero exit makes the value unknown, so the condition is false, and so does output that isn't a number for a `number` condition. `"root": true` runs it as root. |
+| `exec` | one of these | A program, as in a step. The value is its trimmed standard output; standard error is left out. A non-zero exit makes the value unknown, so the condition is false, and so does output that isn't a number for a `number` condition. `"root": true` runs it as root, once the user turns on Run as Root for the add-on; until then the value is unknown. |
 | `notifyState` | | A notification name; the value is its current state number. |
 | `choices` | required for `choice` | `{ "<raw value>": "label" }`. The raw value (from `exec` or `notifyState`) is turned into the label, and the label is what the condition is compared with. |
 | `cache` | | How many seconds a value is reused, from 0 to 3600. Default 0, which reads it every time the condition is checked. While a Wait Until waits on a `notifyState` condition, each new notification clears its cached value. |
@@ -453,6 +456,10 @@ phone, or from anywhere RemoteCompanion takes commands.
 - `addons disable <id>` and `addons enable <id>` turn an add-on off and on again, just like its
   switch in the app. While it's off, it offers no actions, conditions or triggers, and its events
   stop.
+- `addons root <id> on` lets an add-on run programs as root (`"root": true`), and
+  `addons root <id> off` stops it, just like Run as Root on its page in the app. It's off until
+  turned on. `addons root <id>` says which it is, and `addons` shows it for each add-on that asks
+  for root.
 - `addons validate <file>` checks one file and prints `OK` with any warnings, or the problem.
 - `addons trace <add-on command>` runs the command for real and reports what happened: the
   variables it started with, each step as it was filled in, whether each step ran (with an
@@ -519,7 +526,8 @@ doesn't know isn't loaded, and the reason says which version it needs.
 ## Security
 
 An add-on is trusted the way an installed tweak is, because its file sits in a folder that only
-root can write to. It can run programs as mobile, or as root with `"root": true`, post
-notifications and write preferences. It has no shell, no code in SpringBoard and no network access
+root can write to. It can run programs as mobile, post notifications and write preferences. It
+can run programs as root (`"root": true`) only after the user turns on Run as Root for it, which
+is off until then; the app asks before turning it on. It has no shell, no code in SpringBoard and no network access
 of its own. Anyone who can send RemoteCompanion commands (through the Web UI, MQTT or Home
 Assistant) can run an add-on's actions, just as they can run any other command.
