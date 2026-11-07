@@ -3217,10 +3217,6 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
                     [self.tableView reloadData];
                 }]];
             }
-            
-            [alert addAction:[UIAlertAction actionWithTitle:@"Test Macro" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-                [[RCServerClient sharedClient] executeCommand:longPressCmdStr completion:^(NSString * _Nullable output, NSError * _Nullable error) {}];
-            }]];
         }
 
         // If-specific options
