@@ -348,8 +348,8 @@ typedef NS_ENUM(NSInteger, RCGestureDetailSection) {
     [replay addTarget:self action:@selector(replay) forControlEvents:UIControlEventTouchUpInside];
     [header addSubview:replay];
     self.replayButton = replay;
+    // Sized in viewDidLayoutSubviews: the header starts out 0 wide, which autoresizing can't undo
     RCTrimBar *bar = [[RCTrimBar alloc] initWithFrame:CGRectMake(16, 372, 288, 44)];
-    bar.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     bar.hidden = YES;
     [bar addTarget:self action:@selector(trimChanged) forControlEvents:UIControlEventValueChanged];
     [bar addTarget:self action:@selector(replay) forControlEvents:UIControlEventEditingDidEnd];
@@ -365,12 +365,18 @@ typedef NS_ENUM(NSInteger, RCGestureDetailSection) {
     self.trimLabel = trimLabel;
     self.tableView.tableHeaderView = header;
     // Back from Replace Recording: the new recording
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(load) name:UIApplicationDidBecomeActiveNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(becameActive) name:UIApplicationDidBecomeActiveNotification object:nil];
     [self load];
 }
 
 - (void)dealloc {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    CGFloat width = self.tableView.tableHeaderView.bounds.size.width;
+    self.trimBar.frame = CGRectMake(16, 372, MAX(0, width - 32), 44);
 }
 
 - (void)viewWillDisappear:(BOOL)animated {
@@ -380,6 +386,11 @@ typedef NS_ENUM(NSInteger, RCGestureDetailSection) {
 }
 
 #pragma mark - Loading
+
+// Not while trimming: the page has no rows then, and the timeline is for the gesture as it was
+- (void)becameActive {
+    if (!self.trimming) [self load];
+}
 
 // The tweak writes the gesture out (as for Export), then it's read back here
 - (void)load {
