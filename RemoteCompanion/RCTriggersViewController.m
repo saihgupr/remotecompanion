@@ -1528,15 +1528,17 @@ static NSString *const RCEnabledCategoryTitle = @"Enabled";
 }
 
 - (void)tableView:(UITableView *)tableView moveRowAtIndexPath:(NSIndexPath *)sourceIndexPath toIndexPath:(NSIndexPath *)destinationIndexPath {
-    // The favorites as shown, as the grid does: the saved list can hold deleted triggers that
-    // aren't shown, so its positions don't match the rows
+    NSMutableArray *favorites = [[RCConfigManager sharedManager] orderedFavorites].mutableCopy;
+    NSString *movedItem = favorites[sourceIndexPath.row];
+    [favorites removeObjectAtIndex:sourceIndexPath.row];
+    [favorites insertObject:movedItem atIndex:destinationIndexPath.row];
+    [[RCConfigManager sharedManager] setOrderedFavorites:favorites];
+
     NSInteger realSection = [_sectionTitles indexOfObject:@"Favorites"];
     if (realSection == NSNotFound) return;
     NSMutableArray *sectionData = [_sections[realSection] mutableCopy];
-    NSString *movedItem = sectionData[sourceIndexPath.row];
     [sectionData removeObjectAtIndex:sourceIndexPath.row];
     [sectionData insertObject:movedItem atIndex:destinationIndexPath.row];
-    [[RCConfigManager sharedManager] setOrderedFavorites:sectionData];
 
     NSMutableArray *mutableSections = [_sections mutableCopy];
     mutableSections[realSection] = sectionData;
