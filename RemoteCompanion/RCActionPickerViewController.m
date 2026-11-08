@@ -219,7 +219,7 @@
             @{ @"name": @"Connect Bluetooth...", @"command": @"__BT_CONNECT__", @"icon": @"link" },
             @{ @"name": @"Disconnect Bluetooth...", @"command": @"__BT_DISCONNECT__", @"icon": @"xmark.circle" },
             @{ @"name": @"Connect AirPlay...", @"command": @"__AIRPLAY_CONNECT__", @"icon": @"airplayaudio" },
-            @{ @"name": @"Disconnect AirPlay", @"command": @"airplay disconnect", @"icon": @"airplayaudio.badge.exclamationmark" }
+            @{ @"name": @"Disconnect AirPlay", @"command": @"airplay disconnect", @"icon": ([UIImage systemImageNamed:@"airplayaudio.badge.exclamationmark"] ? @"airplayaudio.badge.exclamationmark" : @"airplayaudio") }
         ],
         // System
         @[
@@ -304,7 +304,7 @@
             }
             if (snapperInstalled) {
                 [integrations addObject:@{ @"name": @"Snapper: Open Area", @"command": @"snapper open", @"icon": @"crop" }];
-                [integrations addObject:@{ @"name": @"Snapper: Freeze Screen", @"command": @"snapper freeze", @"icon": @"snowflake" }];
+                [integrations addObject:@{ @"name": @"Snapper: Freeze Screen", @"command": @"snapper freeze", @"icon": ([UIImage systemImageNamed:@"snowflake"] ? @"snowflake" : @"thermometer.snowflake") }];
                 [integrations addObject:@{ @"name": @"Snapper: Instant Snap", @"command": @"snapper instant", @"icon": @"bolt.fill" }];
                 [integrations addObject:@{ @"name": @"Snapper: Close All", @"command": @"snapper close", @"icon": @"xmark.rectangle.fill" }];
             }
