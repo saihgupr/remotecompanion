@@ -260,6 +260,11 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
 // sections come and go (Favorites, NFC, Wi-Fi, ... only appear when they have triggers).
 @property (nonatomic, strong) RCCategoryBar *categoryBar;
 @property (nonatomic, copy) NSString *selectedCategoryTitle;
+// The chips' categories in order: the section titles, with Enabled after Favorites
+@property (nonatomic, strong) NSArray<NSString *> *categoryTitles;
+// What the table and grid show: every section, the selected one, or each section's enabled triggers
+@property (nonatomic, strong) NSArray<NSArray<NSString *> *> *shownSections;
+@property (nonatomic, strong) NSArray<NSString *> *shownTitles;
 // The width the visible cells' card backgrounds were drawn for
 @property (nonatomic, assign) CGFloat cardStyleWidth;
 // Shown when no trigger has been added yet, over the list and the navigation bar
@@ -268,6 +273,9 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
 @property (nonatomic, strong) UIView *tableFooterView;
 @property (nonatomic, strong) UIView *gridFooterView;
 @end
+
+// Not a section: the triggers that run (switched on, with actions), under their own sections
+static NSString *const RCEnabledCategoryTitle = @"Enabled";
 
 @implementation RCTriggersViewController
 
@@ -389,7 +397,8 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     self.categoryBar = [[RCCategoryBar alloc] initWithWidth:self.view.bounds.size.width];
     __weak typeof(self) weakSelf = self;
     self.categoryBar.onSelect = ^(NSInteger index) {
-        weakSelf.selectedCategoryTitle = (index >= 0 && index < (NSInteger)weakSelf.sectionTitles.count) ? weakSelf.sectionTitles[index] : nil;
+        weakSelf.selectedCategoryTitle = (index >= 0 && index < (NSInteger)weakSelf.categoryTitles.count) ? weakSelf.categoryTitles[index] : nil;
+        [weakSelf updateShownSections];
         [weakSelf.tableView reloadData];
         [weakSelf.grid reload];
     };
@@ -853,17 +862,25 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     self.sections = sections;
     self.sectionTitles = titles;
 
-    // Chips follow the sections; a selected section that has gone away falls back to All
+    // Chips follow the sections, with Enabled after Favorites while any trigger is enabled; a
+    // selected category that has gone away falls back to All
+    NSMutableArray *categories = [titles mutableCopy];
+    if ([self enabledSections].count > 0) {
+        NSUInteger favorites = [titles indexOfObject:@"Favorites"];
+        [categories insertObject:RCEnabledCategoryTitle atIndex:favorites == NSNotFound ? 0 : favorites + 1];
+    }
+    self.categoryTitles = categories;
     NSMutableArray *chipTitles = [NSMutableArray array];
-    for (NSString *title in titles) {
+    for (NSString *title in categories) {
         [chipTitles addObject:[title hasSuffix:@" Triggers"] ? [title substringToIndex:title.length - 9] : title];
     }
     NSMutableArray *chipIcons = [NSMutableArray array];
-    for (NSString *title in titles) [chipIcons addObject:RCTriggerCategoryIcon(title) ?: [NSNull null]];
+    for (NSString *title in categories) [chipIcons addObject:RCTriggerCategoryIcon(title) ?: [NSNull null]];
     [self.categoryBar setChipTitles:chipTitles icons:chipIcons];
-    NSUInteger selected = self.selectedCategoryTitle ? [titles indexOfObject:self.selectedCategoryTitle] : NSNotFound;
+    NSUInteger selected = self.selectedCategoryTitle ? [categories indexOfObject:self.selectedCategoryTitle] : NSNotFound;
     if (selected == NSNotFound) self.selectedCategoryTitle = nil;
     self.categoryBar.selectedIndex = (selected == NSNotFound) ? -1 : (NSInteger)selected;
+    [self updateShownSections];
 
     [self updatePauseState]; // the left button is Resume while paused, otherwise none
 
@@ -1279,19 +1296,52 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
 
 #pragma mark - Display model
 
-// The sections the table shows: all of them, or just the selected category
-- (NSInteger)realSectionForDisplaySection:(NSInteger)section {
-    if (!self.selectedCategoryTitle) return section;
-    NSUInteger idx = [self.sectionTitles indexOfObject:self.selectedCategoryTitle];
-    return idx == NSNotFound ? section : (NSInteger)idx;
+// Each section with only its enabled triggers (the tweak runs a trigger that is on and has
+// actions), leaving out sections with none. Favorites keep theirs, so none go missing.
+- (NSArray<NSDictionary *> *)enabledSections {
+    RCConfigManager *config = [RCConfigManager sharedManager];
+    NSMutableArray *out = [NSMutableArray array];
+    [self.sections enumerateObjectsUsingBlock:^(NSArray<NSString *> *keys, NSUInteger i, BOOL *stop) {
+        NSMutableArray *enabled = [NSMutableArray array];
+        for (NSString *key in keys) {
+            if ([config isTriggerEnabled:key] && [config actionsForTrigger:key].count > 0) [enabled addObject:key];
+        }
+        if (enabled.count) [out addObject:@{ @"title": self.sectionTitles[i], @"keys": enabled }];
+    }];
+    return out;
+}
+
+// The sections the table and grid show: all of them, the selected one, or Enabled's
+- (void)updateShownSections {
+    NSString *selected = self.selectedCategoryTitle;
+    NSUInteger idx = selected ? [self.sectionTitles indexOfObject:selected] : NSNotFound;
+    if ([selected isEqualToString:RCEnabledCategoryTitle]) {
+        NSMutableArray *sections = [NSMutableArray array], *titles = [NSMutableArray array];
+        for (NSDictionary *section in [self enabledSections]) {
+            [sections addObject:section[@"keys"]];
+            [titles addObject:section[@"title"]];
+        }
+        self.shownSections = sections;
+        self.shownTitles = titles;
+    } else if (idx != NSNotFound) {
+        self.shownSections = @[self.sections[idx]];
+        self.shownTitles = @[selected];
+    } else {
+        self.shownSections = self.sections ?: @[];
+        self.shownTitles = self.sectionTitles ?: @[];
+    }
+}
+
+- (BOOL)showingEnabled {
+    return [self.selectedCategoryTitle isEqualToString:RCEnabledCategoryTitle];
 }
 
 - (NSInteger)displaySectionCount {
-    return self.selectedCategoryTitle ? 1 : self.sections.count;
+    return self.shownSections.count;
 }
 
 - (NSString *)triggerKeyAtIndexPath:(NSIndexPath *)indexPath {
-    return self.sections[[self realSectionForDisplaySection:indexPath.section]][indexPath.row];
+    return self.shownSections[indexPath.section][indexPath.row];
 }
 
 #pragma mark - Table View Data Source
@@ -1301,7 +1351,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
 }
 
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
-    NSString *title = _sectionTitles[[self realSectionForDisplaySection:section]];
+    NSString *title = self.shownTitles[section];
     CGFloat height = [self tableView:tableView heightForHeaderInSection:section];
     UIView *headerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, tableView.bounds.size.width, height)];
     UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(20, height - 25, tableView.bounds.size.width - 40, 20)];
@@ -1344,7 +1394,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    return self.sections[[self realSectionForDisplaySection:section]].count;
+    return self.shownSections[section].count;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -1475,15 +1525,13 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
 }
 
 - (BOOL)tableView:(UITableView *)tableView canMoveRowAtIndexPath:(NSIndexPath *)indexPath {
-    if (_sectionTitles.count > 0 && [_sectionTitles[[self realSectionForDisplaySection:indexPath.section]] isEqualToString:@"Favorites"]) {
-        return YES;
-    }
-    return NO;
+    // Not under Enabled, where Favorites may be only some of them
+    return ![self showingEnabled] && [self.shownTitles[indexPath.section] isEqualToString:@"Favorites"];
 }
 
 - (NSIndexPath *)tableView:(UITableView *)tableView targetIndexPathForMoveFromRowAtIndexPath:(NSIndexPath *)sourceIndexPath toProposedIndexPath:(NSIndexPath *)proposedDestinationIndexPath {
     if (sourceIndexPath.section != proposedDestinationIndexPath.section) {
-        NSInteger row = (proposedDestinationIndexPath.section < sourceIndexPath.section) ? 0 : [self.sections[[self realSectionForDisplaySection:sourceIndexPath.section]] count] - 1;
+        NSInteger row = (proposedDestinationIndexPath.section < sourceIndexPath.section) ? 0 : [self.shownSections[sourceIndexPath.section] count] - 1;
         return [NSIndexPath indexPathForRow:row inSection:sourceIndexPath.section];
     }
     return proposedDestinationIndexPath;
@@ -1496,7 +1544,8 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     [favorites insertObject:movedItem atIndex:destinationIndexPath.row];
     [[RCConfigManager sharedManager] setOrderedFavorites:favorites];
 
-    NSInteger realSection = [self realSectionForDisplaySection:sourceIndexPath.section];
+    NSInteger realSection = [_sectionTitles indexOfObject:@"Favorites"];
+    if (realSection == NSNotFound) return;
     NSMutableArray *sectionData = [_sections[realSection] mutableCopy];
     [sectionData removeObjectAtIndex:sourceIndexPath.row];
     [sectionData insertObject:movedItem atIndex:destinationIndexPath.row];
@@ -1504,6 +1553,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     NSMutableArray *mutableSections = [_sections mutableCopy];
     mutableSections[realSection] = sectionData;
     _sections = mutableSections;
+    [self updateShownSections];
 }
 
 #pragma mark - Deleting, app icons
@@ -1592,7 +1642,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
 
 - (NSString *)gridTitleForSection:(NSInteger)section {
     if ([self gridIsOneSection]) return @"";
-    return self.sectionTitles[[self realSectionForDisplaySection:section]];
+    return self.shownTitles[section];
 }
 
 - (NSArray<NSString *> *)gridKeysInSection:(NSInteger)section {
@@ -1601,12 +1651,11 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
         for (NSArray *keys in self.sections) [all addObjectsFromArray:keys];
         return all;
     }
-    NSInteger real = [self realSectionForDisplaySection:section];
-    return real < (NSInteger)self.sections.count ? self.sections[real] : @[];
+    return section < (NSInteger)self.shownSections.count ? self.shownSections[section] : @[];
 }
 
 - (BOOL)gridSectionIsFavorites:(NSInteger)section {
-    return [[self gridTitleForSection:section] isEqualToString:@"Favorites"];
+    return ![self showingEnabled] && [[self gridTitleForSection:section] isEqualToString:@"Favorites"];
 }
 
 - (NSString *)gridNameForTrigger:(NSString *)key {

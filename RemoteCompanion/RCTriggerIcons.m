@@ -256,6 +256,7 @@ UIImage *RCTriggerCategoryIcon(NSString *sectionTitle) {
     dispatch_once(&once, ^{
         icons = @{
             @"Favorites": @[@"star.fill"],
+            @"Enabled": @[@"checkmark.circle.fill"],
             @"Volume Buttons": @[@"speaker.wave.2.fill"],
             @"Power Button": @[@"power"],
             @"Status Bar": @[@"rectangle.topthird.inset.filled", @"rectangle.topthird.inset", @"menubar.rectangle"],
