@@ -180,6 +180,7 @@ static NSArray<NSArray<NSDictionary *> *> *RCBannerCatalog(NSArray<NSString *> *
             @"__LUA_SCRIPT__": @[@"lua ", @"lua_eval "],
             @"__SSH_COMMAND__": @[@"ssh-run "],
             @"__REMOTE_RC_COMMAND__": @[@"rc-run "],
+            @"__HTTP_REQUEST__": @[@"http-request "],
             @"__CUSTOM__": @[@"exec ", @"root ", @"sudo "]
         };
     });

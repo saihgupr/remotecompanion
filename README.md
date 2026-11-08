@@ -60,6 +60,7 @@ RemoteCompanion provides fast, scriptable system control for modern rootless jai
 - **Trigger Favorites**: Mark any trigger as a favorite for instant access at the top of the picker.
 - **Web UI Light Mode**: the Web UI follows system appearance with a full light palette, dark theme unchanged.
 - **Web UI Security Hardening**: optional API token in Settings > Web UI > Access (and `rc webui token`) that gates privileged `/api/command` calls, privileged triggers, and TestKit runs. Sensitive secrets in `/api/config` are masked for unauthenticated callers, CORS rejects public web origins, and trigger config is saved with restrictive `0600` permissions.
+- **REST API Actions**: Add a **REST API Call...** action to any trigger to call a URL of your choice, with its method, headers and body. Empty by default, so it can call a webhook, a local service, or RemoteCompanion's own API.
 - **True Multitasking**: Concurrent server handling powered by GCD—zero battery drain, zero blocking.
 
 ---
@@ -541,6 +542,9 @@ If an API token is set in Settings > Web UI > Access, privileged commands (`root
 **3. Fire an Automation Trigger:**
 Execution URLs for your specific triggers:
 - **Example**: `http://[device_ip]:8080/api/trigger/trigger_1`
+
+**4. Call Other APIs from a Trigger:**
+The **REST API Call...** action picks any method, URL, headers and body. Point it at another device's API, a webhook, or this iPhone's own API (`http://127.0.0.1:8080/api/command?cmd=play`).
 
 #### Performance & Implementation
 * **Speed**: The HTTP API is significantly faster than SSH (~0.1s faster) by skipping the heavy SSH handshake.

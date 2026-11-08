@@ -342,6 +342,7 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
             if (cm.mqttEnabled) {
                 [integrations addObject:@{ @"name": @"MQTT: Publish Topic...", @"command": @"__MQTT_PUBLISH__", @"icon": @"dot.radiowaves.left.and.right" }];
             }
+            [integrations addObject:@{ @"name": @"REST API Call...", @"command": @"__HTTP_REQUEST__", @"icon": @"network", @"keywords": @"http rest api request url webhook curl" }];
             [integrations addObject:@{ @"name": @"SSH: Run Remote Command...", @"command": @"__SSH_COMMAND__", @"icon": @"terminal.fill" }];
             [integrations addObject:@{ @"name": @"Remote RC: Run Command...", @"command": @"__REMOTE_RC_COMMAND__", @"icon": @"iphone.radiowaves.left.and.right" }];
             [integrations addObject:@{ @"name": @"Shortcuts: Run Shortcut...", @"command": @"__SHORTCUT_PICKER__", @"icon": @"wand.and.stars" }];

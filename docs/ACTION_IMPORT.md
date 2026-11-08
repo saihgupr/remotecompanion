@@ -82,7 +82,17 @@ Here is the complete list of valid commands you can write, along with parameters
 | :--- | :--- | :--- |
 | `delay <seconds>` | Block execution queue for X seconds | `delay 2.5` |
 | `shortcut "<shortcut_name>"` | Execute a Siri Shortcut | `shortcut "Calculate Tip"` |
+| `http-request <json>` | Call any HTTP endpoint with a method, headers and body | `http-request {"method":"GET","url":"https://example.com/ping"}` |
 | `trigger <trigger_id>` | Fire a RemoteCompanion trigger by ID | `trigger shake` |
+
+#### REST API Calls
+`http-request` holds the request as JSON. `method` defaults to GET; `headers` and `body` are optional. A JSON body is sent as `application/json` unless a Content-Type header is set. A bare URL is a GET. The request runs in the background and the reply goes to the log.
+
+```json
+"http-request {\"method\":\"POST\",\"url\":\"https://example.com/hook\",\"headers\":{\"Authorization\":\"Bearer TOKEN\"},\"body\":{\"event\":\"ping\"}}"
+```
+
+To run an RC command on this iPhone, call the local Web UI API (the Web UI must be on): `http-request {"method":"GET","url":"http://127.0.0.1:8080/api/command?cmd=play"}`.
 
 ### Toast Notifications (HUD)
 Displays system-wide dropdown glassmorphic notification banner with custom title, subtitle, and icon.
