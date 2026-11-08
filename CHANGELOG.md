@@ -11,7 +11,7 @@ All notable changes to this project will be documented in this file.
 ### Changed
 - **Built-in triggers can be deleted**: removing a button or gesture trigger puts it back in the + menu, just like a tag, network, app or schedule trigger. The list never shows a trigger that was not added.
 - **Integrations fold into their own lists**: Snapper and SneakyCam show as one row each in Select Action > Integrations with a chevron, opening just their actions, so the section stays short. Search still finds every action directly, and Settings > Banners keeps the full flat list.
-- **Variables icon**: the Variables row now uses an orange italic x, in the style of Shortcuts' variable glyph.
+- **Variables icon**: the Variables row and Set Variable action now use an orange italic x, in the style of Shortcuts' variable glyph.
 - **Terminal command editor**: creating or editing an `exec` or `root` action now uses the same Settings-style screen as the SSH command editor, with the root switch in its own section above the monospaced command field.
 
 ## [4.4.0] - 2026-11-06

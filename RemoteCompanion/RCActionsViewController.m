@@ -13,6 +13,7 @@
 #import "RCVariableConditionViewController.h"
 #import "RCNumberSettingViewController.h"
 #import "RCVariableEditorParts.h"
+#import "RCVariableIcon.h"
 #import "RCSymbolPickerViewController.h"
 #import "RCServerClient.h"
 #import "RCRunningViewController.h"
@@ -4251,8 +4252,14 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         cell.textLabel.textColor = isControl ? [UIColor secondaryLabelColor] : [UIColor labelColor];
         cell.detailTextLabel.text = nil;
         
-        cell.imageView.image = [UIImage systemImageNamed:[self iconForCommand:actionItem]];
-        cell.imageView.tintColor = isControl ? [UIColor tertiaryLabelColor] : [UIColor systemGrayColor];
+        NSString *stepIcon = [self iconForCommand:actionItem];
+        if ([stepIcon isEqualToString:@"x.squareroot"]) {
+            cell.imageView.image = RCVariableMenuIconSized(22);
+            cell.imageView.tintColor = nil;
+        } else {
+            cell.imageView.image = [UIImage systemImageNamed:stepIcon];
+            cell.imageView.tintColor = isControl ? [UIColor tertiaryLabelColor] : [UIColor systemGrayColor];
+        }
         
         UIImageView *handleView = [[UIImageView alloc] initWithImage:RCGrabberImage()];
         handleView.tintColor = [UIColor systemGray3Color];
@@ -4393,6 +4400,9 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     if ([iconName hasPrefix:@"USER_APP:"]) {
         NSString *bundleId = [iconName substringFromIndex:9];
         cell.imageView.image = [UIImage _applicationIconImageForBundleIdentifier:bundleId format:0 scale:[UIScreen mainScreen].scale];
+        cell.imageView.tintColor = nil;
+    } else if ([iconName isEqualToString:@"x.squareroot"]) {
+        cell.imageView.image = RCVariableMenuIconSized(22);
         cell.imageView.tintColor = nil;
     } else {
         UIImage *custom = [action isKindOfClass:[NSString class]] ? [RCAddOnCatalog imageForCommand:action] : nil;   // an add-on's image icon
