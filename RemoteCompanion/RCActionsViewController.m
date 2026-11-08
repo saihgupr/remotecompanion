@@ -4254,7 +4254,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         
         NSString *stepIcon = [self iconForCommand:actionItem];
         if ([stepIcon isEqualToString:@"x.squareroot"]) {
-            cell.imageView.image = [RCVariableMenuIconSized(22) imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+            cell.imageView.image = RCVariableMenuIconActionSized(22);
         } else {
             cell.imageView.image = [UIImage systemImageNamed:stepIcon];
         }
@@ -4401,7 +4401,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         cell.imageView.image = [UIImage _applicationIconImageForBundleIdentifier:bundleId format:0 scale:[UIScreen mainScreen].scale];
         cell.imageView.tintColor = nil;
     } else if ([iconName isEqualToString:@"x.squareroot"]) {
-        cell.imageView.image = [RCVariableMenuIconSized(22) imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+        cell.imageView.image = RCVariableMenuIconActionSized(22);
         cell.imageView.tintColor = [UIColor systemGrayColor];
     } else {
         UIImage *custom = [action isKindOfClass:[NSString class]] ? [RCAddOnCatalog imageForCommand:action] : nil;   // an add-on's image icon

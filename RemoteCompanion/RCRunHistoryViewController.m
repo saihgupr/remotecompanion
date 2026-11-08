@@ -59,7 +59,7 @@
     cell.indentationWidth = 18;
     cell.indentationLevel = step.depth;
     if ([step.icon isEqualToString:@"x.squareroot"]) {
-        cell.imageView.image = [RCVariableMenuIconSized(22) imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+        cell.imageView.image = RCVariableMenuIconActionSized(22);
     } else {
         cell.imageView.image = [UIImage systemImageNamed:step.icon];
     }

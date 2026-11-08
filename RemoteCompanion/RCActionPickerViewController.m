@@ -588,7 +588,7 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
         NSString *icon = action[@"icon"];
         if (@available(iOS 15.0, *)) {} else if ([icon isEqualToString:@"ear.badge.checkmark"]) icon = @"ear";
         UIImage *custom = [action[@"image"] isKindOfClass:[UIImage class]] ? action[@"image"] : nil;
-        if ([action[@"command"] isEqualToString:@"__SET_VARIABLE__"]) custom = [RCVariableMenuIconSized(22) imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+        if ([action[@"command"] isEqualToString:@"__SET_VARIABLE__"]) custom = RCVariableMenuIconActionSized(22);
         [row setName:action[@"name"] icon:icon image:custom];
         row.opensMore = RCPickerActionOpensMore(action) || [RCAddOnCatalog commandAsksForDetails:action[@"command"]];
         NSInteger count = [collectionView numberOfItemsInSection:indexPath.section];
@@ -600,7 +600,7 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
     NSString *icon = action[@"icon"];
     if (@available(iOS 15.0, *)) {} else if ([icon isEqualToString:@"ear.badge.checkmark"]) icon = @"ear";
     UIImage *custom = [action[@"image"] isKindOfClass:[UIImage class]] ? action[@"image"] : nil;   // an add-on's own picture
-    if ([action[@"command"] isEqualToString:@"__SET_VARIABLE__"]) custom = [RCVariableMenuIconSized(24) imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+    if ([action[@"command"] isEqualToString:@"__SET_VARIABLE__"]) custom = RCVariableMenuIconActionSized(22);
     [cell setName:action[@"name"] icon:icon image:custom];
     cell.opensMore = RCPickerActionOpensMore(action) || [RCAddOnCatalog commandAsksForDetails:action[@"command"]];
     return cell;

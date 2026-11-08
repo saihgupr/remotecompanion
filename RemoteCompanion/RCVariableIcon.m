@@ -1,7 +1,7 @@
 #import "RCVariableIcon.h"
 #import <CoreText/CoreText.h>
 
-UIImage *RCVariableMenuIconSized(CGFloat side) {
+static UIImage *RCVariableIconSized(CGFloat side, CGFloat glyphScale, UIColor *color, UIImageRenderingMode mode) {
     if (side <= 0) side = 29.0;
     UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat defaultFormat];
     format.opaque = NO;
@@ -9,17 +9,16 @@ UIImage *RCVariableMenuIconSized(CGFloat side) {
     UIImage *rendered = [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
         CGContextRef ctx = context.CGContext;
 
-        CGFloat fontSize = side * (28.0 / 29.0);
+        CGFloat fontSize = side * (28.0 / 29.0) * glyphScale;
         UIFont *font = [UIFont fontWithName:@"Georgia-BoldItalic" size:fontSize];
         if (!font) {
             UIFontDescriptor *descriptor = [[UIFont systemFontOfSize:fontSize weight:UIFontWeightBold].fontDescriptor
                 fontDescriptorWithSymbolicTraits:UIFontDescriptorTraitItalic];
             font = [UIFont fontWithDescriptor:descriptor size:fontSize] ?: [UIFont boldSystemFontOfSize:fontSize];
         }
-        UIColor *orange = [UIColor colorWithRed:1.0 green:0.58 blue:0.0 alpha:1.0];
         NSAttributedString *x = [[NSAttributedString alloc] initWithString:@"x" attributes:@{
             NSFontAttributeName: font,
-            NSForegroundColorAttributeName: orange
+            NSForegroundColorAttributeName: color
         }];
 
         // Center the glyph's own path, not its line box, so the x sits optically centered.
@@ -31,7 +30,16 @@ UIImage *RCVariableMenuIconSized(CGFloat side) {
         CTLineDraw(line, ctx);
         CFRelease(line);
     }];
-    return [rendered imageWithRenderingMode:UIImageRenderingModeAlwaysOriginal];
+    return [rendered imageWithRenderingMode:mode];
+}
+
+UIImage *RCVariableMenuIconSized(CGFloat side) {
+    UIColor *orange = [UIColor colorWithRed:1.0 green:0.58 blue:0.0 alpha:1.0];
+    return RCVariableIconSized(side, 1.0, orange, UIImageRenderingModeAlwaysOriginal);
+}
+
+UIImage *RCVariableMenuIconActionSized(CGFloat side) {
+    return RCVariableIconSized(side, 1.25, [UIColor whiteColor], UIImageRenderingModeAlwaysTemplate);
 }
 
 UIImage *RCVariableMenuIcon(void) {
