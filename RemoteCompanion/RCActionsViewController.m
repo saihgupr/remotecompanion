@@ -4254,12 +4254,11 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         
         NSString *stepIcon = [self iconForCommand:actionItem];
         if ([stepIcon isEqualToString:@"x.squareroot"]) {
-            cell.imageView.image = RCVariableMenuIconSized(22);
-            cell.imageView.tintColor = nil;
+            cell.imageView.image = [RCVariableMenuIconSized(22) imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
         } else {
             cell.imageView.image = [UIImage systemImageNamed:stepIcon];
-            cell.imageView.tintColor = isControl ? [UIColor tertiaryLabelColor] : [UIColor systemGrayColor];
         }
+        cell.imageView.tintColor = isControl ? [UIColor tertiaryLabelColor] : [UIColor systemGrayColor];
         
         UIImageView *handleView = [[UIImageView alloc] initWithImage:RCGrabberImage()];
         handleView.tintColor = [UIColor systemGray3Color];
@@ -4402,8 +4401,8 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         cell.imageView.image = [UIImage _applicationIconImageForBundleIdentifier:bundleId format:0 scale:[UIScreen mainScreen].scale];
         cell.imageView.tintColor = nil;
     } else if ([iconName isEqualToString:@"x.squareroot"]) {
-        cell.imageView.image = RCVariableMenuIconSized(22);
-        cell.imageView.tintColor = nil;
+        cell.imageView.image = [RCVariableMenuIconSized(22) imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+        cell.imageView.tintColor = [UIColor systemGrayColor];
     } else {
         UIImage *custom = [action isKindOfClass:[NSString class]] ? [RCAddOnCatalog imageForCommand:action] : nil;   // an add-on's image icon
         cell.imageView.image = custom ?: [UIImage systemImageNamed:iconName];

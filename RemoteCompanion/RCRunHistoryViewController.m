@@ -59,12 +59,11 @@
     cell.indentationWidth = 18;
     cell.indentationLevel = step.depth;
     if ([step.icon isEqualToString:@"x.squareroot"]) {
-        cell.imageView.image = RCVariableMenuIconSized(22);
-        cell.imageView.tintColor = nil;
+        cell.imageView.image = [RCVariableMenuIconSized(22) imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
     } else {
         cell.imageView.image = [UIImage systemImageNamed:step.icon];
-        cell.imageView.tintColor = step.stoppedHere ? [UIColor systemOrangeColor] : step.marker ? [UIColor tertiaryLabelColor] : [UIColor systemGrayColor];
     }
+    cell.imageView.tintColor = step.stoppedHere ? [UIColor systemOrangeColor] : step.marker ? [UIColor tertiaryLabelColor] : [UIColor systemGrayColor];
     cell.textLabel.text = step.name;
     cell.textLabel.numberOfLines = 0;
     cell.textLabel.textColor = step.marker ? [UIColor secondaryLabelColor] : [UIColor labelColor];
