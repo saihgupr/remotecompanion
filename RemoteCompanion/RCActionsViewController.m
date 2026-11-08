@@ -3783,6 +3783,12 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     } else if ([currentAction hasPrefix:@"rc-run "]) {
         [self promptEditRemoteRunActionAtIndex:indexPath.row];
         return;
+    } else if (remoteParts) {
+        // A remote action whose inner command has no editor of its own: edit the
+        // client and the command together, like the Remote Client... menu does.
+        [self finishPendingRemoteEdit];
+        [self promptEditRemoteRunActionAtIndex:indexPath.row];
+        return;
     } else {
         // Any other command: the command editor, with the variable menu
         RCTextInputViewController *inputVC = [[RCTextInputViewController alloc] init];
