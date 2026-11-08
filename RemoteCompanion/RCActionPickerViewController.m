@@ -37,6 +37,8 @@
 @property (nonatomic, copy) NSString *remoteClientName;
 // Set before the view loads when the picker opens straight into remote mode
 @property (nonatomic, strong) NSDictionary *pendingRemoteClient;
+// The list is put at the true top once the nav bar has taken its large-title height
+@property (nonatomic, assign) BOOL didSetInitialTop;
 @end
 
 @implementation RCActionPickerViewController
@@ -148,6 +150,18 @@
     [super viewWillAppear:animated];
     [self rebuildSections];
     [self.collectionView reloadData];
+    // Attaching the category bar in viewDidLoad sets an offset before the nav bar and search
+    // field have their heights, which leaves the first open slightly scrolled. Put it back at
+    // the true top once the nav bar has taken its large-title height.
+    if (!self.didSetInitialTop) {
+        self.didSetInitialTop = YES;
+        [self.navigationController.view layoutIfNeeded];
+        CGFloat navH = self.navigationController.navigationBar.frame.size.height;
+        CGFloat catH = self.groupActions.count == 0 ? [self.categoryBar height] : 0;
+        if (navH > 0) {
+            self.collectionView.contentOffset = CGPointMake(0, -(navH + catH));
+        }
+    }
 }
 
 // Integrations with several actions (Snapper, SneakyCam) show as one entry that opens a list of
@@ -1493,6 +1507,7 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
                                                                              action:@selector(changeRemoteClientTapped)];
     [self.collectionView reloadData];
     [self scrollActionListToTop];
+    self.didSetInitialTop = YES;
 }
 
 // The top of the list sits at -adjustedContentInset.top: scrolling to 0 would tuck the

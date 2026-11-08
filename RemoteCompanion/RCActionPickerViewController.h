@@ -14,5 +14,6 @@
 // Opens the picker already targeting this Remote RC client, so a pick becomes
 // "rc-run <clientId> <command>"
 - (void)startInRemoteModeWithClient:(NSDictionary *)client;
+- (void)enterRemoteModeWithClient:(NSDictionary *)client;
 
 @end
