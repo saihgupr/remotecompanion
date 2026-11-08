@@ -31,3 +31,8 @@ test_script.js
 .test.js
 *_test.sh
 rc_test.sh
+
+# BEGIN parallel OpenCode lanes
+.slim/worktrees/
+.slim/worktrees.json
+# END parallel OpenCode lanes
