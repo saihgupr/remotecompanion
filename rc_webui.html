@@ -2110,7 +2110,7 @@
 <!-- ══ ACTION PICKER DIALOG ════════════════════════════════════════════════ -->
 <div class="dialog-backdrop" id="picker-dialog-backdrop" onclick="_pickerBackdropClick(event)">
   <div class="dialog-box app-launch-dialog" style="max-width: 480px; width: 90%;">
-    <div class="dialog-title">Select Action</div>
+    <div class="dialog-title" id="picker-dialog-title">Select Action</div>
     <div class="dialog-msg" style="text-align:center;padding:0 16px 6px">Choose an action to add to this trigger.</div>
     <div style="padding:0 14px 10px; display:flex; flex-direction:column; flex:1; min-height:0;">
       <div class="app-picker-search-wrap">
@@ -4343,12 +4343,12 @@ const ACTION_SECTIONS = [
     { name:'Keyboard Maestro: Trigger Macro…',cmd:'__KM_TRIGGER__', icon:'command', needs_input:true },
     { name:'MQTT: Publish Topic…',            cmd:'__MQTT_PUBLISH__', icon:'dot_radiowaves_left_right', needs_input:true },
     { name:'Shortcuts: Run Shortcut…',        cmd:'__SHORTCUT__',  icon:'wand_stars', needs_input:true },
-    { name:'Snapper: Open Area',              cmd:'snapper open',  icon:'crop' },
-    { name:'Snapper: Freeze Screen',          cmd:'snapper freeze', icon:'snowflake' },
-    { name:'Snapper: Instant Snap',           cmd:'snapper instant', icon:'bolt_circle_fill' },
-    { name:'Snapper: Close All',              cmd:'snapper close', icon:'xmark_rectangle_fill' },
-    { name:'SneakyCam: Take Photo',           cmd:'sneakycam photo', icon:'camera_filters' },
-    { name:'SneakyCam: Toggle Video',         cmd:'sneakycam video', icon:'eye_slash_fill' },
+    { name:'Snapper: Open Area',              cmd:'snapper open',  icon:'crop', group:'Snapper', groupIcon:'crop' },
+    { name:'Snapper: Freeze Screen',          cmd:'snapper freeze', icon:'snowflake', group:'Snapper', groupIcon:'crop' },
+    { name:'Snapper: Instant Snap',           cmd:'snapper instant', icon:'bolt_circle_fill', group:'Snapper', groupIcon:'crop' },
+    { name:'Snapper: Close All',              cmd:'snapper close', icon:'xmark_rectangle_fill', group:'Snapper', groupIcon:'crop' },
+    { name:'SneakyCam: Take Photo',           cmd:'sneakycam photo', icon:'camera_filters', group:'SneakyCam', groupIcon:'camera_filters' },
+    { name:'SneakyCam: Toggle Video',         cmd:'sneakycam video', icon:'eye_slash_fill', group:'SneakyCam', groupIcon:'camera_filters' },
     { name:'AudioMix: Toggle',                cmd:'audiomix toggle',icon:'equalizer', is_toggle:true },
     { name:'AudioHandoff: Automatic Switching', cmd:'audiohandoff enabled toggle', icon:'headphones', is_toggle:true },
   ]},
@@ -6722,11 +6722,36 @@ function removeKMParameter(idx) {
 
 // ── Action picker dialog ───────────────────────────────────────────────────────
 let g_pickerCategory = null; // null = All (mirrors iOS RCActionPickerViewController selectedCategory)
+let g_pickerGroup = null;    // an integration family opened from its row (SneakyCam, Snapper)
+
+// Families with several actions fold into one row that opens their list, so the
+// Integrations section stays short. The flat catalog is still used by Banners.
+function groupPickerActions(actions) {
+  const out = [];
+  const indexes = {};
+  actions.forEach(a => {
+    if (!a.group) { out.push(a); return; }
+    if (indexes[a.group] == null) {
+      indexes[a.group] = out.length;
+      out.push({ name: a.group, icon: a.groupIcon || a.icon, is_group: true, children: [] });
+    }
+    const child = Object.assign({}, a);
+    const prefix = a.group + ': ';
+    if (child.name.startsWith(prefix)) child.name = child.name.slice(prefix.length);
+    out[indexes[a.group]].children.push(child);
+  });
+  return out;
+}
 
 function renderPickerCategoryBar() {
   const bar = document.getElementById('picker-category-bar');
   if (!bar) return;
   bar.innerHTML = '';
+  if (g_pickerGroup) {
+    bar.style.display = 'none';
+    return;
+  }
+  bar.style.display = '';
   const mkChip = (label, title) => {
     const btn = document.createElement('button');
     btn.className = 'cat-chip' + ((title === g_pickerCategory) ? ' active' : '');
@@ -6752,6 +6777,8 @@ function selectPickerCategory(title, btnEl) {
 function showActionPickerPanel() {
   document.getElementById('action-search').value = '';
   g_pickerCategory = null; // fresh open starts at All, like a new iOS picker VC
+  g_pickerGroup = null;
+  document.getElementById('picker-dialog-title').textContent = 'Select Action';
   renderPickerCategoryBar();
   renderPickerSections();
   document.getElementById('picker-dialog-backdrop').classList.add('visible');
@@ -6760,6 +6787,26 @@ function showActionPickerPanel() {
 
 function closePickerPanel() {
   document.getElementById('picker-dialog-backdrop').classList.remove('visible');
+}
+
+function openPickerGroup(group) {
+  g_pickerGroup = group;
+  document.getElementById('action-search').value = '';
+  document.getElementById('picker-dialog-title').textContent = group.name;
+  renderPickerCategoryBar();
+  renderPickerSections();
+  const list = document.getElementById('picker-content');
+  if (list) list.scrollTop = 0;
+}
+
+function closePickerGroup() {
+  g_pickerGroup = null;
+  document.getElementById('action-search').value = '';
+  document.getElementById('picker-dialog-title').textContent = 'Select Action';
+  renderPickerCategoryBar();
+  renderPickerSections();
+  const list = document.getElementById('picker-content');
+  if (list) list.scrollTop = 0;
 }
 
 function _pickerBackdropClick(e) {
@@ -6782,10 +6829,51 @@ function pickerActionAvailable(sec, a) {
   return true;
 }
 
+function pickerRowFor(act) {
+  const row = document.createElement('div');
+  row.className = 'picker-row';
+  const chevron = (act.is_group || !act.needs_input) ? 'chevron_right' : 'ellipsis';
+  row.innerHTML = `
+    <div class="dialog-row-icon ${act.iconUrl ? 'icon-image' : ''}">
+      ${iconMarkup(act)}
+    </div>
+    <div class="picker-row-text">${escHtml(act.name)}</div>
+    <i class="f7-icons picker-row-chevron">${chevron}</i>
+  `;
+  row.onclick = () => act.is_group ? openPickerGroup(act) : selectPickerAction(act);
+  return row;
+}
+
 function renderPickerSections() {
   const query = document.getElementById('action-search').value.toLowerCase().trim();
   const container = document.getElementById('picker-content');
   container.innerHTML = '';
+  const matches = a => a.name.toLowerCase().includes(query) ||
+    (a.cmd && a.cmd.toLowerCase().includes(query)) ||
+    (a.keywords && a.keywords.toLowerCase().includes(query));
+
+  // An integration family's own list, reached from its row
+  if (g_pickerGroup) {
+    const card = document.createElement('div');
+    card.className = 'dialog-card';
+    container.appendChild(card);
+
+    const back = document.createElement('div');
+    back.className = 'picker-row';
+    back.innerHTML = `
+      <div class="dialog-row-icon">
+        <i class="f7-icons">chevron_left</i>
+      </div>
+      <div class="picker-row-text">Back</div>
+    `;
+    back.onclick = closePickerGroup;
+    card.appendChild(back);
+
+    g_pickerGroup.children.filter(a => !query || matches(a)).forEach(act => {
+      card.appendChild(pickerRowFor(act));
+    });
+    return;
+  }
 
   const sections = g_pickerCategory
     ? ACTION_SECTIONS.filter(sec => sec.title === g_pickerCategory)
@@ -6795,9 +6883,10 @@ function renderPickerSections() {
     // Searching finds an add-on's actions themselves, in place of its row
     const base = (sec.fromAddOn && query) ? sec.actions.flatMap(r => r.actions || [r]) : sec.actions;
     const actions = base.filter(a => pickerActionAvailable(sec, a));
+    // Searching stays flat, like the iOS picker; browsing folds each family into one row
     const filtered = query
-      ? actions.filter(a => a.name.toLowerCase().includes(query) || (a.cmd && a.cmd.toLowerCase().includes(query)) || (a.keywords && a.keywords.toLowerCase().includes(query)))
-      : actions;
+      ? actions.filter(matches)
+      : (sec.title === 'Integrations' ? groupPickerActions(actions) : actions);
     if (filtered.length === 0) return;
 
     const hdr = document.createElement('div');
@@ -6808,19 +6897,7 @@ function renderPickerSections() {
     const card = document.createElement('div');
     card.className = 'dialog-card';
     container.appendChild(card);
-    filtered.forEach(act => {
-      const row = document.createElement('div');
-      row.className = 'picker-row';
-      row.innerHTML = `
-        <div class="dialog-row-icon ${act.iconUrl ? 'icon-image' : ''}">
-          ${iconMarkup(act)}
-        </div>
-        <div class="picker-row-text">${escHtml(act.name)}</div>
-        <i class="f7-icons picker-row-chevron">${act.needs_input ? 'ellipsis' : 'chevron_right'}</i>
-      `;
-      row.onclick = () => selectPickerAction(act);
-      card.appendChild(row);
-    });
+    filtered.forEach(act => card.appendChild(pickerRowFor(act)));
   });
 }
 

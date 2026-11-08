@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Changed
+- **Integrations fold into their own lists**: Snapper and SneakyCam show as one row each in Select Action > Integrations with a chevron, opening just their actions, so the section stays short. Search still finds every action directly, and Settings > Banners keeps the full flat list.
 - **Variables icon**: the Variables row now uses an orange italic x, in the style of Shortcuts' variable glyph.
 
 ## [4.4.0] - 2026-11-06
