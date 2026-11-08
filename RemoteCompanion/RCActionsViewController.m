@@ -3,6 +3,7 @@
 #import "RCConfigManager.h"
 #import "RCActionPickerViewController.h"
 #import "RCSSHActionEditorViewController.h"
+#import "RCTerminalCommandEditorViewController.h"
 #import "RCShortcutPickerViewController.h"
 #import "RCAppPickerViewController.h"
 #import "RCConditionPickerViewController.h"
@@ -1821,23 +1822,19 @@ static void RCSetRunWatching(BOOL watching) {
             
         } else if ([action isEqualToString:@"__CUSTOM__"]) {
             // Show custom text input for command
-            RCTextInputViewController *inputVC = [[RCTextInputViewController alloc] init];
-            inputVC.promptTitle = @"Terminal Command";
-            inputVC.promptMessage = @"Enter terminal command";
-            inputVC.showRootToggle = YES;
+            RCTerminalCommandEditorViewController *inputVC = [[RCTerminalCommandEditorViewController alloc]
+                initWithCommand:@"" isRoot:NO];
             inputVC.variableActions = self.actions;
-            inputVC.initialText = @"";
-            
-            __weak typeof(inputVC) weakInputVC = inputVC;
-            inputVC.onComplete = ^(NSString *text) {
+
+            inputVC.onSave = ^(NSString *text, BOOL isRoot) {
                 if (text.length > 0) {
-                    NSString *prefix = weakInputVC.isRootToggled ? @"root" : @"exec";
+                    NSString *prefix = isRoot ? @"root" : @"exec";
                     [self.actions addObject:[NSString stringWithFormat:@"%@ %@", prefix, text]];
                     [self saveActions];
                     [self.tableView reloadData];
                 }
             };
-            
+
             UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:inputVC];
             
             dispatch_async(dispatch_get_main_queue(), ^{
@@ -3445,18 +3442,13 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         BOOL isRoot = [currentAction hasPrefix:@"root "];
         NSString *currentCommand = [currentAction substringFromIndex:5];
         
-        RCTextInputViewController *inputVC = [[RCTextInputViewController alloc] init];
-        inputVC.promptTitle = @"Edit Command";
-        inputVC.promptMessage = @"Update your terminal command";
-        inputVC.initialText = currentCommand;
-        inputVC.showRootToggle = YES;
-        inputVC.isRootToggled = isRoot;
+        RCTerminalCommandEditorViewController *inputVC = [[RCTerminalCommandEditorViewController alloc]
+            initWithCommand:currentCommand isRoot:isRoot];
         inputVC.variableActions = self.actions;
-        
-        __weak typeof(inputVC) weakInputVC = inputVC;
-        inputVC.onComplete = ^(NSString *text) {
+
+        inputVC.onSave = ^(NSString *text, BOOL root) {
             if (text.length > 0) {
-                NSString *prefix = weakInputVC.isRootToggled ? @"root" : @"exec";
+                NSString *prefix = root ? @"root" : @"exec";
                 [self storeCommand:[NSString stringWithFormat:@"%@ %@", prefix, text] atIndex:indexPath.row];
             }
         };
