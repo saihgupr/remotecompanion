@@ -3,6 +3,7 @@
 #import "RCKMSettingsViewController.h"
 #import "RCMQTTSettingsViewController.h"
 #import "RCSSHSettingsViewController.h"
+#import "RCRCClientSettingsViewController.h"
 #import "RCConfigManager.h"
 #import "RCUITweaker.h"
 
@@ -86,7 +87,7 @@
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    return 4;
+    return 5;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
@@ -135,6 +136,12 @@
         cell.detailTextLabel.text = count > 0 ? [NSString stringWithFormat:@"%lu Host%@", (unsigned long)count, count == 1 ? @"" : @"s"] : @"None Configured";
         cell.imageView.image = [UIImage systemImageNamed:@"terminal.fill"];
         cell.imageView.tintColor = count > 0 ? [UIColor systemOrangeColor] : [UIColor secondaryLabelColor];
+    } else if (indexPath.row == 4) {
+        cell.textLabel.text = @"Remote RC Clients";
+        NSUInteger count = cm.rcClients.count;
+        cell.detailTextLabel.text = count > 0 ? [NSString stringWithFormat:@"%lu Client%@", (unsigned long)count, count == 1 ? @"" : @"s"] : @"None Configured";
+        cell.imageView.image = [UIImage systemImageNamed:@"iphone.radiowaves.left.and.right"];
+        cell.imageView.tintColor = count > 0 ? [UIColor systemGreenColor] : [UIColor secondaryLabelColor];
     }
     
     return cell;
@@ -154,6 +161,9 @@
     } else if (indexPath.row == 3) {
         RCSSHSettingsViewController *sshVC = [[RCSSHSettingsViewController alloc] init];
         [self.navigationController pushViewController:sshVC animated:YES];
+    } else if (indexPath.row == 4) {
+        RCRCClientSettingsViewController *clientsVC = [[RCRCClientSettingsViewController alloc] init];
+        [self.navigationController pushViewController:clientsVC animated:YES];
     }
 }
 

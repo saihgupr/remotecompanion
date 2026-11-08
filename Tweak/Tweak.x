@@ -3530,6 +3530,7 @@ BOOL RCIsPrivilegedCommand(NSString *cmd) {
            [trimmed hasPrefix:@"exec "] || [trimmed isEqualToString:@"exec"] ||
            [trimmed hasPrefix:@"lua "] || [trimmed hasPrefix:@"lua_eval "] || [trimmed hasPrefix:@"Lua "] ||
            [trimmed hasPrefix:@"ssh-run "] ||
+           [trimmed hasPrefix:@"rc-run "] ||
            [trimmed hasPrefix:@"tap "] || [trimmed hasPrefix:@"hold "] || [trimmed hasPrefix:@"swipe "] ||
            [trimmed hasPrefix:@"gesture "];
 }
@@ -11756,6 +11757,100 @@ static NSString *handle_command(NSString *cmd) {
     } else if ([cleanCmd hasPrefix:@"lua "]) {
         NSString *scriptPath = [[cleanCmd substringFromIndex:4] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         return execute_lua_script(scriptPath);
+    } else if ([cleanCmd hasPrefix:@"rc-run "]) {
+        NSString *payload = [[cleanCmd substringFromIndex:7] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        NSRange firstSpace = [payload rangeOfString:@" "];
+        if (firstSpace.location == NSNotFound) {
+            return @"Usage: rc-run <clientId> <command>\n";
+        }
+        NSString *clientId = [payload substringToIndex:firstSpace.location];
+        NSString *remoteCmd = [payload substringFromIndex:firstSpace.location + 1];
+
+        load_trigger_config();
+        NSArray *clients = g_triggerConfig[@"rcClients"] ?: @[];
+        NSDictionary *targetClient = nil;
+        for (NSDictionary *c in clients) {
+            if ([c[@"id"] isEqualToString:clientId]) {
+                targetClient = c;
+                break;
+            }
+        }
+        if (!targetClient) {
+            SRLogMin(@"[RCRemote] Error: Remote RC Client with ID %@ not found", clientId);
+            return [NSString stringWithFormat:@"Remote RC Client '%@' not found\n", clientId];
+        }
+
+        NSString *host = targetClient[@"host"] ?: @"";
+        if (host.length == 0) {
+            SRLogMin(@"[RCRemote] Error: Address for '%@' is empty", clientId);
+            return [NSString stringWithFormat:@"Error: Address for '%@' is empty\n", clientId];
+        }
+        if ([host hasPrefix:@"-"] || [host rangeOfString:@" "].location != NSNotFound) {
+            SRLogMin(@"[RCRemote] Error: Invalid address for '%@'", clientId);
+            return [NSString stringWithFormat:@"Error: Invalid address for '%@'\n", clientId];
+        }
+
+        NSString *address = host;
+        if (![address.lowercaseString hasPrefix:@"http://"] && ![address.lowercaseString hasPrefix:@"https://"]) {
+            address = [@"http://" stringByAppendingString:address];
+        }
+        NSURLComponents *components = [NSURLComponents componentsWithString:address];
+        if (!components || components.host.length == 0) {
+            return [NSString stringWithFormat:@"Error: Invalid address '%@' for '%@'\n", host, clientId];
+        }
+        NSInteger port = [targetClient[@"port"] integerValue];
+        if (port <= 0 || port > 65535) port = 8080;
+        if (components.port == nil) components.port = @(port);
+        components.path = @"/api/command";
+        components.query = nil;
+        NSCharacterSet *unreserved = [NSCharacterSet characterSetWithCharactersInString:@"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"];
+        NSString *encodedCmd = [remoteCmd stringByAddingPercentEncodingWithAllowedCharacters:unreserved];
+        if (!encodedCmd) {
+            return [NSString stringWithFormat:@"Error: Could not encode the command for '%@'\n", clientId];
+        }
+        components.percentEncodedQueryItems = @[[NSURLQueryItem queryItemWithName:@"cmd" value:encodedCmd]];
+        NSURL *url = components.URL;
+        if (!url) {
+            return [NSString stringWithFormat:@"Error: Could not build a URL for '%@'\n", clientId];
+        }
+
+        NSString *clientName = targetClient[@"name"] ?: host;
+        SRLog(@"[RCRemote] Executing remote RC command on %@: %@", clientName, remoteCmd);
+
+        NSString *token = targetClient[@"token"] ?: @"";
+        NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url
+                                                              cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
+                                                          timeoutInterval:8.0];
+        request.HTTPMethod = @"POST";
+        if (token.length > 0) {
+            [request setValue:[NSString stringWithFormat:@"Bearer %@", token] forHTTPHeaderField:@"Authorization"];
+        }
+
+        NSURLSessionConfiguration *sessionConfig = [NSURLSessionConfiguration ephemeralSessionConfiguration];
+        sessionConfig.timeoutIntervalForRequest = 8.0;
+        sessionConfig.timeoutIntervalForResource = 8.0;
+        NSURLSession *session = [NSURLSession sessionWithConfiguration:sessionConfig
+                                                             delegate:[RCInsecureSessionDelegate sharedDelegate]
+                                                        delegateQueue:nil];
+        NSURLSessionDataTask *task = [session dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+            if (error) {
+                SRLogMin(@"[RCRemote] Command on %@ failed: %@", clientName, error.localizedDescription ?: @"connection failed");
+            } else {
+                NSHTTPURLResponse *http = (NSHTTPURLResponse *)response;
+                NSString *reply = data.length > 0 ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : @"";
+                if (reply.length > 300) reply = [[reply substringToIndex:300] stringByAppendingString:@"..."];
+                NSInteger status = http.statusCode;
+                if (status >= 200 && status < 300) {
+                    SRLog(@"[RCRemote] Command on %@ -> %ld %@", clientName, (long)status, reply ?: @"");
+                } else {
+                    SRLogMin(@"[RCRemote] Command on %@ -> %ld %@", clientName, (long)status, reply ?: @"");
+                }
+            }
+            [session finishTasksAndInvalidate];
+        }];
+        [task resume];
+
+        return [NSString stringWithFormat:@"Executing remote RC command on %@: %@\n", clientName, remoteCmd];
     } else if ([cleanCmd hasPrefix:@"ssh-run "]) {
         NSString *payload = [[cleanCmd substringFromIndex:8] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         NSRange firstSpace = [payload rangeOfString:@" "];
@@ -12803,6 +12898,20 @@ static void start_web_server() {
                                             }
                                             mConfig[@"sshHosts"] = mHosts;
                                         }
+                                        NSArray *rcClients = mConfig[@"rcClients"];
+                                        if ([rcClients isKindOfClass:[NSArray class]]) {
+                                            NSMutableArray *mClients = [NSMutableArray array];
+                                            for (NSDictionary *c in rcClients) {
+                                                if ([c isKindOfClass:[NSDictionary class]]) {
+                                                    NSMutableDictionary *mc = [c mutableCopy];
+                                                    if (mc[@"token"] && [mc[@"token"] length] > 0) {
+                                                        mc[@"token"] = @"••••••••";
+                                                    }
+                                                    [mClients addObject:mc];
+                                                }
+                                            }
+                                            mConfig[@"rcClients"] = mClients;
+                                        }
                                         configToReturn = mConfig;
                                     }
                                     NSData *jsonData = [NSJSONSerialization dataWithJSONObject:configToReturn options:0 error:nil];
@@ -12876,6 +12985,27 @@ static void start_web_server() {
                                                         }
                                                     }
                                                     incoming[@"sshHosts"] = updatedHosts;
+                                                }
+                                                NSArray *newClients = incoming[@"rcClients"];
+                                                NSArray *oldClients = g_triggerConfig[@"rcClients"];
+                                                if ([newClients isKindOfClass:[NSArray class]] && [oldClients isKindOfClass:[NSArray class]]) {
+                                                    NSMutableArray *updatedClients = [NSMutableArray array];
+                                                    for (NSDictionary *nc in newClients) {
+                                                        if ([nc isKindOfClass:[NSDictionary class]]) {
+                                                            NSMutableDictionary *mnc = [nc mutableCopy];
+                                                            if ([mnc[@"token"] isEqualToString:@"••••••••"]) {
+                                                                NSString *clientId = mnc[@"id"];
+                                                                for (NSDictionary *oc in oldClients) {
+                                                                    if ([oc[@"id"] isEqualToString:clientId]) {
+                                                                        mnc[@"token"] = oc[@"token"] ?: @"";
+                                                                        break;
+                                                                    }
+                                                                }
+                                                            }
+                                                            [updatedClients addObject:mnc];
+                                                        }
+                                                    }
+                                                    incoming[@"rcClients"] = updatedClients;
                                                 }
                                                 if (!isLocal && !isTokenValid) {
                                                     incoming[@"allowDirectRootHelper"] = g_triggerConfig[@"allowDirectRootHelper"] ?: @NO;

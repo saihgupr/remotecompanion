@@ -54,6 +54,7 @@ RemoteCompanion provides fast, scriptable system control for modern rootless jai
 - **Universal Search**: Instantly find triggers, actions, shortcuts, and devices with integrated search bars in every picker.
 - **Cross-Version Support**: Supports iOS 14 through iOS 17, with partial iOS 26 support, across Rootless, Rootful, and RootHide environments.
 - **Advanced Automation**: Full support for NFC tags, custom Lua scripts (with `objc_call` support), and native Siri integration.
+- **Remote RC Actions**: add another device's IP and Web UI port under Settings > Integrations > Remote RC Clients, then pick any regular action from the normal list and run it there over HTTP, with no SSH or Shortcuts setup.
 - **iPad Experience**: Native landscape orientation and optimized layouts for iPad power users.
 - **Live Discovery**: Discovery-based live lists for nearby AirPlay and Bluetooth hardware.
 - **Trigger Favorites**: Mark any trigger as a favorite for instant access at the top of the picker.
@@ -327,6 +328,24 @@ Once configured:
 - **Visual Macro Picker**: Open **Keyboard Maestro: Trigger Macro…** in the action picker to browse and search all macros categorized by group, with instant live filtering and parameter selection.
 - **Parameter Support**: Tapping or long-pressing any KM action in an action sequence allows you to edit or remove its `%TriggerValue%` parameter, test execution immediately, or switch to a different macro.
 - **CLI & Scripts**: Execute KM commands directly via CLI: `rc km trigger "Sleep Display"` or `rc km "My Macro Name" "Optional Value"`.
+
+</details>
+
+<details>
+<summary><b>Remote RC Clients</b></summary>
+
+### Running actions on another iPhone or iPad
+
+1. On the other device, turn on **Settings > Web UI** and note its IP address and port (`8080` by default).
+2. In the RemoteCompanion iOS App, go to **Settings &rarr; Integrations &rarr; Remote RC Clients** and tap **+**.
+3. Enter a name, the device's address and port, and the other device's Web UI API token if it has one.
+4. Tap **Test Connection** to check that the Web UI answers.
+
+To run something there, add a **Remote RC: Run Command...** action to any trigger. Pick the client, then pick from the normal action list: media, lock, volume, shortcuts, camera, and the rest are all available. The action is saved as `rc-run <clientId> <command>`.
+
+- The target device only needs Wi-Fi and its Web UI enabled, no SSH or Shortcuts setup.
+- Privileged commands (`root`, `exec`, `ssh-run`) need the target's API token.
+- The token is stored in the shared config (mode `0600`) and masked in `/api/config` for unauthenticated callers.
 
 </details>
 

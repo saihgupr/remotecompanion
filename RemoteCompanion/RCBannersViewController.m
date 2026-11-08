@@ -179,6 +179,7 @@ static NSArray<NSArray<NSDictionary *> *> *RCBannerCatalog(NSArray<NSString *> *
             @"__SHORTCUT_PICKER__": @[@"shortcut:"],
             @"__LUA_SCRIPT__": @[@"lua ", @"lua_eval "],
             @"__SSH_COMMAND__": @[@"ssh-run "],
+            @"__REMOTE_RC_COMMAND__": @[@"rc-run "],
             @"__CUSTOM__": @[@"exec ", @"root ", @"sudo "]
         };
     });

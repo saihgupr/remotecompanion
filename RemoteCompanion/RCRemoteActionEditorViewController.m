@@ -1,0 +1,221 @@
+#import "RCRemoteActionEditorViewController.h"
+#import "RCConfigManager.h"
+
+@interface RCRemoteActionEditorViewController () <UITextViewDelegate>
+@property (nonatomic, copy) NSString *clientId;
+@property (nonatomic, copy) NSString *command;
+@property (nonatomic, strong) UITextView *commandView;
+@property (nonatomic, strong) UILabel *placeholderLabel;
+@property (nonatomic, strong) UIBarButtonItem *saveButton;
+@end
+
+@implementation RCRemoteActionEditorViewController
+
+- (instancetype)initWithClientId:(NSString *)clientId command:(NSString *)command {
+    self = [super initWithStyle:UITableViewStyleInsetGrouped];
+    if (self) {
+        _clientId = [clientId copy];
+        _command = [command copy] ?: @"";
+    }
+    return self;
+}
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+
+    self.title = self.command.length > 0 ? @"Edit Remote Command" : @"New Remote Command";
+    self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
+
+    self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc]
+        initWithBarButtonSystemItem:UIBarButtonSystemItemCancel
+        target:self action:@selector(cancelTapped)];
+    self.saveButton = [[UIBarButtonItem alloc]
+        initWithBarButtonSystemItem:UIBarButtonSystemItemSave
+        target:self action:@selector(saveTapped)];
+    self.navigationItem.rightBarButtonItem = self.saveButton;
+
+    self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeInteractive;
+    if (@available(iOS 15.0, *)) {
+        self.tableView.sectionHeaderTopPadding = 10;
+    }
+
+    // If there is only one client, use it; otherwise make the user pick on Save.
+    NSArray<NSDictionary *> *clients = [RCConfigManager sharedManager].rcClients;
+    if (self.clientId.length == 0 && clients.count == 1) {
+        self.clientId = clients.firstObject[@"id"];
+    }
+    [self updateSaveButton];
+}
+
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    [self applyTweaks];
+}
+
+- (void)applyTweaks {
+    RCConfigManager *cm = [RCConfigManager sharedManager];
+    CGFloat mainBG = [cm tweakValueForKey:@"mainBackground" defaultVal:0.09];
+    UIColor *settingsBG = [cm tweakColorForKey:@"settingsBackground" defaultVal:mainBG];
+    self.view.backgroundColor = settingsBG;
+    self.tableView.backgroundColor = settingsBG;
+    self.navigationController.navigationBar.backgroundColor = [cm tweakColorForKey:@"navBar" defaultVal:0.09];
+    self.tableView.separatorColor = [cm tweakColorForKey:@"separators" defaultVal:0.30];
+}
+
+#pragma mark - Table
+
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
+    return 2;
+}
+
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    return 1;
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+    return section == 0 ? @"Client" : @"Command";
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+    if (section == 0) {
+        return @"Pick the device this command runs on. Manage clients in Settings > Integrations > Remote RC Clients.";
+    }
+    return @"Runs on the other device through its Web UI, exactly as typed. Multiple lines are allowed.";
+}
+
+- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
+    return indexPath.section == 1 ? 170 : 50;
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    RCConfigManager *cm = [RCConfigManager sharedManager];
+    UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:nil];
+    cell.backgroundColor = [cm tweakColorForKey:@"blockBackground" defaultVal:0.12];
+    UIView *selBg = [[UIView alloc] init];
+    selBg.backgroundColor = [cm tweakColorForKey:@"selectionHighlight" defaultVal:0.15];
+    cell.selectedBackgroundView = selBg;
+    cell.textLabel.textColor = [UIColor labelColor];
+    cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
+
+    if (indexPath.section == 0) {
+        NSDictionary *client = [[RCConfigManager sharedManager] rcClientForId:self.clientId];
+        if (client) {
+            cell.textLabel.text = client[@"name"] ?: client[@"host"];
+            cell.detailTextLabel.text = [NSString stringWithFormat:@"%@:%@",
+                client[@"host"] ?: @"", client[@"port"] ?: @8080];
+        } else {
+            cell.textLabel.text = @"Choose a Client";
+            cell.detailTextLabel.text = @"Required";
+        }
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    } else {
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        if (!self.commandView) {
+            self.commandView = [[UITextView alloc] init];
+            self.commandView.delegate = self;
+            self.commandView.font = [UIFont monospacedSystemFontOfSize:15 weight:UIFontWeightRegular];
+            self.commandView.backgroundColor = [UIColor clearColor];
+            self.commandView.textColor = [UIColor labelColor];
+            self.commandView.keyboardType = UIKeyboardTypeASCIICapable;
+            self.commandView.autocapitalizationType = UITextAutocapitalizationTypeNone;
+            self.commandView.autocorrectionType = UITextAutocorrectionTypeNo;
+            self.commandView.textContainerInset = UIEdgeInsetsMake(8, 4, 8, 4);
+            self.commandView.translatesAutoresizingMaskIntoConstraints = NO;
+            self.commandView.text = self.command;
+
+            self.placeholderLabel = [[UILabel alloc] init];
+            self.placeholderLabel.text = @"e.g. play";
+            self.placeholderLabel.font = [UIFont monospacedSystemFontOfSize:15 weight:UIFontWeightRegular];
+            self.placeholderLabel.textColor = [UIColor tertiaryLabelColor];
+            self.placeholderLabel.translatesAutoresizingMaskIntoConstraints = NO;
+            self.placeholderLabel.hidden = self.command.length > 0;
+        }
+        [cell.contentView addSubview:self.commandView];
+        [cell.contentView addSubview:self.placeholderLabel];
+        [NSLayoutConstraint activateConstraints:@[
+            [self.commandView.topAnchor constraintEqualToAnchor:cell.contentView.topAnchor constant:4],
+            [self.commandView.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:12],
+            [self.commandView.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-12],
+            [self.commandView.bottomAnchor constraintEqualToAnchor:cell.contentView.bottomAnchor constant:-4],
+            [self.placeholderLabel.topAnchor constraintEqualToAnchor:self.commandView.topAnchor constant:12],
+            [self.placeholderLabel.leadingAnchor constraintEqualToAnchor:self.commandView.leadingAnchor constant:9],
+        ]];
+    }
+
+    return cell;
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    if (indexPath.section == 0) {
+        [self chooseClientFromView:[tableView cellForRowAtIndexPath:indexPath]];
+    }
+}
+
+#pragma mark - Client Picker
+
+- (void)chooseClientFromView:(UIView *)sourceView {
+    NSArray<NSDictionary *> *clients = [RCConfigManager sharedManager].rcClients;
+    if (clients.count == 0) {
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"No Remote RC Clients"
+            message:@"Add a device in Settings > Integrations > Remote RC Clients first."
+            preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:alert animated:YES completion:nil];
+        return;
+    }
+
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Remote RC Client"
+        message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    for (NSDictionary *client in clients) {
+        NSString *name = client[@"name"] ?: client[@"host"];
+        NSString *detail = [NSString stringWithFormat:@"%@:%@", client[@"host"] ?: @"", client[@"port"] ?: @8080];
+        NSString *title = [NSString stringWithFormat:@"%@ (%@)", name, detail];
+        if ([client[@"id"] isEqualToString:self.clientId]) {
+            title = [title stringByAppendingString:@" \u2713"];
+        }
+        [sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+            self.clientId = client[@"id"];
+            [self updateSaveButton];
+            [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:0] withRowAnimation:UITableViewRowAnimationNone];
+        }]];
+    }
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    sheet.popoverPresentationController.sourceView = sourceView;
+    sheet.popoverPresentationController.sourceRect = sourceView.bounds;
+    [self presentViewController:sheet animated:YES completion:nil];
+}
+
+#pragma mark - Editing
+
+- (void)textViewDidChange:(UITextView *)textView {
+    self.placeholderLabel.hidden = textView.text.length > 0;
+    [self updateSaveButton];
+}
+
+- (void)updateSaveButton {
+    NSString *trimmed = [self.commandView.text ?: self.command stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    BOOL clientValid = (self.clientId.length > 0 && [[RCConfigManager sharedManager] rcClientForId:self.clientId] != nil);
+    self.saveButton.enabled = (clientValid && trimmed.length > 0);
+}
+
+#pragma mark - Actions
+
+- (void)cancelTapped {
+    BOOL isRootOfPresentedNav = (self.navigationController.viewControllers.firstObject == self)
+        && self.navigationController.presentingViewController != nil;
+    if (isRootOfPresentedNav) {
+        [self.navigationController dismissViewControllerAnimated:YES completion:nil];
+    } else {
+        [self.navigationController popViewControllerAnimated:YES];
+    }
+}
+
+- (void)saveTapped {
+    [self.view endEditing:YES];
+    NSString *command = [self.commandView.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (self.clientId.length == 0 || command.length == 0) return;
+    if (self.onSave) self.onSave(self.clientId, command);
+}
+
+@end

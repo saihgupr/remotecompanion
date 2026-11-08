@@ -70,6 +70,11 @@
 - (void)addOrUpdateSSHHost:(NSDictionary *)host;
 - (void)deleteSSHHostWithId:(NSString *)hostId;
 - (NSDictionary *)sshHostForId:(NSString *)hostId;
+// Other devices running the RemoteCompanion Web UI, for the Remote RC action
+@property (nonatomic, strong) NSArray<NSDictionary *> *rcClients;
+- (void)addOrUpdateRCClient:(NSDictionary *)client;
+- (void)deleteRCClientWithId:(NSString *)clientId;
+- (NSDictionary *)rcClientForId:(NSString *)clientId;
 
 
 + (instancetype)sharedManager;
