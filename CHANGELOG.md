@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+- **Variables icon**: the Variables row now uses an orange italic x, in the style of Shortcuts' variable glyph.
+
 ## [4.4.0] - 2026-11-06
 
 ### Added

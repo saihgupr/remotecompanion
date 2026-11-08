@@ -1,0 +1,39 @@
+#import "RCVariableIcon.h"
+#import <CoreText/CoreText.h>
+
+UIImage *RCVariableMenuIcon(void) {
+    static UIImage *icon;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        CGFloat side = 29.0;
+        UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat defaultFormat];
+        format.opaque = NO;
+        UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(side, side) format:format];
+        UIImage *rendered = [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
+            CGContextRef ctx = context.CGContext;
+
+            UIFont *font = [UIFont fontWithName:@"Georgia-BoldItalic" size:28.0];
+            if (!font) {
+                UIFontDescriptor *descriptor = [[UIFont systemFontOfSize:28.0 weight:UIFontWeightBold].fontDescriptor
+                    fontDescriptorWithSymbolicTraits:UIFontDescriptorTraitItalic];
+                font = [UIFont fontWithDescriptor:descriptor size:28.0] ?: [UIFont boldSystemFontOfSize:28.0];
+            }
+            UIColor *orange = [UIColor colorWithRed:1.0 green:0.58 blue:0.0 alpha:1.0];
+            NSAttributedString *x = [[NSAttributedString alloc] initWithString:@"x" attributes:@{
+                NSFontAttributeName: font,
+                NSForegroundColorAttributeName: orange
+            }];
+
+            // Center the glyph's own path, not its line box, so the x sits optically centered.
+            CTLineRef line = CTLineCreateWithAttributedString((__bridge CFAttributedStringRef)x);
+            CGRect bounds = CTLineGetBoundsWithOptions(line, kCTLineBoundsUseGlyphPathBounds);
+            CGContextSetTextPosition(ctx,
+                (side - CGRectGetWidth(bounds)) / 2.0 - CGRectGetMinX(bounds),
+                (side - CGRectGetHeight(bounds)) / 2.0 - CGRectGetMinY(bounds));
+            CTLineDraw(line, ctx);
+            CFRelease(line);
+        }];
+        icon = [rendered imageWithRenderingMode:UIImageRenderingModeAlwaysOriginal];
+    });
+    return icon;
+}
