@@ -265,6 +265,8 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
 // What the table and grid show: every section, the selected one, or the enabled triggers
 @property (nonatomic, strong) NSArray<NSArray<NSString *> *> *shownSections;
 @property (nonatomic, strong) NSArray<NSString *> *shownTitles;
+// The triggers that run, worked out once per reload (see enabledTriggers)
+@property (nonatomic, strong) NSArray<NSString *> *enabledKeys;
 // The width the visible cells' card backgrounds were drawn for
 @property (nonatomic, assign) CGFloat cardStyleWidth;
 // Shown when no trigger has been added yet, over the list and the navigation bar
@@ -864,8 +866,9 @@ static NSString *const RCEnabledCategoryTitle = @"Enabled";
 
     // Chips follow the sections, with Enabled after Favorites while any trigger is enabled; a
     // selected category that has gone away falls back to All
+    self.enabledKeys = [self enabledTriggers];
     NSMutableArray *categories = [titles mutableCopy];
-    if ([self enabledTriggers].count > 0) {
+    if (self.enabledKeys.count > 0) {
         NSUInteger favorites = [titles indexOfObject:@"Favorites"];
         [categories insertObject:RCEnabledCategoryTitle atIndex:favorites == NSNotFound ? 0 : favorites + 1];
     }
@@ -1313,7 +1316,7 @@ static NSString *const RCEnabledCategoryTitle = @"Enabled";
     NSString *selected = self.selectedCategoryTitle;
     NSUInteger idx = selected ? [self.sectionTitles indexOfObject:selected] : NSNotFound;
     if ([selected isEqualToString:RCEnabledCategoryTitle]) {
-        self.shownSections = @[[self enabledTriggers]];
+        self.shownSections = @[self.enabledKeys ?: @[]];
         self.shownTitles = @[RCEnabledCategoryTitle];
     } else if (idx != NSNotFound) {
         self.shownSections = @[self.sections[idx]];
@@ -1525,21 +1528,20 @@ static NSString *const RCEnabledCategoryTitle = @"Enabled";
 }
 
 - (void)tableView:(UITableView *)tableView moveRowAtIndexPath:(NSIndexPath *)sourceIndexPath toIndexPath:(NSIndexPath *)destinationIndexPath {
-    NSMutableArray *favorites = [[RCConfigManager sharedManager] orderedFavorites].mutableCopy;
-    NSString *movedItem = favorites[sourceIndexPath.row];
-    [favorites removeObjectAtIndex:sourceIndexPath.row];
-    [favorites insertObject:movedItem atIndex:destinationIndexPath.row];
-    [[RCConfigManager sharedManager] setOrderedFavorites:favorites];
-
+    // The favorites as shown, as the grid does: the saved list can hold deleted triggers that
+    // aren't shown, so its positions don't match the rows
     NSInteger realSection = [_sectionTitles indexOfObject:@"Favorites"];
     if (realSection == NSNotFound) return;
     NSMutableArray *sectionData = [_sections[realSection] mutableCopy];
+    NSString *movedItem = sectionData[sourceIndexPath.row];
     [sectionData removeObjectAtIndex:sourceIndexPath.row];
     [sectionData insertObject:movedItem atIndex:destinationIndexPath.row];
+    [[RCConfigManager sharedManager] setOrderedFavorites:sectionData];
 
     NSMutableArray *mutableSections = [_sections mutableCopy];
     mutableSections[realSection] = sectionData;
     _sections = mutableSections;
+    self.enabledKeys = [self enabledTriggers]; // favorites come first there too
     [self updateShownSections];
 }
 

@@ -4859,12 +4859,12 @@ function enabledTriggers(visible) {
   return out;
 }
 
-function renderCategoryBar(visible) {
+function renderCategoryBar(visible, enabled) {
   const bar = document.getElementById('category-bar');
   if (!bar) return;
   // With nothing added, the invitation is the whole screen (the app hides its bar too)
   bar.style.display = visible.length === 0 ? 'none' : '';
-  const hasEnabled = enabledTriggers(visible).length > 0;
+  const hasEnabled = enabled.length > 0;
   // A selected section that went away (e.g. last NFC tag deleted) falls back to All
   if (g_selectedCategoryId && !(g_selectedCategoryId === ENABLED_CATEGORY ? hasEnabled : visible.some(v => v.sec.id === g_selectedCategoryId))) {
     g_selectedCategoryId = null;
@@ -4879,13 +4879,11 @@ function renderCategoryBar(visible) {
     bar.appendChild(btn);
     return btn;
   };
-  mkChip('All', null);
+  const chips = visible.map(v => [shortChipTitle(v.sec.title), v.sec.id]);
   // Enabled after Favorites (first when there are none)
-  if (hasEnabled && !(visible.length && visible[0].sec.id === 'favorites')) mkChip('Enabled', ENABLED_CATEGORY);
-  visible.forEach(v => {
-    mkChip(shortChipTitle(v.sec.title), v.sec.id);
-    if (hasEnabled && v.sec.id === 'favorites') mkChip('Enabled', ENABLED_CATEGORY);
-  });
+  if (hasEnabled) chips.splice(visible.findIndex(v => v.sec.id === 'favorites') + 1, 0, ['Enabled', ENABLED_CATEGORY]);
+  mkChip('All', null);
+  chips.forEach(([label, id]) => mkChip(label, id));
   const active = bar.querySelector('.cat-chip.active');
   if (active) active.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
 }
@@ -4906,7 +4904,8 @@ function renderAll() {
   root.innerHTML = '';
 
   const visible = computeVisibleSections();
-  renderCategoryBar(visible);
+  const enabled = enabledTriggers(visible);
+  renderCategoryBar(visible, enabled);
 
   // Nothing added yet: the same invitation as the app, with the first step in reach
   if (visible.length === 0) {
@@ -4924,7 +4923,6 @@ function renderAll() {
   }
 
   if (g_selectedCategoryId === ENABLED_CATEGORY) {
-    const enabled = enabledTriggers(visible);
     root.appendChild(sectionHeader('Enabled', false));
     const card = document.createElement('div');
     card.className = 'list-card';
