@@ -1,0 +1,6 @@
+# BEGIN parallel OpenCode lanes
+!.slim/
+!.slim/worktrees.json
+!.slim/worktrees/
+!.slim/worktrees/**
+# END parallel OpenCode lanes
