@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **Triggers only when added**: the Triggers screen now starts empty and lists only the triggers you add. Every built-in trigger moved into the + menu, including volume, power, status bar, edge and bottom bar gestures, multi-finger slides, Home/Touch ID, ringer, motion, device state, media, calls and Apple Watch, so the list stays short instead of showing dozens of unused rows.
+- **First-trigger onboarding**: with nothing added, the app shows a friendly invitation and a hand-drawn arrow curving up to the + button, plus an Add a Trigger button. The Web UI has the same empty state and add menu.
+
+### Changed
+- **Built-in triggers can be deleted**: removing a button or gesture trigger puts it back in the + menu, just like a tag, network, app or schedule trigger. The list never shows a trigger that was not added.
+- **Integrations fold into their own lists**: Snapper and SneakyCam show as one row each in Select Action > Integrations with a chevron, opening just their actions, so the section stays short. Search still finds every action directly, and Settings > Banners keeps the full flat list.
+- **Variables icon**: the Variables row uses an orange italic x, in the style of Shortcuts' variable glyph. Set Variable actions use the same x in the normal action icon color.
+- **Terminal command editor**: creating or editing an `exec` or `root` action now uses the same Settings-style screen as the SSH command editor, with the root switch in its own section above the monospaced command field.
+
 ## [4.4.0] - 2026-11-06
 
 ### Added

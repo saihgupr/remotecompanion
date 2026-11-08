@@ -3,6 +3,7 @@
 #import "RCConfigManager.h"
 #import "RCActionPickerViewController.h"
 #import "RCSSHActionEditorViewController.h"
+#import "RCTerminalCommandEditorViewController.h"
 #import "RCShortcutPickerViewController.h"
 #import "RCAppPickerViewController.h"
 #import "RCConditionPickerViewController.h"
@@ -12,6 +13,7 @@
 #import "RCVariableConditionViewController.h"
 #import "RCNumberSettingViewController.h"
 #import "RCVariableEditorParts.h"
+#import "RCVariableIcon.h"
 #import "RCSymbolPickerViewController.h"
 #import "RCServerClient.h"
 #import "RCRunningViewController.h"
@@ -1821,23 +1823,19 @@ static void RCSetRunWatching(BOOL watching) {
             
         } else if ([action isEqualToString:@"__CUSTOM__"]) {
             // Show custom text input for command
-            RCTextInputViewController *inputVC = [[RCTextInputViewController alloc] init];
-            inputVC.promptTitle = @"Terminal Command";
-            inputVC.promptMessage = @"Enter terminal command";
-            inputVC.showRootToggle = YES;
+            RCTerminalCommandEditorViewController *inputVC = [[RCTerminalCommandEditorViewController alloc]
+                initWithCommand:@"" isRoot:NO];
             inputVC.variableActions = self.actions;
-            inputVC.initialText = @"";
-            
-            __weak typeof(inputVC) weakInputVC = inputVC;
-            inputVC.onComplete = ^(NSString *text) {
+
+            inputVC.onSave = ^(NSString *text, BOOL isRoot) {
                 if (text.length > 0) {
-                    NSString *prefix = weakInputVC.isRootToggled ? @"root" : @"exec";
+                    NSString *prefix = isRoot ? @"root" : @"exec";
                     [self.actions addObject:[NSString stringWithFormat:@"%@ %@", prefix, text]];
                     [self saveActions];
                     [self.tableView reloadData];
                 }
             };
-            
+
             UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:inputVC];
             
             dispatch_async(dispatch_get_main_queue(), ^{
@@ -3445,18 +3443,13 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         BOOL isRoot = [currentAction hasPrefix:@"root "];
         NSString *currentCommand = [currentAction substringFromIndex:5];
         
-        RCTextInputViewController *inputVC = [[RCTextInputViewController alloc] init];
-        inputVC.promptTitle = @"Edit Command";
-        inputVC.promptMessage = @"Update your terminal command";
-        inputVC.initialText = currentCommand;
-        inputVC.showRootToggle = YES;
-        inputVC.isRootToggled = isRoot;
+        RCTerminalCommandEditorViewController *inputVC = [[RCTerminalCommandEditorViewController alloc]
+            initWithCommand:currentCommand isRoot:isRoot];
         inputVC.variableActions = self.actions;
-        
-        __weak typeof(inputVC) weakInputVC = inputVC;
-        inputVC.onComplete = ^(NSString *text) {
+
+        inputVC.onSave = ^(NSString *text, BOOL root) {
             if (text.length > 0) {
-                NSString *prefix = weakInputVC.isRootToggled ? @"root" : @"exec";
+                NSString *prefix = root ? @"root" : @"exec";
                 [self storeCommand:[NSString stringWithFormat:@"%@ %@", prefix, text] atIndex:indexPath.row];
             }
         };
@@ -4259,7 +4252,12 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         cell.textLabel.textColor = isControl ? [UIColor secondaryLabelColor] : [UIColor labelColor];
         cell.detailTextLabel.text = nil;
         
-        cell.imageView.image = [UIImage systemImageNamed:[self iconForCommand:actionItem]];
+        NSString *stepIcon = [self iconForCommand:actionItem];
+        if ([stepIcon isEqualToString:@"x.squareroot"]) {
+            cell.imageView.image = RCVariableMenuIconActionSized(22);
+        } else {
+            cell.imageView.image = [UIImage systemImageNamed:stepIcon];
+        }
         cell.imageView.tintColor = isControl ? [UIColor tertiaryLabelColor] : [UIColor systemGrayColor];
         
         UIImageView *handleView = [[UIImageView alloc] initWithImage:RCGrabberImage()];
@@ -4402,6 +4400,9 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         NSString *bundleId = [iconName substringFromIndex:9];
         cell.imageView.image = [UIImage _applicationIconImageForBundleIdentifier:bundleId format:0 scale:[UIScreen mainScreen].scale];
         cell.imageView.tintColor = nil;
+    } else if ([iconName isEqualToString:@"x.squareroot"]) {
+        cell.imageView.image = RCVariableMenuIconActionSized(22);
+        cell.imageView.tintColor = [UIColor systemGrayColor];
     } else {
         UIImage *custom = [action isKindOfClass:[NSString class]] ? [RCAddOnCatalog imageForCommand:action] : nil;   // an add-on's image icon
         cell.imageView.image = custom ?: [UIImage systemImageNamed:iconName];

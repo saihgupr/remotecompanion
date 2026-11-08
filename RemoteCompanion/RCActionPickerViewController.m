@@ -12,6 +12,7 @@
 #import "RCCategoryBar.h"
 #import "RCSSHActionEditorViewController.h"
 #import "RCActionTile.h"
+#import "RCVariableIcon.h"
 
 @interface RCActionPickerViewController () <UISearchResultsUpdating, UICollectionViewDelegateFlowLayout>
 @property (nonatomic, strong) NSArray<NSString *> *sectionTitles;
@@ -24,6 +25,12 @@
 // Category bar: -1 = All, otherwise an index into sections / sectionTitles
 @property (nonatomic, assign) NSInteger selectedCategory;
 @property (nonatomic, strong) RCCategoryBar *categoryBar;
+// Grouped browsing catalog: the Integrations section folds families with several actions into one
+// entry that opens a list of just those. The flat sections stay for search and Banners.
+@property (nonatomic, copy) NSArray<NSArray<NSDictionary *> *> *browseSections;
+// A picker opened for one integration family shows only that family, under its name
+@property (nonatomic, copy) NSString *groupTitle;
+@property (nonatomic, copy) NSArray<NSDictionary *> *groupActions;
 @end
 
 @implementation RCActionPickerViewController
@@ -69,7 +76,13 @@
     self.navigationController.navigationBar.prefersLargeTitles = YES;
     self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeAlways;
     
-    self.title = @"Select Action";
+    if (self.groupActions.count > 0) {
+        // An integration's own list, opened from its entry in Integrations
+        self.title = self.groupTitle ?: @"Actions";
+        self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
+    } else {
+        self.title = @"Select Action";
+    }
     
     // The cells and titles first: attaching the category bar lays the grid out, and on iOS 14 that
     // asks for cells straight away
@@ -79,16 +92,20 @@
 
     // Category bar floating below the search bar
     [self rebuildSections];
-    self.categoryBar = [self makeCategoryBar];
+    if (self.groupActions.count == 0) {
+        self.categoryBar = [self makeCategoryBar];
+        [self.categoryBar attachToScrollView:self.collectionView];
+    }
     self.collectionView.alwaysBounceVertical = YES;
     self.collectionView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
-    [self.categoryBar attachToScrollView:self.collectionView];
     
-    // Use proper Cancel button style
-    self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc]
-        initWithBarButtonSystemItem:UIBarButtonSystemItemCancel
-        target:self
-        action:@selector(cancel)];
+    // Use proper Cancel button style; a group's list goes Back instead
+    if (self.groupActions.count == 0) {
+        self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc]
+            initWithBarButtonSystemItem:UIBarButtonSystemItemCancel
+            target:self
+            action:@selector(cancel)];
+    }
     
     // Setup Search
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
@@ -113,7 +130,54 @@
     [self.collectionView reloadData];
 }
 
+// Integrations with several actions (Snapper, SneakyCam) show as one entry that opens a list of
+// just those, so the section stays short. Search and Banners keep using the flat catalog.
+static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArray<NSDictionary *> *> *sections,
+                                                                   NSArray<NSString *> *titles) {
+    NSMutableArray *grouped = [NSMutableArray arrayWithCapacity:sections.count];
+    for (NSUInteger i = 0; i < sections.count; i++) {
+        if (i >= titles.count || ![titles[i] isEqualToString:@"Integrations"]) {
+            [grouped addObject:sections[i]];
+            continue;
+        }
+        NSMutableArray *items = [NSMutableArray array];
+        NSMutableDictionary<NSString *, NSNumber *> *groupIndexes = [NSMutableDictionary dictionary];
+        for (NSDictionary *item in sections[i]) {
+            NSString *group = item[@"group"];
+            if (![group isKindOfClass:[NSString class]] || group.length == 0) {
+                [items addObject:item];
+                continue;
+            }
+            NSNumber *index = groupIndexes[group];
+            if (!index) {
+                groupIndexes[group] = @(items.count);
+                [items addObject:[@{ @"name": group,
+                                     @"icon": item[@"groupIcon"] ?: item[@"icon"] ?: @"square.grid.2x2",
+                                     @"children": [NSMutableArray array] } mutableCopy]];
+                index = groupIndexes[group];
+            }
+            // The family's name is the list's title, so "SneakyCam: Take Photo" reads "Take Photo"
+            NSMutableDictionary *child = [item mutableCopy];
+            NSString *prefix = [group stringByAppendingString:@": "];
+            if ([child[@"name"] isKindOfClass:[NSString class]] && [child[@"name"] hasPrefix:prefix]) {
+                child[@"name"] = [child[@"name"] substringFromIndex:prefix.length];
+            }
+            [items[index.integerValue][@"children"] addObject:child];
+        }
+        [grouped addObject:items];
+    }
+    return grouped;
+}
+
 - (void)rebuildSections {
+    // A group's list: only its actions, under its name
+    if (self.groupActions.count > 0) {
+        _sectionTitles = @[self.groupTitle ?: @"Actions"];
+        _sections = @[self.groupActions];
+        _browseSections = _sections;
+        return;
+    }
+    
     RCConfigManager *cm = [RCConfigManager sharedManager];
     
     _sectionTitles = @[@"Media", @"Sound", @"Capture", @"Apps & Navigation", @"Device Controls", @"Connectivity", @"System", @"Integrations", @"Scripting & Logic"];
@@ -268,8 +332,8 @@
                 if ([fm fileExistsAtPath:p]) { sneakyInstalled = YES; break; }
             }
             if (sneakyInstalled) {
-                [integrations addObject:@{ @"name": @"SneakyCam: Take Photo", @"command": @"sneakycam photo", @"icon": @"camera.aperture" }];
-                [integrations addObject:@{ @"name": @"SneakyCam: Toggle Video", @"command": @"sneakycam video", @"icon": @"eye.slash.fill" }];
+                [integrations addObject:@{ @"name": @"SneakyCam: Take Photo", @"command": @"sneakycam photo", @"icon": @"camera.aperture", @"group": @"SneakyCam", @"groupIcon": @"camera.aperture" }];
+                [integrations addObject:@{ @"name": @"SneakyCam: Toggle Video", @"command": @"sneakycam video", @"icon": @"eye.slash.fill", @"group": @"SneakyCam", @"groupIcon": @"camera.aperture" }];
             }
             NSArray *snapperPaths = @[
                 @"/Library/MobileSubstrate/DynamicLibraries/Snapper3.dylib",
@@ -306,10 +370,10 @@
                 if ([fm fileExistsAtPath:p]) { snapperInstalled = YES; break; }
             }
             if (snapperInstalled) {
-                [integrations addObject:@{ @"name": @"Snapper: Open Area", @"command": @"snapper open", @"icon": @"crop" }];
-                [integrations addObject:@{ @"name": @"Snapper: Freeze Screen", @"command": @"snapper freeze", @"icon": @"snowflake" }];
-                [integrations addObject:@{ @"name": @"Snapper: Instant Snap", @"command": @"snapper instant", @"icon": @"bolt.fill" }];
-                [integrations addObject:@{ @"name": @"Snapper: Close All", @"command": @"snapper close", @"icon": @"xmark.rectangle.fill" }];
+                [integrations addObject:@{ @"name": @"Snapper: Open Area", @"command": @"snapper open", @"icon": @"crop", @"group": @"Snapper", @"groupIcon": @"crop" }];
+                [integrations addObject:@{ @"name": @"Snapper: Freeze Screen", @"command": @"snapper freeze", @"icon": @"snowflake", @"group": @"Snapper", @"groupIcon": @"crop" }];
+                [integrations addObject:@{ @"name": @"Snapper: Instant Snap", @"command": @"snapper instant", @"icon": @"bolt.fill", @"group": @"Snapper", @"groupIcon": @"crop" }];
+                [integrations addObject:@{ @"name": @"Snapper: Close All", @"command": @"snapper close", @"icon": @"xmark.rectangle.fill", @"group": @"Snapper", @"groupIcon": @"crop" }];
             }
             NSArray *audioHandoffPaths = @[
                 @"/Library/MobileSubstrate/DynamicLibraries/AudioHandoff.dylib",
@@ -378,6 +442,7 @@
     }
     _sectionTitles = titles;
     _sections = sections;
+    _browseSections = RCPickerGroupedSections(_sections, _sectionTitles);
 }
 
 - (NSArray<NSArray<NSDictionary *> *> *)catalogSections {
@@ -471,8 +536,8 @@
 // What the table shows: search results, the selected category, or everything
 - (NSArray<NSArray<NSDictionary *> *> *)displaySections {
     if ([self isSearching]) return @[self.filteredActions ?: @[]];
-    if ([self hasCategory]) return @[_sections[self.selectedCategory]];
-    return _sections;
+    if ([self hasCategory]) return @[_browseSections[self.selectedCategory]];
+    return _browseSections;
 }
 
 - (NSString *)displayTitleForSection:(NSInteger)section {
@@ -488,7 +553,9 @@
 #pragma mark - Grid
 
 // Actions that open another screen or ask for more: their tiles get a chevron
-static BOOL RCPickerActionOpensMore(NSString *command) {
+static BOOL RCPickerActionOpensMore(NSDictionary *action) {
+    if (action[@"children"]) return YES;
+    NSString *command = action[@"command"];
     static NSSet *more;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
@@ -521,8 +588,9 @@ static BOOL RCPickerActionOpensMore(NSString *command) {
         NSString *icon = action[@"icon"];
         if (@available(iOS 15.0, *)) {} else if ([icon isEqualToString:@"ear.badge.checkmark"]) icon = @"ear";
         UIImage *custom = [action[@"image"] isKindOfClass:[UIImage class]] ? action[@"image"] : nil;
+        if ([action[@"command"] isEqualToString:@"__SET_VARIABLE__"]) custom = RCVariableMenuIconActionSized(22);
         [row setName:action[@"name"] icon:icon image:custom];
-        row.opensMore = RCPickerActionOpensMore(action[@"command"]) || [RCAddOnCatalog commandAsksForDetails:action[@"command"]];
+        row.opensMore = RCPickerActionOpensMore(action) || [RCAddOnCatalog commandAsksForDetails:action[@"command"]];
         NSInteger count = [collectionView numberOfItemsInSection:indexPath.section];
         [row setFirst:indexPath.item == 0 last:indexPath.item == count - 1];
         return row;
@@ -532,8 +600,9 @@ static BOOL RCPickerActionOpensMore(NSString *command) {
     NSString *icon = action[@"icon"];
     if (@available(iOS 15.0, *)) {} else if ([icon isEqualToString:@"ear.badge.checkmark"]) icon = @"ear";
     UIImage *custom = [action[@"image"] isKindOfClass:[UIImage class]] ? action[@"image"] : nil;   // an add-on's own picture
+    if ([action[@"command"] isEqualToString:@"__SET_VARIABLE__"]) custom = RCVariableMenuIconActionSized(22);
     [cell setName:action[@"name"] icon:icon image:custom];
-    cell.opensMore = RCPickerActionOpensMore(action[@"command"]) || [RCAddOnCatalog commandAsksForDetails:action[@"command"]];
+    cell.opensMore = RCPickerActionOpensMore(action) || [RCAddOnCatalog commandAsksForDetails:action[@"command"]];
     return cell;
 }
 
@@ -552,6 +621,8 @@ static BOOL RCPickerActionOpensMore(NSString *command) {
 }
 
 - (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout referenceSizeForHeaderInSection:(NSInteger)section {
+    // A group's list already has its name in the title
+    if (self.groupActions.count > 0) return CGSizeZero;
     // The first title sits just below the category bar
     return CGSizeMake(collectionView.bounds.size.width, section == 0 ? 30 : 38);
 }
@@ -567,7 +638,6 @@ static BOOL RCPickerActionOpensMore(NSString *command) {
     NSString *command = action[@"command"];
     if (self.isBeingDismissed || self.navigationController.isBeingDismissed) return; // already picked, closing
     
-
     // An add-on opens a list of its actions; the one picked comes back through here
     if ([command hasPrefix:@"__ADDON__"]) {
         __weak typeof(self) weakSelf = self;
@@ -592,7 +662,11 @@ static BOOL RCPickerActionOpensMore(NSString *command) {
         return;
     }
 
-
+    // An integration with several actions: open its own list instead of picking anything
+    if ([action[@"children"] isKindOfClass:[NSArray class]]) {
+        [self openGroup:action];
+        return;
+    }
     if ([command isEqualToString:@"__UNLOCK_DEVICE__"]) {
         [self handleUnlockDevice];
         return;
@@ -708,6 +782,15 @@ static BOOL RCPickerActionOpensMore(NSString *command) {
     } else {
         [self dismissViewControllerAnimated:YES completion:nil];
     }
+}
+
+- (void)openGroup:(NSDictionary *)group {
+    RCActionPickerViewController *picker = [[RCActionPickerViewController alloc] init];
+    picker.groupTitle = group[@"name"];
+    picker.groupActions = group[@"children"];
+    picker.onActionSelected = self.onActionSelected;
+    picker.staysOpenFor = self.staysOpenFor;
+    [self.navigationController pushViewController:picker animated:YES];
 }
 
 - (void)handleCameraPicker:(BOOL)isVideo {

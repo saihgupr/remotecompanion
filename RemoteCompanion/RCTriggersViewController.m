@@ -36,6 +36,217 @@
 }
 @end
 
+#pragma mark - Empty state
+
+static UIFont *RCEmptyTitleFont(CGFloat size) {
+    UIFont *font = [UIFont systemFontOfSize:size weight:UIFontWeightBold];
+    if (@available(iOS 13.0, *)) {
+        UIFontDescriptor *descriptor = [font.fontDescriptor fontDescriptorWithDesign:UIFontDescriptorSystemDesignRounded];
+        if (descriptor) return [UIFont fontWithDescriptor:descriptor size:size];
+    }
+    return font;
+}
+
+static UIFont *RCEmptyScaledFont(UIFont *font) {
+    if (@available(iOS 11.0, *)) return [[UIFontMetrics defaultMetrics] scaledFontForFont:font];
+    return font;
+}
+
+// The Triggers screen with nothing added yet: a short invitation and a button to start.
+@interface RCEmptyTriggersView : UIView
+@property (nonatomic, copy) void (^onAdd)(void);
+@property (nonatomic, weak) UINavigationBar *navigationBar;
+@end
+
+@implementation RCEmptyTriggersView {
+    UIImageView *_iconView;
+    UILabel *_eyebrowLabel;
+    UILabel *_titleLabel;
+    UILabel *_bodyLabel;
+    UIButton *_addButton;
+    CAGradientLayer *_glowLayer;
+    BOOL _introPlayed;
+}
+
+- (instancetype)initWithFrame:(CGRect)frame {
+    self = [super initWithFrame:frame];
+    if (self) {
+        self.backgroundColor = [UIColor clearColor];
+        self.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+
+        // A soft blue halo behind the icon, so the empty screen has depth instead of a flat gap
+        _glowLayer = [CAGradientLayer layer];
+        _glowLayer.type = kCAGradientLayerRadial;
+        _glowLayer.startPoint = CGPointMake(0.5, 0.5);
+        _glowLayer.endPoint = CGPointMake(1.0, 1.0);
+        [self.layer addSublayer:_glowLayer];
+
+        _iconView = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"hand.tap.fill"]];
+        _iconView.contentMode = UIViewContentModeCenter;
+        _iconView.tintColor = [UIColor systemBlueColor];
+        _iconView.backgroundColor = [[UIColor systemBlueColor] colorWithAlphaComponent:0.12];
+        _iconView.layer.cornerRadius = 34;
+        _iconView.layer.cornerCurve = kCACornerCurveContinuous;
+        [_iconView setPreferredSymbolConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:34 weight:UIImageSymbolWeightRegular]];
+        [self addSubview:_iconView];
+
+        _eyebrowLabel = [[UILabel alloc] init];
+        _eyebrowLabel.attributedText = [[NSAttributedString alloc] initWithString:@"GET STARTED" attributes:@{
+            NSFontAttributeName: [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold],
+            NSForegroundColorAttributeName: [UIColor systemBlueColor],
+            NSKernAttributeName: @1.4
+        }];
+        _eyebrowLabel.textAlignment = NSTextAlignmentCenter;
+        [self addSubview:_eyebrowLabel];
+
+        _titleLabel = [[UILabel alloc] init];
+        _titleLabel.text = @"Add your first trigger";
+        _titleLabel.font = RCEmptyScaledFont(RCEmptyTitleFont(25));
+        _titleLabel.textColor = [UIColor labelColor];
+        _titleLabel.textAlignment = NSTextAlignmentCenter;
+        _titleLabel.numberOfLines = 0;
+        _titleLabel.adjustsFontForContentSizeCategory = YES;
+        [self addSubview:_titleLabel];
+
+        _bodyLabel = [[UILabel alloc] init];
+        _bodyLabel.text = @"Pick a button, gesture, app, or schedule, then choose the action it runs.";
+        _bodyLabel.font = RCEmptyScaledFont([UIFont systemFontOfSize:15.5]);
+        _bodyLabel.textColor = [UIColor secondaryLabelColor];
+        _bodyLabel.textAlignment = NSTextAlignmentCenter;
+        _bodyLabel.numberOfLines = 0;
+        _bodyLabel.adjustsFontForContentSizeCategory = YES;
+        [self addSubview:_bodyLabel];
+
+        _addButton = [UIButton buttonWithType:UIButtonTypeSystem];
+        [_addButton setTitle:@"Add a Trigger" forState:UIControlStateNormal];
+        [_addButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        _addButton.titleLabel.font = RCEmptyScaledFont([UIFont systemFontOfSize:17 weight:UIFontWeightSemibold]);
+        _addButton.titleLabel.adjustsFontForContentSizeCategory = YES;
+        _addButton.backgroundColor = [UIColor systemBlueColor];
+        _addButton.layer.cornerCurve = kCACornerCurveContinuous;
+        [_addButton addTarget:self action:@selector(addTapped) forControlEvents:UIControlEventTouchUpInside];
+        _addButton.accessibilityLabel = @"Add a Trigger";
+        [self addSubview:_addButton];
+    }
+    return self;
+}
+
+- (void)addTapped {
+    if (self.onAdd) self.onAdd();
+}
+
+- (void)setHidden:(BOOL)hidden {
+    [super setHidden:hidden];
+    if (hidden) _introPlayed = NO;
+}
+
+// Only the button takes touches; everything else falls through to the Triggers screen and
+// the + button underneath (the copy is decoration)
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    UIView *hit = [super hitTest:point withEvent:event];
+    return hit == self ? nil : hit;
+}
+
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+    [super traitCollectionDidChange:previousTraitCollection];
+    BOOL relayout = NO;
+    if (@available(iOS 13.0, *)) {
+        if ([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection]) relayout = YES;
+    }
+    if (previousTraitCollection && self.traitCollection.preferredContentSizeCategory != previousTraitCollection.preferredContentSizeCategory) relayout = YES;
+    if (relayout) [self setNeedsLayout];
+}
+
+// A staggered entrance for the copy and button, and one soft pop for the icon. Skipped
+// when Reduce Motion is on.
+- (void)playIntro {
+    if (_introPlayed) return;
+    _introPlayed = YES;
+    BOOL reduceMotion = UIAccessibilityIsReduceMotionEnabled();
+    if (reduceMotion) {
+        for (UIView *view in @[_iconView, _eyebrowLabel, _titleLabel, _bodyLabel, _addButton]) {
+            view.alpha = 1;
+            view.transform = CGAffineTransformIdentity;
+        }
+        _glowLayer.opacity = 1;
+        return;
+    }
+
+    for (UIView *view in @[_eyebrowLabel, _titleLabel, _bodyLabel, _addButton]) {
+        view.alpha = 0;
+        view.transform = CGAffineTransformMakeTranslation(0, 10);
+    }
+    _iconView.alpha = 0;
+    _iconView.transform = CGAffineTransformMakeScale(0.86, 0.86);
+    _glowLayer.opacity = 0;
+
+    CABasicAnimation *glow = [CABasicAnimation animationWithKeyPath:@"opacity"];
+    glow.fromValue = @0;
+    glow.toValue = @1;
+    glow.duration = 0.38;
+    glow.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
+    _glowLayer.opacity = 1;
+    [_glowLayer addAnimation:glow forKey:@"intro"];
+
+    [UIView animateWithDuration:0.38 delay:0 options:UIViewAnimationOptionCurveEaseOut animations:^{
+        self->_iconView.alpha = 1;
+        self->_iconView.transform = CGAffineTransformIdentity;
+    } completion:nil];
+
+    NSArray *copyViews = @[_eyebrowLabel, _titleLabel, _bodyLabel, _addButton];
+    [copyViews enumerateObjectsUsingBlock:^(UIView *view, NSUInteger index, __unused BOOL *stop) {
+        [UIView animateWithDuration:0.32 delay:0.08 + index * 0.06 options:UIViewAnimationOptionCurveEaseOut animations:^{
+            view.alpha = 1;
+            view.transform = CGAffineTransformIdentity;
+        } completion:nil];
+    }];
+}
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+
+    CGFloat width = CGRectGetWidth(self.bounds);
+    CGFloat side = MIN(320, width - 48);
+    CGRect navFrame = self.navigationBar ? [self.navigationBar convertRect:self.navigationBar.bounds toView:self] : CGRectMake(0, 0, width, 0);
+    CGFloat navBottom = CGRectGetMaxY(navFrame);
+
+    CGSize eyebrowSize = [_eyebrowLabel sizeThatFits:CGSizeMake(side, CGFLOAT_MAX)];
+    CGSize titleSize = [_titleLabel sizeThatFits:CGSizeMake(side, CGFLOAT_MAX)];
+    CGSize bodySize = [_bodyLabel sizeThatFits:CGSizeMake(side, CGFLOAT_MAX)];
+    UIFont *buttonFont = _addButton.titleLabel.font;
+    CGFloat buttonHeight = MAX(46, ceil(buttonFont.lineHeight + 24));
+    CGFloat buttonWidth = MIN(side, MAX(184, ceil([_addButton.titleLabel sizeThatFits:CGSizeMake(side, CGFLOAT_MAX)].width + 48)));
+
+    CGFloat total = 68 + 14 + eyebrowSize.height + 8 + titleSize.height + 10 + bodySize.height + 22 + buttonHeight;
+    CGFloat top = navBottom + 56;
+    CGFloat bottomRoom = CGRectGetHeight(self.bounds) - 48;
+    if (top + total > bottomRoom) top = navBottom + 24;
+    CGFloat y = top + MAX(0, (bottomRoom - top - total) * 0.25);
+    CGFloat centerX = CGRectGetMidX(self.bounds);
+
+    BOOL light = NO;
+    if (@available(iOS 13.0, *)) light = self.traitCollection.userInterfaceStyle == UIUserInterfaceStyleLight;
+    UIColor *blue = [UIColor systemBlueColor];
+    _glowLayer.colors = @[
+        (id)[blue colorWithAlphaComponent:(light ? 0.10 : 0.20)].CGColor,
+        (id)[blue colorWithAlphaComponent:0].CGColor
+    ];
+    _glowLayer.frame = CGRectMake(centerX - 96, y + 34 - 96, 192, 192);
+
+    _iconView.frame = CGRectMake(centerX - 34, y, 68, 68);
+    y += 68 + 14;
+    _eyebrowLabel.frame = CGRectMake(centerX - side / 2, y, side, eyebrowSize.height);
+    y += eyebrowSize.height + 8;
+    _titleLabel.frame = CGRectMake(centerX - side / 2, y, side, titleSize.height);
+    y += titleSize.height + 10;
+    _bodyLabel.frame = CGRectMake(centerX - side / 2, y, side, bodySize.height);
+    y += bodySize.height + 22;
+    _addButton.frame = CGRectMake(centerX - buttonWidth / 2, y, buttonWidth, buttonHeight);
+    _addButton.layer.cornerRadius = buttonHeight / 2;
+}
+
+@end
+
 @interface RCTriggersViewController () <RCTriggersGridSource>
 // Compact: the grid, its pull-to-refresh, and the bar buttons without Edit
 @property (nonatomic, strong) RCTriggersGrid *grid;
@@ -51,6 +262,11 @@
 @property (nonatomic, copy) NSString *selectedCategoryTitle;
 // The width the visible cells' card backgrounds were drawn for
 @property (nonatomic, assign) CGFloat cardStyleWidth;
+// Shown when no trigger has been added yet, over the list and the navigation bar
+@property (nonatomic, strong) RCEmptyTriggersView *emptyView;
+// The name and version footer under the list and the grid
+@property (nonatomic, strong) UIView *tableFooterView;
+@property (nonatomic, strong) UIView *gridFooterView;
 @end
 
 @implementation RCTriggersViewController
@@ -155,6 +371,8 @@
         style:UIBarButtonItemStylePlain
         target:self
         action:@selector(addNewItem)];
+    addItem.accessibilityLabel = @"Add Trigger";
+    addItem.accessibilityIdentifier = @"RCAddTriggerButton";
 
     self.navigationItem.rightBarButtonItems = @[settingsItem, addItem];
     
@@ -205,6 +423,7 @@
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(wrapLongNamesSettingChanged:) name:@"RCWrapLongNamesSettingChanged" object:nil];
                                                
     [self setupFooterView];
+    self.tableFooterView = self.tableView.tableFooterView;
     [self setupGrid];
     [self applyTweaks];
 }
@@ -232,7 +451,8 @@
     // The same footer (name and version) under the grid
     UIView *tableFooter = self.tableView.tableFooterView;
     [self setupFooterView];
-    self.grid.footerView = self.tableView.tableFooterView;
+    self.gridFooterView = self.tableView.tableFooterView;
+    self.grid.footerView = self.gridFooterView;
     self.tableView.tableFooterView = tableFooter;
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(layoutSettingChanged:) name:RCLayoutChangedNotification object:nil];
     [self applyLayout];
@@ -395,6 +615,12 @@
     [self updatePauseState];
 }
 
+- (void)viewWillDisappear:(BOOL)animated {
+    [super viewWillDisappear:animated];
+    // The invitation belongs to this screen, not to the editor pushed above it
+    self.emptyView.hidden = YES;
+}
+
 // Paused button triggers (the Button Triggers action, or another tweak): a line above the title,
 // and Resume when it's the action's pause. The states are the tweak's (see RC_TriggersPaused).
 - (void)updatePauseState {
@@ -440,6 +666,12 @@
 
     RCConfigManager *config = [RCConfigManager sharedManager];
 
+    // Only a trigger that has been added is listed. A trigger is added when it has an
+    // entry in the config: the + menu makes one, and deleting removes it.
+    NSPredicate *added = [NSPredicate predicateWithBlock:^BOOL(NSString *key, NSDictionary *bindings) {
+        return [config triggerDataForKey:key] != nil;
+    }];
+
     // Helper to filter out favorited triggers
     NSArray* (^filterFavorites)(NSArray*) = ^NSArray*(NSArray *keys) {
         return [keys filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSString *key, NSDictionary *bindings) {
@@ -448,10 +680,8 @@
     };
 
     // Get ordered favorites from config
-    // A created trigger that was deleted before deleting took it out of Favorites isn't shown
-    NSArray *allFavorites = [[config orderedFavorites] filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSString *key, NSDictionary *bindings) {
-        return ![RCConfigManager canRenameTrigger:key] || [config triggerDataForKey:key] != nil;
-    }]];
+    // A trigger that was deleted isn't shown, even if it was left in Favorites
+    NSArray *allFavorites = [[config orderedFavorites] filteredArrayUsingPredicate:added];
 
     // Add Favorites section at top if there are any
     if (allFavorites.count > 0) {
@@ -461,38 +691,33 @@
 
     // Helper to add section
     void (^addSection)(NSArray *, NSString *, BOOL) = ^(NSArray *keys, NSString *title, BOOL hideIfEmpty) {
-        NSArray *filtered = filterFavorites(keys);
+        NSArray *filtered = filterFavorites([keys filteredArrayUsingPredicate:added]);
         if (filtered.count > 0 || !hideIfEmpty) {
             [sections addObject:filtered];
             [titles addObject:title];
         }
     };
 
-    // Standard Sections (Always show headers)
-    addSection(@[@"volume_up_hold", @"volume_down_hold", @"volume_both_press", @"volume_up_then_down", @"volume_down_then_up"], @"Volume Buttons", NO);
-    addSection(@[@"power_double_tap", @"power_triple_click", @"power_quadruple_click", @"power_volume_up", @"power_volume_down", @"power_long_press"], @"Power Button", NO);
-    addSection(@[@"trigger_statusbar_left_hold", @"trigger_statusbar_center_hold", @"trigger_statusbar_right_hold", @"trigger_statusbar_swipe_left", @"trigger_statusbar_swipe_right", @"trigger_statusbar_double_tap"], @"Status Bar", NO);
-    addSection(@[@"trigger_edge_left_swipe_up", @"trigger_edge_left_swipe_down", @"trigger_edge_right_swipe_up", @"trigger_edge_right_swipe_down"], @"Edge Gestures", NO);
-    addSection(@[@"trigger_bottombar_swipe_left", @"trigger_bottombar_swipe_right", @"trigger_bottom_swipe_up_left", @"trigger_bottom_swipe_up_center", @"trigger_bottom_swipe_up_right"], @"Bottom Bar Gestures", NO);
-    // Multi-Finger Gestures Section (Only show if configured, hide if empty)
+    // Standard Sections
+    addSection(@[@"volume_up_hold", @"volume_down_hold", @"volume_both_press", @"volume_up_then_down", @"volume_down_then_up"], @"Volume Buttons", YES);
+    addSection(@[@"power_double_tap", @"power_triple_click", @"power_quadruple_click", @"power_volume_up", @"power_volume_down", @"power_long_press"], @"Power Button", YES);
+    addSection(@[@"trigger_statusbar_left_hold", @"trigger_statusbar_center_hold", @"trigger_statusbar_right_hold", @"trigger_statusbar_swipe_left", @"trigger_statusbar_swipe_right", @"trigger_statusbar_double_tap"], @"Status Bar", YES);
+    addSection(@[@"trigger_edge_left_swipe_up", @"trigger_edge_left_swipe_down", @"trigger_edge_right_swipe_up", @"trigger_edge_right_swipe_down"], @"Edge Gestures", YES);
+    addSection(@[@"trigger_bottombar_swipe_left", @"trigger_bottombar_swipe_right", @"trigger_bottom_swipe_up_left", @"trigger_bottom_swipe_up_center", @"trigger_bottom_swipe_up_right"], @"Bottom Bar Gestures", YES);
+    // Multi-Finger Gestures Section (Only show if added)
     NSMutableArray *multiFingerKeys = [NSMutableArray array];
     for (NSString *key in @[@"trigger_statusbar_two_finger_swipe_down", @"trigger_bottom_two_finger_swipe_up"]) {
-        NSDictionary *trig = [[RCConfigManager sharedManager] triggerDataForKey:key];
-        if (trig && ([trig[@"enabled"] boolValue] || [trig[@"actions"] count] > 0)) {
-            [multiFingerKeys addObject:key];
-        }
+        if ([[RCConfigManager sharedManager] triggerDataForKey:key]) [multiFingerKeys addObject:key];
     }
     addSection(multiFingerKeys, @"Multi-Finger Gestures", YES);
     if ([RCConfigManager hasHomeButton]) {
-        addSection(@[@"trigger_home_double_click", @"trigger_home_triple_click", @"trigger_home_quadruple_click", @"trigger_home_hold", @"trigger_home_power", @"touchid_tap", @"touchid_hold"], @"Home Button", NO);
+        addSection(@[@"trigger_home_double_click", @"trigger_home_triple_click", @"trigger_home_quadruple_click", @"trigger_home_hold", @"trigger_home_power", @"touchid_tap", @"touchid_hold"], @"Home Button", YES);
     }
-    addSection(@[@"trigger_ringer_mute", @"trigger_ringer_unmute", @"trigger_ringer_toggle"], @"Ringer Switch", NO);
-    // Apple Watch Section (Only show if configured, hide if empty)
+    addSection(@[@"trigger_ringer_mute", @"trigger_ringer_unmute", @"trigger_ringer_toggle"], @"Ringer Switch", YES);
+    // Apple Watch Section (Only show if added)
     NSMutableArray *watchKeys = [NSMutableArray array];
     for (NSString *key in @[@"trigger_watch_ping", @"trigger_watch_ping_hold"]) {
-        if ([[RCConfigManager sharedManager] actionsForTrigger:key].count > 0) {
-            [watchKeys addObject:key];
-        }
+        if ([[RCConfigManager sharedManager] triggerDataForKey:key]) [watchKeys addObject:key];
     }
     addSection(watchKeys, @"Apple Watch", YES);
     // Device State Section (Only show if configured, hide if empty)
@@ -559,7 +784,7 @@
         if ([configuredKeys containsObject:key]) [deviceStateKeys addObject:key];
     }
     addSection(deviceStateKeys, @"Device State", YES);
-    addSection(@[@"shake"], @"Motion Gestures", NO);
+    addSection(@[@"shake"], @"Motion Gestures", YES);
 
     // Dynamic Sections (Hide if empty/favorited)
     addSection([[RCConfigManager sharedManager] nfcTriggerKeys], @"NFC Tags", YES);
@@ -642,8 +867,40 @@
 
     [self updatePauseState]; // the left button is Resume while paused, otherwise none
 
+    [self updateEmptyState];
     [self.tableView reloadData];
     [self.grid reload];
+}
+
+#pragma mark - Onboarding
+
+// With no trigger added, the list is empty: hide the category bar and show the invitation
+- (void)updateEmptyState {
+    BOOL empty = self.sections.count == 0;
+    BOOL wasHidden = self.emptyView.hidden || self.emptyView.superview == nil;
+    self.categoryBar.hidden = empty;
+    // The name and version under the list would otherwise sit inside the invitation
+    self.tableView.tableFooterView = empty ? nil : self.tableFooterView;
+    self.grid.footerView = empty ? nil : self.gridFooterView;
+    if (!empty) {
+        self.emptyView.hidden = YES;
+        return;
+    }
+    if (!self.emptyView) {
+        self.emptyView = [[RCEmptyTriggersView alloc] initWithFrame:CGRectZero];
+        __weak typeof(self) weakSelf = self;
+        self.emptyView.onAdd = ^{ [weakSelf addNewItem]; };
+    }
+    // Above the list and the grid, below the navigation bar
+    UIView *host = self.view;
+    self.emptyView.navigationBar = self.navigationController.navigationBar;
+    if (self.emptyView.superview != host) [host addSubview:self.emptyView];
+    self.emptyView.frame = host.bounds;
+    [host bringSubviewToFront:self.emptyView];
+    self.emptyView.hidden = NO;
+    [self.emptyView setNeedsLayout];
+    [self.emptyView layoutIfNeeded];
+    if (wasHidden) [self.emptyView playIntro];
 }
 
 
@@ -682,45 +939,6 @@
         [vcs addObject:vc];
         [nav setViewControllers:vcs animated:YES];
     };
-
-    // System events can only be added once; one that exists just opens
-    NSMutableArray *systemEvents = [NSMutableArray array];
-    for (NSArray *event in @[@[@"trigger_statusbar_two_finger_swipe_down", @"2-Finger Top Slide Down", @"hand.draw", @"Gestures"],
-                             @[@"trigger_bottom_two_finger_swipe_up", @"2-Finger Bottom Slide Up", @"hand.draw", @"Gestures"],
-                             @[@"trigger_device_lock", @"Device Locked", @"lock.fill", @"Device"],
-                             @[@"trigger_device_unlock", @"Device Unlocked", @"lock.open.fill", @"Device"],
-                             @[@"trigger_power_connect", @"Power Connected", @"bolt.fill", @"Device"],
-                             @[@"trigger_power_disconnect", @"Power Disconnected", @"bolt.slash.fill", @"Device"],
-                             @[@"trigger_device_rotated_landscape", @"Rotated to Landscape", @"iphone.landscape", @"Device"],
-                             @[@"trigger_device_rotated_portrait", @"Rotated to Portrait", @"iphone", @"Device"],
-                             @[@"trigger_carplay_connect", @"CarPlay Connected", @"car.fill", @"Device"],
-                             @[@"trigger_carplay_disconnect", @"CarPlay Disconnected", @"car", @"Device"],
-                             @[@"trigger_device_findmy_sound", @"Find My Sound", @"location.circle.fill", @"Device"],
-                             @[@"trigger_media_play", @"Media Playing", @"play.fill", @"Media"],
-                             @[@"trigger_media_pause", @"Media Paused", @"pause.fill", @"Media"],
-                             @[@"trigger_media_track_change", @"Media Track Changed", @"forward.fill", @"Media"],
-                             @[@"trigger_device_call_incoming", @"Incoming Call", @"phone.arrow.down.left", @"Calls"],
-                             @[@"trigger_device_call_start", @"Call Started", @"phone.fill", @"Calls"],
-                             @[@"trigger_device_call_end", @"Call Ended", @"phone.down.fill", @"Calls"],
-                             @[@"trigger_watch_ping", @"Ping iPhone", @"applewatch.radiowaves.left.and.right", @"Apple Watch"],
-                             @[@"trigger_watch_ping_hold", @"Ping iPhone (Hold)", @"applewatch.radiowaves.left.and.right", @"Apple Watch"]]) {
-        NSString *key = event[0], *title = event[1];
-        NSMutableDictionary *item = [@{ @"title": title, @"icon": event[2], @"section": event[3], @"handler": ^{
-            if (![[[RCConfigManager sharedManager] allConfiguredTriggerKeys] containsObject:key]) {
-                [[RCConfigManager sharedManager] updateTrigger:key withData:@{@"name": title, @"enabled": @YES, @"actions": @[]}];
-            } else {
-                NSMutableDictionary *data = [[[RCConfigManager sharedManager] triggerDataForKey:key] mutableCopy] ?: [NSMutableDictionary dictionary];
-                data[@"enabled"] = @YES;
-                [[RCConfigManager sharedManager] updateTrigger:key withData:data];
-            }
-            replaceMenuWith([[RCActionsViewController alloc] initWithTriggerKey:key]);
-        } } mutableCopy];
-        NSDictionary *trig = [[RCConfigManager sharedManager] triggerDataForKey:key];
-        if (trig && ([trig[@"enabled"] boolValue] || [trig[@"actions"] count] > 0)) {
-            item[@"detail"] = @"Added";
-        }
-        [systemEvents addObject:item];
-    }
 
     NSMutableArray *items = [@[
         @{ @"title": @"NFC Tag", @"icon": @"wave.3.right", @"section": @"Nearby", @"handler": ^{ push([[RCNFCTriggerViewController alloc] init]); } },
@@ -765,11 +983,72 @@
         } },
         @{ @"title": @"Notification", @"icon": @"bell.badge", @"section": @"Apps", @"handler": ^{ push([[RCNotificationTriggerViewController alloc] init]); } },
         @{ @"title": @"Scheduled Trigger", @"icon": @"calendar.badge.clock", @"section": @"Time", @"handler": ^{ push([[RCScheduledTriggerViewController alloc] init]); } },
+        @{ @"title": @"Battery Level", @"icon": [UIImage systemImageNamed:@"battery.50"] ? @"battery.50" : @"battery.25", @"section": @"Device", @"handler": ^{ push([[RCBatteryTriggerViewController alloc] init]); } },
+        @{ @"title": @"Focus", @"icon": @"moon.fill", @"section": @"Device", @"handler": ^{ push([[RCFocusTriggerViewController alloc] init]); } },
+        @{ @"title": @"MQTT Topic", @"icon": @"antenna.radiowaves.left.and.right", @"section": @"Integrations", @"handler": ^{ push([[RCMQTTTriggerViewController alloc] init]); } },
     ] mutableCopy];
-    [items addObjectsFromArray:systemEvents];
-    [items addObject:@{ @"title": @"Battery Level", @"icon": [UIImage systemImageNamed:@"battery.50"] ? @"battery.50" : @"battery.25", @"section": @"Device", @"handler": ^{ push([[RCBatteryTriggerViewController alloc] init]); } }];
-    [items addObject:@{ @"title": @"MQTT Topic", @"icon": @"antenna.radiowaves.left.and.right", @"section": @"Integrations", @"handler": ^{ push([[RCMQTTTriggerViewController alloc] init]); } }];
-    [items addObject:@{ @"title": @"Focus", @"icon": @"moon.fill", @"section": @"Device", @"handler": ^{ push([[RCFocusTriggerViewController alloc] init]); } }];
+
+    // Every built-in trigger is added from here. It can only be added once: when it is
+    // already in the list, its menu entry opens it instead.
+    void (^addBuiltIn)(NSString *, NSString *) = ^(NSString *key, NSString *section) {
+        RCConfigManager *config = [RCConfigManager sharedManager];
+        NSString *title = [config defaultNameForTrigger:key];
+        NSMutableDictionary *item = [@{ @"title": title,
+                                        @"icon": [RCTriggersViewController iconNameForTrigger:key],
+                                        @"section": section,
+                                        @"handler": ^{
+            // A new trigger stays disabled until it has an action; the action editor
+            // switches it on. Opening one that already exists leaves its state alone.
+            if (![config triggerDataForKey:key]) {
+                [config updateTrigger:key withData:@{ @"name": title, @"enabled": @NO, @"actions": @[], @"added": @YES }];
+            }
+            replaceMenuWith([[RCActionsViewController alloc] initWithTriggerKey:key]);
+        } } mutableCopy];
+        if ([config triggerDataForKey:key]) item[@"detail"] = @"Added";
+        [items addObject:item];
+    };
+
+    for (NSString *key in @[@"volume_up_hold", @"volume_down_hold", @"volume_both_press", @"volume_up_then_down", @"volume_down_then_up"]) {
+        addBuiltIn(key, @"Volume Buttons");
+    }
+    for (NSString *key in @[@"power_double_tap", @"power_triple_click", @"power_quadruple_click", @"power_volume_up", @"power_volume_down", @"power_long_press"]) {
+        addBuiltIn(key, @"Power Button");
+    }
+    for (NSString *key in @[@"trigger_statusbar_left_hold", @"trigger_statusbar_center_hold", @"trigger_statusbar_right_hold", @"trigger_statusbar_swipe_left", @"trigger_statusbar_swipe_right", @"trigger_statusbar_double_tap"]) {
+        addBuiltIn(key, @"Status Bar");
+    }
+    for (NSString *key in @[@"trigger_edge_left_swipe_up", @"trigger_edge_left_swipe_down", @"trigger_edge_right_swipe_up", @"trigger_edge_right_swipe_down"]) {
+        addBuiltIn(key, @"Edge Gestures");
+    }
+    for (NSString *key in @[@"trigger_bottombar_swipe_left", @"trigger_bottombar_swipe_right", @"trigger_bottom_swipe_up_left", @"trigger_bottom_swipe_up_center", @"trigger_bottom_swipe_up_right"]) {
+        addBuiltIn(key, @"Bottom Bar Gestures");
+    }
+    for (NSString *key in @[@"trigger_statusbar_two_finger_swipe_down", @"trigger_bottom_two_finger_swipe_up"]) {
+        addBuiltIn(key, @"Multi-Finger Gestures");
+    }
+    if ([RCConfigManager hasHomeButton]) {
+        for (NSString *key in @[@"trigger_home_double_click", @"trigger_home_triple_click", @"trigger_home_quadruple_click", @"trigger_home_hold", @"trigger_home_power", @"touchid_tap", @"touchid_hold"]) {
+            addBuiltIn(key, @"Home Button");
+        }
+    }
+    for (NSString *key in @[@"trigger_ringer_mute", @"trigger_ringer_unmute", @"trigger_ringer_toggle"]) {
+        addBuiltIn(key, @"Ringer Switch");
+    }
+    addBuiltIn(@"shake", @"Motion Gestures");
+
+    for (NSString *key in @[@"trigger_device_lock", @"trigger_device_unlock", @"trigger_power_connect", @"trigger_power_disconnect", @"trigger_device_rotated_landscape", @"trigger_device_rotated_portrait", @"trigger_carplay_connect", @"trigger_carplay_disconnect", @"trigger_device_findmy_sound"]) {
+        addBuiltIn(key, @"Device State");
+    }
+    for (NSString *key in @[@"trigger_media_play", @"trigger_media_pause", @"trigger_media_track_change"]) {
+        addBuiltIn(key, @"Media");
+    }
+    for (NSString *key in @[@"trigger_device_call_incoming", @"trigger_device_call_start", @"trigger_device_call_end"]) {
+        addBuiltIn(key, @"Calls");
+    }
+    for (NSString *key in @[@"trigger_watch_ping", @"trigger_watch_ping_hold"]) {
+        addBuiltIn(key, @"Apple Watch");
+    }
+
     // Add-ons: a row for each one that has triggers, opening its list (last, so they come after
     // the built-in sections)
     for (NSDictionary *group in [RCAddOnCatalog addOnTriggerGroups]) {
@@ -983,6 +1262,9 @@
     [super viewDidLayoutSubviews];
     [self.categoryBar layoutInScrollView:[self activeScrollView]];
 
+    // Keep the invitation below the navigation bar when its height changes
+    if (!self.emptyView.hidden) [self.emptyView setNeedsLayout];
+
     // The card backgrounds are drawn for the cell's width when it's displayed: redraw the
     // visible ones when the width changes (rotation), or they keep the old width
     CGFloat width = CGRectGetWidth(self.tableView.bounds);
@@ -1108,7 +1390,7 @@
         // Use Monospace font for commands for better readability of code/IDs
         cell.detailTextLabel.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
     } else {
-        cell.detailTextLabel.text = @"Not configured";
+        cell.detailTextLabel.text = @"Tap to add actions";
         cell.detailTextLabel.textColor = [UIColor tertiaryLabelColor];
         cell.detailTextLabel.font = [UIFont systemFontOfSize:13]; // Regular font for placeholder
     }
@@ -1226,10 +1508,10 @@
 
 #pragma mark - Deleting, app icons
 
-// The triggers that can be deleted: the ones made for a tag, network, device, app, notification,
-// schedule, topic or state (the button and gesture triggers are always there)
+// Every trigger in the list was added on purpose, so every one can be deleted. Removing
+// it puts the built-in triggers back in the New Trigger menu.
 - (BOOL)canDeleteTrigger:(NSString *)triggerKey {
-    return !(![triggerKey hasPrefix:@"nfc_"] && ![triggerKey hasPrefix:@"wifi_"] && ![triggerKey hasPrefix:@"bt_"] && ![triggerKey hasPrefix:@"app_launch_"] && ![triggerKey hasPrefix:@"app_exit_"] && ![triggerKey hasPrefix:@"output_"] && ![triggerKey hasPrefix:@"notif_"] && ![triggerKey hasPrefix:@"notify_"] && ![triggerKey hasPrefix:@"sched_"] && ![triggerKey hasPrefix:@"mqtt_"] && ![triggerKey hasPrefix:@"mqtt_sub_"] && ![triggerKey hasPrefix:@"trigger_device_"] && ![triggerKey hasPrefix:@"trigger_media_"] && ![triggerKey hasPrefix:@"trigger_power_"] && ![triggerKey hasPrefix:@"trigger_carplay_"] && ![triggerKey hasPrefix:@"trigger_watch_"] && ![triggerKey containsString:@"two_finger"] && ![RCAddOnCatalog isAddOnTriggerKey:triggerKey]);
+    return YES;
 }
 
 // A created trigger's letter, telling NFC tags, networks and devices of one kind apart: the first

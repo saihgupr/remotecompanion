@@ -75,6 +75,7 @@
 + (instancetype)sharedManager;
 
 - (NSArray<NSString *> *)allTriggerKeys;
++ (NSArray<NSString *> *)builtInTriggerKeys;
 - (NSArray<NSString *> *)allConfiguredTriggerKeys;
 - (NSString *)displayNameForTrigger:(NSString *)triggerKey;
 // Whether a trigger can have a name of its own: the ones the user makes, not the built-in ones

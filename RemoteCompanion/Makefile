@@ -31,7 +31,7 @@ RemoteCompanion_FILES += RCFocusPickerViewController.m
 RemoteCompanion_FILES += RCWebUIAccessViewController.m
 RemoteCompanion_FILES += RCRunningViewController.m
 RemoteCompanion_FILES += RCRunHistoryViewController.m
-RemoteCompanion_FILES += RCVariablesViewController.m RCSetVariableViewController.m RCVariableConditionViewController.m RCNumberSettingViewController.m RCSymbolPickerViewController.m RCCommandPickerViewController.m RCTimeRangeViewController.m
+RemoteCompanion_FILES += RCVariablesViewController.m RCVariableIcon.m RCSetVariableViewController.m RCVariableConditionViewController.m RCNumberSettingViewController.m RCSymbolPickerViewController.m RCCommandPickerViewController.m RCTimeRangeViewController.m
 RemoteCompanion_FILES += RCAddOnCatalog.m RCAddOnsViewController.m RCAddOnDetailViewController.m RCAddOnActionsViewController.m RCAddOnOptionsViewController.m RCAddOnExpandCell.m RCAddOnTriggersViewController.m
 
 # Reorganized Settings submenus
@@ -40,6 +40,7 @@ RemoteCompanion_FILES += RCFocusTriggerViewController.m
 RemoteCompanion_FILES += RCSSHSettingsViewController.m
 RemoteCompanion_FILES += RCSSHHostEditorViewController.m
 RemoteCompanion_FILES += RCSSHActionEditorViewController.m
+RemoteCompanion_FILES += RCTerminalCommandEditorViewController.m
 RemoteCompanion_FILES += RCConfigManager+AppExclusions.m RCExcludedAppsViewController.m
 
 include $(THEOS_MAKE_PATH)/application.mk

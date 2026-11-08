@@ -7,6 +7,7 @@
 #import "RCRunningViewController.h"
 #import "RCWebUIAccessViewController.h"
 #import "RCVariablesViewController.h"
+#import "RCVariableIcon.h"
 #import "RCGesturesViewController.h"
 #import "RCAddOnCatalog.h"
 #import "RCAddOnsViewController.h"
@@ -322,8 +323,8 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     } else if (indexPath.section == RCSettingsSectionAdvanced && indexPath.row == 1) {
         cell.textLabel.text = @"Variables";
-        cell.imageView.image = [UIImage systemImageNamed:@"x.squareroot"];
-        cell.imageView.tintColor = [UIColor systemOrangeColor];
+        cell.imageView.image = RCVariableMenuIcon();
+        cell.imageView.tintColor = nil;
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     } else if (indexPath.section == RCSettingsSectionAdvanced) {
         cell.textLabel.text = @"Advanced Settings";

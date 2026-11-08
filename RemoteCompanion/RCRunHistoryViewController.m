@@ -1,6 +1,7 @@
 #import "RCRunHistoryViewController.h"
 #import "RCConfigManager.h"
 #import "RCServerClient.h"
+#import "RCVariableIcon.h"
 
 // One row of a run's details: an action as it was for that run, what happened there, and how deep
 // in the If and Repeat blocks it sits
@@ -57,7 +58,11 @@
     RCRunStep *step = self.steps[indexPath.row];
     cell.indentationWidth = 18;
     cell.indentationLevel = step.depth;
-    cell.imageView.image = [UIImage systemImageNamed:step.icon];
+    if ([step.icon isEqualToString:@"x.squareroot"]) {
+        cell.imageView.image = RCVariableMenuIconActionSized(22);
+    } else {
+        cell.imageView.image = [UIImage systemImageNamed:step.icon];
+    }
     cell.imageView.tintColor = step.stoppedHere ? [UIColor systemOrangeColor] : step.marker ? [UIColor tertiaryLabelColor] : [UIColor systemGrayColor];
     cell.textLabel.text = step.name;
     cell.textLabel.numberOfLines = 0;
