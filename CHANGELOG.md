@@ -12,7 +12,7 @@ All notable changes to this project will be documented in this file.
 - **Duplicate actions**: the long-press action menu can duplicate a row in place, and the Web UI's right-click menu has the same. If and Repeat blocks, including their Else branches, duplicate whole so a block is never split.
 
 ### Changed
-- **AudioStream auto-start is opt-in**: `/api/audiostream/start` now returns 403 unless AudioStream auto-start is enabled in Settings > Integrations. It is off by default, so a NAS or other client timing out can no longer wake the iPhone streaming daemon.
+- **AudioStream auto-start is opt-in**: `/api/audiostream/start` now returns 403 unless AudioStream auto-start is enabled. The switch lives under Settings > Integrations > AudioStream in the app and the Web UI, only appears when AudioStream is installed, and is off by default, so a NAS or other client timing out can no longer wake the iPhone streaming daemon.
 - **Built-in triggers can be deleted**: removing a button or gesture trigger puts it back in the + menu, just like a tag, network, app or schedule trigger. The list never shows a trigger that was not added.
 - **Integrations fold into their own lists**: Snapper and SneakyCam show as one row each in Select Action > Integrations with a chevron, opening just their actions, so the section stays short. Search still finds every action directly, and Settings > Banners keeps the full flat list.
 - **Variables icon**: the Variables row uses an orange italic x, in the style of Shortcuts' variable glyph. Set Variable actions use the same x in the normal action icon color.
