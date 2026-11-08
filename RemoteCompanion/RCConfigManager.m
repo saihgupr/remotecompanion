@@ -95,42 +95,44 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
             _config[@"sshHosts"] = [_config[@"sshHosts"] mutableCopy];
         }
         
-        // Auto-add any missing triggers (for upgrades)
+        // 4.5: a trigger appears in the app only once it has been added. Older versions
+        // filled in every built-in trigger as an empty, disabled entry (and could leave
+        // favorites behind), so drop those. An entry with actions, switched on, or added
+        // from the New Trigger screen (its "added" marker) is kept.
         NSMutableDictionary *triggers = _config[@"triggers"];
-        NSArray *allKeys = @[@"volume_up_hold", @"volume_down_hold", @"power_double_tap", @"power_long_press", 
-                             @"power_triple_click", @"power_quadruple_click", 
-                             @"trigger_statusbar_left_hold", @"trigger_statusbar_center_hold", @"trigger_statusbar_right_hold", 
-                             @"trigger_statusbar_swipe_left", @"trigger_statusbar_swipe_right",
-                             @"trigger_statusbar_double_tap",
-                             @"trigger_home_triple_click", @"trigger_home_quadruple_click", @"trigger_home_double_click",
-                             @"trigger_home_hold", @"trigger_home_power",
-                             @"trigger_edge_left_swipe_up", @"trigger_edge_left_swipe_down", 
-                             @"trigger_edge_right_swipe_up", @"trigger_edge_right_swipe_down",
-                             @"volume_both_press", @"volume_up_then_down", @"volume_down_then_up", @"touchid_tap",
-                             @"power_volume_up", @"power_volume_down", @"shake",
-                             @"trigger_ringer_mute", @"trigger_ringer_unmute", @"trigger_ringer_toggle",
-                             @"trigger_bottombar_swipe_left", @"trigger_bottombar_swipe_right",
-                             @"trigger_bottom_swipe_up_left", @"trigger_bottom_swipe_up_center", @"trigger_bottom_swipe_up_right",
-                             @"trigger_device_lock", @"trigger_device_unlock",
-                             @"trigger_media_play", @"trigger_media_pause", @"trigger_media_track_change"];
-        
+        NSMutableArray *favorites = [_config[@"favoriteTriggers"] mutableCopy] ?: [NSMutableArray array];
         BOOL needsSave = NO;
-        // Clean up unconfigured multi-finger triggers so they don't show in the main menu by default
-        for (NSString *mfKey in @[@"trigger_statusbar_two_finger_swipe_down", @"trigger_bottom_two_finger_swipe_up"]) {
-            NSDictionary *t = triggers[mfKey];
-            if (t && ![t[@"enabled"] boolValue] && [t[@"actions"] count] == 0) {
-                [triggers removeObjectForKey:mfKey];
+        for (NSString *key in [[self class] builtInTriggerKeys]) {
+            NSDictionary *trigger = triggers[key];
+            if (![trigger isKindOfClass:[NSDictionary class]]) continue;
+            BOOL kept = [trigger[@"actions"] count] > 0 || [trigger[@"enabled"] boolValue] || [trigger[@"added"] boolValue];
+            if (!kept) {
+                [triggers removeObjectForKey:key];
+                needsSave = YES;
+            } else if (![trigger[@"added"] boolValue]) {
+                // Mark a trigger that was already set up as added on purpose, so it
+                // stays on the list even if its actions are later removed
+                NSMutableDictionary *marked = [trigger mutableCopy];
+                marked[@"added"] = @YES;
+                triggers[key] = marked;
                 needsSave = YES;
             }
         }
-        for (NSString *key in allKeys) {
-            if (!triggers[key]) {
-                triggers[key] = [@{ @"enabled": @NO, @"actions": @[] } mutableCopy];
-                NSLog(@"[RCConfigManager] Added missing trigger: %@", key);
-                needsSave = YES;
-            }
+        // A favorite whose trigger is gone (deleted, or one of the empty entries above)
+        // would stay in Favorites under its raw key
+        NSMutableArray *leftFavorites = [NSMutableArray array];
+        for (NSString *key in favorites) {
+            if (triggers[key]) [leftFavorites addObject:key];
         }
-        
+        if (![leftFavorites isEqualToArray:favorites]) {
+            _config[@"favoriteTriggers"] = leftFavorites;
+            needsSave = YES;
+        }
+
+        // Cleanup deprecated watch triggers
+        if (triggers[@"watch_near"]) { [triggers removeObjectForKey:@"watch_near"]; needsSave = YES; }
+        if (triggers[@"watch_far"]) { [triggers removeObjectForKey:@"watch_far"]; needsSave = YES; }
+
         if (needsSave) {
             [self saveConfig];
         }
@@ -183,27 +185,8 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
             [self saveConfig];
         }
 
-        // Cleanup deprecated watch triggers
-        BOOL didChange = NO;
-        if (triggers[@"watch_near"]) { [triggers removeObjectForKey:@"watch_near"]; didChange = YES; }
-        if (triggers[@"watch_far"]) { [triggers removeObjectForKey:@"watch_far"]; didChange = YES; }
-        
-        // Also cleanup unconfigured device state, media, and watch triggers so they don't show up in the main list unless created
-        NSArray *deviceStateKeys = @[@"trigger_device_lock", @"trigger_device_unlock", @"trigger_media_play", @"trigger_media_pause", @"trigger_media_track_change", @"trigger_watch_ping", @"trigger_watch_ping_hold"];
-        for (NSString *key in deviceStateKeys) {
-            NSDictionary *trig = triggers[key];
-            if (trig && (!trig[@"actions"] || [trig[@"actions"] count] == 0)) {
-                [triggers removeObjectForKey:key];
-                didChange = YES;
-            }
-        }
-        
-        if (didChange) {
-            _config[@"triggers"] = triggers;
-            [self saveConfig];
-        }
     } else {
-        // Default config with all triggers (excluding system events which are added dynamically)
+        // Default config: no triggers until one is added from the New Trigger screen
         NSLog(@"[RCConfigManager] Using default config");
         _config = [@{
             @"masterEnabled": @YES,
@@ -215,47 +198,56 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
             @"nfcEnabled": @YES,
             @"rootEnabled": @YES,
             @"sshHosts": [NSMutableArray array],
-            @"triggers": [@{
-                @"volume_up_hold": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"volume_down_hold": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"power_double_tap": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"power_long_press": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"power_triple_click": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"power_quadruple_click": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"trigger_statusbar_left_hold": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"trigger_statusbar_center_hold": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"trigger_statusbar_right_hold": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"trigger_statusbar_swipe_left": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"trigger_statusbar_swipe_right": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"trigger_statusbar_double_tap": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"trigger_home_triple_click": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"trigger_home_quadruple_click": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"trigger_home_hold": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"trigger_home_power": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"trigger_home_double_click": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"touchid_hold": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"touchid_tap": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"trigger_edge_left_swipe_up": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"trigger_edge_left_swipe_down": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"trigger_edge_right_swipe_up": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"trigger_edge_right_swipe_down": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"volume_both_press": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"volume_up_then_down": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"volume_down_then_up": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"power_volume_up": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"power_volume_down": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"trigger_ringer_mute": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"trigger_ringer_unmute": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"trigger_ringer_toggle": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"shake": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"trigger_bottombar_swipe_left": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"trigger_bottombar_swipe_right": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"trigger_bottom_swipe_up_left": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"trigger_bottom_swipe_up_center": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy],
-                @"trigger_bottom_swipe_up_right": [@{ @"enabled": @NO, @"actions": @[] } mutableCopy]
-            } mutableCopy]
+            @"triggers": [NSMutableDictionary dictionary]
         } mutableCopy];
     }
+}
+
+// Every trigger the app can add that is not made for a tag, network, device, app,
+// notification, time or topic. Older versions listed these all the time; now one only
+// appears once it has been added.
++ (NSArray<NSString *> *)builtInTriggerKeys {
+    static NSArray<NSString *> *keys;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        keys = @[
+            // Volume Buttons
+            @"volume_up_hold", @"volume_down_hold", @"volume_both_press",
+            @"volume_up_then_down", @"volume_down_then_up",
+            // Power Button
+            @"power_double_tap", @"power_triple_click", @"power_quadruple_click",
+            @"power_volume_up", @"power_volume_down", @"power_long_press",
+            // Status Bar
+            @"trigger_statusbar_left_hold", @"trigger_statusbar_center_hold", @"trigger_statusbar_right_hold",
+            @"trigger_statusbar_swipe_left", @"trigger_statusbar_swipe_right", @"trigger_statusbar_double_tap",
+            @"trigger_statusbar_two_finger_swipe_down",
+            // Edge Gestures
+            @"trigger_edge_left_swipe_up", @"trigger_edge_left_swipe_down",
+            @"trigger_edge_right_swipe_up", @"trigger_edge_right_swipe_down",
+            // Bottom Bar Gestures
+            @"trigger_bottombar_swipe_left", @"trigger_bottombar_swipe_right",
+            @"trigger_bottom_swipe_up_left", @"trigger_bottom_swipe_up_center", @"trigger_bottom_swipe_up_right",
+            @"trigger_bottom_two_finger_swipe_up",
+            // Home Button
+            @"trigger_home_double_click", @"trigger_home_triple_click", @"trigger_home_quadruple_click",
+            @"trigger_home_hold", @"trigger_home_power", @"touchid_tap", @"touchid_hold",
+            // Ringer Switch
+            @"trigger_ringer_mute", @"trigger_ringer_unmute", @"trigger_ringer_toggle",
+            // Apple Watch
+            @"trigger_watch_ping", @"trigger_watch_ping_hold",
+            // Motion Gestures
+            @"shake",
+            // Device State
+            @"trigger_device_lock", @"trigger_device_unlock",
+            @"trigger_power_connect", @"trigger_power_disconnect",
+            @"trigger_device_rotated_landscape", @"trigger_device_rotated_portrait",
+            @"trigger_carplay_connect", @"trigger_carplay_disconnect",
+            @"trigger_device_findmy_sound",
+            @"trigger_media_play", @"trigger_media_pause", @"trigger_media_track_change",
+            @"trigger_device_call_incoming", @"trigger_device_call_start", @"trigger_device_call_end"
+        ];
+    });
+    return keys;
 }
 
 - (BOOL)masterEnabled {
@@ -771,7 +763,7 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
 }
 
 - (NSArray<NSString *> *)allTriggerKeys {
-    return @[@"volume_up_hold", @"volume_down_hold", @"volume_both_press", @"volume_up_then_down", @"volume_down_then_up", @"power_double_tap", @"power_long_press", @"power_triple_click", @"power_quadruple_click", @"trigger_statusbar_left_hold", @"trigger_statusbar_center_hold", @"trigger_statusbar_right_hold", @"trigger_statusbar_swipe_left", @"trigger_statusbar_swipe_right", @"trigger_statusbar_double_tap", @"trigger_statusbar_two_finger_swipe_down", @"trigger_bottom_two_finger_swipe_up", @"trigger_home_triple_click", @"trigger_home_quadruple_click", @"trigger_home_double_click", @"trigger_home_hold", @"trigger_home_power", @"touchid_tap", @"touchid_hold", @"trigger_edge_left_swipe_up", @"trigger_edge_left_swipe_down", @"trigger_edge_right_swipe_up", @"trigger_edge_right_swipe_down", @"trigger_ringer_mute", @"trigger_ringer_unmute", @"trigger_ringer_toggle", @"trigger_watch_ping", @"trigger_watch_ping_hold", @"trigger_bottombar_swipe_left", @"trigger_bottombar_swipe_right", @"trigger_bottom_swipe_up_left", @"trigger_bottom_swipe_up_center", @"trigger_bottom_swipe_up_right", @"power_volume_up", @"power_volume_down", @"shake", @"trigger_device_lock", @"trigger_device_unlock", @"trigger_media_play", @"trigger_media_pause", @"trigger_media_track_change"];
+    return [[self class] builtInTriggerKeys];
 }
 
 - (NSArray<NSDictionary *> *)notificationTriggers {

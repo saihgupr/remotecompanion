@@ -3364,6 +3364,7 @@ const TRIGGER_SECTIONS = [
   { title: 'Status Bar',             id: 'statusbar', keys: ['trigger_statusbar_left_hold','trigger_statusbar_center_hold','trigger_statusbar_right_hold','trigger_statusbar_swipe_left','trigger_statusbar_swipe_right','trigger_statusbar_double_tap'] },
   { title: 'Edge Gestures',          id: 'edge',      keys: ['trigger_edge_left_swipe_up','trigger_edge_left_swipe_down','trigger_edge_right_swipe_up','trigger_edge_right_swipe_down'] },
   { title: 'Bottom Bar Gestures',    id: 'bottombar', keys: ['trigger_bottombar_swipe_left','trigger_bottombar_swipe_right','trigger_bottom_swipe_up_left','trigger_bottom_swipe_up_center','trigger_bottom_swipe_up_right'] },
+  { title: 'Multi-Finger Gestures',  id: 'multifinger', keys: ['trigger_statusbar_two_finger_swipe_down','trigger_bottom_two_finger_swipe_up'] },
   { title: 'Home Button',            id: 'home',      keys: ['trigger_home_double_click','trigger_home_triple_click','trigger_home_quadruple_click','trigger_home_hold','trigger_home_power','touchid_tap','touchid_hold'] },
   { title: 'Ringer Switch',          id: 'ringer',    keys: ['trigger_ringer_mute','trigger_ringer_unmute','trigger_ringer_toggle'] },
   { title: 'Apple Watch',            id: 'watch',     keys: ['trigger_watch_ping','trigger_watch_ping_hold'] },
@@ -3401,6 +3402,7 @@ const TRIGGER_NAMES = {
   trigger_watch_ping:'Ping iPhone', trigger_watch_ping_hold:'Ping iPhone (Hold)',
   trigger_bottombar_swipe_left:'Bottom Bar Swipe Left', trigger_bottombar_swipe_right:'Bottom Bar Swipe Right',
   trigger_bottom_swipe_up_left:'Bottom Swipe Up (Left)', trigger_bottom_swipe_up_center:'Bottom Swipe Up (Center)', trigger_bottom_swipe_up_right:'Bottom Swipe Up (Right)',
+  trigger_statusbar_two_finger_swipe_down:'2-Finger Top Slide Down', trigger_bottom_two_finger_swipe_up:'2-Finger Bottom Slide Up',
   trigger_device_lock: 'Device Locked', trigger_device_unlock: 'Device Unlocked',
   trigger_power_connect: 'Power Connected', trigger_power_disconnect: 'Power Disconnected',
   trigger_device_rotated_landscape: 'Rotated to Landscape', trigger_device_rotated_portrait: 'Rotated to Portrait',
@@ -4750,9 +4752,18 @@ function sectionMatches(sec, key) {
   return false;
 }
 
-// Sections that currently have something to show (same visibility rules as iOS)
+// A trigger is on the list only after it has been added: it has actions, is switched
+// on, or carries the marker the New Trigger screen sets. Empty, disabled built-ins
+// left by older versions stay out.
+function triggerIsAdded(key) {
+  const t = config.triggers[key];
+  return !!t && ((t.actions || []).length > 0 || t.enabled === true || t.added === true);
+}
+
+// Sections that currently have something to show (same visibility rules as iOS): a
+// trigger is listed only after it has been added, and empty sections drop out
 function computeVisibleSections() {
-  const allKeys = Object.keys(config.triggers);
+  const allKeys = Object.keys(config.triggers).filter(triggerIsAdded);
   const favs = config.favoriteTriggers || [];
   const out = [];
   TRIGGER_SECTIONS.forEach(sec => {
@@ -4760,16 +4771,15 @@ function computeVisibleSections() {
     if (sec.id === 'status') {
       keys = allKeys.filter(k => ['trigger_device_','trigger_media_','trigger_power_','trigger_carplay_'].some(p => k.startsWith(p)));
     } else if (sec.id === 'favorites') {
-      keys = favs.filter(k => config.triggers[k]);
+      keys = favs.filter(k => triggerIsAdded(k));
     } else if (sec.dynamic) {
       keys = allKeys.filter(k => sectionMatches(sec, k));
     } else {
-      keys = (sec.keys || []).slice();
+      keys = (sec.keys || []).filter(k => triggerIsAdded(k));
     }
     if (sec.id !== 'favorites') keys = keys.filter(k => !favs.includes(k));
-    if (sec.dynamic && keys.length === 0) return;
     if (sec.id === 'home' && typeof serverCapabilities !== 'undefined' && serverCapabilities.home_button === false) return;
-    if (sec.id === 'favorites' && keys.length === 0) return;
+    if (keys.length === 0) return;
     out.push({ sec, keys });
   });
   return out;
@@ -4778,6 +4788,8 @@ function computeVisibleSections() {
 function renderCategoryBar(visible) {
   const bar = document.getElementById('category-bar');
   if (!bar) return;
+  // With nothing added, the invitation is the whole screen (the app hides its bar too)
+  bar.style.display = visible.length === 0 ? 'none' : '';
   // A selected section that went away (e.g. last NFC tag deleted) falls back to All
   if (g_selectedCategoryId && !visible.some(v => v.sec.id === g_selectedCategoryId)) {
     g_selectedCategoryId = null;
@@ -4816,6 +4828,21 @@ function renderAll() {
   const visible = computeVisibleSections();
   renderCategoryBar(visible);
 
+  // Nothing added yet: the same invitation as the app, with the first step in reach
+  if (visible.length === 0) {
+    const empty = document.createElement('div');
+    empty.style.cssText = 'text-align:center;padding:56px 24px 40px';
+    empty.innerHTML = `
+      <div style="width:68px;height:68px;border-radius:34px;background:rgba(0,122,255,.12);display:flex;align-items:center;justify-content:center;margin:0 auto 18px">
+        <i class="f7-icons" style="font-size:34px;color:var(--rc-blue)">hand_tap_fill</i>
+      </div>
+      <div style="font-size:24px;font-weight:700;margin-bottom:8px">Add your first trigger</div>
+      <div style="color:var(--rc-label-2);font-size:15px;line-height:1.4;max-width:300px;margin:0 auto 22px">Pick a button, gesture, app, or schedule, then choose the action it runs.</div>
+      <button onclick="showAddTriggerSheet()" style="background:var(--rc-blue);color:#fff;border:none;border-radius:23px;height:46px;padding:0 26px;font-size:17px;font-weight:600;font-family:inherit;cursor:pointer">Add a Trigger</button>`;
+    root.appendChild(empty);
+    return;
+  }
+
   visible.forEach(({ sec, keys }) => {
     if (g_selectedCategoryId && sec.id !== g_selectedCategoryId) return;
 
@@ -4829,7 +4856,8 @@ function renderAll() {
     // Card
     const card = document.createElement('div');
     card.className = 'list-card';
-    keys.forEach(key => card.appendChild(renderTriggerRow(key, !!sec.deletable)));
+    // Every trigger in the list was added on purpose, so every one can be deleted
+    keys.forEach(key => card.appendChild(renderTriggerRow(key, true)));
     root.appendChild(card);
   });
 }
@@ -4843,6 +4871,7 @@ const TRIGGER_CATEGORY_ICONS = {
   'Status Bar': SCREEN_AREA(5, 4, 10, 4),
   'Edge Gestures': SCREEN_AREA(5, 4, 4, 12),
   'Bottom Bar Gestures': SCREEN_AREA(5, 12, 10, 4),
+  'Multi-Finger Gestures': 'hand_draw',
   'Home Button': 'circle',
   'Ringer Switch': 'bell_fill',
   'Apple Watch': 'clock',
@@ -9921,6 +9950,7 @@ function promptBatteryLevel(mode) {
 // ── Add Trigger Sheet System ──────────────────────────────────────────────────
 function showAddTriggerSheet() {
   showSheet('Add New Trigger', [
+    { label: 'Button, Gesture or Device Trigger', action: () => setTimeout(showBuiltInTriggerSheet, 250) },
     { label: 'WiFi Network Trigger', action: () => promptComplexTrigger('wifi') },
     { label: 'Bluetooth Device Trigger', action: () => promptComplexTrigger('bt') },
     { label: 'Audio Output Trigger', action: () => promptAudioOutputTrigger() },
@@ -9934,6 +9964,47 @@ function showAddTriggerSheet() {
     { label: 'MQTT Topic Trigger', action: () => promptMqttTrigger() },
     { label: 'NFC Tag Trigger', action: () => promptNfcTrigger() },
   ]);
+}
+
+// The built-in triggers the app has, grouped like its Triggers screen. As there, a
+// trigger only appears on the list after it has been added here.
+const BUILT_IN_TRIGGER_GROUPS = [
+  { title: 'Volume Buttons', keys: ['volume_up_hold','volume_down_hold','volume_both_press','volume_up_then_down','volume_down_then_up'] },
+  { title: 'Power Button', keys: ['power_double_tap','power_triple_click','power_quadruple_click','power_volume_up','power_volume_down','power_long_press'] },
+  { title: 'Status Bar', keys: ['trigger_statusbar_left_hold','trigger_statusbar_center_hold','trigger_statusbar_right_hold','trigger_statusbar_swipe_left','trigger_statusbar_swipe_right','trigger_statusbar_double_tap'] },
+  { title: 'Edge Gestures', keys: ['trigger_edge_left_swipe_up','trigger_edge_left_swipe_down','trigger_edge_right_swipe_up','trigger_edge_right_swipe_down'] },
+  { title: 'Bottom Bar Gestures', keys: ['trigger_bottombar_swipe_left','trigger_bottombar_swipe_right','trigger_bottom_swipe_up_left','trigger_bottom_swipe_up_center','trigger_bottom_swipe_up_right'] },
+  { title: 'Multi-Finger Gestures', keys: ['trigger_statusbar_two_finger_swipe_down','trigger_bottom_two_finger_swipe_up'] },
+  { title: 'Home Button', keys: ['trigger_home_double_click','trigger_home_triple_click','trigger_home_quadruple_click','trigger_home_hold','trigger_home_power','touchid_tap','touchid_hold'] },
+  { title: 'Ringer Switch', keys: ['trigger_ringer_mute','trigger_ringer_unmute','trigger_ringer_toggle'] },
+  { title: 'Motion Gestures', keys: ['shake'] },
+  { title: 'Device State', keys: ['trigger_device_lock','trigger_device_unlock','trigger_power_connect','trigger_power_disconnect','trigger_device_rotated_landscape','trigger_device_rotated_portrait','trigger_carplay_connect','trigger_carplay_disconnect','trigger_device_findmy_sound'] },
+  { title: 'Media', keys: ['trigger_media_play','trigger_media_pause','trigger_media_track_change'] },
+  { title: 'Calls', keys: ['trigger_device_call_incoming','trigger_device_call_start','trigger_device_call_end'] },
+  { title: 'Apple Watch', keys: ['trigger_watch_ping','trigger_watch_ping_hold'] },
+];
+
+function addBuiltInTrigger(key) {
+  if (!triggerIsAdded(key)) {
+    const previous = config.triggers[key] || {};
+    // A new trigger stays disabled until it has an action; the action editor turns it on
+    config.triggers[key] = { ...previous, name: defaultNameForKey(key), enabled: false, actions: previous.actions || [], added: true };
+    saveConfig();
+    renderAll();
+  }
+  openActionsPanel(key);
+}
+
+function showBuiltInTriggerSheet() {
+  const rows = [];
+  BUILT_IN_TRIGGER_GROUPS.forEach(group => {
+    if (group.title === 'Home Button' && typeof serverCapabilities !== 'undefined' && serverCapabilities.home_button === false) return;
+    rows.push({ header: group.title });
+    group.keys.forEach(key => {
+      rows.push({ label: `${defaultNameForKey(key)}${triggerIsAdded(key) ? ' ✓' : ''}`, action: () => addBuiltInTrigger(key) });
+    });
+  });
+  showSheet('Built-in Triggers', rows);
 }
 
 function promptMqttTrigger(editKey = null) {
@@ -10233,7 +10304,18 @@ function showSheet(title, buttons) {
   document.getElementById('sheet-title').textContent = title;
   const container = document.getElementById('sheet-buttons');
   container.innerHTML = '';
+  // A long menu (the built-in triggers) scrolls inside the sheet instead of running off screen
+  container.style.maxHeight = buttons.length > 8 ? '58vh' : '';
+  container.style.overflowY = buttons.length > 8 ? 'auto' : '';
+  container.style.webkitOverflowScrolling = buttons.length > 8 ? 'touch' : '';
   buttons.forEach(b => {
+    if (b.header) {
+      const header = document.createElement('div');
+      header.textContent = b.header;
+      header.style.cssText = 'font-size:12px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--rc-label-2);text-align:left;padding:14px 20px 4px;';
+      container.appendChild(header);
+      return;
+    }
     const btn = document.createElement('button');
     btn.className = 'sheet-btn' + (b.destructive ? ' destructive' : '');
     btn.textContent = b.label;

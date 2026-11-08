@@ -261,6 +261,7 @@ UIImage *RCTriggerCategoryIcon(NSString *sectionTitle) {
             @"Status Bar": @[@"rectangle.topthird.inset.filled", @"rectangle.topthird.inset", @"menubar.rectangle"],
             @"Edge Gestures": @[@"rectangle.lefthalf.inset.filled", @"rectangle.lefthalf.inset.fill", @"arrow.left.and.right"],
             @"Bottom Bar Gestures": @[@"rectangle.bottomthird.inset.filled", @"rectangle.bottomthird.inset", @"house.fill"],
+            @"Multi-Finger Gestures": @[@"hand.draw.fill", @"hand.draw"],
             @"Home Button": @[@"circle.circle"],
             @"Ringer Switch": @[@"bell.fill"],
             @"Apple Watch": @[@"applewatch"],
