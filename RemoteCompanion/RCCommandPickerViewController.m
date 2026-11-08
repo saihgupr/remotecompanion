@@ -9,7 +9,7 @@ static NSArray<NSArray *> *RCValueCommandSections(void) {
     dispatch_once(&once, ^{
         list = @[
             @[@"Levels", @[
-                @{ @"title": @"Battery Level", @"command": @"battery", @"icon": @"battery.75", @"number": @YES },
+                @{ @"title": @"Battery Level", @"command": @"battery", @"icon": @"battery.75", @"fallbackIcon": @"battery.100", @"number": @YES },
                 @{ @"title": @"Volume", @"command": @"volume", @"icon": @"speaker.wave.2.fill", @"number": @YES },
             ]],
             @[@"Connectivity", @[

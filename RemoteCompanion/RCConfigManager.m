@@ -1898,7 +1898,7 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
     }
     if ([cmd hasPrefix:@"sneakycam photo"] || [cmd isEqualToString:@"sneakycam takephoto"]) return @"camera.aperture";
     if ([cmd hasPrefix:@"sneakycam video"] || [cmd isEqualToString:@"sneakycam record"] || [cmd isEqualToString:@"sneakycam startstopvideo"]) return @"eye.slash.fill";
-    if ([cmd hasPrefix:@"snapper freeze"]) return @"snowflake";
+    if ([cmd hasPrefix:@"snapper freeze"]) return ([UIImage systemImageNamed:@"snowflake"] ? @"snowflake" : @"thermometer.snowflake"); // snowflake is iOS 15+
     if ([cmd hasPrefix:@"snapper instant"]) return @"bolt.fill";
     if ([cmd hasPrefix:@"snapper close"]) return @"xmark.rectangle.fill";
     if ([cmd hasPrefix:@"snapper"]) return @"crop";
@@ -2000,7 +2000,7 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         @"screenrecord status": @"record.circle",
         @"snapper": @"crop",
         @"snapper open": @"crop",
-        @"snapper freeze": @"snowflake",
+        @"snapper freeze": ([UIImage systemImageNamed:@"snowflake"] ? @"snowflake" : @"thermometer.snowflake"),
         @"snapper instant": @"bolt.fill",
         @"snapper close": @"xmark.rectangle.fill",
         @"lock": @"lock.fill",
@@ -2032,7 +2032,7 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         @"audiomix toggle": @"music.note",
         @"audiomix status": @"music.note",
         @"audiomix": @"music.note",
-        @"airplay disconnect": @"airplayaudio.badge.exclamationmark",
+        @"airplay disconnect": ([UIImage systemImageNamed:@"airplayaudio.badge.exclamationmark"] ? @"airplayaudio.badge.exclamationmark" : @"airplayaudio"), // iOS 15+
         @"mute toggle": @"speaker.slash.fill",
         @"mute on": @"speaker.slash.fill",
         @"mute off": @"speaker.wave.2.fill",

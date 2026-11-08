@@ -341,7 +341,7 @@ UIMenu *RCVariableInsertMenuWithRound(NSArray<NSString *> *runNames, NSArray<NSS
     }
     self.insertButtons = inserts;
     UIButton *list = [UIButton buttonWithType:UIButtonTypeSystem];
-    [list setImage:[UIImage systemImageNamed:@"list.bullet.circle"] forState:UIControlStateNormal];
+    [list setImage:[UIImage systemImageNamed:@"list.bullet.circle"] ?: [UIImage systemImageNamed:@"list.bullet"] forState:UIControlStateNormal]; // iOS 15+
     list.frame = CGRectMake(0, 0, 36, 36);
     list.accessibilityLabel = @"Choose Command";
     [list addTarget:self action:@selector(chooseCommand) forControlEvents:UIControlEventTouchUpInside];
