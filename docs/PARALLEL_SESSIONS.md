@@ -2,7 +2,19 @@
 
 Use one worktree per session. Two sessions in the same checkout will keep
 committing into each other's branch and overwriting each other's uncommitted
-work, which is exactly what happened on the 4.5 trigger work.
+work.
+
+## OpenCode commands
+
+Invoke these from the OpenCode composer:
+
+| Command | What it does |
+| --- | --- |
+| `/lane <slug> <task>` | Creates the lane, moves this session into it, then starts the task |
+| `/lane-status` | Shows the current lane, branch, changes, and build state |
+| `/lane-worker <task>` | Runs the task in a background `lane-worker` subagent inside the current lane |
+| `/lane-review` | Runs the `verifier` subagent over the current lane changes |
+| `/lane-done` | Verifies the lane, commits, rebases onto `alpha-4.5`, and prepares integration |
 
 ## Ground rules
 
@@ -23,17 +35,18 @@ git fetch origin
 ./tools/new-lane.sh trigger-onboarding alpha-4.5
 ```
 
-That creates:
+Or from OpenCode:
+
+```text
+/lane trigger-onboarding build the onboarding empty state
+```
+
+The script creates:
 
 - branch `feature/trigger-onboarding`
 - worktree `.slim/worktrees/trigger-onboarding`
 
-Open a new OpenCode session in that folder. If the current session is already
-running, move it there from the session controls instead of opening a second
-session in the main checkout.
-
-The lane directory is ignored by git; `.slim/worktrees.json` is optional local
-bookkeeping and is not committed.
+The `/lane` command then moves this session into that folder.
 
 ## Daily loop
 
@@ -116,7 +129,7 @@ inside the lane first.
 
 ## Subagents
 
-Subagents run inside the current session's directory. They are useful for
-read-only review, exploration, and verification. They cannot talk to another
-top-level session. Coordination between sessions goes through git, not through
-the agents.
+Subagents run inside the current session's directory. The `/lane-worker` and
+`/lane-review` commands use the current lane as their working directory. They
+cannot talk to another top-level session. Coordination between sessions goes
+through git, not through the agents.
