@@ -44,7 +44,7 @@ static NSArray<NSString *> *RCHTTPMethods(void) {
 - (void)viewDidLoad {
     [super viewDidLoad];
 
-    self.title = self.editingExisting ? @"Edit REST Request" : @"New REST Request";
+    self.title = self.editingExisting ? @"Edit REST API Call" : @"New REST API Call";
     self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
 
     self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc]
@@ -124,6 +124,8 @@ static NSArray<NSString *> *RCHTTPMethods(void) {
     view.autocapitalizationType = UITextAutocapitalizationTypeNone;
     view.autocorrectionType = UITextAutocorrectionTypeNo;
     view.spellCheckingType = UITextSpellCheckingTypeNo;
+    view.smartQuotesType = UITextSmartQuotesTypeNo;
+    view.smartDashesType = UITextSmartDashesTypeNo;
     view.textContainerInset = UIEdgeInsetsMake(8, 4, 8, 4);
     view.translatesAutoresizingMaskIntoConstraints = NO;
     view.text = text ?: @"";
@@ -158,19 +160,19 @@ static NSArray<NSString *> *RCHTTPMethods(void) {
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == 0) {
-        return @"Calls this URL when the action runs. For example, http://127.0.0.1:8080/api/command?cmd=play runs an RC command on this iPhone. The Web UI must be on.";
+        return @"Full URL. Variables like {host} work.";
     }
     if (section == 1) {
-        return @"Optional. One Name: Value header per line. Lines starting with # are ignored.";
+        return @"Optional. One Name: Value header per line.";
     }
-    return @"Optional. Sent exactly as typed in UTF-8. JSON is detected and sent as application/json unless you set a Content-Type header.";
+    return @"Optional. JSON is sent as application/json.";
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
     if (indexPath.section == 0) {
-        return indexPath.row == 0 ? 44 : 56;
+        return indexPath.row == 0 ? 44 : 50;
     }
-    return indexPath.section == 1 ? 120 : 170;
+    return indexPath.section == 1 ? 92 : 112;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
