@@ -4843,7 +4843,7 @@ function computeVisibleSections() {
   return out;
 }
 
-// Not a section: the triggers that run (switched on, with actions), under their own sections
+// Not a section: the triggers that run (switched on, with actions), in one list
 const ENABLED_CATEGORY = 'enabled';
 
 function triggerIsEnabled(key) {
@@ -4851,9 +4851,12 @@ function triggerIsEnabled(key) {
   return !!(t && t.enabled && (t.actions || []).length > 0);
 }
 
-// Each visible section with only its enabled triggers, leaving out sections with none
-function enabledSections(visible) {
-  return visible.map(({ sec, keys }) => ({ sec, keys: keys.filter(triggerIsEnabled) })).filter(v => v.keys.length > 0);
+// The enabled triggers in the sections' order (favorites first), each with whether its own
+// section lets it be deleted
+function enabledTriggers(visible) {
+  const out = [];
+  visible.forEach(({ sec, keys }) => keys.filter(triggerIsEnabled).forEach(key => out.push({ key, deletable: !!sec.deletable })));
+  return out;
 }
 
 function renderCategoryBar(visible) {
@@ -4861,7 +4864,7 @@ function renderCategoryBar(visible) {
   if (!bar) return;
   // With nothing added, the invitation is the whole screen (the app hides its bar too)
   bar.style.display = visible.length === 0 ? 'none' : '';
-  const hasEnabled = enabledSections(visible).length > 0;
+  const hasEnabled = enabledTriggers(visible).length > 0;
   // A selected section that went away (e.g. last NFC tag deleted) falls back to All
   if (g_selectedCategoryId && !(g_selectedCategoryId === ENABLED_CATEGORY ? hasEnabled : visible.some(v => v.sec.id === g_selectedCategoryId))) {
     g_selectedCategoryId = null;
@@ -4920,16 +4923,20 @@ function renderAll() {
     return;
   }
 
-  const showingEnabled = g_selectedCategoryId === ENABLED_CATEGORY;
-  (showingEnabled ? enabledSections(visible) : visible).forEach(({ sec, keys }) => {
-    if (g_selectedCategoryId && !showingEnabled && sec.id !== g_selectedCategoryId) return;
+  if (g_selectedCategoryId === ENABLED_CATEGORY) {
+    const enabled = enabledTriggers(visible);
+    root.appendChild(sectionHeader('Enabled', false));
+    const card = document.createElement('div');
+    card.className = 'list-card';
+    enabled.forEach(({ key, deletable }) => card.appendChild(renderTriggerRow(key, deletable)));
+    root.appendChild(card);
+    return;
+  }
 
-    // Section header
-    const hdr = document.createElement('div');
-    hdr.className = 'section-header' + (sec.id === 'favorites' ? ' favorites' : '');
-    const catIcon = TRIGGER_CATEGORY_ICONS[sec.title];
-    hdr.innerHTML = (catIcon ? `<span class="section-icon">${catIcon.startsWith('<') ? catIcon : `<i class="f7-icons">${catIcon}</i>`}</span>` : '') + escHtml(sec.title.toUpperCase());
-    root.appendChild(hdr);
+  visible.forEach(({ sec, keys }) => {
+    if (g_selectedCategoryId && sec.id !== g_selectedCategoryId) return;
+
+    root.appendChild(sectionHeader(sec.title, sec.id === 'favorites'));
 
     // Card
     const card = document.createElement('div');
@@ -4940,10 +4947,19 @@ function renderAll() {
   });
 }
 
+function sectionHeader(title, favorites) {
+  const hdr = document.createElement('div');
+  hdr.className = 'section-header' + (favorites ? ' favorites' : '');
+  const catIcon = TRIGGER_CATEGORY_ICONS[title];
+  hdr.innerHTML = (catIcon ? `<span class="section-icon">${catIcon.startsWith('<') ? catIcon : `<i class="f7-icons">${catIcon}</i>`}</span>` : '') + escHtml(title.toUpperCase());
+  return hdr;
+}
+
 // A section's icon before its title (as in the app): a Framework7 icon, or a drawn screen area
 const SCREEN_AREA = (x, y, w, h) => `<svg viewBox="0 0 20 20" width="14" height="14" aria-hidden="true"><rect x="2.5" y="1.5" width="15" height="17" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="1.2" fill="currentColor"/></svg>`;
 const TRIGGER_CATEGORY_ICONS = {
   'Favorites': 'star_fill',
+  'Enabled': 'checkmark_circle_fill',
   'Volume Buttons': 'speaker_2_fill',
   'Power Button': 'power',
   'Status Bar': SCREEN_AREA(5, 4, 10, 4),

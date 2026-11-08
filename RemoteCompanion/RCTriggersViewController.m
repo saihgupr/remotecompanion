@@ -262,7 +262,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
 @property (nonatomic, copy) NSString *selectedCategoryTitle;
 // The chips' categories in order: the section titles, with Enabled after Favorites
 @property (nonatomic, strong) NSArray<NSString *> *categoryTitles;
-// What the table and grid show: every section, the selected one, or each section's enabled triggers
+// What the table and grid show: every section, the selected one, or the enabled triggers
 @property (nonatomic, strong) NSArray<NSArray<NSString *> *> *shownSections;
 @property (nonatomic, strong) NSArray<NSString *> *shownTitles;
 // The width the visible cells' card backgrounds were drawn for
@@ -274,7 +274,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
 @property (nonatomic, strong) UIView *gridFooterView;
 @end
 
-// Not a section: the triggers that run (switched on, with actions), under their own sections
+// Not a section: the triggers that run (switched on, with actions), in one list
 static NSString *const RCEnabledCategoryTitle = @"Enabled";
 
 @implementation RCTriggersViewController
@@ -865,7 +865,7 @@ static NSString *const RCEnabledCategoryTitle = @"Enabled";
     // Chips follow the sections, with Enabled after Favorites while any trigger is enabled; a
     // selected category that has gone away falls back to All
     NSMutableArray *categories = [titles mutableCopy];
-    if ([self enabledSections].count > 0) {
+    if ([self enabledTriggers].count > 0) {
         NSUInteger favorites = [titles indexOfObject:@"Favorites"];
         [categories insertObject:RCEnabledCategoryTitle atIndex:favorites == NSNotFound ? 0 : favorites + 1];
     }
@@ -1296,18 +1296,15 @@ static NSString *const RCEnabledCategoryTitle = @"Enabled";
 
 #pragma mark - Display model
 
-// Each section with only its enabled triggers (the tweak runs a trigger that is on and has
-// actions), leaving out sections with none. Favorites keep theirs, so none go missing.
-- (NSArray<NSDictionary *> *)enabledSections {
+// The triggers the tweak runs (switched on, with actions), in the sections' order: favorites first
+- (NSArray<NSString *> *)enabledTriggers {
     RCConfigManager *config = [RCConfigManager sharedManager];
     NSMutableArray *out = [NSMutableArray array];
-    [self.sections enumerateObjectsUsingBlock:^(NSArray<NSString *> *keys, NSUInteger i, BOOL *stop) {
-        NSMutableArray *enabled = [NSMutableArray array];
+    for (NSArray<NSString *> *keys in self.sections) {
         for (NSString *key in keys) {
-            if ([config isTriggerEnabled:key] && [config actionsForTrigger:key].count > 0) [enabled addObject:key];
+            if ([config isTriggerEnabled:key] && [config actionsForTrigger:key].count > 0) [out addObject:key];
         }
-        if (enabled.count) [out addObject:@{ @"title": self.sectionTitles[i], @"keys": enabled }];
-    }];
+    }
     return out;
 }
 
@@ -1316,13 +1313,8 @@ static NSString *const RCEnabledCategoryTitle = @"Enabled";
     NSString *selected = self.selectedCategoryTitle;
     NSUInteger idx = selected ? [self.sectionTitles indexOfObject:selected] : NSNotFound;
     if ([selected isEqualToString:RCEnabledCategoryTitle]) {
-        NSMutableArray *sections = [NSMutableArray array], *titles = [NSMutableArray array];
-        for (NSDictionary *section in [self enabledSections]) {
-            [sections addObject:section[@"keys"]];
-            [titles addObject:section[@"title"]];
-        }
-        self.shownSections = sections;
-        self.shownTitles = titles;
+        self.shownSections = @[[self enabledTriggers]];
+        self.shownTitles = @[RCEnabledCategoryTitle];
     } else if (idx != NSNotFound) {
         self.shownSections = @[self.sections[idx]];
         self.shownTitles = @[selected];
@@ -1330,10 +1322,6 @@ static NSString *const RCEnabledCategoryTitle = @"Enabled";
         self.shownSections = self.sections ?: @[];
         self.shownTitles = self.sectionTitles ?: @[];
     }
-}
-
-- (BOOL)showingEnabled {
-    return [self.selectedCategoryTitle isEqualToString:RCEnabledCategoryTitle];
 }
 
 - (NSInteger)displaySectionCount {
@@ -1525,8 +1513,7 @@ static NSString *const RCEnabledCategoryTitle = @"Enabled";
 }
 
 - (BOOL)tableView:(UITableView *)tableView canMoveRowAtIndexPath:(NSIndexPath *)indexPath {
-    // Not under Enabled, where Favorites may be only some of them
-    return ![self showingEnabled] && [self.shownTitles[indexPath.section] isEqualToString:@"Favorites"];
+    return [self.shownTitles[indexPath.section] isEqualToString:@"Favorites"];
 }
 
 - (NSIndexPath *)tableView:(UITableView *)tableView targetIndexPathForMoveFromRowAtIndexPath:(NSIndexPath *)sourceIndexPath toProposedIndexPath:(NSIndexPath *)proposedDestinationIndexPath {
@@ -1655,7 +1642,7 @@ static NSString *const RCEnabledCategoryTitle = @"Enabled";
 }
 
 - (BOOL)gridSectionIsFavorites:(NSInteger)section {
-    return ![self showingEnabled] && [[self gridTitleForSection:section] isEqualToString:@"Favorites"];
+    return [[self gridTitleForSection:section] isEqualToString:@"Favorites"];
 }
 
 - (NSString *)gridNameForTrigger:(NSString *)key {
