@@ -2465,7 +2465,19 @@
         </div>
       </div>
     </div>
-    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">Configure external service integrations to trigger actions and control third-party automations.</div>
+    <div class="action-list-header">On-Device</div>
+    <div class="action-list-card" style="margin-bottom:12px">
+      <div class="settings-row">
+        <span class="settings-label">AudioStream auto-start</span>
+        <div class="settings-btn">
+          <input type="checkbox" class="ios-toggle" id="setting-audiostream-autostart" onchange="config.audiostreamAutoStart=this.checked;saveConfig()">
+        </div>
+      </div>
+      <div style="padding: 0 16px 12px; font-size:13px; color:var(--rc-label-2);">
+        Allow other devices to start the iPhone streaming server with /api/audiostream/start. Off by default.
+      </div>
+    </div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">Configure external services and on-device integrations.</div>
   </div>
 </div>
 
@@ -3348,7 +3360,7 @@
 'use strict';
 
 // ── State ────────────────────────────────────────────────────────────────────
-let config = { masterEnabled: true, nfcEnabled: true, webUIEnabled: false, fixedVolumeButtons: false, triggers: {}, favoriteTriggers: [] };
+let config = { masterEnabled: true, nfcEnabled: true, webUIEnabled: false, fixedVolumeButtons: false, audiostreamAutoStart: false, triggers: {}, favoriteTriggers: [] };
 let hasLoadedData = false;
 let currentKey = null;
 let dialogCallback = null;
@@ -8837,6 +8849,10 @@ function openSettings() {
   document.getElementById('setting-master').checked = !!config.masterEnabled;
   document.getElementById('setting-nfc').checked    = !!config.nfcEnabled;
   document.getElementById('setting-webui').checked  = !!config.webUIEnabled;
+  const audioStreamAutoStartToggle = document.getElementById('setting-audiostream-autostart');
+  if (audioStreamAutoStartToggle) {
+    audioStreamAutoStartToggle.checked = !!config.audiostreamAutoStart;
+  }
   updateAccessStatus();
   renderAccessPanel();
   document.getElementById('setting-loglevel').value = ['off','minimal','full'].includes(config.logLevel) ? config.logLevel : 'minimal';
