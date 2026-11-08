@@ -11,4 +11,8 @@
 - (NSArray<NSArray<NSDictionary *> *> *)catalogSections;
 - (NSArray<NSString *> *)catalogSectionTitles;
 
+// Opens the picker already targeting this Remote RC client, so a pick becomes
+// "rc-run <clientId> <command>"
+- (void)startInRemoteModeWithClient:(NSDictionary *)client;
+
 @end

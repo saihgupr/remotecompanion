@@ -35,6 +35,8 @@
 // pick comes back as "rc-run <clientId> <command>".
 @property (nonatomic, copy) NSString *remoteClientId;
 @property (nonatomic, copy) NSString *remoteClientName;
+// Set before the view loads when the picker opens straight into remote mode
+@property (nonatomic, strong) NSDictionary *pendingRemoteClient;
 @end
 
 @implementation RCActionPickerViewController
@@ -134,6 +136,12 @@
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(layoutChanged:) name:RCLayoutChangedNotification object:nil];
     
     [self applyTweaks];
+
+    if (self.pendingRemoteClient) {
+        NSDictionary *client = self.pendingRemoteClient;
+        self.pendingRemoteClient = nil;
+        [self enterRemoteModeWithClient:client];
+    }
 }
 
 - (void)viewWillAppear:(BOOL)animated {
@@ -1449,6 +1457,15 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
 
 - (void)changeRemoteClientTapped {
     [self handleRemoteRCCommand];
+}
+
+- (void)startInRemoteModeWithClient:(NSDictionary *)client {
+    if (![client[@"id"] isKindOfClass:[NSString class]]) return;
+    if (self.isViewLoaded) {
+        [self enterRemoteModeWithClient:client];
+    } else {
+        self.pendingRemoteClient = client;
+    }
 }
 
 - (void)enterRemoteModeWithClient:(NSDictionary *)client {

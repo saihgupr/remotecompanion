@@ -3253,8 +3253,11 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             [self duplicateActionAtIndex:indexPath.row];
         }]];
 
-        // A Remote RC action edits like its inner action; this changes the target device
+        // A Remote RC action edits like its inner action; these change the command or device
         if ([self remotePartsForAction:item]) {
+            [alert addAction:[UIAlertAction actionWithTitle:@"Change Action..." style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+                [self promptChangeRemoteActionAtIndex:indexPath.row];
+            }]];
             [alert addAction:[UIAlertAction actionWithTitle:@"Remote Client..." style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
                 [self promptEditRemoteRunActionAtIndex:indexPath.row];
             }]];
@@ -3897,6 +3900,36 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         [strongSelf.navigationController popViewControllerAnimated:YES];
     };
     [self.navigationController pushViewController:editor animated:YES];
+}
+
+// Lets a Remote RC action change its inner action while keeping the same device.
+- (void)promptChangeRemoteActionAtIndex:(NSInteger)index {
+    if (index < 0 || index >= (NSInteger)self.actions.count) return;
+    NSDictionary *parts = [self remotePartsForAction:self.actions[index]];
+    if (!parts) return;
+
+    NSDictionary *client = [[RCConfigManager sharedManager] rcClientForId:parts[@"clientId"]];
+    if (!client) {
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Remote RC Client Not Found"
+            message:@"The device this action targets is no longer configured. Use Remote Client... to pick another one."
+            preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:alert animated:YES completion:nil];
+        return;
+    }
+
+    RCActionPickerViewController *picker = [[RCActionPickerViewController alloc] init];
+    [picker startInRemoteModeWithClient:client];
+    __weak typeof(self) weakSelf = self;
+    picker.onActionSelected = ^(NSString *action) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        [strongSelf storeCommand:action atIndex:index];
+        [strongSelf saveActions];
+        [strongSelf.tableView reloadData];
+    };
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:picker];
+    [self presentViewController:nav animated:YES completion:nil];
 }
 
 // The one toast editor. New toasts and edits both come through here,
