@@ -47,23 +47,12 @@ static UIFont *RCEmptyTitleFont(CGFloat size) {
     return font;
 }
 
-static UIView *RCFindViewByAccessibilityLabel(UIView *root, NSString *label) {
-    if (!root) return nil;
-    if ([root.accessibilityLabel isEqualToString:label] || [root.accessibilityIdentifier isEqualToString:label]) return root;
-    for (UIView *subview in root.subviews) {
-        UIView *match = RCFindViewByAccessibilityLabel(subview, label);
-        if (match) return match;
-    }
-    return nil;
+static UIFont *RCEmptyScaledFont(UIFont *font) {
+    if (@available(iOS 11.0, *)) return [[UIFontMetrics defaultMetrics] scaledFontForFont:font];
+    return font;
 }
 
-static void RCCollectControls(UIView *view, NSMutableArray<UIView *> *out) {
-    if ([view isKindOfClass:[UIControl class]] && !CGRectIsEmpty(view.bounds)) [out addObject:view];
-    for (UIView *subview in view.subviews) RCCollectControls(subview, out);
-}
-
-// The Triggers screen with nothing added yet: a short invitation and a hand-drawn arrow
-// curving up to the + button, so the first step is obvious.
+// The Triggers screen with nothing added yet: a short invitation and a button to start.
 @interface RCEmptyTriggersView : UIView
 @property (nonatomic, copy) void (^onAdd)(void);
 @property (nonatomic, weak) UINavigationBar *navigationBar;
@@ -71,11 +60,12 @@ static void RCCollectControls(UIView *view, NSMutableArray<UIView *> *out) {
 
 @implementation RCEmptyTriggersView {
     UIImageView *_iconView;
+    UILabel *_eyebrowLabel;
     UILabel *_titleLabel;
     UILabel *_bodyLabel;
     UIButton *_addButton;
-    CAShapeLayer *_arrowLayer;
-    CAShapeLayer *_arrowHeadLayer;
+    CAGradientLayer *_glowLayer;
+    BOOL _introPlayed;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
@@ -83,6 +73,13 @@ static void RCCollectControls(UIView *view, NSMutableArray<UIView *> *out) {
     if (self) {
         self.backgroundColor = [UIColor clearColor];
         self.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+
+        // A soft blue halo behind the icon, so the empty screen has depth instead of a flat gap
+        _glowLayer = [CAGradientLayer layer];
+        _glowLayer.type = kCAGradientLayerRadial;
+        _glowLayer.startPoint = CGPointMake(0.5, 0.5);
+        _glowLayer.endPoint = CGPointMake(1.0, 1.0);
+        [self.layer addSublayer:_glowLayer];
 
         _iconView = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"hand.tap.fill"]];
         _iconView.contentMode = UIViewContentModeCenter;
@@ -93,44 +90,43 @@ static void RCCollectControls(UIView *view, NSMutableArray<UIView *> *out) {
         [_iconView setPreferredSymbolConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:34 weight:UIImageSymbolWeightRegular]];
         [self addSubview:_iconView];
 
+        _eyebrowLabel = [[UILabel alloc] init];
+        _eyebrowLabel.attributedText = [[NSAttributedString alloc] initWithString:@"GET STARTED" attributes:@{
+            NSFontAttributeName: [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold],
+            NSForegroundColorAttributeName: [UIColor systemBlueColor],
+            NSKernAttributeName: @1.4
+        }];
+        _eyebrowLabel.textAlignment = NSTextAlignmentCenter;
+        [self addSubview:_eyebrowLabel];
+
         _titleLabel = [[UILabel alloc] init];
         _titleLabel.text = @"Add your first trigger";
-        _titleLabel.font = RCEmptyTitleFont(25);
+        _titleLabel.font = RCEmptyScaledFont(RCEmptyTitleFont(25));
         _titleLabel.textColor = [UIColor labelColor];
         _titleLabel.textAlignment = NSTextAlignmentCenter;
         _titleLabel.numberOfLines = 0;
+        _titleLabel.adjustsFontForContentSizeCategory = YES;
         [self addSubview:_titleLabel];
 
         _bodyLabel = [[UILabel alloc] init];
         _bodyLabel.text = @"Pick a button, gesture, app, or schedule, then choose the action it runs.";
-        _bodyLabel.font = [UIFont systemFontOfSize:15.5];
+        _bodyLabel.font = RCEmptyScaledFont([UIFont systemFontOfSize:15.5]);
         _bodyLabel.textColor = [UIColor secondaryLabelColor];
         _bodyLabel.textAlignment = NSTextAlignmentCenter;
         _bodyLabel.numberOfLines = 0;
+        _bodyLabel.adjustsFontForContentSizeCategory = YES;
         [self addSubview:_bodyLabel];
 
         _addButton = [UIButton buttonWithType:UIButtonTypeSystem];
         [_addButton setTitle:@"Add a Trigger" forState:UIControlStateNormal];
         [_addButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-        _addButton.titleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
+        _addButton.titleLabel.font = RCEmptyScaledFont([UIFont systemFontOfSize:17 weight:UIFontWeightSemibold]);
+        _addButton.titleLabel.adjustsFontForContentSizeCategory = YES;
         _addButton.backgroundColor = [UIColor systemBlueColor];
-        _addButton.layer.cornerRadius = 23;
         _addButton.layer.cornerCurve = kCACornerCurveContinuous;
         [_addButton addTarget:self action:@selector(addTapped) forControlEvents:UIControlEventTouchUpInside];
         _addButton.accessibilityLabel = @"Add a Trigger";
         [self addSubview:_addButton];
-
-        _arrowLayer = [CAShapeLayer layer];
-        _arrowLayer.fillColor = [UIColor clearColor].CGColor;
-        _arrowLayer.strokeColor = [UIColor systemBlueColor].CGColor;
-        _arrowLayer.lineWidth = 5;
-        _arrowLayer.lineCap = kCALineCapRound;
-        _arrowLayer.lineJoin = kCALineJoinRound;
-        [self.layer addSublayer:_arrowLayer];
-
-        _arrowHeadLayer = [CAShapeLayer layer];
-        _arrowHeadLayer.fillColor = [UIColor systemBlueColor].CGColor;
-        [self.layer addSublayer:_arrowHeadLayer];
     }
     return self;
 }
@@ -139,11 +135,71 @@ static void RCCollectControls(UIView *view, NSMutableArray<UIView *> *out) {
     if (self.onAdd) self.onAdd();
 }
 
+- (void)setHidden:(BOOL)hidden {
+    [super setHidden:hidden];
+    if (hidden) _introPlayed = NO;
+}
+
 // Only the button takes touches; everything else falls through to the Triggers screen and
-// the + button underneath (the arrow and copy are decoration)
+// the + button underneath (the copy is decoration)
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     UIView *hit = [super hitTest:point withEvent:event];
     return hit == self ? nil : hit;
+}
+
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+    [super traitCollectionDidChange:previousTraitCollection];
+    BOOL relayout = NO;
+    if (@available(iOS 13.0, *)) {
+        if ([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection]) relayout = YES;
+    }
+    if (previousTraitCollection && self.traitCollection.preferredContentSizeCategory != previousTraitCollection.preferredContentSizeCategory) relayout = YES;
+    if (relayout) [self setNeedsLayout];
+}
+
+// A staggered entrance for the copy and button, and one soft pop for the icon. Skipped
+// when Reduce Motion is on.
+- (void)playIntro {
+    if (_introPlayed) return;
+    _introPlayed = YES;
+    BOOL reduceMotion = UIAccessibilityIsReduceMotionEnabled();
+    if (reduceMotion) {
+        for (UIView *view in @[_iconView, _eyebrowLabel, _titleLabel, _bodyLabel, _addButton]) {
+            view.alpha = 1;
+            view.transform = CGAffineTransformIdentity;
+        }
+        _glowLayer.opacity = 1;
+        return;
+    }
+
+    for (UIView *view in @[_eyebrowLabel, _titleLabel, _bodyLabel, _addButton]) {
+        view.alpha = 0;
+        view.transform = CGAffineTransformMakeTranslation(0, 10);
+    }
+    _iconView.alpha = 0;
+    _iconView.transform = CGAffineTransformMakeScale(0.86, 0.86);
+    _glowLayer.opacity = 0;
+
+    CABasicAnimation *glow = [CABasicAnimation animationWithKeyPath:@"opacity"];
+    glow.fromValue = @0;
+    glow.toValue = @1;
+    glow.duration = 0.38;
+    glow.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
+    _glowLayer.opacity = 1;
+    [_glowLayer addAnimation:glow forKey:@"intro"];
+
+    [UIView animateWithDuration:0.38 delay:0 options:UIViewAnimationOptionCurveEaseOut animations:^{
+        self->_iconView.alpha = 1;
+        self->_iconView.transform = CGAffineTransformIdentity;
+    } completion:nil];
+
+    NSArray *copyViews = @[_eyebrowLabel, _titleLabel, _bodyLabel, _addButton];
+    [copyViews enumerateObjectsUsingBlock:^(UIView *view, NSUInteger index, __unused BOOL *stop) {
+        [UIView animateWithDuration:0.32 delay:0.08 + index * 0.06 options:UIViewAnimationOptionCurveEaseOut animations:^{
+            view.alpha = 1;
+            view.transform = CGAffineTransformIdentity;
+        } completion:nil];
+    }];
 }
 
 - (void)layoutSubviews {
@@ -154,66 +210,39 @@ static void RCCollectControls(UIView *view, NSMutableArray<UIView *> *out) {
     CGRect navFrame = self.navigationBar ? [self.navigationBar convertRect:self.navigationBar.bounds toView:self] : CGRectMake(0, 0, width, 0);
     CGFloat navBottom = CGRectGetMaxY(navFrame);
 
+    CGSize eyebrowSize = [_eyebrowLabel sizeThatFits:CGSizeMake(side, CGFLOAT_MAX)];
     CGSize titleSize = [_titleLabel sizeThatFits:CGSizeMake(side, CGFLOAT_MAX)];
     CGSize bodySize = [_bodyLabel sizeThatFits:CGSizeMake(side, CGFLOAT_MAX)];
-    CGFloat total = 68 + 18 + titleSize.height + 10 + bodySize.height + 22 + 46;
+    UIFont *buttonFont = _addButton.titleLabel.font;
+    CGFloat buttonHeight = MAX(46, ceil(buttonFont.lineHeight + 24));
+    CGFloat buttonWidth = MIN(side, MAX(184, ceil([_addButton.titleLabel sizeThatFits:CGSizeMake(side, CGFLOAT_MAX)].width + 48)));
+
+    CGFloat total = 68 + 14 + eyebrowSize.height + 8 + titleSize.height + 10 + bodySize.height + 22 + buttonHeight;
     CGFloat top = navBottom + 56;
     CGFloat bottomRoom = CGRectGetHeight(self.bounds) - 48;
     if (top + total > bottomRoom) top = navBottom + 24;
     CGFloat y = top + MAX(0, (bottomRoom - top - total) * 0.25);
     CGFloat centerX = CGRectGetMidX(self.bounds);
 
+    BOOL light = NO;
+    if (@available(iOS 13.0, *)) light = self.traitCollection.userInterfaceStyle == UIUserInterfaceStyleLight;
+    UIColor *blue = [UIColor systemBlueColor];
+    _glowLayer.colors = @[
+        (id)[blue colorWithAlphaComponent:(light ? 0.10 : 0.20)].CGColor,
+        (id)[blue colorWithAlphaComponent:0].CGColor
+    ];
+    _glowLayer.frame = CGRectMake(centerX - 96, y + 34 - 96, 192, 192);
+
     _iconView.frame = CGRectMake(centerX - 34, y, 68, 68);
-    y += 68 + 18;
+    y += 68 + 14;
+    _eyebrowLabel.frame = CGRectMake(centerX - side / 2, y, side, eyebrowSize.height);
+    y += eyebrowSize.height + 8;
     _titleLabel.frame = CGRectMake(centerX - side / 2, y, side, titleSize.height);
     y += titleSize.height + 10;
     _bodyLabel.frame = CGRectMake(centerX - side / 2, y, side, bodySize.height);
     y += bodySize.height + 22;
-    _addButton.frame = CGRectMake(centerX - 92, y, 184, 46);
-
-    // The arrow: from the copy's top right up to the + button, ending just below the
-    // navigation bar so it never draws over the large title
-    UIView *plus = RCFindViewByAccessibilityLabel(self.navigationBar, @"Add Trigger");
-    if (!plus) {
-        // Older iOS builds don't pass the item's label to its view: the first right
-        // bar item is rightmost, so the + is the leftmost control on the right side
-        NSMutableArray<UIView *> *controls = [NSMutableArray array];
-        RCCollectControls(self.navigationBar, controls);
-        CGPoint bestCenter = CGPointZero;
-        for (UIView *control in controls) {
-            CGPoint center = [control convertPoint:CGPointMake(CGRectGetMidX(control.bounds), CGRectGetMidY(control.bounds)) toView:self];
-            if (center.x <= CGRectGetMidX(self.bounds) || center.y > navBottom) continue;
-            if (!plus || center.x < bestCenter.x) { plus = control; bestCenter = center; }
-        }
-    }
-    CGPoint end;
-    if (plus) {
-        CGPoint center = [plus convertPoint:CGPointMake(CGRectGetMidX(plus.bounds), CGRectGetMidY(plus.bounds)) toView:self];
-        end = CGPointMake(center.x - 6, navBottom + 10);
-    } else {
-        end = CGPointMake(width - 44, navBottom + 10);
-    }
-    CGPoint start = CGPointMake(MIN(CGRectGetMidX(self.bounds) + side / 2 - 26, width - 76),
-                                CGRectGetMinY(_titleLabel.frame) - 2);
-    CGPoint control = CGPointMake(end.x - 58, start.y - 46);
-
-    UIBezierPath *path = [UIBezierPath bezierPath];
-    [path moveToPoint:start];
-    [path addQuadCurveToPoint:end controlPoint:control];
-    _arrowLayer.path = path.CGPath;
-
-    // A filled head along the curve's last direction
-    CGFloat angle = atan2(end.y - control.y, end.x - control.x);
-    CGFloat length = 16, halfWidth = 9;
-    CGPoint base = CGPointMake(end.x - cos(angle) * length, end.y - sin(angle) * length);
-    CGPoint left = CGPointMake(base.x - sin(angle) * halfWidth, base.y + cos(angle) * halfWidth);
-    CGPoint right = CGPointMake(base.x + sin(angle) * halfWidth, base.y - cos(angle) * halfWidth);
-    UIBezierPath *head = [UIBezierPath bezierPath];
-    [head moveToPoint:end];
-    [head addLineToPoint:left];
-    [head addLineToPoint:right];
-    [head closePath];
-    _arrowHeadLayer.path = head.CGPath;
+    _addButton.frame = CGRectMake(centerX - buttonWidth / 2, y, buttonWidth, buttonHeight);
+    _addButton.layer.cornerRadius = buttonHeight / 2;
 }
 
 @end
@@ -235,6 +264,9 @@ static void RCCollectControls(UIView *view, NSMutableArray<UIView *> *out) {
 @property (nonatomic, assign) CGFloat cardStyleWidth;
 // Shown when no trigger has been added yet, over the list and the navigation bar
 @property (nonatomic, strong) RCEmptyTriggersView *emptyView;
+// The name and version footer under the list and the grid
+@property (nonatomic, strong) UIView *tableFooterView;
+@property (nonatomic, strong) UIView *gridFooterView;
 @end
 
 @implementation RCTriggersViewController
@@ -391,6 +423,7 @@ static void RCCollectControls(UIView *view, NSMutableArray<UIView *> *out) {
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(wrapLongNamesSettingChanged:) name:@"RCWrapLongNamesSettingChanged" object:nil];
                                                
     [self setupFooterView];
+    self.tableFooterView = self.tableView.tableFooterView;
     [self setupGrid];
     [self applyTweaks];
 }
@@ -418,7 +451,8 @@ static void RCCollectControls(UIView *view, NSMutableArray<UIView *> *out) {
     // The same footer (name and version) under the grid
     UIView *tableFooter = self.tableView.tableFooterView;
     [self setupFooterView];
-    self.grid.footerView = self.tableView.tableFooterView;
+    self.gridFooterView = self.tableView.tableFooterView;
+    self.grid.footerView = self.gridFooterView;
     self.tableView.tableFooterView = tableFooter;
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(layoutSettingChanged:) name:RCLayoutChangedNotification object:nil];
     [self applyLayout];
@@ -833,18 +867,21 @@ static void RCCollectControls(UIView *view, NSMutableArray<UIView *> *out) {
 
     [self updatePauseState]; // the left button is Resume while paused, otherwise none
 
+    [self updateEmptyState];
     [self.tableView reloadData];
     [self.grid reload];
-    [self updateEmptyState];
 }
 
 #pragma mark - Onboarding
 
 // With no trigger added, the list is empty: hide the category bar and show the invitation
-// with its arrow to the + button
 - (void)updateEmptyState {
     BOOL empty = self.sections.count == 0;
+    BOOL wasHidden = self.emptyView.hidden || self.emptyView.superview == nil;
     self.categoryBar.hidden = empty;
+    // The name and version under the list would otherwise sit inside the invitation
+    self.tableView.tableFooterView = empty ? nil : self.tableFooterView;
+    self.grid.footerView = empty ? nil : self.gridFooterView;
     if (!empty) {
         self.emptyView.hidden = YES;
         return;
@@ -854,8 +891,8 @@ static void RCCollectControls(UIView *view, NSMutableArray<UIView *> *out) {
         __weak typeof(self) weakSelf = self;
         self.emptyView.onAdd = ^{ [weakSelf addNewItem]; };
     }
-    // Over the navigation bar too, so the arrow can reach the + button
-    UIView *host = self.navigationController.view ?: self.view;
+    // Above the list and the grid, below the navigation bar
+    UIView *host = self.view;
     self.emptyView.navigationBar = self.navigationController.navigationBar;
     if (self.emptyView.superview != host) [host addSubview:self.emptyView];
     self.emptyView.frame = host.bounds;
@@ -863,6 +900,7 @@ static void RCCollectControls(UIView *view, NSMutableArray<UIView *> *out) {
     self.emptyView.hidden = NO;
     [self.emptyView setNeedsLayout];
     [self.emptyView layoutIfNeeded];
+    if (wasHidden) [self.emptyView playIntro];
 }
 
 
@@ -1224,7 +1262,7 @@ static void RCCollectControls(UIView *view, NSMutableArray<UIView *> *out) {
     [super viewDidLayoutSubviews];
     [self.categoryBar layoutInScrollView:[self activeScrollView]];
 
-    // The +/- positions in the navigation bar are settled now, so redraw the arrow at it
+    // Keep the invitation below the navigation bar when its height changes
     if (!self.emptyView.hidden) [self.emptyView setNeedsLayout];
 
     // The card backgrounds are drawn for the cell's width when it's displayed: redraw the
