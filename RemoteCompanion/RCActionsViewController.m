@@ -1032,6 +1032,21 @@ static void RCSetRunWatching(BOOL watching) {
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     [self startRunWatch];
+    [self refreshTitle];
+}
+
+// The name can change while this screen is open: a trigger's editor (Edit Schedule) saves it and
+// comes back here, and a schedule's name follows its time. The title is read again from the config.
+- (void)refreshTitle {
+    NSString *name = [[RCConfigManager sharedManager] displayNameForTrigger:self.triggerKey];
+    if (!name.length || [name isEqualToString:self.title]) return;
+    self.title = name;
+    // The NFC tag's tappable title, or the wrapped title above the actions
+    if ([self.navigationItem.titleView isKindOfClass:[UILabel class]]) {
+        ((UILabel *)self.navigationItem.titleView).text = name;
+        [self.navigationItem.titleView sizeToFit];
+    }
+    [self updateWrappedTitle];
 }
 
 - (void)viewWillDisappear:(BOOL)animated {
@@ -1518,6 +1533,7 @@ static void RCSetRunWatching(BOOL watching) {
     dispatch_async(dispatch_get_main_queue(), ^{
         _actions = [[[RCConfigManager sharedManager] actionsForTrigger:_triggerKey] mutableCopy];
         [self.tableView reloadData];
+        [self refreshTitle];
     });
 }
 
@@ -1638,14 +1654,7 @@ static void RCSetRunWatching(BOOL watching) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf) return;
         [config setCustomName:alert.textFields.firstObject.text forTrigger:strongSelf.triggerKey];
-        NSString *name = [config displayNameForTrigger:strongSelf.triggerKey];
-        strongSelf.title = name;
-        // The NFC tag's tappable title, or the wrapped title above the actions
-        if ([strongSelf.navigationItem.titleView isKindOfClass:[UILabel class]]) {
-            ((UILabel *)strongSelf.navigationItem.titleView).text = name;
-            [strongSelf.navigationItem.titleView sizeToFit];
-        }
-        [strongSelf updateWrappedTitle];
+        [strongSelf refreshTitle];
     }];
     [alert addAction:save];
     alert.preferredAction = save;
