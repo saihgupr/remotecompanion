@@ -7380,17 +7380,25 @@ static int lua_objc_call(lua_State *L) {
     NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
     [inv setTarget:target];
     [inv setSelector:selector];
-    
+    // NSInvocation doesn't retain arguments by default. The strings and
+    // numbers made from Lua values below have no other owner, so without
+    // this they're freed before -invoke runs. Must be called before any
+    // setArgument: so each object is retained as it's stored.
+    [inv retainArguments];
+
     // 4. Arguments
     NSUInteger numArgs = [sig numberOfArguments];
     // arg 0 is self, 1 is _cmd. Lua args start at index 3 (mapped to ObjC arg 2)
     for (NSUInteger i = 2; i < numArgs; i++) {
-        int luaIdx = (int)i + 1; 
+        int luaIdx = (int)i + 1;
         if (luaIdx > top) break;
-        
+
         const char *type = [sig getArgumentTypeAtIndex:i];
         // Basic type handling
-        if (strcmp(type, "@") == 0 || strcmp(type, "#") == 0) { // Object or Class
+        if (strcmp(type, "@?") == 0) { // Block: can't be built from Lua, pass nil
+            id blk = nil;
+            [inv setArgument:&blk atIndex:i];
+        } else if (strcmp(type, "@") == 0 || strcmp(type, "#") == 0) { // Object or Class
             id obj = lua_to_id(L, luaIdx);
             [inv setArgument:&obj atIndex:i];
         } else if (type[0] == '^') { // Pointer
@@ -7402,7 +7410,10 @@ static int lua_objc_call(lua_State *L) {
         } else if (strcmp(type, "i") == 0 || strcmp(type, "s") == 0 || strcmp(type, "l") == 0 || strcmp(type, "q") == 0 || strcmp(type, "Q") == 0 || strcmp(type, "I") == 0 || strcmp(type, "S") == 0 || strcmp(type, "L") == 0) { // Integers
              long long val = (long long)lua_tonumber(L, luaIdx);
              [inv setArgument:&val atIndex:i];
-        } else if (strcmp(type, "f") == 0 || strcmp(type, "d") == 0) { // Floats
+        } else if (strcmp(type, "f") == 0) { // Float (4 bytes, not a double)
+             float val = (float)lua_tonumber(L, luaIdx);
+             [inv setArgument:&val atIndex:i];
+        } else if (strcmp(type, "d") == 0) { // Double
              double val = lua_tonumber(L, luaIdx);
              [inv setArgument:&val atIndex:i];
         } else if (strcmp(type, "B") == 0 || strcmp(type, "c") == 0) { // BOOL / char
@@ -7410,7 +7421,7 @@ static int lua_objc_call(lua_State *L) {
              [inv setArgument:&val atIndex:i];
         } else if (strcmp(type, ":") == 0) { // Selector
              const char *s = lua_tostring(L, luaIdx);
-             SEL sel = sel_registerName(s);
+             SEL sel = s ? sel_registerName(s) : NULL;
              [inv setArgument:&sel atIndex:i];
         }
     }
@@ -7439,15 +7450,32 @@ static int lua_objc_call(lua_State *L) {
         [inv getReturnValue:&val];
         lua_pushboolean(L, val);
         return 1;
-    } else if (strcmp(retType, "i") == 0 || strcmp(retType, "s") == 0 || strcmp(retType, "l") == 0 || strcmp(retType, "q") == 0 || strcmp(retType, "Q") == 0) {
-        long long val;
-        [inv getReturnValue:&val];
-        lua_pushnumber(L, (double)val);
-        return 1;
-    } else {
-        // Unknown return type, return nil
-        return 0;
     }
+
+    // Numbers: read each into a variable of its own size. getReturnValue:
+    // only writes as many bytes as the type has, so a shared long long
+    // would keep garbage in its upper bytes for int and short.
+    #define RC_PUSH_RET(code, ctype) \
+        if (strcmp(retType, code) == 0) { \
+            ctype val = 0; \
+            [inv getReturnValue:&val]; \
+            lua_pushnumber(L, (double)val); \
+            return 1; \
+        }
+    RC_PUSH_RET("i", int)
+    RC_PUSH_RET("I", unsigned int)
+    RC_PUSH_RET("s", short)
+    RC_PUSH_RET("S", unsigned short)
+    RC_PUSH_RET("l", long)
+    RC_PUSH_RET("L", unsigned long)
+    RC_PUSH_RET("q", long long)
+    RC_PUSH_RET("Q", unsigned long long)
+    RC_PUSH_RET("f", float)
+    RC_PUSH_RET("d", double)
+    #undef RC_PUSH_RET
+
+    // Unknown return type, return nil
+    return 0;
 }
 
 // Execute a Lua script file
