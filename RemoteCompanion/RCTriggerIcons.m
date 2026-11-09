@@ -340,6 +340,15 @@ UIImage *RCTriggerCategoryIcon(NSString *sectionTitle) {
             @"Scheduled Triggers": @[@"clock.fill"],
             @"MQTT Subscription Triggers": @[@"antenna.radiowaves.left.and.right"],
             @"Add-on Triggers": @[@"puzzlepiece.extension.fill", @"puzzlepiece.fill"],
+            // The New Trigger menu's own sections
+            @"Nearby": @[@"dot.radiowaves.left.and.right"],
+            @"Apps": @[@"square.grid.2x2.fill"],
+            @"Time": @[@"clock.fill"],
+            @"Device": @[@"slider.horizontal.3"],
+            @"Integrations": @[@"link"],
+            @"Media": @[@"play.fill"],
+            @"Calls": @[@"phone.fill"],
+            @"Add-ons": @[@"puzzlepiece.extension.fill", @"puzzlepiece.fill"],
         };
     });
     for (NSString *name in icons[sectionTitle ?: @""]) {
