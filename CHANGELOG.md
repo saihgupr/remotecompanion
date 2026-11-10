@@ -19,6 +19,9 @@ All notable changes to this project will be documented in this file.
 - **Home Assistant actions edit like the entity picker**: tapping an existing HA action in the app, or clicking one in the Web UI, shows its Toggle, Turn On and Turn Off choices with the current one ticked, plus Change Entity. Raw and custom commands keep an Edit Command option instead of being overwritten.
 - **REST API Call editor**: the app's editor uses one-line hints instead of long footer paragraphs and shorter header and body fields, so the whole request fits without the dead space.
 
+### Fixed
+- **Add-on programs run again**: every add-on `exec` step and exec condition failed with "stopped or killed" on rootless, because the runner waited on its output pipes with `poll()`, which SpringBoard's sandbox refuses with `EPERM`. The pipes are read without `poll()` now, so `exec` steps and exec conditions work, including the Uptime add-on.
+
 ## [4.4.0] - 2026-11-06
 
 ### Added

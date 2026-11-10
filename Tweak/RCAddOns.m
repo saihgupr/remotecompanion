@@ -794,22 +794,25 @@ static NSString *rcao_rc_root(void) {
     return access("/var/jb/usr/bin/rc-root", X_OK) == 0 ? @"/var/jb/usr/bin/rc-root" : @"/usr/bin/rc-root";
 }
 
-// Reads from a pipe into data (up to 64 KB kept): one read, or with drain all that's ready now.
-// Closes it and sets *fd to -1 at its end.
-static void rcao_read_pipe(int *fd, NSMutableData *data, BOOL drain) {
+// Reads what's ready from a non-blocking pipe into data (up to 64 KB kept); closes it and sets *fd
+// to -1 at its end. Returns whether anything was read.
+static BOOL rcao_drain_pipe(int *fd, NSMutableData *data) {
     char buffer[4096];
+    BOOL readAny = NO;
     while (*fd >= 0) {
-        struct pollfd p = { .fd = *fd, .events = POLLIN };
-        if (drain && poll(&p, 1, 0) <= 0) return;
         ssize_t n = read(*fd, buffer, sizeof(buffer));
-        if (n <= 0) {
+        if (n > 0) {
+            if (data.length < 65536) [data appendBytes:buffer length:(NSUInteger)n];
+            readAny = YES;
+            continue;
+        }
+        if (n == 0) {
             close(*fd);
             *fd = -1;
-            return;
         }
-        if (data.length < 65536) [data appendBytes:buffer length:(NSUInteger)n];
-        if (!drain) return;
+        break;   // EAGAIN, or an error
     }
+    return readAny;
 }
 
 // Runs a program directly (no shell) and returns its output, or nil if it couldn't start. With
@@ -856,31 +859,30 @@ static NSString *rcao_exec(NSArray<NSString *> *arguments, BOOL root, int *exitS
     }
     // [0] stdout (or both), [1] stderr when split; -1 once closed
     int fds[2] = { outPipe[0], split ? errPipe[0] : -1 };
+    for (int i = 0; i < 2; i++) {
+        if (fds[i] < 0) continue;
+        int flags = fcntl(fds[i], F_GETFL);
+        if (flags >= 0) fcntl(fds[i], F_SETFL, flags | O_NONBLOCK);
+    }
     NSMutableData *outData = [NSMutableData data], *errData = [NSMutableData data];
     CFAbsoluteTime deadline = CFAbsoluteTimeGetCurrent() + kRCAOExecTimeout + (root ? 2 : 0);
     BOOL exited = NO;
     int status = 0;
     // Read until the output closes; while it's quiet, check now and then whether the program has
-    // exited (a helper it started may keep the output open)
+    // exited (a helper it started may keep the output open). The pipes are read without poll(),
+    // which SpringBoard's sandbox refuses.
     while (fds[0] >= 0 || fds[1] >= 0) {
-        int left = (int)((deadline - CFAbsoluteTimeGetCurrent()) * 1000);
-        if (left <= 0) break;
-        struct pollfd p[2];
-        int which[2], count = 0;
-        for (int i = 0; i < 2; i++) if (fds[i] >= 0) { p[count] = (struct pollfd){ .fd = fds[i], .events = POLLIN }; which[count++] = i; }
-        int ready = poll(p, count, MIN(left, 200));
-        if (ready < 0) {
-            if (errno == EINTR) continue;
-            break;
-        }
-        if (ready == 0) {
-            if (waitpid(pid, &status, WNOHANG) != pid) continue;
+        if (CFAbsoluteTimeGetCurrent() >= deadline) break;
+        BOOL readAny = rcao_drain_pipe(&fds[0], outData);
+        if (rcao_drain_pipe(&fds[1], errData)) readAny = YES;
+        if (readAny) continue;
+        if (waitpid(pid, &status, WNOHANG) == pid) {
             exited = YES;
-            rcao_read_pipe(&fds[0], outData, YES);   // whatever it wrote just before exiting
-            rcao_read_pipe(&fds[1], errData, YES);
+            rcao_drain_pipe(&fds[0], outData);   // whatever it wrote just before exiting
+            rcao_drain_pipe(&fds[1], errData);
             break;
         }
-        for (int k = 0; k < count; k++) if (p[k].revents) rcao_read_pipe(&fds[which[k]], which[k] ? errData : outData, NO);
+        usleep(20000);
     }
     for (int i = 0; i < 2; i++) if (fds[i] >= 0) close(fds[i]);
     // The output closed: wait for the program to exit, up to the same deadline
@@ -906,8 +908,9 @@ static NSString *rcao_exec(NSArray<NSString *> *arguments, BOOL root, int *exitS
             });
         }
         if (exitStatus) *exitStatus = -1;
-    } else if (exitStatus) {
-        *exitStatus = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+    } else {
+        if (WIFSIGNALED(status)) SRLogMin(@"[AddOns] %@ was killed by signal %d", arguments.firstObject, WTERMSIG(status));
+        if (exitStatus) *exitStatus = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
     }
     if (errors) *errors = rcao_decode(errData);
     return rcao_decode(outData);
