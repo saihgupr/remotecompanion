@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Action Sequence Edited trigger**: fires when any trigger's action sequence changes, from the app or the Web UI. Add, remove, reorder or edit an action and it runs, with an optional debounce (Off, 5, 10, 15 or 30 seconds, 1, 2 or 5 minutes) that waits until the edits stop so a run of changes runs the sequence once. Changes to this trigger's own actions do not fire it.
 - **Triggers only when added**: the Triggers screen now starts empty and lists only the triggers you add. Every built-in trigger moved into the + menu, including volume, power, status bar, edge and bottom bar gestures, multi-finger slides, Home/Touch ID, ringer, motion, device state, media, calls and Apple Watch, so the list stays short instead of showing dozens of unused rows.
 - **First-trigger onboarding**: with nothing added, the app shows a friendly invitation and a hand-drawn arrow curving up to the + button, plus an Add a Trigger button. The Web UI has the same empty state and add menu.
 

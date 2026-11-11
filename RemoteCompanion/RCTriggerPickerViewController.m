@@ -76,6 +76,7 @@
     if ([key hasPrefix:@"notif_"] || [key hasPrefix:@"notify_"]) return @"Notification Triggers";
     if ([key hasPrefix:@"sched_"]) return @"Scheduled Triggers";
     if ([key hasPrefix:@"mqtt_"]) return @"MQTT Triggers";
+    if ([key isEqualToString:@"trigger_sequence_edited"]) return @"Configuration";
     return @"Other";
 }
 
@@ -83,7 +84,7 @@
     return @[@"Volume Buttons", @"Power Button", @"Screen Gestures", @"Edge Gestures", @"Bottom Bar Gestures", @"Home Button",
              @"Ringer Switch", @"Apple Watch", @"Device State", @"Motion Gestures", @"NFC Tags", @"WiFi Network Triggers",
              @"Bluetooth Device Triggers", @"Audio Output Triggers", @"App Triggers", @"Notification Triggers",
-             @"Scheduled Triggers", @"MQTT Triggers", @"Other"];
+             @"Scheduled Triggers", @"MQTT Triggers", @"Configuration", @"Other"];
 }
 
 - (NSArray *)actionsForTrigger:(NSString *)key {

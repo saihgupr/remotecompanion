@@ -257,6 +257,8 @@ static NSString *RCFitOneLine(NSString *text, UIFont *font, CGFloat width) {
     }
     addSection(mqttKeys, @"MQTT Subscription Triggers");
 
+    addSection(@[@"trigger_sequence_edited"], @"Configuration");
+
     // Assigned keys the Triggers screen has no section for (for example one left
     // behind by a newer or custom trigger) still need a row.
     NSMutableArray<NSString *> *otherKeys = [NSMutableArray array];

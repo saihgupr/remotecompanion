@@ -3380,6 +3380,7 @@ const TRIGGER_SECTIONS = [
   { title: 'Add-on Triggers',         id: 'addon',     keys: [], dynamic: true, prefix: 'addon_', deletable: true },
   { title: 'Scheduled Triggers',     id: 'sched',     keys: [], dynamic: true, prefix: 'sched_',      deletable: true },
   { title: 'MQTT Subscription Triggers', id: 'mqtt', keys: [], dynamic: true, prefix: 'mqtt_sub_', prefix2: 'mqtt_', deletable: true },
+  { title: 'Configuration',           id: 'config',  keys: ['trigger_sequence_edited'] },
 ];
 
 const TRIGGER_NAMES = {
@@ -3410,6 +3411,7 @@ const TRIGGER_NAMES = {
   trigger_device_findmy_sound: 'Find My Sound',
   trigger_media_play: 'Media Playing', trigger_media_pause: 'Media Paused', trigger_media_track_change: 'Media Track Changed',
   trigger_device_call_incoming: 'Incoming Call', trigger_device_call_start: 'Call Started', trigger_device_call_end: 'Call Ended',
+  trigger_sequence_edited: 'Action Sequence Edited',
 };
 
 const TRIGGER_ICONS = {
@@ -3467,6 +3469,7 @@ const TRIGGER_ICONS = {
   trigger_device_call_incoming: { icon:'phone_arrow_down_left', cls:'icon-green' },
   trigger_device_call_start:    { icon:'phone_fill',            cls:'icon-green' },
   trigger_device_call_end:      { icon:'phone_down_fill',       cls:'icon-red' },
+  trigger_sequence_edited:      { icon:'pencil',                cls:'icon-purple' },
 };
 
 // The button and gesture triggers drawn as a tiny phone, as in the app: the pressed button filled
@@ -5270,7 +5273,7 @@ function openActionsPanel(key) {
   const isBT = key.startsWith('bt_');
   const isApp = key.startsWith('app_launch_') || key.startsWith('app_exit_');
   
-  if (isSched || isNotif || isWiFi || isBT || isApp || canRenameTrigger(key) || canKeepDefault(key)) {
+  if (isSched || isNotif || isWiFi || isBT || isApp || key === 'trigger_sequence_edited' || canRenameTrigger(key) || canKeepDefault(key)) {
     editBtn.style.display = 'flex';
   } else {
     editBtn.style.display = 'none';
@@ -5330,6 +5333,7 @@ function triggerSettingsAction(currentKey) {
   if (isWiFi) return () => promptComplexTrigger('wifi', currentKey);
   if (isBT) return () => promptComplexTrigger('bt', currentKey);
   if (isApp) return () => promptAppEdit(currentKey);
+  if (currentKey === 'trigger_sequence_edited') return () => promptSequenceEditedTrigger(currentKey);
   return null;
 }
 function promptAppEdit(key) {
@@ -9926,6 +9930,41 @@ function promptAudioOutputName(mode) {
   });
 }
 
+// ── Action Sequence Edited Trigger Setup ─────────────────────────────────────
+// Runs when any trigger's actions change. A debounce waits for the edits to stop, so a run of
+// changes runs the sequence once. Changes to this trigger's own actions are ignored (as on iOS).
+const SEQUENCE_DEBOUNCE_OPTIONS = [0, 5, 10, 15, 30, 60, 120, 300];
+function sequenceDebounceLabel(seconds) {
+  if (!seconds) return 'Off';
+  if (seconds < 60) return `${seconds} Seconds`;
+  return `${seconds / 60} Minute${seconds >= 120 ? 's' : ''}`;
+}
+function promptSequenceEditedTrigger(editKey = null) {
+  const key = 'trigger_sequence_edited';
+  const data = editKey ? triggerData(key) : null;
+  const current = data && typeof data.debounce === 'number' ? data.debounce : 0;
+  const choose = seconds => {
+    const t = triggerData(key);
+    if (seconds > 0) t.debounce = seconds; else delete t.debounce;
+    if (!editKey) {
+      t.name = defaultNameForKey(key);
+      t.enabled = false;
+      if (!Array.isArray(t.actions)) t.actions = [];
+      t.added = true;
+    }
+    saveConfig();
+    renderAll();
+    openActionsPanel(key);
+  };
+  showSheet('Action Sequence Edited', [
+    { header: 'Debounce' },
+    ...SEQUENCE_DEBOUNCE_OPTIONS.map(v => ({
+      label: `${sequenceDebounceLabel(v)}${v === current ? ' ✓' : ''}`,
+      action() { choose(v); }
+    }))
+  ]);
+}
+
 // ── Battery Level Trigger Setup ─────────────────────────────────────────────
 function promptBatteryTrigger() {
   showSheet('Battery Level', [
@@ -9961,6 +10000,7 @@ function showAddTriggerSheet() {
     { label: 'Add-on Trigger', action: () => promptAddOnTrigger() },
     { label: 'Scheduled Trigger', action: () => promptSchedTrigger() },
     { label: 'Battery Level Trigger', action: () => promptBatteryTrigger() },
+    { label: 'Action Sequence Edited Trigger', action: () => promptSequenceEditedTrigger() },
     { label: 'MQTT Topic Trigger', action: () => promptMqttTrigger() },
     { label: 'NFC Tag Trigger', action: () => promptNfcTrigger() },
   ]);

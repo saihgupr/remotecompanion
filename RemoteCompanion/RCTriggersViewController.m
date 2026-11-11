@@ -12,6 +12,7 @@
 #import "RCBluetoothTriggerViewController.h"
 #import "RCAudioOutputTriggerViewController.h"
 #import "RCBatteryTriggerViewController.h"
+#import "RCSequenceEditedTriggerViewController.h"
 #import "RCWrapSizing.h"
 #import "RCAppPickerViewController.h"
 #import "RCNotificationTriggerViewController.h"
@@ -342,6 +343,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     if ([triggerKey isEqualToString:@"trigger_device_call_incoming"]) return @"phone.arrow.down.left";
     if ([triggerKey isEqualToString:@"trigger_device_call_start"]) return @"phone.fill";
     if ([triggerKey isEqualToString:@"trigger_device_call_end"]) return @"phone.down.fill";
+    if ([triggerKey isEqualToString:@"trigger_sequence_edited"]) return @"square.and.pencil";
     return @"hand.tap"; // Default
 }
 
@@ -850,6 +852,11 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     }
     addSection(mqttKeys, @"MQTT Subscription Triggers", YES);
 
+    // Configuration Section
+    NSMutableArray *configKeys = [NSMutableArray array];
+    if ([[RCConfigManager sharedManager] triggerDataForKey:@"trigger_sequence_edited"]) [configKeys addObject:@"trigger_sequence_edited"];
+    addSection(configKeys, @"Configuration", YES);
+
     self.sections = sections;
     self.sectionTitles = titles;
 
@@ -987,6 +994,19 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
         @{ @"title": @"Focus", @"icon": @"moon.fill", @"section": @"Device", @"handler": ^{ push([[RCFocusTriggerViewController alloc] init]); } },
         @{ @"title": @"MQTT Topic", @"icon": @"antenna.radiowaves.left.and.right", @"section": @"Integrations", @"handler": ^{ push([[RCMQTTTriggerViewController alloc] init]); } },
     ] mutableCopy];
+
+    // A trigger over the config itself: its settings screen adds it (and is where the debounce
+    // lives), then opens the action list
+    NSString *sequenceKey = @"trigger_sequence_edited";
+    NSMutableDictionary *sequenceItem = [@{ @"title": @"Action Sequence Edited",
+                                             @"icon": @"square.and.pencil",
+                                             @"section": @"Configuration",
+                                             @"handler": ^{
+        NSString *existing = [[RCConfigManager sharedManager] triggerDataForKey:sequenceKey] ? sequenceKey : nil;
+        push([[RCSequenceEditedTriggerViewController alloc] initWithTriggerKey:existing]);
+    } } mutableCopy];
+    if ([[RCConfigManager sharedManager] triggerDataForKey:sequenceKey]) sequenceItem[@"detail"] = @"Added";
+    [items addObject:sequenceItem];
 
     // Every built-in trigger is added from here. It can only be added once: when it is
     // already in the list, its menu entry opens it instead.

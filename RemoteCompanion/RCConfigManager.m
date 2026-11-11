@@ -244,7 +244,9 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
             @"trigger_carplay_connect", @"trigger_carplay_disconnect",
             @"trigger_device_findmy_sound",
             @"trigger_media_play", @"trigger_media_pause", @"trigger_media_track_change",
-            @"trigger_device_call_incoming", @"trigger_device_call_start", @"trigger_device_call_end"
+            @"trigger_device_call_incoming", @"trigger_device_call_start", @"trigger_device_call_end",
+            // Configuration
+            @"trigger_sequence_edited"
         ];
     });
     return keys;
@@ -830,6 +832,7 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         @"trigger_device_call_incoming": @"Incoming Call",
         @"trigger_device_call_start": @"Call Started",
         @"trigger_device_call_end": @"Call Ended",
+        @"trigger_sequence_edited": @"Action Sequence Edited",
         @"volume_up_hold": @"Volume Up Hold",
         @"volume_down_hold": @"Volume Down Hold",
         @"volume_both_press": @"Volume Up + Down (Both)",

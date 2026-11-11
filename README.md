@@ -211,6 +211,7 @@ Configure these in the `RemoteCompanion` app for custom action sequences. Tip: *
   - **Focus**: Run when a chosen Focus, or any Focus, turns on or off.
   - **Find My Sound**: Run when Play Sound is sent to the phone from Find My or iCloud.com.
   - **Rotation**: Rotated to Landscape / Portrait, after a half-second settle.
+  - **Action Sequence Edited**: Run when any trigger's actions change, with an optional debounce so a run of edits runs it once.
 
 </details>
 
