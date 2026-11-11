@@ -179,6 +179,7 @@ Access the desktop-class automation hub at `http://[DEVICE_IP]:8080` from any co
 - `rc stop trigger <key>` - Cancel another trigger's running sequence.
 - `rc button triggers pause [minutes]` / `rc button triggers resume` - Temporarily return buttons and gestures to stock behavior.
 - `rc nfc scanner [pause|resume|toggle]` - Pause or resume NFC tag scanning.
+- `rc export [path]` - Export the configuration JSON used by Settings > Backup > Export Configuration. With no path it writes `rc_config_YYYYMMDD_HHMM.json` in the current directory, a directory path writes the default name there, and a file path is used as-is (overwriting an existing file).
 
 <details>
 <summary><b>Hardware Triggers Reference (Tweak App)</b></summary>

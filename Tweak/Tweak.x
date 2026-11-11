@@ -2280,6 +2280,24 @@ static void load_trigger_config() {
     }
 }
 
+// The Settings > Backup > Export Configuration JSON, for "rc export" (the app writes the same
+// dictionary with NSJSONWritingPrettyPrinted)
+static NSString *rc_export_config_json(void) {
+    load_trigger_config();
+    NSDictionary *config = nil;
+    @synchronized (rc_trigger_config_lock()) { config = [g_triggerConfig copy]; }
+    if (![config isKindOfClass:[NSDictionary class]]) return @"Error: No configuration found\n";
+    if (![NSJSONSerialization isValidJSONObject:config]) return @"Error: Configuration cannot be exported as JSON\n";
+    NSError *error = nil;
+    NSData *data = [NSJSONSerialization dataWithJSONObject:config options:NSJSONWritingPrettyPrinted error:&error];
+    NSString *json = data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
+    if (!json) {
+        SRLogMin(@"Export config error: %@", error);
+        return @"Error: Could not export configuration\n";
+    }
+    return json;
+}
+
 static void update_simulation_observers();
 
 static float get_flash_brightness() {
@@ -12247,6 +12265,8 @@ static NSString *handle_command(NSString *cmd) {
             rc_posix_spawn(&pid, [binPath UTF8String], NULL, NULL, (char* const*)args, NULL);
         });
         return @"Triggering userspace-reboot...\n";
+    } else if ([cleanCmd isEqualToString:@"export config"] || [cleanCmd hasPrefix:@"export config "]) {
+        return rc_export_config_json();
     } else if ([cleanCmd isEqualToString:@"list-triggers"]) {
         load_trigger_config();
         if (!g_triggerConfig) return @"Error: No trigger config found\n";
@@ -13477,6 +13497,7 @@ static void start_web_server() {
                                     @{@"command": @"accessibility shortcut", @"desc": @"System: Run the Accessibility Shortcut"},
                                     @{@"command": @"open <bundleId>", @"desc": @"System: Launch an application by bundle identifier"},
                                     @{@"command": @"nav <panel>", @"desc": @"Companion: Open app panel (triggers, settings, ha, km, mqtt, add)"},
+                                    @{@"command": @"export config", @"desc": @"Companion: Export the configuration as JSON"},
                                     @{@"command": @"kill <bundleId>", @"desc": @"System: Force-close an application"},
                                     @{@"command": @"kill current", @"desc": @"System: Force-close the currently focused app"},
                                     @{@"command": @"respring", @"desc": @"System: Restart SpringBoard"},
