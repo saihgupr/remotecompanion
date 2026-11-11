@@ -15,6 +15,7 @@ All notable changes to this project will be documented in this file.
 - **Integrations fold into their own lists**: Snapper and SneakyCam show as one row each in Select Action > Integrations with a chevron, opening just their actions, so the section stays short. Search still finds every action directly, and Settings > Banners keeps the full flat list.
 - **Variables icon**: the Variables row uses an orange italic x, in the style of Shortcuts' variable glyph. Set Variable actions use the same x in the normal action icon color.
 - **Terminal command editor**: creating or editing an `exec` or `root` action now uses the same Settings-style screen as the SSH command editor, with the root switch in its own section above the monospaced command field.
+- **Backup privacy warning**: the README Backup section, the app's export confirmation, and the Web UI export toast now say the configuration file may contain saved credentials and should be kept private.
 
 ### Fixed
 - **Imported Keyboard Maestro actions show their macro names**: importing a configuration now merges the saved macro name map, so a `km trigger <uuid>` action reads as "KM: Macro Name" instead of a bare UUID on the other device.

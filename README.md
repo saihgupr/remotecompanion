@@ -187,6 +187,7 @@ Access the desktop-class automation hub at `http://[DEVICE_IP]:8080` from any co
   rc export ~/Desktop          # ~/Desktop/rc_config_20261111_0716.json
   rc export ~/Desktop/rc.json  # ~/Desktop/rc.json, overwrites if it exists
   ```
+  The export includes any saved passwords and tokens in plain text (Home Assistant, Keyboard Maestro, MQTT, SSH, and the Web UI API). Only the integrations you have set up are included. Keep backups private and treat them like passwords.
 
 <details>
 <summary><b>Hardware Triggers Reference (Tweak App)</b></summary>

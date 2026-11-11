@@ -9708,6 +9708,7 @@ function exportConfig() {
   a.href = url; a.download = 'rc_triggers_backup.json';
   a.click();
   URL.revokeObjectURL(url);
+  showToast('Configuration exported. It may contain saved passwords and tokens, so keep it private.');
 }
 
 function importConfig() {
