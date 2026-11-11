@@ -7,6 +7,7 @@
 //   buttons: volUp, volDown, power, ringer      home: a Home button
 //   zone: top, bottom, left, right               dot: L, C, R (in the top zone)
 //   arrow: left, right, up, down (in the zone)   arrowAt: L, C, R (a swipe up from the bottom)
+//   fingers: up, down (two fingertips in the zone, with a big arrow the way they slide)
 //   mark: @"2×" (text), @"sym:clock" (a symbol), @"arrows:up,down"
 //   symbol: a plain symbol instead of the phone (Touch ID), with a mark as a small badge
 static NSDictionary<NSString *, NSDictionary *> *RCPhoneIconSpecs(void) {
@@ -41,6 +42,8 @@ static NSDictionary<NSString *, NSDictionary *> *RCPhoneIconSpecs(void) {
             @"trigger_bottom_swipe_up_left":   @{ @"arrowAt": @"L" },
             @"trigger_bottom_swipe_up_center": @{ @"arrowAt": @"C" },
             @"trigger_bottom_swipe_up_right":  @{ @"arrowAt": @"R" },
+            @"trigger_statusbar_two_finger_swipe_down": @{ @"zone": @"top", @"fingers": @"down" },
+            @"trigger_bottom_two_finger_swipe_up":      @{ @"zone": @"bottom", @"fingers": @"up" },
             @"trigger_home_double_click":    @{ @"home": @YES, @"mark": @"2×" },
             @"trigger_home_triple_click":    @{ @"home": @YES, @"mark": @"3×" },
             @"trigger_home_quadruple_click": @{ @"home": @YES, @"mark": @"4×" },
@@ -55,9 +58,34 @@ static NSDictionary<NSString *, NSDictionary *> *RCPhoneIconSpecs(void) {
             // No phone button: the watch (tall like the phone, so it's as big), with a clock for a hold
             @"trigger_watch_ping":           @{ @"symbol": @"applewatch", @"tall": @YES },
             @"trigger_watch_ping_hold":      @{ @"symbol": @"applewatch", @"tall": @YES, @"mark": hold },
+            // The Bluetooth Device kind itself (a bare "bt_", never a real trigger's key): the logo, for
+            // screens that show one icon per kind of trigger
+            @"bt_":                          @{ @"symbol": RCBluetoothIconName },
         };
     });
     return specs;
+}
+
+NSString *const RCBluetoothIconName = @"rc.bluetooth";
+
+// The Bluetooth logo (the rune), stroked in a box about 10 wide by 16 tall
+static void RCDrawBluetoothRune(CGRect box, CGFloat lineWidth) {
+    CGFloat ux = box.size.width / 10, uy = box.size.height / 16;
+    CGPoint (^P)(CGFloat, CGFloat) = ^CGPoint(CGFloat x, CGFloat y) {
+        return CGPointMake(box.origin.x + x * ux, box.origin.y + y * uy);
+    };
+    UIBezierPath *rune = [UIBezierPath bezierPath];
+    [rune moveToPoint:P(0.6, 4.2)];
+    [rune addLineToPoint:P(9.4, 11.8)];
+    [rune addLineToPoint:P(5, 15.6)];
+    [rune addLineToPoint:P(5, 0.4)];
+    [rune addLineToPoint:P(9.4, 4.2)];
+    [rune addLineToPoint:P(0.6, 11.8)];
+    rune.lineWidth = lineWidth;
+    rune.lineCapStyle = kCGLineCapRound;
+    rune.lineJoinStyle = kCGLineJoinMiter;
+    rune.miterLimit = 4;
+    [rune stroke];
 }
 
 static UIImage *RCSymbol(NSString *name, CGFloat size, UIImageSymbolWeight weight) {
@@ -98,6 +126,12 @@ static UIImage *RCDrawPhoneIcon(NSDictionary *spec, CGFloat side) {
         // A plain symbol, with its mark as a badge at the bottom right
         NSString *symbol = spec[@"symbol"];
         if (symbol) {
+            if ([symbol isEqualToString:RCBluetoothIconName]) {
+                // The Bluetooth logo, which no symbol has, in its own proportions (0.62 wide to 1 tall),
+                // a little smaller and moved left of the letter when there is one. (RCSymbol below finds
+                // nothing for this name, so it draws nothing over it.)
+                RCDrawBluetoothRune([spec[@"letter"] length] ? R(4.5, 3, 18.6, 30) : R(10.1, 4, 19.8, 32), 2.8 * k);
+            }
             // A tall symbol fills the height the phone does
             BOOL tall = [spec[@"tall"] boolValue];
             UIImage *image = RCSymbol(symbol, (tall ? 34 : 26) * k, UIImageSymbolWeightRegular) ?: RCSymbol(spec[@"fallback"], 26 * k, UIImageSymbolWeightRegular);
@@ -191,6 +225,16 @@ static UIImage *RCDrawPhoneIcon(NSDictionary *spec, CGFloat side) {
             RCDrawFitted(RCSymbol(@"arrow.up", 14 * k, UIImageSymbolWeightBlack), R(x, 18, 8, 16), kCGBlendModeNormal);
             [[UIBezierPath bezierPathWithRoundedRect:R(14, 35, 12, 1.8) cornerRadius:0.9 * k] fill];   // the home bar
         }
+        NSString *fingers = spec[@"fingers"];
+        if (fingers) {
+            // Two fingertips side by side in the zone, and the way they slide in the rest of the screen
+            BOOL down = [fingers isEqualToString:@"down"];
+            CGFloat y = down ? 4 : 30;
+            CGContextFillEllipseInRect(context, R(12.5, y, 6, 6));
+            CGContextFillEllipseInRect(context, R(21.5, y, 6, 6));
+            RCDrawFitted(RCSymbol([@"arrow." stringByAppendingString:fingers], 14 * k, UIImageSymbolWeightBlack),
+                         down ? R(11, 13, 18, 20) : R(11, 7, 18, 20), kCGBlendModeNormal);
+        }
 
         // What happens, inside the screen
         if (!mark) return;
@@ -249,7 +293,25 @@ UIImage *RCTriggerSymbolImage(NSString *symbolName, CGFloat pointSize) {
     return icon;
 }
 
+UIImage *RCBluetoothIcon(CGFloat pointSize) {
+    NSString *cacheKey = [NSString stringWithFormat:@"bluetooth@%.1f", pointSize];
+    UIImage *cached = [RCIconCache() objectForKey:cacheKey];
+    if (cached) return cached;
+    CGFloat side = ceil(pointSize);
+    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(side, side)];
+    UIImage *icon = [[renderer imageWithActions:^(UIGraphicsImageRendererContext *rendererContext) {
+        [[UIColor blackColor] setStroke];
+        CGFloat height = side * 0.9, width = height * 0.62;
+        RCDrawBluetoothRune(CGRectMake((side - width) / 2, (side - height) / 2, width, height), side * 0.1);
+    }] imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+    [RCIconCache() setObject:icon forKey:cacheKey];
+    return icon;
+}
+
 UIImage *RCTriggerCategoryIcon(NSString *sectionTitle) {
+    // Bluetooth has no symbol: its logo, drawn about as big as the 13 pt symbols beside it
+    if ([sectionTitle isEqualToString:@"Bluetooth Device Triggers"]) return RCBluetoothIcon(16);
+
     // Symbols in order of preference: the first this iOS has is used (the later ones are older)
     static NSDictionary<NSString *, NSArray<NSString *> *> *icons;
     static dispatch_once_t once;
