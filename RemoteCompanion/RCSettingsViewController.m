@@ -12,6 +12,7 @@
 #import "RCAddOnCatalog.h"
 #import "RCAddOnsViewController.h"
 #import "RCBackup.h"
+#import "RCColorPickerViewController.h"
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #include <ifaddrs.h>
 #include <arpa/inet.h>
@@ -263,13 +264,17 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
         // Integrations, then Add-ons (ADDONS.md) once the tweak has written its catalog
         return [RCAddOnCatalog catalogAvailable] ? 2 : 1;
     }
-    return 1; // Gestures
+    if (section == RCSettingsSectionGestures) {
+        return 2; // Gestures, Icon Color
+    }
+    return 1;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     RCConfigManager *cm = [RCConfigManager sharedManager];
     
-    BOOL isLinkRow = (indexPath.section == RCSettingsSectionGeneral && indexPath.row >= 2);
+    BOOL isLinkRow = (indexPath.section == RCSettingsSectionGeneral && indexPath.row >= 2) ||
+                     (indexPath.section == RCSettingsSectionGestures && indexPath.row == 1);
     UITableViewCellStyle style = isLinkRow ? UITableViewCellStyleValue1 : UITableViewCellStyleDefault;
     UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:style reuseIdentifier:nil];
     cell.backgroundColor = [cm tweakColorForKey:@"blockBackground" defaultVal:0.12];
@@ -338,10 +343,18 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
         cell.imageView.tintColor = [UIColor systemPurpleColor];
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     } else if (indexPath.section == RCSettingsSectionGestures) {
-        cell.textLabel.text = @"Gestures";
-        cell.imageView.image = [UIImage systemImageNamed:@"hand.draw.fill"];
-        cell.imageView.tintColor = [UIColor systemRedColor];
-        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        if (indexPath.row == 0) {
+            cell.textLabel.text = @"Gestures";
+            cell.imageView.image = [UIImage systemImageNamed:@"hand.draw.fill"];
+            cell.imageView.tintColor = [RCColorPickerViewController colorForName:cm.gesturesIconColor];
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        } else {
+            cell.textLabel.text = @"Icon Color";
+            cell.imageView.image = [UIImage systemImageNamed:@"circle.fill"];
+            cell.imageView.tintColor = [RCColorPickerViewController colorForName:cm.gesturesIconColor];
+            cell.detailTextLabel.text = [RCColorPickerViewController titleForName:cm.gesturesIconColor];
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        }
     } else if (indexPath.section == RCSettingsSectionBackup) {
         if (indexPath.row == 0) {
             cell.textLabel.text = @"Export Configuration";
@@ -387,7 +400,11 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     } else if (indexPath.section == RCSettingsSectionAdvanced) {
         [self.navigationController pushViewController:[[RCAdvancedSettingsViewController alloc] init] animated:YES];
     } else if (indexPath.section == RCSettingsSectionGestures) {
-        [self.navigationController pushViewController:[[RCGesturesViewController alloc] init] animated:YES];
+        if (indexPath.row == 0) {
+            [self.navigationController pushViewController:[[RCGesturesViewController alloc] init] animated:YES];
+        } else {
+            [self presentGesturesIconColorPicker];
+        }
     } else if (indexPath.section == RCSettingsSectionDiagnostics) {
         if (indexPath.row == 0) {
             [self.navigationController pushViewController:[[RCRunningViewController alloc] init] animated:YES];
@@ -423,6 +440,23 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
 
 - (void)openGitHub {
     [[UIApplication sharedApplication] openURL:[NSURL URLWithString:@"https://github.com/saihgupr/RemoteCompanion"] options:@{} completionHandler:nil];
+}
+
+// A small popup of color swatches for the Gestures row icon. Picking one saves it
+// and repaints the row, so the change is visible when the popup closes.
+- (void)presentGesturesIconColorPicker {
+    RCConfigManager *cm = [RCConfigManager sharedManager];
+    RCColorPickerViewController *picker = [[RCColorPickerViewController alloc] initWithSelectedName:cm.gesturesIconColor];
+    __weak typeof(self) weakSelf = self;
+    picker.onPick = ^(NSString *name) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        [RCConfigManager sharedManager].gesturesIconColor = name;
+        [strongSelf.tableView reloadData];
+    };
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:picker];
+    nav.modalPresentationStyle = UIModalPresentationFormSheet;
+    [self presentViewController:nav animated:YES completion:nil];
 }
 
 #pragma mark - Backup / Import
