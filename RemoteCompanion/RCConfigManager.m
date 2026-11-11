@@ -26,6 +26,26 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
 @property (nonatomic, strong) NSMutableDictionary *config;
 @end
 
+// JSON null is not a plist value, so a hand-edited file with nulls would fail to
+// save. Drop them instead of refusing the whole import.
+static void RCRemoveNulls(id object) {
+    if ([object isKindOfClass:[NSMutableDictionary class]]) {
+        NSMutableDictionary *dict = object;
+        for (id key in [dict allKeys]) {
+            id value = dict[key];
+            if (value == [NSNull null]) [dict removeObjectForKey:key];
+            else RCRemoveNulls(value);
+        }
+    } else if ([object isKindOfClass:[NSMutableArray class]]) {
+        NSMutableArray *array = object;
+        for (NSInteger i = (NSInteger)array.count - 1; i >= 0; i--) {
+            id value = array[(NSUInteger)i];
+            if (value == [NSNull null]) [array removeObjectAtIndex:(NSUInteger)i];
+            else RCRemoveNulls(value);
+        }
+    }
+}
+
 @implementation RCConfigManager
 
 + (instancetype)sharedManager {
@@ -1249,58 +1269,44 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
 
 #pragma mark - Backup/Restore
 
-- (NSData *)exportConfigAsJSON {
-    NSError *error = nil;
-    NSData *jsonData = [NSJSONSerialization dataWithJSONObject:_config
-                                                       options:NSJSONWritingPrettyPrinted
-                                                         error:&error];
-    if (error) {
-        NSLog(@"[RCConfigManager] Export error: %@", error);
-        return nil;
-    }
-    return jsonData;
-}
-
+// Applies everything in the file. Older exports carry the whole configuration as
+// well, so they restore integrations and settings too, not just triggers.
 - (BOOL)importConfigFromJSON:(NSData *)jsonData error:(NSError **)error {
     id parsed = [NSJSONSerialization JSONObjectWithData:jsonData options:NSJSONReadingMutableContainers error:error];
     if (!parsed || ![parsed isKindOfClass:[NSDictionary class]]) {
         return NO;
     }
-    
+
     NSMutableDictionary *importedConfig = (NSMutableDictionary *)parsed;
-    
-    // Robust Merge Logic
-    // 1. Master Switch (if present)
-    if (importedConfig[@"masterEnabled"]) {
-        _config[@"masterEnabled"] = importedConfig[@"masterEnabled"];
-    }
-    
-    if (importedConfig[@"nfcBackgroundReading"]) {
-        _config[@"nfcBackgroundReading"] = importedConfig[@"nfcBackgroundReading"];
-    }
-    if (importedConfig[@"nfcEnabled"]) {
-        _config[@"nfcEnabled"] = importedConfig[@"nfcEnabled"];
-    }
-    // If missing in import, keep current local setting.
-    
-    // 2. Triggers (Merge)
-    NSDictionary *importedTriggers = importedConfig[@"triggers"];
-    if (importedTriggers && [importedTriggers isKindOfClass:[NSDictionary class]]) {
-        NSMutableDictionary *currentTriggers = _config[@"triggers"];
-        if (!currentTriggers) {
-            currentTriggers = [NSMutableDictionary dictionary];
-            _config[@"triggers"] = currentTriggers;
+    RCRemoveNulls(importedConfig);
+
+    // Everything the file has: a backup made on one device puts the same settings,
+    // integrations and triggers on another. Keys the file does not have stay local.
+    for (NSString *key in importedConfig) {
+        id value = importedConfig[key];
+
+        if ([key isEqualToString:@"triggers"]) {
+            if (![value isKindOfClass:[NSDictionary class]]) continue;
+            NSMutableDictionary *currentTriggers = _config[@"triggers"];
+            if (![currentTriggers isKindOfClass:[NSMutableDictionary class]]) {
+                currentTriggers = [NSMutableDictionary dictionary];
+                _config[@"triggers"] = currentTriggers;
+            }
+            [(NSDictionary *)value enumerateKeysAndObjectsUsingBlock:^(id triggerKey, id trigger, BOOL *stop) {
+                currentTriggers[triggerKey] = [trigger mutableCopy];
+            }];
+            continue;
         }
-        
-        [importedTriggers enumerateKeysAndObjectsUsingBlock:^(id key, id obj, BOOL *stop) {
-            // Overwrite or add
-            currentTriggers[key] = [obj mutableCopy];
-        }];
+
+        BOOL container = [value isKindOfClass:[NSArray class]] || [value isKindOfClass:[NSDictionary class]];
+        _config[key] = container ? [value mutableCopy] : value;
     }
-    
+
     [self saveConfig];
-    NSLog(@"[RCConfigManager] Config merged successfully. Master: %@, Triggers Updated: %lu", 
-          _config[@"masterEnabled"], (unsigned long)importedTriggers.count);
+    // Normalise the mutable containers and fill in anything the file was too old to have
+    [self loadConfig];
+
+    NSLog(@"[RCConfigManager] Config imported: %lu keys", (unsigned long)importedConfig.count);
     return YES;
 }
 

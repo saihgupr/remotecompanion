@@ -606,6 +606,8 @@ typedef NS_ENUM(NSInteger, RCGestureSection) {
 }
 
 - (void)importGestures {
+    // Open in place; the read below falls back to a coordinated copy when a
+    // provider refuses direct access.
     UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeJSON]];
     picker.delegate = self;
     picker.allowsMultipleSelection = YES;
@@ -618,6 +620,16 @@ typedef NS_ENUM(NSInteger, RCGestureSection) {
     for (NSURL *url in urls) {
         BOOL accessing = [url startAccessingSecurityScopedResource];
         NSData *data = [NSData dataWithContentsOfURL:url];
+        if (!data) {
+            // Provider-backed files can refuse a direct read; ask for a local copy.
+            NSFileCoordinator *coordinator = [[NSFileCoordinator alloc] initWithFilePresenter:nil];
+            NSError *coordError = nil;
+            __block NSData *copied = nil;
+            [coordinator coordinateReadingItemAtURL:url options:NSFileCoordinatorReadingForUploading error:&coordError byAccessor:^(NSURL *newURL) {
+                copied = [NSData dataWithContentsOfURL:newURL];
+            }];
+            data = copied;
+        }
         if (accessing) [url stopAccessingSecurityScopedResource];
         if (!data) continue;
         NSString *path = [NSString stringWithFormat:@"/tmp/rc-gesture-import-%lu.json", (unsigned long)paths.count];

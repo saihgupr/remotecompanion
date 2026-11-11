@@ -245,6 +245,22 @@ Combine status queries with actions for smart automation:
 </details>
 
 <details>
+<summary><b>Backup CLI Commands</b></summary>
+
+### Backup
+- `rc backup [path]` - Save everything on the device in one JSON file: settings, integrations, triggers, add-ons, gestures, notification filters, variables and the app blacklist. Import it from Settings > Backup > Import Configuration, or with `rc restore`.
+  ```bash
+  rc backup                    # ./rc_backup_20261111_0930.json
+  rc backup ~/Desktop          # ~/Desktop/rc_backup_20261111_0930.json
+  rc backup ~/Desktop/rc.json  # ~/Desktop/rc.json, overwrites if it exists
+  ```
+- `rc restore <path>` - Put a backup file back on the device exactly as it was.
+
+The file is plain text and holds your passwords and tokens. Keep it private.
+
+</details>
+
+<details>
 <summary><b>Integrations CLI Commands (HA, Keyboard Maestro, MQTT)</b></summary>
 
 ### Home Assistant

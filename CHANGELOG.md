@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Full backup and restore**: Settings > Backup > Export Configuration now writes one file with everything on the device, including integrations, SSH hosts, tokens, add-ons, gestures, notification filters, variables and the app blacklist. Import Configuration puts it back on a new device exactly as it was, and still accepts older configuration files. `rc backup [path]` and `rc restore <path>` do the same from a terminal.
 - **Triggers only when added**: the Triggers screen now starts empty and lists only the triggers you add. Every built-in trigger moved into the + menu, including volume, power, status bar, edge and bottom bar gestures, multi-finger slides, Home/Touch ID, ringer, motion, device state, media, calls and Apple Watch, so the list stays short instead of showing dozens of unused rows.
 - **First-trigger onboarding**: with nothing added, the app shows a friendly invitation and a hand-drawn arrow curving up to the + button, plus an Add a Trigger button. The Web UI has the same empty state and add menu.
 - **Remote RC actions**: Settings > Integrations > Remote RC Clients stores another device's address and Web UI port (8080 by default) plus an optional API token. A new Remote RC action runs regular RC commands on that device over its Web UI, with no SSH needed. Creating one opens the normal action list filtered for the remote, so play, lock, volume, shortcuts and the rest are picked and parameterized the same way as local actions.
