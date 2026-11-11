@@ -26,7 +26,6 @@ All notable changes to this project will be documented in this file.
 - **Switched-off integrations show dimmed**: a trigger or action that needs MQTT, Home Assistant or Keyboard Maestro stays in its list and stays editable while that integration is off. The row is dimmed and marked "MQTT off" or "Home Assistant off" in the app and the Web UI, so it is clear why it does nothing; turning the integration back on restores the normal look.
 
 ### Fixed
-- **Control Center on iOS 18**: later iOS 18 releases dropped the single Control Center controller RC used, so the action and `rc control-center` did nothing. They now open it through `SBControlCenterCoordinator` (#148).
 - **App Switcher on iOS 18 and 26**: the old toggle method is gone on iOS 18, so the action and `rc switcher` failed. They now use the main screen's switcher controller, and iOS 17 keeps the old call (#149).
 - **Quick Shortcuts and Camera modes on iOS 26**: a Quick Shortcut now runs through the class iOS 26 moved it to, and a Camera action with a mode or lens applies it now that the mode method has a new name. The two fallbacks behind it were also wrong and are fixed (#150).
 - **Lua objc_call with arguments**: arguments are kept alive until the call finishes, so a string, number or boolean argument no longer crashes SpringBoard. Float arguments arrive at their real size, and float, double and unsigned returns come back correctly (#144).
