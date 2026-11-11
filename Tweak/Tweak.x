@@ -13257,20 +13257,28 @@ static void start_web_server() {
                                     NSString *jsonStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
                                     responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)[jsonStr lengthOfBytesUsingEncoding:NSUTF8StringEncoding], jsonStr];
                                 } else if ([path isEqualToString:@"/api/audiostream/start"] && ([method isEqualToString:@"POST"] || [method isEqualToString:@"GET"])) {
-                                    BOOL alreadyRunning = is_audiostreamerd_running();
-                                    if (alreadyRunning) {
-                                        NSDictionary *dict = @{@"status": @"already_running", @"port": @(18080)};
-                                        NSData *jsonData = [NSJSONSerialization dataWithJSONObject:dict options:0 error:nil];
-                                        NSString *jsonStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
-                                        responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)[jsonStr lengthOfBytesUsingEncoding:NSUTF8StringEncoding], jsonStr];
+                                    load_trigger_config();
+                                    BOOL allowAutoStart = [g_triggerConfig[@"audiostreamAutoStart"] boolValue];
+                                    if (!allowAutoStart) {
+                                        NSString *jsonStr = @"{\"status\":\"disabled\",\"port\":18080}";
+                                        NSData *jsonData = [jsonStr dataUsingEncoding:NSUTF8StringEncoding];
+                                        responseString = [NSString stringWithFormat:@"HTTP/1.1 403 Forbidden\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)jsonData.length, jsonStr];
                                     } else {
-                                        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-                                            execute_shell_command("if [ -x /var/jb/usr/bin/audiostream ]; then /var/jb/usr/bin/audiostream start --auto-off; elif [ -x /usr/bin/audiostream ]; then /usr/bin/audiostream start --auto-off; else audiostream start --auto-off; fi");
-                                        });
-                                        NSDictionary *dict = @{@"status": @"started", @"port": @(18080)};
-                                        NSData *jsonData = [NSJSONSerialization dataWithJSONObject:dict options:0 error:nil];
-                                        NSString *jsonStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
-                                        responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)[jsonStr lengthOfBytesUsingEncoding:NSUTF8StringEncoding], jsonStr];
+                                        BOOL alreadyRunning = is_audiostreamerd_running();
+                                        if (alreadyRunning) {
+                                            NSDictionary *dict = @{@"status": @"already_running", @"port": @(18080)};
+                                            NSData *jsonData = [NSJSONSerialization dataWithJSONObject:dict options:0 error:nil];
+                                            NSString *jsonStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+                                            responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)[jsonStr lengthOfBytesUsingEncoding:NSUTF8StringEncoding], jsonStr];
+                                        } else {
+                                            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                                                execute_shell_command("if [ -x /var/jb/usr/bin/audiostream ]; then /var/jb/usr/bin/audiostream start --auto-off; elif [ -x /usr/bin/audiostream ]; then /usr/bin/audiostream start --auto-off; else audiostream start --auto-off; fi");
+                                            });
+                                            NSDictionary *dict = @{@"status": @"started", @"port": @(18080)};
+                                            NSData *jsonData = [NSJSONSerialization dataWithJSONObject:dict options:0 error:nil];
+                                            NSString *jsonStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+                                            responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)[jsonStr lengthOfBytesUsingEncoding:NSUTF8StringEncoding], jsonStr];
+                                        }
                                     }
                                 } else if ([path isEqualToString:@"/api/audiostream/stop"] && ([method isEqualToString:@"POST"] || [method isEqualToString:@"GET"])) {
                                     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{

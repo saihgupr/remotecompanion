@@ -2465,7 +2465,40 @@
         </div>
       </div>
     </div>
-    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">Configure external service integrations to trigger actions and control third-party automations.</div>
+    <div id="audiostart-integration-section" style="display:none;">
+      <div class="action-list-header">On-Device</div>
+      <div class="action-list-card" style="margin-bottom:12px">
+        <div class="action-list-row" onclick="openAudioStreamPanel()">
+          <div class="action-row-icon icon-pink"><i class="f7-icons">music_note</i></div>
+          <div class="action-row-text" style="flex:1">AudioStream<br><span id="setting-audiostream-status" style="font-size:13px;color:var(--rc-label-2);font-weight:400">Auto-start disabled</span></div>
+          <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
+        </div>
+      </div>
+    </div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">Configure external services and on-device integrations.</div>
+  </div>
+</div>
+
+<!-- ══ AUDIOSTREAM PANEL (Settings > Integrations > AudioStream) ═══════════ -->
+<div class="rc-panel" id="audiostream-panel">
+  <div class="panel-navbar">
+    <button class="panel-back" onclick="closeAudioStreamPanel()">
+      <i class="f7-icons">chevron_left</i> Integrations
+    </button>
+    <div class="panel-title">AudioStream</div>
+    <div style="width:80px"></div>
+  </div>
+  <div class="panel-content">
+    <div class="action-list-header" style="margin-top:28px">Streaming Server</div>
+    <div class="action-list-card">
+      <div class="settings-row">
+        <span class="settings-label">Enable Auto-Start</span>
+        <div class="settings-btn">
+          <input type="checkbox" class="ios-toggle" id="setting-audiostream-autostart" onchange="onAudioStreamToggleChange(this.checked)">
+        </div>
+      </div>
+    </div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">Allow other devices to start the iPhone streaming server. Off by default. Starting it from the AudioStream app still works.</div>
   </div>
 </div>
 
@@ -3348,7 +3381,7 @@
 'use strict';
 
 // ── State ────────────────────────────────────────────────────────────────────
-let config = { masterEnabled: true, nfcEnabled: true, webUIEnabled: false, fixedVolumeButtons: false, triggers: {}, favoriteTriggers: [] };
+let config = { masterEnabled: true, nfcEnabled: true, webUIEnabled: false, fixedVolumeButtons: false, audiostreamAutoStart: false, triggers: {}, favoriteTriggers: [] };
 let hasLoadedData = false;
 let currentKey = null;
 let dialogCallback = null;
@@ -4675,6 +4708,7 @@ async function loadCapabilities() {
   } catch(e) {
     console.error("Failed to load capabilities", e);
   }
+  updateAudioStreamAvailability();
 }
 
 // ── API ───────────────────────────────────────────────────────────────────────
@@ -8837,6 +8871,12 @@ function openSettings() {
   document.getElementById('setting-master').checked = !!config.masterEnabled;
   document.getElementById('setting-nfc').checked    = !!config.nfcEnabled;
   document.getElementById('setting-webui').checked  = !!config.webUIEnabled;
+  const audioStreamAutoStartToggle = document.getElementById('setting-audiostream-autostart');
+  if (audioStreamAutoStartToggle) {
+    audioStreamAutoStartToggle.checked = !!config.audiostreamAutoStart;
+  }
+  updateAudioStreamAvailability();
+  updateAudioStreamStatus();
   updateAccessStatus();
   renderAccessPanel();
   document.getElementById('setting-loglevel').value = ['off','minimal','full'].includes(config.logLevel) ? config.logLevel : 'minimal';
@@ -8914,6 +8954,7 @@ function updateIntegrationsStatus() {
   if (config.haEnabled) names.push('Home Assistant');
   if (config.kmEnabled) names.push('Keyboard Maestro');
   if (config.mqttEnabled) names.push('MQTT');
+  if (serverCapabilities && serverCapabilities.audiostream && config.audiostreamAutoStart) names.push('AudioStream');
   el.textContent = names.length ? names.join(' • ') : 'Disabled';
 }
 
@@ -9044,12 +9085,47 @@ function onWrapLongNamesChange(enabled) {
 }
 
 function openIntegrationsPanel() {
+  updateAudioStreamAvailability();
+  updateAudioStreamStatus();
   document.getElementById('integrations-panel').classList.add('active');
 }
 
 function closeIntegrationsPanel() {
   document.getElementById('integrations-panel').classList.remove('active');
   updateIntegrationsStatus();
+}
+
+function openAudioStreamPanel() {
+  const toggle = document.getElementById('setting-audiostream-autostart');
+  if (toggle) toggle.checked = !!config.audiostreamAutoStart;
+  updateAudioStreamStatus();
+  document.getElementById('audiostream-panel').classList.add('active');
+}
+
+function closeAudioStreamPanel() {
+  document.getElementById('audiostream-panel').classList.remove('active');
+  updateAudioStreamStatus();
+  updateIntegrationsStatus();
+}
+
+function onAudioStreamToggleChange(enabled) {
+  config.audiostreamAutoStart = enabled;
+  saveConfig();
+  updateAudioStreamStatus();
+  updateIntegrationsStatus();
+}
+
+function updateAudioStreamStatus() {
+  const el = document.getElementById('setting-audiostream-status');
+  if (!el) return;
+  el.textContent = config.audiostreamAutoStart ? 'Auto-start enabled' : 'Auto-start disabled';
+}
+
+function updateAudioStreamAvailability() {
+  const section = document.getElementById('audiostart-integration-section');
+  if (!section) return;
+  const installed = !!(serverCapabilities && serverCapabilities.audiostream);
+  section.style.display = installed ? '' : 'none';
 }
 
 function closeAdvancedPanel() {

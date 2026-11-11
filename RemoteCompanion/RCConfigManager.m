@@ -292,6 +292,15 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
     [self saveConfig];
 }
 
+- (BOOL)audiostreamAutoStart {
+    return [_config[@"audiostreamAutoStart"] boolValue];
+}
+
+- (void)setAudiostreamAutoStart:(BOOL)audiostreamAutoStart {
+    _config[@"audiostreamAutoStart"] = @(audiostreamAutoStart);
+    [self saveConfig];
+}
+
 - (NSString *)webUIAccess {
     NSString *access = _config[@"webUIAccess"];
     return [access isKindOfClass:[NSString class]] && ([access isEqualToString:@"networks"] || [access isEqualToString:@"local"]) ? access : @"any";
