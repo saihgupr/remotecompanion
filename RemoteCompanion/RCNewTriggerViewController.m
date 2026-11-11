@@ -2,7 +2,7 @@
 #import "RCConfigManager.h"
 #import "RCActionsViewController.h"
 
-@interface RCNewTriggerViewController () <UISearchResultsUpdating>
+@interface RCNewTriggerViewController () <UISearchResultsUpdating, UISearchControllerDelegate>
 // Everything the picker was given, and the part currently shown (the search filters it)
 @property (nonatomic, strong) NSArray<NSString *> *allSectionTitles;
 @property (nonatomic, strong) NSArray<NSArray<NSDictionary *> *> *allSections;
@@ -10,6 +10,8 @@
 @property (nonatomic, strong) NSArray<NSArray<NSDictionary *> *> *sections;
 @property (nonatomic, strong) UISearchController *searchController;
 @property (nonatomic, strong) UILabel *emptyLabel;
+// A chosen item waits here until the search that found it has finished closing
+@property (nonatomic, copy) void (^pendingHandler)(void);
 @end
 
 @implementation RCNewTriggerViewController
@@ -48,6 +50,7 @@
 
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
+    self.searchController.delegate = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
     self.searchController.searchBar.placeholder = @"Search Triggers";
     self.navigationItem.searchController = self.searchController;
@@ -179,9 +182,30 @@
     NSDictionary *item = self.sections[indexPath.section][indexPath.row];
     void (^handler)(void) = item[@"handler"];
     if (!handler) return;
-    // The setup screen is pushed under a clean navigation bar, not an active search
-    if (self.searchController.isActive) self.searchController.active = NO;
+    // Pushing while the search is still closing loses the push on iPad. Close the search
+    // first, then run the handler once it has actually gone.
+    if (self.searchController.isActive) {
+        self.pendingHandler = handler;
+        self.searchController.active = NO;
+        // In case the dismissal does not report back (it does on most releases), do not
+        // leave the tap doing nothing.
+        __weak typeof(self) weakSelf = self;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [weakSelf runPendingHandler];
+        });
+        return;
+    }
     handler();
+}
+
+- (void)searchControllerDidDismissSearchController:(UISearchController *)searchController {
+    [self runPendingHandler];
+}
+
+- (void)runPendingHandler {
+    void (^pending)(void) = self.pendingHandler;
+    self.pendingHandler = nil;
+    if (pending) pending();
 }
 
 @end
