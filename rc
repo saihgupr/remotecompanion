@@ -72,6 +72,7 @@ if [ -z "$1" ]; then
     echo "  nav <panel>       - Navigate companion app (triggers, settings, ha, km, mqtt, add)"
     echo "  export [path]     - Save everything for an exact restore (default: current directory; a directory or file)"
     echo "  import <path>     - Restore an exported file on the device"
+    echo "  pull-backup [dir] - Copy the newest IAmLazy backup to the Mac, printing its path"
     echo "  log               - Stream device logs"
     echo ""
     exit 1
@@ -167,6 +168,68 @@ if [[ "$1" == "import" ]]; then
     case "$RESPONSE" in
         Error*) exit 1 ;;
     esac
+    exit 0
+fi
+
+# Pull the newest IAmLazy archive to the Mac. The backup itself is made in the app; this only
+# copies it, so it prints the saved path and nothing else on success.
+if [[ "$1" == "pull-backup" ]]; then
+    DEST="${2:-$HOME/Desktop/RC-Backups/iamlazy}"
+    case "$DEST" in
+        "~") DEST="$HOME" ;;
+        "~/"*) DEST="$HOME/${DEST#\~/}" ;;
+    esac
+    # A path under an unmounted drive would otherwise be created on the boot disk and filled
+    case "$DEST" in
+        /Volumes/*)
+            VOL="/Volumes/$(printf '%s' "$DEST" | cut -d/ -f3)"
+            if ! mount | grep -q " on ${VOL} "; then
+                echo "Error: ${VOL} is not mounted" >&2
+                exit 1
+            fi
+            ;;
+    esac
+    mkdir -p "$DEST" || { echo "Error: Could not create $DEST" >&2; exit 1; }
+
+    REMOTE_DIR=""
+    for d in /var/jb/var/mobile/Documents/me.lightmann.iamlazy /var/mobile/Documents/me.lightmann.iamlazy; do
+        if [[ "$IP" == "127.0.0.1" ]]; then
+            [ -d "$d" ] && REMOTE_DIR="$d" && break
+        else
+            ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no mobile@$IP "test -d '$d'" 2>/dev/null && REMOTE_DIR="$d" && break
+        fi
+    done
+    if [ -z "$REMOTE_DIR" ]; then
+        echo "Error: No IAmLazy backup folder on $IP" >&2
+        exit 1
+    fi
+
+    if [[ "$IP" == "127.0.0.1" ]]; then
+        NEWEST=$(ls -t "$REMOTE_DIR"/*.tar.gz 2>/dev/null | head -n1)
+    else
+        NEWEST=$(ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no mobile@$IP "ls -t '$REMOTE_DIR'/*.tar.gz 2>/dev/null | head -n1")
+    fi
+    if [ -z "$NEWEST" ]; then
+        echo "Error: No backup in $REMOTE_DIR yet" >&2
+        exit 1
+    fi
+
+    NAME="$(basename "$NEWEST")"
+    TARGET="$DEST/$NAME"
+    if [[ "$IP" == "127.0.0.1" ]]; then
+        [ "$NEWEST" = "$TARGET" ] || cp "$NEWEST" "$TARGET" || exit 1
+    else
+        REMOTE_SIZE=$(ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no mobile@$IP "wc -c < '$NEWEST'" 2>/dev/null | tr -d ' ')
+        LOCAL_SIZE=$(stat -f %z "$TARGET" 2>/dev/null)
+        if [ -z "$REMOTE_SIZE" ] || [ "$REMOTE_SIZE" != "$LOCAL_SIZE" ]; then
+            scp -q -o ConnectTimeout=10 -o StrictHostKeyChecking=no "mobile@$IP:$NEWEST" "$TARGET" || {
+                echo "Error: Could not copy $NEWEST from $IP" >&2
+                exit 1
+            }
+        fi
+    fi
+    chmod 600 "$TARGET" 2>/dev/null || true
+    echo "$TARGET"
     exit 0
 fi
 
