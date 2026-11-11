@@ -943,7 +943,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     NSMutableArray *items = [@[
         @{ @"title": @"NFC Tag", @"icon": @"wave.3.right", @"section": @"Nearby", @"handler": ^{ push([[RCNFCTriggerViewController alloc] init]); } },
         @{ @"title": @"Wi-Fi Network", @"icon": @"wifi", @"section": @"Nearby", @"handler": ^{ push([[RCWiFiTriggerViewController alloc] init]); } },
-        @{ @"title": @"Bluetooth Device", @"icon": @"dot.radiowaves.left.and.right", @"section": @"Nearby", @"handler": ^{ push([[RCBluetoothTriggerViewController alloc] init]); } },
+        @{ @"title": @"Bluetooth Device", @"icon": @"dot.radiowaves.left.and.right", @"image": RCBluetoothIcon(20), @"section": @"Nearby", @"handler": ^{ push([[RCBluetoothTriggerViewController alloc] init]); } },
         @{ @"title": @"Audio Output", @"icon": @"airplayaudio", @"section": @"Nearby", @"handler": ^{ push([[RCAudioOutputTriggerViewController alloc] init]); } },
         @{ @"title": @"App Launch", @"icon": @"square.grid.2x2", @"section": @"Apps", @"handler": ^{
             RCAppPickerViewController *vc = [[RCAppPickerViewController alloc] init];
@@ -1557,12 +1557,18 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
             if (app) return app;
         }
     }
-    return RCTriggerIconImage(triggerKey, size) ?: RCTriggerLetterImage([RCTriggersViewController iconNameForTrigger:triggerKey], [RCTriggersViewController letterForTrigger:triggerKey], size);
+    return RCTriggerIconImage(triggerKey, size) ?: RCTriggerLetterImage([RCTriggersViewController drawnIconNameForTrigger:triggerKey], [RCTriggersViewController letterForTrigger:triggerKey], size);
 }
 
 // A trigger's plain symbol, with its letter when it's a created one
 - (UIImage *)symbolIconForTrigger:(NSString *)triggerKey size:(CGFloat)size {
-    return RCTriggerLetterImage([RCTriggersViewController iconNameForTrigger:triggerKey], [RCTriggersViewController letterForTrigger:triggerKey], size);
+    return RCTriggerLetterImage([RCTriggersViewController drawnIconNameForTrigger:triggerKey], [RCTriggersViewController letterForTrigger:triggerKey], size);
+}
+
+// The symbol drawn for a trigger: its symbol, or the Bluetooth logo (no symbol has it)
++ (NSString *)drawnIconNameForTrigger:(NSString *)triggerKey {
+    if ([triggerKey hasPrefix:@"bt_"]) return RCBluetoothIconName;
+    return [RCTriggersViewController iconNameForTrigger:triggerKey];
 }
 
 // A trigger's own picture (an add-on's), or nil

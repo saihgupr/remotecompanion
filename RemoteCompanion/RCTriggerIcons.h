@@ -13,6 +13,14 @@ UIImage *RCTriggerSymbolImage(NSString *symbolName, CGFloat pointSize);
 // so NFC tags, networks and devices of one kind are told apart. No letter: the plain symbol.
 UIImage *RCTriggerLetterImage(NSString *symbolName, NSString *letter, CGFloat pointSize);
 
+// A name the two functions above take in place of a symbol's: the Bluetooth logo, drawn (there's
+// no symbol for it)
+extern NSString *const RCBluetoothIconName;
+
+// The Bluetooth logo on its own, about as tall as a symbol of this size: for rows and chips that
+// show plain symbols. A template image.
+UIImage *RCBluetoothIcon(CGFloat pointSize);
+
 // A Triggers section's icon, by its title ("Volume Buttons", "NFC Tags"...): for the category
 // chips and the section titles. A template symbol; nil for an unknown section.
 UIImage *RCTriggerCategoryIcon(NSString *sectionTitle);
