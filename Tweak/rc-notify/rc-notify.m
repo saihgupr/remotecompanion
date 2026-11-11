@@ -12,10 +12,12 @@
 //   --tap     tapping it runs the Notification Tap trigger with this ID (SpringBoard part)
 //   --thread ID  its own group in Notification Center (not stacked with RC's others)
 //   --icon SPEC  its icon in place of the app's: "app:BUNDLE" (that app's icon) or "sf:NAME" (a symbol)
+//             (on iOS 14, which has no symbol icons, the symbol is drawn on a gray tile as a picture)
 //   --button ID TITLE FLAGS  a button in its long-press menu (up to 4; FLAGS: red, unlock, or
 //             both with a comma, or -). Pressing one runs the trigger notifbtn_<ID>.
 // exit: 0 done, 1 usage, 2 not allowed or failed, 3 timed out
 #import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
 #import <UserNotifications/UserNotifications.h>
 #import <objc/message.h>
 
@@ -24,6 +26,32 @@
 @interface UNUserNotificationCenter (Private)
 - (instancetype)initWithBundleIdentifier:(NSString *)bundleIdentifier;
 @end
+
+// A symbol drawn white on a gray tile, saved as a picture for iOS versions without symbol icons
+// (iOS 14). Drawn once per symbol and kept. Returns its path, or nil when there's no such symbol.
+static NSString *rc_symbol_tile_path(NSString *symbol) {
+    NSCharacterSet *allowed = [NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"];
+    if (!symbol.length || [symbol rangeOfCharacterFromSet:allowed.invertedSet].location != NSNotFound) return nil;
+    NSString *dir = @"/var/mobile/Library/Caches/com.saihgupr.remotecompanion.icons";
+    NSString *path = [dir stringByAppendingPathComponent:[symbol stringByAppendingString:@".png"]];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:path]) return path;
+    UIImage *image = [UIImage systemImageNamed:symbol withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:64 weight:UIImageSymbolWeightRegular]];
+    if (!image) return nil;
+    CGFloat side = 120;
+    UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat defaultFormat];
+    format.scale = 3;
+    format.opaque = NO;
+    UIImage *tile = [[[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(side, side) format:format] imageWithActions:^(__unused UIGraphicsImageRendererContext *context) {
+        [[UIColor systemGrayColor] setFill];
+        UIRectFill(CGRectMake(0, 0, side, side));
+        UIImage *white = [image imageWithTintColor:[UIColor whiteColor] renderingMode:UIImageRenderingModeAlwaysOriginal];
+        CGFloat scale = MIN(side * 0.62 / white.size.width, side * 0.62 / white.size.height);
+        CGSize size = CGSizeMake(white.size.width * scale, white.size.height * scale);
+        [white drawInRect:CGRectMake((side - size.width) / 2, (side - size.height) / 2, size.width, size.height)];
+    }];
+    [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+    return [UIImagePNGRepresentation(tile) writeToFile:path atomically:YES] ? path : nil;
+}
 
 int main(int argc, char **argv) {
     @autoreleasepool {
@@ -114,6 +142,10 @@ int main(int argc, char **argv) {
             notificationIcon = ((id (*)(id, SEL, id))objc_msgSend)(iconClass, NSSelectorFromString(@"iconForApplicationIdentifier:"), [icon substringFromIndex:4]);
         } else if ([icon hasPrefix:@"sf:"] && [iconClass respondsToSelector:NSSelectorFromString(@"iconForSystemImageNamed:")]) {
             notificationIcon = ((id (*)(id, SEL, id))objc_msgSend)(iconClass, NSSelectorFromString(@"iconForSystemImageNamed:"), [icon substringFromIndex:3]);
+        } else if ([icon hasPrefix:@"sf:"] && [iconClass respondsToSelector:NSSelectorFromString(@"iconAtPath:")]) {
+            // iOS 14 has no symbol icons: the symbol, drawn on a tile, as a picture
+            NSString *path = rc_symbol_tile_path([icon substringFromIndex:3]);
+            if (path) notificationIcon = ((id (*)(id, SEL, id))objc_msgSend)(iconClass, NSSelectorFromString(@"iconAtPath:"), path);
         }
         if (notificationIcon && [content respondsToSelector:NSSelectorFromString(@"setIcon:")]) {
             ((void (*)(id, SEL, id))objc_msgSend)(content, NSSelectorFromString(@"setIcon:"), notificationIcon);

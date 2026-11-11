@@ -7,7 +7,7 @@ TOOL_NAME = rc-notify
 
 rc-notify_FILES = rc-notify.m
 rc-notify_CFLAGS = -fobjc-arc
-rc-notify_FRAMEWORKS = Foundation UserNotifications
+rc-notify_FRAMEWORKS = Foundation UIKit UserNotifications
 rc-notify_CODESIGN_FLAGS = -Sentitlements.plist
 rc-notify_INSTALL_PATH = /usr/bin
 
