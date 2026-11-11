@@ -274,7 +274,7 @@ static NSDictionary *RCTKProbeWith(BOOL light) {
         id frontApp = RCTKSend(sb, @"_accessibilityFrontMostApplication");
         ui[@"frontApp"] = RCTKSend(frontApp, @"bundleIdentifier") ?: @"com.apple.springboard";
         ui[@"siriVisible"] = RCTKSendBool(NSClassFromString(@"SBAssistantController"), @"isVisible") ?: [NSNull null];
-        ui[@"controlCenterVisible"] = RCTKSendBool(RCTKShared(@"SBControlCenterController", @"sharedInstanceIfExists"), @"isVisible") ?: @NO;
+        ui[@"controlCenterVisible"] = RCTKSendBool((RCTKShared(@"SBControlCenterCoordinator", @"sharedInstanceIfExists") ?: RCTKShared(@"SBControlCenterController", @"sharedInstanceIfExists")), @"isVisible") ?: @NO;
         // Spotlight (a swipe down on the home screen), and the Today view / App Library
         id iconController = RCTKShared(@"SBIconController", @"sharedInstance");
         ui[@"spotlightVisible"] = RCTKSendBool(iconController, @"isAnySearchVisibleOrTransitioning") ?: @NO;
@@ -995,7 +995,7 @@ static NSString *RCTKReturnHome(void) {
         dispatch_sync(dispatch_get_main_queue(), ^{
             id icons = RCTKShared(@"SBIconController", @"sharedInstance");
             if ([covering isEqualToString:@"controlCenter"]) {
-                id controlCenter = RCTKShared(@"SBControlCenterController", @"sharedInstanceIfExists");
+                id controlCenter = (RCTKShared(@"SBControlCenterCoordinator", @"sharedInstanceIfExists") ?: RCTKShared(@"SBControlCenterController", @"sharedInstanceIfExists"));
                 if ([controlCenter respondsToSelector:@selector(dismissAnimated:)]) ((void (*)(id, SEL, BOOL))objc_msgSend)(controlCenter, @selector(dismissAnimated:), YES);
             } else if ([covering isEqualToString:@"switcher"]) {
                 // iOS 15+ / iOS 14
