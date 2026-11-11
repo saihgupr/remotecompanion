@@ -123,8 +123,8 @@ static NSString *const kRCBackupFormat = @"rc-backup";
         formatter.dateFormat = @"yyyyMMdd_HHmm";
         formatter.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
     });
-    NSString *stamp = [formatter stringFromDate:[NSDate date]] ?: @"backup";
-    return [NSString stringWithFormat:@"rc_backup_%@.json", stamp];
+    NSString *stamp = [formatter stringFromDate:[NSDate date]] ?: @"export";
+    return [NSString stringWithFormat:@"rc_export_%@.json", stamp];
 }
 
 @end

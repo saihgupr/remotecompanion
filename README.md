@@ -4,7 +4,7 @@ RemoteCompanion provides fast, scriptable system control for modern rootless jai
 
 > [!IMPORTANT]
 > **What’s New in v4.5.0**
-> - **Full Backup**: Export Configuration writes one file with everything on this device, including settings, integrations, triggers, add-ons, gestures, notification filters and variables. Import it on a new device to put it all back, and `rc backup` / `rc restore` do the same from a terminal.
+> - **Full Backup**: Export Configuration writes one file with everything on this device, including settings, integrations, triggers, add-ons, gestures, notification filters and variables. Import it on a new device to put it all back, and `rc export` / `rc import` do the same from a terminal.
 > - **Triggers only when added**: the Triggers screen starts empty and every built-in trigger lives in the + menu, so the list holds only what you use. Removing a trigger puts it back in the menu.
 > - **Remote RC actions**: add another device under Settings > Integrations > Remote RC Clients, then run any RC command on it over its Web UI, with the same pickers and editors as local actions.
 > - **Duplicate actions**: the long-press action menu can duplicate a row in place, whole If and Repeat blocks included, and the Web UI's right-click menu has the same.
@@ -239,16 +239,16 @@ Combine status queries with actions for smart automation:
 </details>
 
 <details>
-<summary><b>Backup CLI Commands</b></summary>
+<summary><b>Export &amp; Import CLI Commands</b></summary>
 
-### Backup
-- `rc backup [path]` - Save everything on the device in one JSON file: settings, integrations, triggers, add-ons, gestures, notification filters, variables and the app blacklist. Import it from Settings > Backup > Import Configuration, or with `rc restore`.
+### Export & Import
+- `rc export [path]` - Save everything on the device in one JSON file: settings, integrations, triggers, add-ons, gestures, notification filters, variables and the app blacklist. Import it from Settings > Backup > Import Configuration, or with `rc import`.
   ```bash
-  rc backup                    # ./rc_backup_20261111_0930.json
-  rc backup ~/Desktop          # ~/Desktop/rc_backup_20261111_0930.json
-  rc backup ~/Desktop/rc.json  # ~/Desktop/rc.json, overwrites if it exists
+  rc export                    # ./rc_export_20261111_0930.json
+  rc export ~/Desktop          # ~/Desktop/rc_export_20261111_0930.json
+  rc export ~/Desktop/rc.json  # ~/Desktop/rc.json, overwrites if it exists
   ```
-- `rc restore <path>` - Put a backup file back on the device exactly as it was.
+- `rc import <path>` - Put an exported file back on the device exactly as it was.
 
 The file is plain text and holds your passwords and tokens. Keep it private.
 
