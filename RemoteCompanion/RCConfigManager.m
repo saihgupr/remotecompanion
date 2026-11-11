@@ -386,7 +386,7 @@ static void RCRemoveNulls(id object) {
 
 - (NSString *)gesturesIconColor {
     NSString *name = _config[@"gesturesIconColor"];
-    return [name isKindOfClass:[NSString class]] && name.length ? name : @"red";
+    return [name isKindOfClass:[NSString class]] && name.length ? name : @"pink";
 }
 
 - (void)setGesturesIconColor:(NSString *)gesturesIconColor {

@@ -21,7 +21,7 @@
             @"gray": @"Gray"
         };
     });
-    return titles[name] ?: @"Red";
+    return titles[name] ?: @"Pink";
 }
 
 + (UIColor *)colorForName:(NSString *)name {
@@ -41,13 +41,13 @@
             @"gray": [UIColor systemGrayColor]
         };
     });
-    return colors[name] ?: [UIColor systemRedColor];
+    return colors[name] ?: [UIColor systemPinkColor];
 }
 
 - (instancetype)initWithSelectedName:(NSString *)name {
     self = [super initWithStyle:UITableViewStyleInsetGrouped];
     if (self) {
-        _selected = [name copy] ?: @"red";
+        _selected = [name copy] ?: @"pink";
         _names = [RCColorPickerViewController colorNames];
         self.title = @"Icon Color";
     }
