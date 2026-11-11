@@ -1081,7 +1081,8 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
         if ([item[@"section"] isEqualToString:@"Add-ons"]) {
             compactImage = [item[@"image"] isKindOfClass:[UIImage class]] ? item[@"image"] : RCTriggerSymbolImage(item[@"icon"], 26);
         } else if (sampleKeys[item[@"title"]]) {
-            compactImage = RCTriggerSymbolImage([RCTriggersViewController iconNameForTrigger:sampleKeys[item[@"title"]]], 26);
+            // A drawing for the kind itself (its bare key) when there is one, else its triggers' symbol
+            compactImage = RCTriggerIconImage(sampleKeys[item[@"title"]], 26) ?: RCTriggerSymbolImage([RCTriggersViewController iconNameForTrigger:sampleKeys[item[@"title"]]], 26);
         }
         if (!compactImage) continue;
         NSMutableDictionary *withImage = [item mutableCopy];
