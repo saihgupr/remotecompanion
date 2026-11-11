@@ -200,6 +200,15 @@ static id RCTKShared(NSString *className, NSString *accessor) {
     return RCTKSend(NSClassFromString(className), accessor);
 }
 
+// iOS 26 moved the Spotlight and Today view methods from SBIconController to the main
+// screen's SBHomeScreenController (iOS 18+). Returns whichever one has the selector.
+static id RCTKHomeScreenTarget(id icons, NSString *selector) {
+    if ([icons respondsToSelector:NSSelectorFromString(selector)]) return icons;
+    id manager = RCTKSend([UIApplication sharedApplication], @"windowSceneManager");
+    id home = RCTKSend(RCTKSend(manager, @"embeddedDisplayWindowScene"), @"homeScreenController");
+    return [home respondsToSelector:NSSelectorFromString(selector)] ? home : icons;
+}
+
 static NSString *RCTKStatus(NSString *command) {
     NSString *output = RCHandleCommand(command);
     return [output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] ?: @"";
@@ -277,8 +286,8 @@ static NSDictionary *RCTKProbeWith(BOOL light) {
         ui[@"controlCenterVisible"] = RCTKSendBool(RCTKShared(@"SBControlCenterController", @"sharedInstanceIfExists"), @"isVisible") ?: @NO;
         // Spotlight (a swipe down on the home screen), and the Today view / App Library
         id iconController = RCTKShared(@"SBIconController", @"sharedInstance");
-        ui[@"spotlightVisible"] = RCTKSendBool(iconController, @"isAnySearchVisibleOrTransitioning") ?: @NO;
-        ui[@"homeOverlayVisible"] = RCTKSendBool(iconController, @"isShowingHomeScreenOverlay") ?: @NO;
+        ui[@"spotlightVisible"] = RCTKSendBool(RCTKHomeScreenTarget(iconController, @"isAnySearchVisibleOrTransitioning"), @"isAnySearchVisibleOrTransitioning") ?: @NO;
+        ui[@"homeOverlayVisible"] = RCTKSendBool(RCTKHomeScreenTarget(iconController, @"isShowingHomeScreenOverlay"), @"isShowingHomeScreenOverlay") ?: @NO;
         id switcher = RCTKShared(@"SBMainSwitcherViewController", @"sharedInstanceIfExists");
         ui[@"switcherVisible"] = RCTKSendBool(switcher, @"isMainSwitcherVisible") ?: RCTKSendBool(RCTKShared(@"SBMainSwitcherControllerCoordinator", @"sharedInstance"), @"isAnySwitcherVisible") ?: [NSNull null];
         ui[@"rotationLocked"] = RCTKSendBool(RCTKShared(@"SBOrientationLockManager", @"sharedInstance"), @"isUserLocked") ?: [NSNull null];
@@ -1004,13 +1013,16 @@ static NSString *RCTKReturnHome(void) {
                 // Then the home action, which is what a Home press does in the switcher
                 if (attempt == 0 && [switcher respondsToSelector:dismiss]) ((BOOL (*)(id, SEL, BOOL))objc_msgSend)(switcher, dismiss, YES);
                 else RCTKHomeAction();
-            } else if ([covering isEqualToString:@"spotlight"] && [icons respondsToSelector:@selector(dismissSearchView)]) {
-                ((void (*)(id, SEL))objc_msgSend)(icons, @selector(dismissSearchView));
+            } else if ([covering isEqualToString:@"spotlight"]) {
+                id home = RCTKHomeScreenTarget(icons, @"dismissSearchView");
+                if ([home respondsToSelector:@selector(dismissSearchView)]) ((void (*)(id, SEL))objc_msgSend)(home, @selector(dismissSearchView));
+                else RCTKHomeAction();
             } else if ([covering isEqualToString:@"todayOrLibrary"]) {
                 // iOS 15+ / iOS 14 names
                 for (NSString *name in @[@"dismissHomeScreenOverlaysAnimated:", @"dismissHomeScreenOverlayAnimated:"]) {
-                    if (![icons respondsToSelector:NSSelectorFromString(name)]) continue;
-                    ((void (*)(id, SEL, BOOL))objc_msgSend)(icons, NSSelectorFromString(name), YES);
+                    id home = RCTKHomeScreenTarget(icons, name);
+                    if (![home respondsToSelector:NSSelectorFromString(name)]) continue;
+                    ((void (*)(id, SEL, BOOL))objc_msgSend)(home, NSSelectorFromString(name), YES);
                     break;
                 }
             } else {
