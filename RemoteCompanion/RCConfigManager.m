@@ -354,6 +354,16 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
     [self saveConfig];
 }
 
+- (NSString *)gesturesIconColor {
+    NSString *name = _config[@"gesturesIconColor"];
+    return [name isKindOfClass:[NSString class]] && name.length ? name : @"red";
+}
+
+- (void)setGesturesIconColor:(NSString *)gesturesIconColor {
+    _config[@"gesturesIconColor"] = gesturesIconColor ?: @"red";
+    [self saveConfig];
+}
+
 - (NSString *)logLevel {
     NSString *level = _config[@"logLevel"];
     return [@[@"off", @"minimal", @"full"] containsObject:level] ? level : @"minimal";
