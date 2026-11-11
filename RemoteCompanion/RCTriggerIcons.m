@@ -100,10 +100,21 @@ static UIImage *RCDrawPhoneIcon(NSDictionary *spec, CGFloat side) {
         if (symbol) {
             // A tall symbol fills the height the phone does
             BOOL tall = [spec[@"tall"] boolValue];
+            BOOL press = [spec[@"press"] boolValue];
             UIImage *image = RCSymbol(symbol, (tall ? 34 : 26) * k, UIImageSymbolWeightRegular) ?: RCSymbol(spec[@"fallback"], 26 * k, UIImageSymbolWeightRegular);
-            RCDrawFitted(image, tall ? R(4, 1, 30, 38) : R(3, 3, 32, 32), kCGBlendModeNormal);
+            RCDrawFitted(image, tall ? R(4, 1, 30, 38) : (press ? R(1, 1, 30, 30) : R(3, 3, 32, 32)), kCGBlendModeNormal);
             NSString *letter = spec[@"letter"];
-            if (letter.length) {
+            if (press) {
+                // A finger pressing it at the bottom right, set off from the symbol by a thin gap
+                UIImage *finger = RCSymbol(@"hand.point.up.left.fill", 17 * k, UIImageSymbolWeightRegular);
+                CGRect box = R(20, 17, 19, 22);
+                for (NSInteger dx = -1; dx <= 1; dx++) {
+                    for (NSInteger dy = -1; dy <= 1; dy++) {
+                        RCDrawFitted(finger, CGRectOffset(box, dx * 1.6 * k, dy * 1.6 * k), kCGBlendModeDestinationOut);
+                    }
+                }
+                RCDrawFitted(finger, box, kCGBlendModeNormal);
+            } else if (letter.length) {
                 CGContextSetBlendMode(context, kCGBlendModeClear);
                 CGContextFillEllipseInRect(context, R(23, 23, 17, 17));
                 CGContextSetBlendMode(context, kCGBlendModeNormal);
@@ -219,6 +230,11 @@ static NSCache *RCIconCache(void) {
 
 UIImage *RCTriggerIconImage(NSString *triggerKey, CGFloat pointSize) {
     NSDictionary *spec = RCPhoneIconSpecs()[triggerKey ?: @""];
+    // A Notification Tap trigger: a finger pressing a bell (all alike, so one cached drawing)
+    if ([triggerKey hasPrefix:@"notiftap_"]) {
+        triggerKey = @"notiftap_";
+        spec = @{ @"symbol": @"bell.fill", @"press": @YES };
+    }
     if (!spec) return nil;
     NSString *cacheKey = [NSString stringWithFormat:@"%@@%.1f", triggerKey, pointSize];
     UIImage *cached = [RCIconCache() objectForKey:cacheKey];
@@ -267,6 +283,7 @@ UIImage *RCTriggerCategoryIcon(NSString *sectionTitle) {
             @"Device State": @[@"iphone"],
             @"Motion Gestures": @[@"iphone.radiowaves.left.and.right", @"waveform.path"],
             @"NFC Tags": @[@"wave.3.right"],
+            @"Notifications": @[@"bell.fill"],
             @"WiFi Network Triggers": @[@"wifi"],
             @"Bluetooth Device Triggers": @[@"dot.radiowaves.left.and.right"],
             @"Audio Output Triggers": @[@"airplayaudio"],

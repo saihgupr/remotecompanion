@@ -1,4 +1,5 @@
 #import "RCAppDelegate.h"
+#import "RCServerClient.h"
 #import "RCTriggersViewController.h"
 #import "RCSettingsViewController.h"
 #import "RCIntegrationsViewController.h"
@@ -31,6 +32,9 @@
     [@"--- APP LAUNCH ---" writeToFile:@"/var/mobile/Documents/rclog.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
     RCLog(@"App launched! starting didFinishLaunchingWithOptions");
     
+    // Notification actions post as this app; show them while it's open too
+    [UNUserNotificationCenter currentNotificationCenter].delegate = self;
+
     @try {
         self.window = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
         RCLog(@"Window created");
@@ -49,6 +53,49 @@
     }
     
     return YES;
+}
+
++ (void)requestNotificationPermission {
+    UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
+    [center getNotificationSettingsWithCompletionHandler:^(UNNotificationSettings *settings) {
+        if (settings.authorizationStatus != UNAuthorizationStatusNotDetermined) return;
+        [center requestAuthorizationWithOptions:(UNAuthorizationOptionAlert | UNAuthorizationOptionSound | UNAuthorizationOptionBadge)
+                              completionHandler:^(BOOL granted, NSError *error) {
+            RCLog(@"Notification permission: %d %@", granted, error);
+        }];
+    }];
+}
+
+// A tap or button press that reached RC: SpringBoard runs a notification's tap and button triggers
+// itself and RC stays closed, so getting here means it didn't (no such trigger, a button that
+// needed the passcode first, or an iOS version where SpringBoard's part isn't there). Run the
+// trigger now; the tweak skips one that's off or empty.
+- (void)userNotificationCenter:(UNUserNotificationCenter *)center
+didReceiveNotificationResponse:(UNNotificationResponse *)response
+         withCompletionHandler:(void (^)(void))completionHandler {
+    id tap = response.notification.request.content.userInfo[@"rcTap"];
+    NSString *key = nil;
+    if ([response.actionIdentifier isEqualToString:UNNotificationDefaultActionIdentifier] && [tap isKindOfClass:[NSString class]] && [tap length]) {
+        key = [@"notiftap_" stringByAppendingString:tap];
+    } else if ([response.actionIdentifier hasPrefix:@"rcbtn-"] && response.actionIdentifier.length > 6) {
+        // A long-press menu button (one that needed the phone unlocked comes here after the passcode)
+        key = [@"notifbtn_" stringByAppendingString:[response.actionIdentifier substringFromIndex:6]];
+    }
+    if (!key) {
+        completionHandler();
+        return;
+    }
+    RCLog(@"Notification response reached the app: %@", key);
+    // Done once the command is sent: a button press may have launched RC in the background
+    [[RCServerClient sharedClient] executeCommand:[@"trigger " stringByAppendingString:key] completion:^(__unused NSString *output, __unused NSError *error) {
+        dispatch_async(dispatch_get_main_queue(), completionHandler);
+    }];
+}
+
+- (void)userNotificationCenter:(UNUserNotificationCenter *)center
+       willPresentNotification:(UNNotification *)notification
+         withCompletionHandler:(void (^)(UNNotificationPresentationOptions))completionHandler {
+    completionHandler(UNNotificationPresentationOptionBanner | UNNotificationPresentationOptionList | UNNotificationPresentationOptionSound);
 }
 
 - (BOOL)application:(UIApplication *)app openURL:(NSURL *)url options:(NSDictionary<UIApplicationOpenURLOptionsKey,id> *)options {

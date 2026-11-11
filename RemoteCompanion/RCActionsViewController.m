@@ -1,4 +1,8 @@
 #import "RCActionsViewController.h"
+#import "RCAppDelegate.h"
+#import "RCNotificationTapTriggerViewController.h"
+#import "RCNotificationEditorViewController.h"
+#import "RCNotifyCommand.h"
 #import "RCConfigManager.h"
 #import "RCActionPickerViewController.h"
 #import "RCSSHActionEditorViewController.h"
@@ -153,7 +157,6 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
     }
 }
 
-
 @interface UIImage (Private)
 + (UIImage *)_applicationIconImageForBundleIdentifier:(NSString *)bundleIdentifier format:(int)format scale:(CGFloat)scale;
 @end
@@ -219,6 +222,9 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
 // The action picker while it's open for an action that leads to another screen; closed once
 // that action is added
 @property (nonatomic, weak) UINavigationController *addingNav;
+// Opened to show one action (a Notification Tap trigger's notification): scrolled to and briefly
+// highlighted once the screen is up
+@property (nonatomic, strong) NSNumber *revealActionIndex;
 // While this trigger runs: the row of the action it's on (highlighted, like a debugger's current
 // line), or NSNotFound
 @property (nonatomic, assign) NSInteger runningIndex; // the longest run's (scrolled to)
@@ -246,6 +252,8 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
 @property (nonatomic, strong) CADisplayLink *reorderScrollLink;
 @property (nonatomic, assign) CGFloat reorderFingerY; // in the table's visible frame, for scrolling
 @property (nonatomic, strong) UISelectionFeedbackGenerator *reorderTick;
+// Title and message of a Notification action
+- (void)showNotificationEditorWithCommand:(NSString *)command onSave:(void (^)(NSString *cmd))onSave;
 // The one toast editor. New toasts and edits both come through here,
 // so they always look and save the same way.
 - (void)showToastEditorWithTitle:(NSString *)title
@@ -809,6 +817,12 @@ static id g_actionClipboard = nil;
             }
         }
         paramText = firstArg;
+    } else if ([lower isEqualToString:@"notify clear"]) {
+        baseText = @"Clear RC Notifications";
+        paramText = @"";
+    } else if ([lower hasPrefix:@"notify "]) {
+        baseText = @"Notification ";
+        paramText = [RCNotifyCommand commandWithString:cmd].title;
     } else if ([lower hasPrefix:@"unlock "]) {
         baseText = @"Unlock Device ";
         paramText = @"(Passcode)";
@@ -1032,6 +1046,90 @@ static void RCSetRunWatching(BOOL watching) {
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     [self startRunWatch];
+    // The linked notification may have changed on another screen
+    if ([self.triggerKey hasPrefix:@"notiftap_"] || [self.triggerKey hasPrefix:@"notifbtn_"]) {
+        self.title = [[RCConfigManager sharedManager] displayNameForTrigger:self.triggerKey];
+        [self updateWrappedTitle];
+    }
+}
+
+- (void)viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated];
+    NSNumber *reveal = self.revealActionIndex;
+    self.revealActionIndex = nil;
+    NSInteger row = reveal.integerValue;
+    if (!reveal || row < 0 || row >= (NSInteger)self.actions.count || row >= [self.tableView numberOfRowsInSection:0]) return;
+    NSIndexPath *path = [NSIndexPath indexPathForRow:row inSection:0];
+    [self.tableView scrollToRowAtIndexPath:path atScrollPosition:UITableViewScrollPositionMiddle animated:YES];
+    [self.tableView selectRowAtIndexPath:path animated:YES scrollPosition:UITableViewScrollPositionNone];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self.tableView deselectRowAtIndexPath:path animated:YES];
+    });
+}
+
+// A Notification Tap or button trigger's notification: the Notification action (and button) it's
+// linked to, or nil
+- (NSDictionary *)linkedNotificationEntry {
+    if (![self.triggerKey hasPrefix:@"notiftap_"] && ![self.triggerKey hasPrefix:@"notifbtn_"]) return nil;
+    return [[RCConfigManager sharedManager] notificationEntryForTriggerKey:self.triggerKey];
+}
+
+// The row at the top of a Notification Tap trigger: its notification and where it is
+- (UIView *)linkedNotificationViewAt:(CGFloat)y width:(CGFloat)width {
+    NSDictionary *entry = [self linkedNotificationEntry];
+    UIControl *row = [[UIControl alloc] initWithFrame:CGRectMake(20.0, y, width, 56.0)];
+    row.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    row.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
+    row.layer.cornerRadius = 10.0;
+    row.accessibilityTraits = UIAccessibilityTraitButton;
+    [row addTarget:self action:@selector(openLinkedNotification) forControlEvents:UIControlEventTouchUpInside];
+
+    UIImageView *icon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:entry ? @"bell.badge.fill" : @"bell.slash"]];
+    icon.tintColor = [UIColor secondaryLabelColor];
+    icon.contentMode = UIViewContentModeScaleAspectFit;
+    icon.frame = CGRectMake(14.0, 18.0, 22.0, 20.0);
+    [row addSubview:icon];
+    UIImageView *chevron = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"chevron.right"]];
+    chevron.tintColor = [UIColor tertiaryLabelColor];
+    chevron.contentMode = UIViewContentModeScaleAspectFit;
+    chevron.frame = CGRectMake(width - 26.0, 20.0, 12.0, 16.0);
+    chevron.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
+    [row addSubview:chevron];
+
+    UILabel *title = [[UILabel alloc] initWithFrame:CGRectMake(48.0, 9.0, width - 84.0, 21.0)];
+    title.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    title.font = [UIFont systemFontOfSize:17];
+    title.textColor = [UIColor labelColor];
+    UILabel *detail = [[UILabel alloc] initWithFrame:CGRectMake(48.0, 30.0, width - 84.0, 18.0)];
+    detail.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    detail.font = [UIFont systemFontOfSize:13];
+    detail.textColor = [UIColor secondaryLabelColor];
+    BOOL isButton = [self.triggerKey hasPrefix:@"notifbtn_"];
+    if (entry) {
+        NSString *name = [entry[@"title"] length] ? entry[@"title"] : @"Notification";
+        title.text = isButton ? [NSString stringWithFormat:@"%@ › %@", name, entry[@"buttonTitle"]] : name;
+        detail.text = [@"In " stringByAppendingString:[[RCConfigManager sharedManager] displayNameForTrigger:entry[@"trigger"]]];
+    } else {
+        title.text = isButton ? @"No Button" : @"No Notification";
+        detail.text = isButton ? @"Its notification button was deleted. Choose another." : @"Its Notification action was deleted. Choose another.";
+    }
+    [row addSubview:title];
+    [row addSubview:detail];
+    row.accessibilityLabel = [NSString stringWithFormat:@"%@, %@", title.text, detail.text];
+    row.isAccessibilityElement = YES;
+    return row;
+}
+
+// Opens the trigger with the linked Notification action and shows it; without one, the picker
+- (void)openLinkedNotification {
+    NSDictionary *entry = [self linkedNotificationEntry];
+    if (!entry) {
+        [self editTriggerSettings];
+        return;
+    }
+    RCActionsViewController *vc = [[RCActionsViewController alloc] initWithTriggerKey:entry[@"trigger"]];
+    vc.revealActionIndex = entry[@"index"];
+    [self.navigationController pushViewController:vc animated:YES];
 }
 
 - (void)viewWillDisappear:(BOOL)animated {
@@ -1321,7 +1419,9 @@ static void RCSetRunWatching(BOOL watching) {
                           [_triggerKey hasPrefix:@"output_"] ||
                           [_triggerKey hasPrefix:@"trigger_device_battery_"] ||
                           [_triggerKey hasPrefix:@"app_launch_"] ||
-                          [_triggerKey hasPrefix:@"app_exit_"];
+                          [_triggerKey hasPrefix:@"app_exit_"] ||
+                          [_triggerKey hasPrefix:@"notiftap_"] ||
+                          [_triggerKey hasPrefix:@"notifbtn_"];
     
     if (isConfigurable) {
         UIBarButtonItem *settingsButton = [[UIBarButtonItem alloc] 
@@ -1411,7 +1511,8 @@ static void RCSetRunWatching(BOOL watching) {
     BOOL wrapTitle = !fits || self.titleInHeader;
     BOOL askName = [self asksForName];
     self.namePromptShown = askName;
-    if (!wrapTitle && !askName) {
+    BOOL linkRow = [self.triggerKey hasPrefix:@"notiftap_"] || [self.triggerKey hasPrefix:@"notifbtn_"];
+    if (!wrapTitle && !askName && !linkRow) {
         self.tableView.tableHeaderView = nil; // an ordinary large title
         return;
     }
@@ -1438,6 +1539,10 @@ static void RCSetRunWatching(BOOL watching) {
     if (askName) {
         [header addSubview:[self namePromptViewAt:y width:available]];
         y += 46.0 + 14.0;
+    }
+    if (linkRow) {
+        [header addSubview:[self linkedNotificationViewAt:y width:available]];
+        y += 56.0 + 14.0;
     }
     header.frame = CGRectMake(0, 0, available + 40.0, y + 6.0);
     self.tableView.tableHeaderView = header;
@@ -1607,6 +1712,17 @@ static void RCSetRunWatching(BOOL watching) {
             // The picker closes itself once this returns (popping here too went back a screen too far)
         };
         vc = appVC;
+    } else if ([_triggerKey hasPrefix:@"notiftap_"] || [_triggerKey hasPrefix:@"notifbtn_"]) {
+        // Pick the notification (or button) it belongs to (when the old one was deleted or replaced)
+        RCNotificationTapTriggerViewController *picker = [[RCNotificationTapTriggerViewController alloc] initWithTapTriggerKey:_triggerKey];
+        __weak typeof(self) weakSelf = self;
+        picker.onLinked = ^{
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) return;
+            strongSelf.title = [[RCConfigManager sharedManager] displayNameForTrigger:strongSelf.triggerKey];
+            [strongSelf updateWrappedTitle];
+        };
+        vc = picker;
     } else if ([_triggerKey hasPrefix:@"nfc_"]) {
         [self renameTrigger];
         return;
@@ -2015,6 +2131,13 @@ static void RCSetRunWatching(BOOL watching) {
                 __strong typeof(weakSelf) strongSelf = weakSelf;
                 if (!strongSelf) return;
                 [strongSelf showToastEditorWithTitle:@"" message:@"" icon:@"" isNew:YES onSave:^(NSString *cmd) {
+                    [weakSelf storeCommand:cmd atIndex:NSNotFound];
+                }];
+            });
+        } else if ([action isEqualToString:@"__NOTIFICATION__"]) {
+            __weak typeof(self) weakSelf = self;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [weakSelf showNotificationEditorWithCommand:nil onSave:^(NSString *cmd) {
                     [weakSelf storeCommand:cmd atIndex:NSNotFound];
                 }];
             });
@@ -3610,6 +3733,12 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     } else if ([currentAction isEqualToString:@"lock-toggle"] || [currentAction isEqualToString:@"lock toggle"] || [currentAction hasPrefix:@"lock-toggle "] || [currentAction hasPrefix:@"lock toggle "]) {
         [self promptEditLockToggleActionAtIndex:indexPath.row];
         return;
+    } else if ([currentAction hasPrefix:@"notify "] && ![currentAction isEqualToString:@"notify clear"]) {
+        __weak typeof(self) weakSelf = self;
+        NSInteger index = indexPath.row;
+        [self showNotificationEditorWithCommand:currentAction onSave:^(NSString *cmd) {
+            [weakSelf storeCommand:cmd atIndex:index];
+        }];
     } else if ([currentAction hasPrefix:@"toast "] || [currentAction isEqualToString:@"toast"]) {
         // Edit Toast: same editor as creation
         NSString *toastTitle = nil, *toastSub = nil, *toastIcon = nil;
@@ -3682,6 +3811,15 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         [strongSelf.navigationController popViewControllerAnimated:YES];
     };
     [self.navigationController pushViewController:editor animated:YES];
+}
+
+// The Notification action's editor (a card); onSave gets the new command
+- (void)showNotificationEditorWithCommand:(NSString *)command onSave:(void (^)(NSString *cmd))onSave {
+    RCNotificationEditorViewController *editor = [[RCNotificationEditorViewController alloc] initWithCommand:command];
+    editor.variableActions = self.actions;
+    editor.onSave = onSave;
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:editor];
+    [self presentViewController:nav animated:YES completion:nil];
 }
 
 // The one toast editor. New toasts and edits both come through here,

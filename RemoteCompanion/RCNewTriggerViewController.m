@@ -161,7 +161,8 @@
     cell.selectedBackgroundView = selBg;
     cell.textLabel.text = item[@"title"];
     cell.textLabel.textColor = [UIColor labelColor];
-    cell.imageView.image = [UIImage systemImageNamed:item[@"icon"] ?: @"circle"];
+    UIImage *custom = [item[@"image"] isKindOfClass:[UIImage class]] ? item[@"image"] : nil;
+    cell.imageView.image = custom ?: [UIImage systemImageNamed:item[@"icon"] ?: @"circle"];
     cell.imageView.tintColor = [UIColor secondaryLabelColor];
     cell.detailTextLabel.text = item[@"detail"];
     cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
