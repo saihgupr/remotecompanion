@@ -1776,25 +1776,77 @@ static NSString *resolve_bundle_id(NSString *input) {
     return mapped ? mapped : input; // Return mapped ID or original input if not found
 }
 
-// IPC for RemoteCompanion app notifications (use Documents for TrollStore access)
-#define kIPCPath @"/var/mobile/Documents/rc_notify.plist"
-#define kNotifyName "com.pizzaman.show_banner"
+// Posts a standard iOS notification as the RemoteCompanion app, which shows whether or not the app
+// is running. SpringBoard isn't allowed to post for another app, so the rc-notify helper does it.
+static int rc_posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *file_actions, const posix_spawnattr_t *attrp, char *const argv[], char *const envp[]);
 
-static void send_notification(NSString *title, NSString *message, BOOL urgent) {
-    NSDictionary *payload = @{
-        @"title": title ?: @"RemoteCommand",
-        @"message": message ?: @"",
-        @"urgent": @(urgent)
-    };
-    [payload writeToFile:kIPCPath atomically:YES];
-    
-    // Post Darwin notification to wake companion app
-    CFNotificationCenterPostNotification(
-        CFNotificationCenterGetDarwinNotifyCenter(),
-        CFSTR(kNotifyName),
-        NULL, NULL, true);
-    
-    SRLog(@"Sent notification IPC: %@ - %@", title, message);
+// Runs rc-notify with these arguments off the main thread; returns at once
+static void rc_run_notify_helper(NSArray<NSString *> *args) {
+    NSString *helper = @"/var/jb/usr/bin/rc-notify";
+    if (![[NSFileManager defaultManager] fileExistsAtPath:helper]) helper = @"/usr/bin/rc-notify";
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        extern char **environ;
+        char **argv = calloc(args.count + 2, sizeof(char *));
+        argv[0] = (char *)helper.fileSystemRepresentation;
+        for (NSUInteger i = 0; i < args.count; i++) argv[i + 1] = (char *)args[i].UTF8String;
+        pid_t pid = 0;
+        int err = rc_posix_spawn(&pid, helper.fileSystemRepresentation, NULL, NULL, argv, environ);
+        free(argv);
+        if (err != 0) {
+            SRLogMin(@"[Notify] Can't run %@: %s", helper, strerror(err));
+            return;
+        }
+        int status = 0;
+        waitpid(pid, &status, 0);
+        int code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+        if (code == 2) SRLogMin(@"[Notify] Not shown: notifications are off for RemoteCompanion");
+        else if (code != 0) SRLogMin(@"[Notify] rc-notify failed (%d)", code);
+    });
+}
+
+// removeAfter > 0: taken out of Notification Center after that many seconds (while SpringBoard
+// keeps running).
+// tapID: tapping the notification runs the Notification Tap trigger notiftap_<tapID>
+// buttons: its long-press menu, each "ID|Title|flags" (flags: red, unlock); pressing one runs the
+// trigger notifbtn_<ID>. image: its icon in place of RC's, "app:BUNDLE" or "sf:NAME".
+static void send_notification(NSString *title, NSString *message, BOOL urgent, NSTimeInterval removeAfter, NSString *tapID, NSArray<NSString *> *buttons, NSString *image) {
+    NSMutableArray *args = [NSMutableArray arrayWithObjects:(title.length ? title : @"RemoteCompanion"), (message ?: @""), nil];
+    if (urgent) [args addObject:@"--urgent"];
+    if (tapID.length) [args addObjectsFromArray:@[@"--tap", tapID]];
+    for (NSString *button in buttons) {
+        // "ID|Name|flags": the ID ends at the first bar and the flags start after the last one, so
+        // a name (or a variable's value in it) may hold bars of its own
+        NSRange first = [button rangeOfString:@"|"];
+        if (first.location == NSNotFound || first.location == 0) continue;
+        NSString *buttonID = [button substringToIndex:first.location];
+        NSString *rest = [button substringFromIndex:NSMaxRange(first)];
+        NSString *flags = @"-";
+        NSRange last = [rest rangeOfString:@"|" options:NSBackwardsSearch];
+        if (last.location != NSNotFound) {
+            NSString *tail = [rest substringFromIndex:NSMaxRange(last)];
+            NSSet *known = [NSSet setWithArray:@[@"red", @"unlock", @""]];
+            BOOL onlyFlags = [[NSSet setWithArray:[tail componentsSeparatedByString:@","]] isSubsetOfSet:known];
+            if (onlyFlags) {
+                if (tail.length) flags = tail;
+                rest = [rest substringToIndex:last.location];
+            }
+        }
+        if (!rest.length) continue;
+        [args addObjectsFromArray:@[@"--button", buttonID, rest, flags]];
+    }
+    if (image.length) [args addObjectsFromArray:@[@"--icon", image]];
+    NSString *identifier = nil;
+    if (removeAfter > 0) {
+        identifier = [@"rc-" stringByAppendingString:[NSUUID UUID].UUIDString];
+        [args addObjectsFromArray:@[@"--id", identifier]];
+    }
+    rc_run_notify_helper(args);
+    SRLog(@"[Notify] %@ - %@%@", args[0], args[1], removeAfter > 0 ? [NSString stringWithFormat:@" (removed after %.0f s)", removeAfter] : @"");
+    if (identifier) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(removeAfter * NSEC_PER_SEC)), dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+            rc_run_notify_helper(@[@"--remove", identifier]);
+        });
+    }
 }
 
 // ============ TRIGGER CONFIG SYSTEM ============
@@ -2212,6 +2264,8 @@ static NSString *get_human_name_for_trigger(NSString *key, NSDictionary *trigger
     if ([key hasPrefix:@"output_unset_"]) return [NSString stringWithFormat:@"Audio Output Unset: %@", [key substringFromIndex:13]];
     if ([key hasPrefix:@"notif_"] || [key hasPrefix:@"notify_"]) return @"Notification Trigger";
     if ([key hasPrefix:@"sched_"]) return @"Scheduled Automation";
+    if ([key hasPrefix:@"notiftap_"]) return @"Notification Tap";
+    if ([key hasPrefix:@"notifbtn_"]) return @"Notification Button";
     if ([key hasPrefix:@"trigger_device_battery_below_"]) return [NSString stringWithFormat:@"Battery Drops to %@%%", [key substringFromIndex:29]];
     if ([key hasPrefix:@"trigger_device_battery_above_"]) return [NSString stringWithFormat:@"Battery Rises to %@%%", [key substringFromIndex:29]];
     
@@ -2299,6 +2353,92 @@ void RCNFCConfigChanged(void);
 #define kRCWatchPingArmed "com.pizzaman.rc.watch_ping_armed"
 #define kRCWatchPing      "com.pizzaman.rc.watch_ping"
 void RCExecuteTrigger(NSString *triggerKey);
+
+// Notification Tap triggers: tapping one of RC's notifications that carries a tap ID (notify
+// ... --tap ID) runs the trigger notiftap_<ID> right here, and RC stays closed; a button of its
+// long-press menu (--button "ID|...") runs notifbtn_<ID>. Without that
+// trigger (or with it off or empty) the tap opens RC as usual. This dispatcher runs the actions
+// of banners, the lock screen and Notification Center alike (iOS 14-26).
+@interface NCNotificationRequest (RCNotificationTap)
+- (id)userNotification;
+- (id)defaultAction;
+- (NSDictionary *)context;
+@end
+
+static NSString *rc_notification_tap_id(id request) {
+    if (![request respondsToSelector:@selector(sectionIdentifier)]) return nil;
+    if (![[request sectionIdentifier] isEqual:@"com.saihgupr.remotecompanion"]) return nil;
+    NSDictionary *info = nil;
+    if ([request respondsToSelector:@selector(userNotification)]) {
+        id note = [request userNotification];
+        id unRequest = [note respondsToSelector:@selector(request)] ? ((id (*)(id, SEL))objc_msgSend)(note, @selector(request)) : nil;
+        id content = [unRequest respondsToSelector:@selector(content)] ? ((id (*)(id, SEL))objc_msgSend)(unRequest, @selector(content)) : nil;
+        if ([content respondsToSelector:@selector(userInfo)]) info = [content userInfo];
+    }
+    if (![info isKindOfClass:[NSDictionary class]] && [request respondsToSelector:@selector(context)]) {
+        id context = [request context];
+        info = [context isKindOfClass:[NSDictionary class]] ? context[@"userInfo"] : nil;
+    }
+    id tap = [info isKindOfClass:[NSDictionary class]] ? info[@"rcTap"] : nil;
+    return [tap isKindOfClass:[NSString class]] && [tap length] ? tap : nil;
+}
+
+static NSString *rc_notification_identifier(id request) {
+    id note = [request respondsToSelector:@selector(userNotification)] ? [request userNotification] : nil;
+    id unRequest = [note respondsToSelector:@selector(request)] ? ((id (*)(id, SEL))objc_msgSend)(note, @selector(request)) : nil;
+    id identifier = [unRequest respondsToSelector:@selector(identifier)] ? ((id (*)(id, SEL))objc_msgSend)(unRequest, @selector(identifier)) : nil;
+    return [identifier isKindOfClass:[NSString class]] ? identifier : nil;
+}
+
+// The tap trigger is there to run: RC on, the trigger on and with actions
+static BOOL rc_tap_trigger_ready(NSString *key) {
+    if (!g_triggerConfig) load_trigger_config();
+    if (![g_triggerConfig[@"masterEnabled"] boolValue]) return NO;
+    id trigger = g_triggerConfig[@"triggers"][key];
+    if (![trigger isKindOfClass:[NSDictionary class]] || ![trigger[@"enabled"] boolValue]) return NO;
+    id actions = trigger[@"actions"];
+    return [actions isKindOfClass:[NSArray class]] && [actions count] > 0;
+}
+
+// A long-press menu button of one of RC's notifications: its ID (from its action, "rcbtn-<ID>")
+static NSString *rc_notification_button_id(id request, id action) {
+    if (![request respondsToSelector:@selector(sectionIdentifier)] || ![[request sectionIdentifier] isEqual:@"com.saihgupr.remotecompanion"]) return nil;
+    id identifier = [action respondsToSelector:@selector(identifier)] ? ((id (*)(id, SEL))objc_msgSend)(action, @selector(identifier)) : nil;
+    if (![identifier isKindOfClass:[NSString class]] || ![identifier hasPrefix:@"rcbtn-"] || [identifier length] <= 6) return nil;
+    return [identifier substringFromIndex:6];
+}
+
+static BOOL rc_ui_locked(void) {
+    id manager = [objc_getClass("SBLockScreenManager") sharedInstance];
+    return [manager respondsToSelector:@selector(isUILocked)] && [manager isUILocked];
+}
+
+%hook NCNotificationDispatcher
+- (void)destination:(id)destination executeAction:(id)action forNotificationRequest:(id)request requestAuthentication:(BOOL)requestAuthentication withParameters:(id)parameters completion:(id)completion {
+    NSString *tap = rc_notification_tap_id(request);
+    // The tap itself (the default action), or one of its long-press menu buttons; not Clear
+    BOOL isTap = tap && action && [request respondsToSelector:@selector(defaultAction)] && [action isEqual:[request defaultAction]];
+    NSString *button = isTap ? nil : rc_notification_button_id(request, action);
+    NSString *key = isTap ? [@"notiftap_" stringByAppendingString:tap] : (button ? [@"notifbtn_" stringByAppendingString:button] : nil);
+    if (!key || !rc_tap_trigger_ready(key)) {
+        %orig;
+        return;
+    }
+    // A button that needs the phone unlocked goes through iOS while it's locked: it asks for the
+    // passcode, then hands the button to RC, which runs the trigger (see RCAppDelegate)
+    if (button && rc_ui_locked() && [action respondsToSelector:@selector(requiresAuthentication)] && ((BOOL (*)(id, SEL))objc_msgSend)(action, @selector(requiresAuthentication))) {
+        %orig;
+        return;
+    }
+    SRLogMin(@"[Notify] %@ -> %@", button ? @"Button" : @"Tapped", key);
+    dispatch_async(dispatch_get_main_queue(), ^{ RCExecuteTrigger(key); });
+    // A tap takes the notification away, as one that opens its app does
+    NSString *identifier = rc_notification_identifier(request);
+    if (identifier) rc_run_notify_helper(@[@"--remove", identifier]);
+    if (completion) ((void (^)(BOOL))completion)(YES);
+}
+%end
+
 
 static BOOL rc_watch_ping_quiets(NSString *key) {
     if (!RC_MasterEnabled()) return NO;
@@ -2995,8 +3135,8 @@ static NSString *rc_fill_action(NSString *text) {
     for (NSString *prefix in @[@"exec ", @"root ", @"sudo ", @"ssh-run "]) {
         if ([lower hasPrefix:prefix]) return rc_fill_placeholders_mode(text, RCFillShell);
     }
-    // A Toast's parts are in double quotes: a " in a value would end one early
-    if ([lower hasPrefix:@"toast "]) return rc_fill_placeholders_mode(text, RCFillQuoted);
+    // A Toast's and a notification's parts are in double quotes: a " in a value would end one early
+    if ([lower hasPrefix:@"toast "] || [lower hasPrefix:@"notify "]) return rc_fill_placeholders_mode(text, RCFillQuoted);
     return rc_fill_placeholders_mode(text, RCFillPlain);
 }
 
@@ -9621,18 +9761,65 @@ static NSString *handle_command(NSString *cmd) {
         }
         return @"Error: Flashlight not available\n";
     } else if ([cleanCmd isEqualToString:@"flashlight off"] || [cleanCmd isEqualToString:@"torch off"]) {
+    } else if ([cleanCmd isEqualToString:@"notify clear"]) {
+        // Removes all of RC's notifications from Notification Center
+        rc_run_notify_helper(@[@"--clear"]);
+        return @"OK\n";
     } else if ([cleanCmd hasPrefix:@"notify "]) {
-        // notify "Title" "Body" [--urgent]
+        // notify "Title" "Body" [--urgent] [--remove-after SECONDS] [--image "sf:NAME"|"app:BUNDLE"]
+        //        [--tap ID] [--button "ID|Title|flags"]...
         // Parse: notify "Title" "Message" OR notify Title Message
         NSString *args = [[cleanCmd substringFromIndex:7] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-        NSString *title = @"RemoteCommand";
+        NSString *title = @"RemoteCompanion";
         NSString *body = @"";
         BOOL urgent = NO;
-        
-        // Check for --urgent flag
-        if ([args hasSuffix:@" --urgent"]) {
-            urgent = YES;
-            args = [[args substringToIndex:args.length - 9] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        NSTimeInterval removeAfter = 0;
+        NSString *tapID = nil;
+        NSMutableArray<NSString *> *buttons = [NSMutableArray array];
+        NSString *image = nil;
+
+        // Options at the end, in any order
+        static NSRegularExpression *removeAfterOption;
+        static dispatch_once_t onceRemoveAfter;
+        static NSRegularExpression *tapOption;
+        static NSRegularExpression *buttonOption, *imageOption;
+        dispatch_once(&onceRemoveAfter, ^{
+            removeAfterOption = [NSRegularExpression regularExpressionWithPattern:@"\\s--remove-after\\s+(\\d+(\\.\\d+)?)$" options:0 error:nil];
+            tapOption = [NSRegularExpression regularExpressionWithPattern:@"\\s--tap\\s+([A-Za-z0-9_-]+)$" options:0 error:nil];
+            buttonOption = [NSRegularExpression regularExpressionWithPattern:@"\\s--button\\s+\"([^\"]*)\"$" options:0 error:nil];
+            imageOption = [NSRegularExpression regularExpressionWithPattern:@"\\s--image\\s+\"([^\"]*)\"$" options:0 error:nil];
+        });
+        for (BOOL found = YES; found; ) {
+            found = NO;
+            if ([args hasSuffix:@" --urgent"]) {
+                urgent = YES;
+                args = [[args substringToIndex:args.length - 9] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+                found = YES;
+            }
+            NSTextCheckingResult *m = [removeAfterOption firstMatchInString:args options:0 range:NSMakeRange(0, args.length)];
+            if (m) {
+                removeAfter = [[args substringWithRange:[m rangeAtIndex:1]] doubleValue];
+                args = [[args substringToIndex:m.range.location] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+                found = YES;
+            }
+            NSTextCheckingResult *i = [imageOption firstMatchInString:args options:0 range:NSMakeRange(0, args.length)];
+            if (i) {
+                image = [args substringWithRange:[i rangeAtIndex:1]];
+                args = [[args substringToIndex:i.range.location] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+                found = YES;
+            }
+            NSTextCheckingResult *b = [buttonOption firstMatchInString:args options:0 range:NSMakeRange(0, args.length)];
+            if (b) {
+                [buttons insertObject:[args substringWithRange:[b rangeAtIndex:1]] atIndex:0]; // read from the end
+                args = [[args substringToIndex:b.range.location] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+                found = YES;
+            }
+            NSTextCheckingResult *t = [tapOption firstMatchInString:args options:0 range:NSMakeRange(0, args.length)];
+            if (t) {
+                tapID = [args substringWithRange:[t rangeAtIndex:1]];
+                args = [[args substringToIndex:t.range.location] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+                found = YES;
+            }
         }
         
         // Parse quoted strings: "Title" "Body"
@@ -9659,7 +9846,7 @@ static NSString *handle_command(NSString *cmd) {
             if (parts.count >= 2) body = [[parts subarrayWithRange:NSMakeRange(1, parts.count - 1)] componentsJoinedByString:@" "];
         }
         
-        send_notification(title, body, urgent);
+        send_notification(title, body, urgent, removeAfter, tapID, buttons, image);
         return @"OK\n";
     } else if ([cleanCmd isEqualToString:@"shortcuts list"]) {
         // The app's shortcut picker; an empty answer makes it try SpringCuts. Not answered on the

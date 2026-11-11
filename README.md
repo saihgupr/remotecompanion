@@ -146,6 +146,9 @@ Access the desktop-class automation hub at `http://[DEVICE_IP]:8080` from any co
 - `rc type "Text"` - Type text (supports symbols).
 - `rc paste "Text"` - Paste into clipboard.
 - `rc toast "Title" ["Subtitle"] ["SF Symbol"]` - Display a HUD toast notification. *(Use single quotes if passing special characters like `!` to prevent shell history expansion).*
+- `rc notify "Title" ["Message"] [--urgent] [--remove-after SECONDS] [--image "sf:NAME"|"app:BUNDLE"]` - Post a standard iOS notification (banner, sound, Notification Center), also when the app is closed. `--urgent` makes it Time Sensitive; `--remove-after` takes it out of Notification Center after that many seconds; `--image` shows a symbol or an app's icon in place of RC's. Allow notifications for RC when asked (the first Notification action you save asks).
+- `rc notify clear` - Remove all of RC's notifications from Notification Center.
+- **Notification triggers**: New Trigger > Notification Tap lists your Notification actions and their buttons (shown when the notification is held); the actions you give one run when the notification is tapped or the button pressed, with RC closed. They're listed under Notifications. In commands, `--tap ID` on `notify` runs the trigger `notiftap_ID`, and `--button "ID|Name|flags"` (flags `red`, `unlock`) adds a button that runs `notifbtn_ID`.
 - `rc key <hex>` - Specific keyboard keys (e.g., `0x04` for 'A', `0x28` for Enter).
 - `rc log` - View the RemoteCompanion server logs.
 

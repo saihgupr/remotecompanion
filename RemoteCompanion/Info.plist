@@ -24,10 +24,16 @@
 	<string>6.0</string>
 	<key>CFBundleName</key>
 	<string>RemoteCompanion</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>4.4.0</string>
 	<key>CFBundleSignature</key>
 	<string>????</string>
+	<key>CFBundleSupportedPlatforms</key>
+	<array>
+		<string>iPhoneOS</string>
+	</array>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -41,12 +47,16 @@
 	</array>
 	<key>CFBundleVersion</key>
 	<string>4.4.0</string>
+	<key>DTPlatformName</key>
+	<string>iphoneos</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>MinimumOSVersion</key>
 	<string>14.0</string>
 	<key>NFCReaderUsageDescription</key>
 	<string>NFC is used to trigger RemoteCommand actions.</string>
+	<key>SBAppUsesLocalNotifications</key>
+	<true/>
 	<key>UIDeviceFamily</key>
 	<array>
 		<integer>1</integer>
@@ -54,6 +64,10 @@
 	</array>
 	<key>UILaunchStoryboardName</key>
 	<string></string>
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>arm64</string>
+	</array>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
