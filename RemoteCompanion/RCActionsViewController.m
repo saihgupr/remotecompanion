@@ -4555,7 +4555,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         // Each mode gets its own icon. The prohibited sign belongs to Ignore, where the
         // new run really is blocked, not to the default mode.
         NSString *mode = [self runMode];
-        NSString *symbol = @"square.stack.3d.up";
+        NSString *symbol = @"arrow.triangle.branch";
         if ([mode isEqualToString:@"restart"]) symbol = @"arrow.counterclockwise";
         else if ([mode isEqualToString:@"single"]) symbol = @"nosign";
         UIImageView *icon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:symbol]];
