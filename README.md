@@ -181,7 +181,7 @@ Access the desktop-class automation hub at `http://[DEVICE_IP]:8080` from any co
 - `rc nfc scanner [pause|resume|toggle]` - Pause or resume NFC tag scanning.
 
 ### Backup
-- `rc export [path]` - Export the same configuration JSON as Settings > Backup > Export Configuration. With no path it writes `rc_config_YYYYMMDD_HHMM.json` in the current directory. A directory path writes the default name there. A file path is used exactly and replaces an existing file.
+- `rc export [path]` - Export the same JSON as Settings > Backup > Export Configuration. The file lands wherever `rc` runs, on your computer or on the device over SSH.
   ```bash
   rc export                    # ./rc_config_20261111_0716.json
   rc export ~/Desktop          # ~/Desktop/rc_config_20261111_0716.json
