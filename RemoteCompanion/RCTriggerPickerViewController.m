@@ -69,6 +69,7 @@
     if ([key hasPrefix:@"trigger_device_"] || [key hasPrefix:@"trigger_power_"] || [key hasPrefix:@"trigger_carplay_"] || [key hasPrefix:@"trigger_media_"]) return @"Device State";
     if ([key isEqualToString:@"shake"]) return @"Motion Gestures";
     if ([key hasPrefix:@"nfc_"]) return @"NFC Tags";
+    if ([key hasPrefix:@"notiftap_"] || [key hasPrefix:@"notifbtn_"]) return @"Notifications";
     if ([key hasPrefix:@"wifi_"]) return @"WiFi Network Triggers";
     if ([key hasPrefix:@"bt_"]) return @"Bluetooth Device Triggers";
     if ([key hasPrefix:@"output_"]) return @"Audio Output Triggers";
@@ -81,7 +82,7 @@
 
 - (NSArray<NSString *> *)sectionOrder {
     return @[@"Volume Buttons", @"Power Button", @"Screen Gestures", @"Edge Gestures", @"Bottom Bar Gestures", @"Home Button",
-             @"Ringer Switch", @"Apple Watch", @"Device State", @"Motion Gestures", @"NFC Tags", @"WiFi Network Triggers",
+             @"Ringer Switch", @"Apple Watch", @"Device State", @"Motion Gestures", @"NFC Tags", @"Notifications", @"WiFi Network Triggers",
              @"Bluetooth Device Triggers", @"Audio Output Triggers", @"App Triggers", @"Notification Triggers",
              @"Scheduled Triggers", @"MQTT Triggers", @"Other"];
 }

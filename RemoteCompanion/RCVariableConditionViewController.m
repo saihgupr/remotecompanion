@@ -1,4 +1,5 @@
 #import "RCVariableConditionViewController.h"
+#import "RCNotifyCommand.h"
 #import "RCConfigManager.h"
 #import "RCServerClient.h"
 #import "RCVariableEditorParts.h"
@@ -75,6 +76,9 @@ static NSArray<NSDictionary *> *RCVariableComparisons(void) {
             if ([[item[@"scope"] description] isEqualToString:@"run"]) [run addObject:name];
             else [saved addObject:name];
         }
+        // A waiting Notification action's answer
+        NSString *response = [RCNotifyCommand responseVariableIn:otherActions];
+        if (response) [run addObject:response];
         _runNames = [run.array sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
         _triggerSavedNames = saved.array;
         _savedNames = [self mergedSaved:@[]];

@@ -1,5 +1,6 @@
 #import "RCConfigManager.h"
 #import "RCHTTPAction.h"
+#import "RCNotifyCommand.h"
 #import "RCGesturesViewController.h"
 #import <sys/sysctl.h>
 #import "RCAddOnCatalog.h"
@@ -24,6 +25,8 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
 
 @interface RCConfigManager ()
 @property (nonatomic, strong) NSMutableDictionary *config;
+// notificationActionEntries, kept until the config is next loaded or saved
+@property (nonatomic, copy) NSArray<NSDictionary *> *notificationEntriesCache;
 @end
 
 // JSON null is not a plist value, so a hand-edited file with nulls would fail to
@@ -76,6 +79,7 @@ static void RCRemoveNulls(id object) {
 }
 
 - (void)loadConfig {
+    self.notificationEntriesCache = nil;
     NSDictionary *saved = nil;
     
     // 1. Try shared path first (persists across reinstalls)
@@ -851,6 +855,132 @@ static void RCRemoveNulls(id object) {
     return keys;
 }
 
+- (NSArray<NSString *> *)notificationTapTriggerKeys {
+    NSMutableArray *keys = [NSMutableArray array];
+    for (NSString *key in _config[@"triggers"]) {
+        if ([key hasPrefix:@"notiftap_"] || [key hasPrefix:@"notifbtn_"]) [keys addObject:key];
+    }
+    return keys;
+}
+
+static NSString *RCActionCommand(id item) {
+    if ([item isKindOfClass:[NSString class]]) return item;
+    if ([item isKindOfClass:[NSDictionary class]] && [item[@"command"] isKindOfClass:[NSString class]]) return item[@"command"];
+    return nil;
+}
+
++ (NSString *)tapIDInNotifyCommand:(NSString *)command {
+    return [RCNotifyCommand isNotifyCommand:command] ? [RCNotifyCommand commandWithString:command].tapID : nil;
+}
+
++ (NSString *)titleInNotifyCommand:(NSString *)command {
+    return [RCNotifyCommand isNotifyCommand:command] ? [RCNotifyCommand commandWithString:command].title : nil;
+}
+
++ (NSString *)newNotificationTapID {
+    return [RCNotifyCommand newID];
+}
+
+- (NSArray<NSDictionary *> *)notificationActionEntries {
+    // Every tap/button trigger's name and letter read it, so it's worked out once per config change
+    if (self.notificationEntriesCache) return self.notificationEntriesCache;
+    NSMutableArray *entries = [NSMutableArray array];
+    NSDictionary *triggers = _config[@"triggers"];
+    for (NSString *key in [triggers.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
+        id actions = triggers[key][@"actions"];
+        if (![actions isKindOfClass:[NSArray class]]) continue;
+        [(NSArray *)actions enumerateObjectsUsingBlock:^(id item, NSUInteger index, BOOL *stop) {
+            NSString *command = RCActionCommand(item);
+            if (![RCNotifyCommand isNotifyCommand:command]) return;
+            RCNotifyCommand *notify = [RCNotifyCommand commandWithString:command];
+            NSMutableDictionary *entry = [@{ @"kind": @"tap", @"trigger": key, @"index": @(index), @"title": notify.title ?: @"" } mutableCopy];
+            if (notify.tapID) {
+                entry[@"tap"] = notify.tapID;
+                entry[@"key"] = [@"notiftap_" stringByAppendingString:notify.tapID];
+            }
+            [entries addObject:entry];
+            [notify.buttons enumerateObjectsUsingBlock:^(NSDictionary *button, NSUInteger b, BOOL *stopButtons) {
+                [entries addObject:@{ @"kind": @"button", @"trigger": key, @"index": @(index), @"title": notify.title ?: @"",
+                                      @"button": @(b), @"buttonID": button[@"id"], @"buttonTitle": button[@"title"] ?: @"",
+                                      @"key": [@"notifbtn_" stringByAppendingString:button[@"id"]] }];
+            }];
+        }];
+    }
+    self.notificationEntriesCache = entries;
+    return entries;
+}
+
+- (NSDictionary *)notificationEntryForTriggerKey:(NSString *)triggerKey {
+    for (NSDictionary *entry in [self notificationActionEntries]) {
+        if ([entry[@"key"] isEqualToString:triggerKey]) return entry;
+    }
+    return nil;
+}
+
+- (void)setNotifyCommand:(NSString *)command inActions:(NSMutableArray *)actions atIndex:(NSUInteger)index {
+    id item = actions[index];
+    if ([item isKindOfClass:[NSDictionary class]]) {
+        NSMutableDictionary *d = [item mutableCopy];
+        d[@"command"] = command;
+        actions[index] = d;
+    } else {
+        actions[index] = command;
+    }
+}
+
+// Changes the Notification action at triggerKey/index with edit, and saves
+- (void)editNotificationActionInTrigger:(NSString *)triggerKey atIndex:(NSUInteger)index with:(void (^)(RCNotifyCommand *notify))edit {
+    NSMutableDictionary *trigger = [self triggerDict:triggerKey];
+    NSMutableArray *actions = [trigger[@"actions"] mutableCopy];
+    if (index >= actions.count) return;
+    NSString *command = RCActionCommand(actions[index]);
+    if (![RCNotifyCommand isNotifyCommand:command]) return;
+    RCNotifyCommand *notify = [RCNotifyCommand commandWithString:command];
+    edit(notify);
+    [self setNotifyCommand:notify.string inActions:actions atIndex:index];
+    trigger[@"actions"] = actions;
+    self.notificationEntriesCache = nil;
+}
+
+- (NSString *)triggerKeyForNotificationEntry:(NSDictionary *)entry {
+    if (entry[@"key"]) return entry[@"key"];
+    // A notification without a tap ID gets one
+    __block NSString *tap = nil;
+    [self editNotificationActionInTrigger:entry[@"trigger"] atIndex:[entry[@"index"] unsignedIntegerValue] with:^(RCNotifyCommand *notify) {
+        if (!notify.tapID) notify.tapID = [RCNotifyCommand newID];
+        tap = notify.tapID;
+    }];
+    [self saveConfig];
+    return tap ? [@"notiftap_" stringByAppendingString:tap] : nil;
+}
+
+- (void)linkNotificationEntry:(NSDictionary *)chosen toTriggerKey:(NSString *)triggerKey {
+    BOOL isButton = [triggerKey hasPrefix:@"notifbtn_"];
+    if (!isButton && ![triggerKey hasPrefix:@"notiftap_"]) return;
+    NSString *linkID = [triggerKey substringFromIndex:9];
+    for (NSDictionary *entry in [self notificationActionEntries]) {
+        if (![entry[@"kind"] isEqualToString:isButton ? @"button" : @"tap"]) continue;
+        BOOL isChosen = [entry[@"trigger"] isEqualToString:chosen[@"trigger"]] && [entry[@"index"] isEqual:chosen[@"index"]] && (!isButton || [entry[@"button"] isEqual:chosen[@"button"]]);
+        BOOL hasLink = [entry[@"key"] isEqualToString:triggerKey];
+        if (!isChosen && !hasLink) continue;
+        [self editNotificationActionInTrigger:entry[@"trigger"] atIndex:[entry[@"index"] unsignedIntegerValue] with:^(RCNotifyCommand *notify) {
+            if (!isButton) {
+                // Others with this tap ID lose it, so one notification runs each tap trigger
+                notify.tapID = isChosen ? linkID : nil;
+                return;
+            }
+            NSMutableArray *buttons = [notify.buttons mutableCopy];
+            NSUInteger b = [entry[@"button"] unsignedIntegerValue];
+            if (b >= buttons.count) return;
+            NSMutableDictionary *button = [buttons[b] mutableCopy];
+            button[@"id"] = isChosen ? linkID : [RCNotifyCommand newID]; // a button always has its own
+            buttons[b] = button;
+            notify.buttons = buttons;
+        }];
+    }
+    [self saveConfig];
+}
+
 - (NSArray<NSString *> *)allTriggerKeys {
     return [[self class] builtInTriggerKeys];
 }
@@ -877,7 +1007,7 @@ static void RCRemoveNulls(id object) {
 // topic) can have a name of their own; the built-in ones (Power Double Click...) keep theirs, so
 // they always say what they are
 + (BOOL)canRenameTrigger:(NSString *)triggerKey {
-    for (NSString *prefix in @[@"nfc_", @"wifi_", @"bt_", @"output_", @"app_launch_", @"app_exit_", @"notif_", @"notify_", @"sched_", @"mqtt_"]) {
+    for (NSString *prefix in @[@"nfc_", @"wifi_", @"bt_", @"output_", @"app_launch_", @"app_exit_", @"notif_", @"notify_", @"sched_", @"mqtt_", @"notiftap_", @"notifbtn_"]) {
         if ([triggerKey hasPrefix:prefix]) return YES;
     }
     return NO;
@@ -969,6 +1099,14 @@ static void RCRemoveNulls(id object) {
         // Return custom name or default
         NSString *customName = _config[@"triggers"][triggerKey][@"name"];
         return customName ?: [NSString stringWithFormat:@"NFC Tag %@", [triggerKey substringFromIndex:4]];
+    }
+
+    // Named after its notification (and button), as they are now
+    if ([triggerKey hasPrefix:@"notiftap_"] || [triggerKey hasPrefix:@"notifbtn_"]) {
+        NSDictionary *entry = [self notificationEntryForTriggerKey:triggerKey];
+        NSString *title = [entry[@"title"] length] ? entry[@"title"] : @"Notification";
+        if ([triggerKey hasPrefix:@"notifbtn_"]) return entry ? [NSString stringWithFormat:@"%@ › %@", title, entry[@"buttonTitle"]] : @"Notification Button";
+        return entry ? [@"Tap: " stringByAppendingString:title] : @"Notification Tap";
     }
 
     if ([triggerKey hasPrefix:@"trigger_device_battery_"]) {
@@ -1134,6 +1272,7 @@ static void RCRemoveNulls(id object) {
 }
 
 - (void)saveConfig {
+    self.notificationEntriesCache = nil;
     // Serialize config to plist data
     NSError *error = nil;
     NSData *data = [NSPropertyListSerialization dataWithPropertyList:_config 
@@ -2006,6 +2145,8 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
     if ([cmd hasPrefix:@"km "] || [cmd isEqualToString:@"km"]) return @"command";
     if ([cmd hasPrefix:@"mqtt "] || [cmd isEqualToString:@"mqtt"]) return @"dot.radiowaves.left.and.right";
     if ([cmd hasPrefix:@"toast"]) return @"text.bubble.fill";
+    if ([cmd isEqualToString:@"notify clear"]) return @"bell.slash.fill";
+    if ([cmd hasPrefix:@"notify "]) return @"bell.badge.fill";
     if ([cmd hasPrefix:@"root "] || [cmd hasPrefix:@"exec-root "]) return @"terminal.fill";
     if ([cmd hasPrefix:@"exec "]) return @"terminal.fill";
     if ([cmd hasPrefix:@"delay "]) return @"hourglass";
