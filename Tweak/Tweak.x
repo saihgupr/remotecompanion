@@ -3597,6 +3597,26 @@ static NSString *rc_extract_token_from_headers(NSString *requestHeaders) {
     return RCExtractTokenFromHeaders(requestHeaders);
 }
 
+// The settings only the API token may change. Triggers and their actions are not here: the
+// Web UI saves the whole config on every edit, so gating all of it asked for the token on
+// every trigger and action change.
+static NSArray *rc_protected_config_keys(void) {
+    return @[@"webUIApiToken", @"webUIAccess", @"webUINetworks", @"webUIEnabled",
+             @"allowDirectRootHelper", @"rootEnabled", @"haToken", @"mqttPassword",
+             @"kmPassword", @"sshHosts", @"rcClients"];
+}
+
+static BOOL rc_config_changes_protected_settings(NSDictionary *incoming, NSDictionary *current) {
+    for (NSString *key in rc_protected_config_keys()) {
+        id newValue = incoming[key];
+        id oldValue = current[key];
+        if (newValue == oldValue) continue;
+        if (!newValue || !oldValue) return YES;
+        if (![newValue isEqual:oldValue]) return YES;
+    }
+    return NO;
+}
+
 // A trigger's runs. Each firing runs the actions on a thread of its own; a run carries its
 // trigger's generation and stops (before its next step, or out of a wait) once that changes - when
 // the trigger is fired again in Restart mode, or stopped by a "stop trigger" action.
@@ -12780,11 +12800,7 @@ static void start_web_server() {
                                 } else if ([method isEqualToString:@"POST"]) {
                                     NSString *expectedToken = g_triggerConfig[@"webUIApiToken"];
                                     BOOL hasConfiguredToken = [expectedToken isKindOfClass:[NSString class]] && expectedToken.length > 0;
-                                    if (!isLocal && hasConfiguredToken && !isTokenValid) {
-                                        NSString *errJson = @"{\"ok\":false,\"error\":\"Saving configuration requires valid API token\"}";
-                                        NSData *errData = [errJson dataUsingEncoding:NSUTF8StringEncoding];
-                                        responseString = [NSString stringWithFormat:@"HTTP/1.1 403 Forbidden\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)errData.length, errJson];
-                                    } else {
+                                    {
                                         NSRange clRange = [requestString rangeOfString:@"Content-Length: " options:NSCaseInsensitiveSearch];
                                         int contentLength = 0;
                                         if (clRange.location != NSNotFound) {
@@ -12844,12 +12860,20 @@ static void start_web_server() {
                                                     }
                                                     incoming[@"sshHosts"] = updatedHosts;
                                                 }
-                                                if (!isLocal && !isTokenValid) {
-                                                    incoming[@"allowDirectRootHelper"] = g_triggerConfig[@"allowDirectRootHelper"] ?: @NO;
+                                                BOOL protectedChange = !isLocal && hasConfiguredToken && !isTokenValid &&
+                                                    rc_config_changes_protected_settings(incoming, g_triggerConfig);
+                                                if (protectedChange) {
+                                                    NSString *errJson = @"{\"ok\":false,\"error\":\"Changing protected settings requires valid API token\"}";
+                                                    NSData *errData = [errJson dataUsingEncoding:NSUTF8StringEncoding];
+                                                    responseString = [NSString stringWithFormat:@"HTTP/1.1 403 Forbidden\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)errData.length, errJson];
+                                                } else {
+                                                    if (!isLocal && !isTokenValid) {
+                                                        incoming[@"allowDirectRootHelper"] = g_triggerConfig[@"allowDirectRootHelper"] ?: @NO;
+                                                    }
+                                                    rc_set_trigger_config([incoming copy]);
+                                                    save_trigger_config();
+                                                    responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: 12\r\n\r\n{\"ok\": true}", cors];
                                                 }
-                                                rc_set_trigger_config([incoming copy]);
-                                                save_trigger_config();
-                                                responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: 12\r\n\r\n{\"ok\": true}", cors];
                                             } else {
                                                 responseString = [NSString stringWithFormat:@"HTTP/1.1 400 Bad Request\r\n%@Content-Type: application/json\r\nContent-Length: 17\r\n\r\n{\"error\":\"JSON\"}", cors];
                                             }

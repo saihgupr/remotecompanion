@@ -4430,7 +4430,17 @@ async function saveConfig() {
       headers: headers
     });
     if (res.status === 403) {
-      promptApiTokenModal(saveConfig);
+      let errorText = '';
+      try { errorText = await res.text(); } catch(e) {}
+      if (errorText.includes('protected settings')) {
+        promptApiTokenModal(saveConfig, 'Changing protected settings requires the API Token from Settings > Web UI > Access on your iPhone:');
+      } else if (errorText.includes('requires valid API token')) {
+        promptApiTokenModal(saveConfig);
+      } else {
+        let detail = errorText.trim();
+        try { detail = JSON.parse(errorText).error || detail; } catch(e) {}
+        showToast('⚠ ' + (detail || 'Could not save'));
+      }
       return;
     }
     if (!res.ok) {
