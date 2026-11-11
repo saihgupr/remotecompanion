@@ -234,6 +234,11 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
 @property (nonatomic, assign) BOOL debugRunSeen; // the followed run has shown up (it ending closes the view)
 @property (nonatomic, copy) NSArray<NSDictionary *> *stripRuns; // this trigger's runs, for the strip
 @property (nonatomic, weak) UILabel *stripLabel;
+// The strip waits out fast runs, and stays up long enough to read once it appears
+@property (nonatomic, copy) NSArray<NSDictionary *> *pendingStripRuns;
+@property (nonatomic, strong) NSTimer *stripShowTimer;
+@property (nonatomic, strong) NSTimer *stripHideTimer;
+@property (nonatomic, assign) NSTimeInterval stripShownAt;
 // Reordering: the rows being dragged (one action, or a whole block), the picture of them that
 // follows the finger, the line where they'd land, and the gap (insert before this row) it marks
 @property (nonatomic, assign) NSRange reorderRange;
@@ -1065,6 +1070,12 @@ static void RCSetRunWatching(BOOL watching) {
 }
 
 - (void)stopRunWatch {
+    // Nothing that was waiting to appear may pop in after the screen is gone
+    [self.stripShowTimer invalidate];
+    self.stripShowTimer = nil;
+    [self.stripHideTimer invalidate];
+    self.stripHideTimer = nil;
+    self.pendingStripRuns = nil;
     if (!self.runsToken && !self.stepToken) return;
     RCSetRunWatching(NO);
     if (self.runsToken) notify_cancel(self.runsToken);
@@ -1113,24 +1124,91 @@ static void RCSetRunWatching(BOOL watching) {
     }
 }
 
+// A run shorter than the delay never shows the strip, so a fast sequence does not flash it.
+// Once it appears it stays for the minimum, so it can actually be read.
+static const NSTimeInterval RCRunStripShowDelay = 0.5;
+static const NSTimeInterval RCRunStripMinimum = 1.0;
+
 // The ordinary editor: a strip at the top of the list while the trigger runs
 - (void)showStripForRuns:(NSArray<NSDictionary *> *)runs {
-    BOOL had = self.stripRuns.count > 0;
-    self.stripRuns = runs;
-    if (had != (runs.count > 0)) {
-        [self.tableView reloadData]; // the strip comes or goes (the header's height changes)
-    } else if (runs.count && self.stripLabel) {
-        self.stripLabel.text = [self stripText];
-        // A longer step name wraps to another line, which the header has to grow for
-        CGFloat height = [self runStripHeightForWidth:self.tableView.bounds.size.width];
-        if (fabs(height - CGRectGetHeight(self.stripLabel.superview.bounds)) > 0.5) [self.tableView reloadData];
-    }
+    // Keep the once-a-second time refresh going from the moment a run starts, whether or
+    // not the strip has appeared yet.
     if (runs.count && !self.runTimer && self.runsToken) {
         __weak typeof(self) weakSelf = self;
         self.runTimer = [NSTimer scheduledTimerWithTimeInterval:1.0 repeats:YES block:^(NSTimer *timer) { [weakSelf pollRun]; }];
     } else if (!runs.count) {
         [self.runTimer invalidate];
         self.runTimer = nil;
+    }
+
+    if (runs.count) {
+        // A run is going, so a pending hide is wrong, and a visible strip can update now.
+        [self.stripHideTimer invalidate];
+        self.stripHideTimer = nil;
+
+        if (self.stripRuns.count) {
+            [self displayStripRuns:runs];
+            return;
+        }
+
+        // Not up yet: wait, so a run that ends quickly never flashes it.
+        self.pendingStripRuns = runs;
+        if (!self.stripShowTimer) {
+            __weak typeof(self) weakSelf = self;
+            self.stripShowTimer = [NSTimer scheduledTimerWithTimeInterval:RCRunStripShowDelay repeats:NO block:^(NSTimer *timer) {
+                [weakSelf showPendingStrip];
+            }];
+        }
+        return;
+    }
+
+    // No runs left: a strip that never appeared stays hidden.
+    [self.stripShowTimer invalidate];
+    self.stripShowTimer = nil;
+    self.pendingStripRuns = nil;
+    if (!self.stripRuns.count) return;
+
+    // A strip that did appear stays for the minimum, so it does not blink out as soon as it showed.
+    NSTimeInterval shownFor = [NSProcessInfo processInfo].systemUptime - self.stripShownAt;
+    NSTimeInterval left = RCRunStripMinimum - shownFor;
+    if (left <= 0) {
+        [self hideStrip];
+    } else if (!self.stripHideTimer) {
+        __weak typeof(self) weakSelf = self;
+        self.stripHideTimer = [NSTimer scheduledTimerWithTimeInterval:left repeats:NO block:^(NSTimer *timer) {
+            [weakSelf hideStrip];
+        }];
+    }
+}
+
+- (void)showPendingStrip {
+    self.stripShowTimer = nil;
+    NSArray<NSDictionary *> *runs = self.pendingStripRuns;
+    self.pendingStripRuns = nil;
+    if (!runs.count) return;
+    if (!self.isViewLoaded || !self.view.window) return;
+    self.stripShownAt = [NSProcessInfo processInfo].systemUptime;
+    [self displayStripRuns:runs];
+}
+
+- (void)hideStrip {
+    self.stripHideTimer = nil;
+    self.stripShownAt = 0;
+    if (!self.stripRuns.count) return;
+    self.stripRuns = @[];
+    [self.tableView reloadData];
+}
+
+- (void)displayStripRuns:(NSArray<NSDictionary *> *)runs {
+    BOOL had = self.stripRuns.count > 0;
+    self.stripRuns = runs;
+    if (!had) {
+        [self.tableView reloadData]; // the strip arrives (the header's height changes)
+    } else if (self.stripLabel) {
+        self.stripLabel.text = [self stripText];
+        // A longer step name wraps to another line, which the header has to grow for
+        CGFloat height = [self runStripHeightForWidth:self.tableView.bounds.size.width];
+        if (fabs(height - CGRectGetHeight(self.stripLabel.superview.bounds)) > 0.5) [self.tableView reloadData];
     }
 }
 
@@ -4149,8 +4227,12 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         banner.enabled = ![self runShown]; // the debugger view is read-only
         banner.accessibilityLabel = [self runModeBannerText];
         banner.accessibilityHint = @"Changes what happens when triggered again";
-        BOOL restart = [[self runMode] isEqualToString:@"restart"];
-        UIImageView *icon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:restart ? @"arrow.counterclockwise" : @"nosign"]];
+        // The default mode branches into another run; restart loops and ignore blocks the new one.
+        NSString *mode = [self runMode];
+        NSString *symbol = @"arrow.triangle.branch";
+        if ([mode isEqualToString:@"restart"]) symbol = @"arrow.counterclockwise";
+        else if ([mode isEqualToString:@"single"]) symbol = @"nosign";
+        UIImageView *icon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:symbol]];
         icon.tintColor = [UIColor secondaryLabelColor];
         icon.contentMode = UIViewContentModeCenter;
         icon.frame = CGRectMake(12, 0, 22, bannerHeight);
