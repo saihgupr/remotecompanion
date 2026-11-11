@@ -68,6 +68,7 @@ static NSString *const kRCAOBuiltinPrefixes[] = {
     @"proximity ",
     @"quickactions ",
     @"rc-run ",
+    @"read file ",
     @"ringer ",
     @"root ",
     @"rotate ",
