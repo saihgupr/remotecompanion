@@ -15,10 +15,10 @@ static NSString *const kSequenceEditedTriggerKey = @"trigger_sequence_edited";
     self = [super initWithStyle:UITableViewStyleInsetGrouped];
     if (self) {
         _triggerKey = [triggerKey copy];
-        _debounce = 0;
+        _debounce = 15; // a new trigger starts with a short debounce; Off is still a choice
         if (triggerKey) {
             id stored = [[RCConfigManager sharedManager] triggerDataForKey:triggerKey][@"debounce"];
-            if ([stored isKindOfClass:[NSNumber class]]) _debounce = [stored doubleValue];
+            _debounce = [stored isKindOfClass:[NSNumber class]] ? [stored doubleValue] : 0;
         }
     }
     return self;
@@ -79,7 +79,7 @@ static NSString *const kSequenceEditedTriggerKey = @"trigger_sequence_edited";
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    return @"Runs when you add, remove, reorder or change an action in any trigger's sequence. A debounce waits until the edits stop, so a run of changes runs the sequence once. Changes to this trigger's own actions are ignored.";
+    return @"Runs when you add, remove, reorder or change an action in any trigger's sequence, including this one. A debounce waits until the edits stop, so a run of changes runs the sequence once.";
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {

@@ -2229,8 +2229,8 @@ static void RC_RefreshAXTriplePress(void);
 static BOOL RC_RunAccessibilityShortcut(void);
 
 // "Action Sequence Edited" (trigger_sequence_edited): fires when the actions of a trigger change
-// in the app or the web UI, since both save this same config. Changes to this trigger's own
-// actions are left out, so setting it up does not fire it.
+// in the app or the web UI, since both save this same config. Its own actions count too, so
+// changing this trigger's sequence also runs it.
 void RCExecuteTrigger(NSString *triggerKey);
 #define kSequenceEditedTrigger @"trigger_sequence_edited"
 
@@ -2242,7 +2242,6 @@ static NSDictionary *rc_action_sequences(NSDictionary *config) {
     id triggers = config[@"triggers"];
     if (![triggers isKindOfClass:[NSDictionary class]]) return sequences;
     for (NSString *key in (NSDictionary *)triggers) {
-        if ([key isEqualToString:kSequenceEditedTrigger]) continue;
         id trigger = ((NSDictionary *)triggers)[key];
         NSArray *actions = [trigger isKindOfClass:[NSDictionary class]] ? trigger[@"actions"] : nil;
         if ([actions isKindOfClass:[NSArray class]] && actions.count > 0) sequences[key] = actions;

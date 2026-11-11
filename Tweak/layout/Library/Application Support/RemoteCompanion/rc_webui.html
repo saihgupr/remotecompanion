@@ -9932,7 +9932,7 @@ function promptAudioOutputName(mode) {
 
 // ── Action Sequence Edited Trigger Setup ─────────────────────────────────────
 // Runs when any trigger's actions change. A debounce waits for the edits to stop, so a run of
-// changes runs the sequence once. Changes to this trigger's own actions are ignored (as on iOS).
+// changes runs the sequence once. Changes to this trigger's own actions count too.
 const SEQUENCE_DEBOUNCE_OPTIONS = [0, 5, 10, 15, 30, 60, 120, 300];
 function sequenceDebounceLabel(seconds) {
   if (!seconds) return 'Off';
@@ -9942,7 +9942,7 @@ function sequenceDebounceLabel(seconds) {
 function promptSequenceEditedTrigger(editKey = null) {
   const key = 'trigger_sequence_edited';
   const data = editKey ? triggerData(key) : null;
-  const current = data && typeof data.debounce === 'number' ? data.debounce : 0;
+  const current = data && typeof data.debounce === 'number' ? data.debounce : 15;
   const choose = seconds => {
     const t = triggerData(key);
     if (seconds > 0) t.debounce = seconds; else delete t.debounce;
