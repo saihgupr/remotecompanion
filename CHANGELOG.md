@@ -21,6 +21,7 @@ All notable changes to this project will be documented in this file.
 - **Home Assistant actions edit like the entity picker**: tapping an existing HA action in the app, or clicking one in the Web UI, shows its Toggle, Turn On and Turn Off choices with the current one ticked, plus Change Entity. Raw and custom commands keep an Edit Command option instead of being overwritten.
 - **REST API Call editor**: the app's editor uses one-line hints instead of long footer paragraphs and shorter header and body fields, so the whole request fits without the dead space.
 - **Run strip waits for slow runs**: a sequence that finishes in under half a second no longer flashes the green strip at the top of the actions screen. Once it appears it stays for at least a second, so a quick run reads as nothing instead of a blink.
+- **Switched-off integrations show dimmed**: a trigger or action that needs MQTT, Home Assistant or Keyboard Maestro stays in its list and stays editable while that integration is off. The row is dimmed and marked "MQTT off" or "Home Assistant off" in the app and the Web UI, so it is clear why it does nothing; turning the integration back on restores the normal look.
 
 ### Fixed
 - **Control Center on iOS 18**: later iOS 18 releases dropped the single Control Center controller RC used, so the action and `rc control-center` did nothing. They now open it through `SBControlCenterCoordinator` (#148).

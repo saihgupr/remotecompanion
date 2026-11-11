@@ -210,6 +210,8 @@
     }
     .trigger-row:last-child { border-bottom: none; }
     .trigger-row:active { background: var(--rc-fill-tint); }
+    /* Integration off: still listed and usable, dimmed so it is clear why nothing happens */
+    .trigger-row.integration-off .trigger-row-inner { opacity: 0.5; }
 
     /* Separator line for triggers */
     .trigger-row-inner::after {
@@ -3667,6 +3669,22 @@ function triggerIconHTML(key) {
   return `<i class="f7-icons">${icon}</i>${letter ? `<span class="row-icon-letter">${escHtml(letter)}</span>` : ''}${appBadge}`;
 }
 
+// A trigger or action that needs an integration that is switched off: still listed and usable,
+// dimmed with the integration's name, so it is clear why it does nothing.
+function offIntegrationForTrigger(key) {
+  if (key.startsWith('mqtt_') && !config.mqttEnabled) return 'MQTT';
+  return null;
+}
+
+function offIntegrationForCmd(action) {
+  const cmd = (action && typeof action === 'object') ? action.command : action;
+  if (typeof cmd !== 'string') return null;
+  if ((cmd === 'mqtt' || cmd.startsWith('mqtt ')) && !config.mqttEnabled) return 'MQTT';
+  if ((cmd === 'ha' || cmd.startsWith('ha ')) && !config.haEnabled) return 'Home Assistant';
+  if ((cmd === 'km' || cmd.startsWith('km ')) && !config.kmEnabled) return 'Keyboard Maestro';
+  return null;
+}
+
 function iconForKey(key) {
   if (TRIGGER_ICONS[key]) return TRIGGER_ICONS[key];
   if (key.startsWith('trigger_device_focus_on')) return { icon:'moon_fill', cls:'icon-indigo' };
@@ -5010,9 +5028,11 @@ function renderTriggerRow(key, deletable) {
     ? actions.map(a => nameForCmd(a)).join(' › ')
     : 'Not configured';
   if (customNameForKey(key)) subtitle = `${defaultNameForKey(key)} · ${subtitle}`;
+  const offIntegration = offIntegrationForTrigger(key);
+  if (offIntegration) subtitle = `${offIntegration} off · ${subtitle}`;
 
   const row = document.createElement('div');
-  row.className = 'trigger-row';
+  row.className = 'trigger-row' + (offIntegration ? ' integration-off' : '');
   row.dataset.key = key;
 
   // ── Swipe actions (Star, Play, [Delete]) ──
@@ -5510,7 +5530,8 @@ function renderActionList() {
     }
 
     // Outer wrapper
-    const isDisabled = (typeof action === 'object' && action !== null && (action.disabled === true || action.disabled === '1' || action.disabled === 1));
+    const isDisabled = (typeof action === 'object' && action !== null && (action.disabled === true || action.disabled === '1' || action.disabled === 1))
+                    || offIntegrationForCmd(action) !== null;
     const row = document.createElement('div');
     row.className = 'action-seq-row' + (isDisabled ? ' action-disabled' : '');
 

@@ -1405,6 +1405,15 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
         cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · %@", [config defaultNameForTrigger:triggerKey], cell.detailTextLabel.text ?: @""];
     }
 
+    // A trigger whose integration is switched off stays listed and editable, dimmed, so it is
+    // clear why it does nothing until the integration comes back
+    NSString *offIntegration = [config offIntegrationNameForTrigger:triggerKey];
+    if (offIntegration) {
+        cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ off · %@", offIntegration, cell.detailTextLabel.text ?: @""];
+        cell.detailTextLabel.textColor = [UIColor tertiaryLabelColor];
+    }
+    cell.contentView.alpha = offIntegration ? 0.5 : 1.0;
+
     [self applySectionCardStyleToCell:cell atIndexPath:indexPath];
 
     return cell;
@@ -1642,6 +1651,10 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
 
 - (NSInteger)gridActionCountForTrigger:(NSString *)key {
     return (NSInteger)[[RCConfigManager sharedManager] actionsForTrigger:key].count;
+}
+
+- (NSString *)gridOffIntegrationForTrigger:(NSString *)key {
+    return [[RCConfigManager sharedManager] offIntegrationNameForTrigger:key];
 }
 
 - (BOOL)gridTriggerIsFavorite:(NSString *)key {

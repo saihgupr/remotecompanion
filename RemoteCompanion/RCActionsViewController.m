@@ -4899,7 +4899,8 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     cell.accessoryView = handleView;
     [self applySectionCardStyleToCell:cell atIndexPath:indexPath];
     
-    BOOL isDisabled = [[RCConfigManager sharedManager] isActionDisabled:actionItem];
+    BOOL isDisabled = [[RCConfigManager sharedManager] isActionDisabled:actionItem]
+                   || [[RCConfigManager sharedManager] offIntegrationNameForAction:actionItem] != nil;
     cell.contentView.alpha = isDisabled ? 0.38f : 1.0f;
     cell.accessoryView.alpha = isDisabled ? 0.38f : 1.0f;
     return cell;

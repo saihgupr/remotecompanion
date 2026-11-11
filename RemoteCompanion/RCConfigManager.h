@@ -69,6 +69,10 @@
 @property (nonatomic, copy) NSString *mqttPassword;
 @property (nonatomic, copy) NSString *mqttClientId;
 @property (nonatomic, copy) NSString *mqttTopicPrefix;
+// A trigger or action that needs an integration which is switched off: still listed and still
+// editable, but dimmed with the integration's name, so it is clear why it does nothing.
+- (NSString *)offIntegrationNameForTrigger:(NSString *)triggerKey;
+- (NSString *)offIntegrationNameForAction:(id)actionItem;
 @property (nonatomic, strong) NSArray<NSDictionary *> *sshHosts;
 - (void)addOrUpdateSSHHost:(NSDictionary *)host;
 - (void)deleteSSHHostWithId:(NSString *)hostId;
