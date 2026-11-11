@@ -2017,6 +2017,27 @@ static inline void rc_mark_intentional_cc_open(void) {
     g_rcIntentionalCCOpenUntil = [[NSDate date] timeIntervalSince1970] + 1.5;
 }
 
+// Object that opens and closes Control Center. Later iOS 18 releases (18.6 and 26.3
+// SpringBoard, not 18.0) give each window scene its own SBControlCenterController and
+// drop its sharedInstance methods; SBControlCenterCoordinator is the singleton with
+// presentAnimated:, dismissAnimated: and isVisible. Older versions keep the
+// SBControlCenterController singleton.
+static id rc_shared_instance(const char *className) {
+    Class cls = objc_getClass(className);
+    if (!cls) return nil;
+    id instance = nil;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+    if ([cls respondsToSelector:@selector(sharedInstanceIfExists)]) instance = [cls performSelector:@selector(sharedInstanceIfExists)];
+    if (!instance && [cls respondsToSelector:@selector(sharedInstance)]) instance = [cls performSelector:@selector(sharedInstance)];
+#pragma clang diagnostic pop
+    return instance;
+}
+
+static id rc_control_center_presenter(void) {
+    return rc_shared_instance("SBControlCenterCoordinator") ?: rc_shared_instance("SBControlCenterController");
+}
+
 static void load_blacklist() {
     NSString *path = @"/var/mobile/Library/Preferences/com.saihgupr.remotecompanion.blacklist.plist";
     g_blacklist = [NSArray arrayWithContentsOfFile:path];
@@ -9791,33 +9812,27 @@ static NSString *handle_command(NSString *cmd) {
                [cleanCmd isEqualToString:@"control-center"]) {
         __block BOOL opened = NO;
         void (^ccBlock)(void) = ^{
-            Class ccClass = objc_getClass("SBControlCenterController");
-            if (!ccClass) {
-                SRLog(@"Control Center class unavailable");
+            id controller = rc_control_center_presenter();
+            if (!controller) {
+                SRLog(@"Control Center controller unavailable");
                 return;
             }
 
-            id controller = nil;
-            if ([ccClass respondsToSelector:@selector(sharedInstanceIfExists)]) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-                controller = [ccClass performSelector:@selector(sharedInstanceIfExists)];
-#pragma clang diagnostic pop
-            }
-
-            if (controller && [controller respondsToSelector:@selector(isVisible)]) {
+            if ([controller respondsToSelector:@selector(isVisible)] &&
+                [controller respondsToSelector:@selector(presentAnimated:)]) {
                 if ([controller isVisible]) {
                     [controller dismissAnimated:YES];
-                    opened = YES;
                 } else {
                     rc_mark_intentional_cc_open();
                     [controller presentAnimated:YES];
-                    opened = YES;
                 }
-            } else if (controller && [controller respondsToSelector:@selector(_presentControlCenterGestureBeganWithReason:)]) {
+                opened = YES;
+            } else if ([controller respondsToSelector:@selector(_presentControlCenterGestureBeganWithReason:)]) {
                  rc_mark_intentional_cc_open();
                  [controller performSelector:@selector(_presentControlCenterGestureBeganWithReason:) withObject:@"RemoteCompanion"];
                  opened = YES;
+            } else {
+                SRLog(@"Control Center controller %@ has no present method", NSStringFromClass([controller class]));
             }
         };
 

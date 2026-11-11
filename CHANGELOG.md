@@ -47,6 +47,7 @@ All notable changes to this project will be documented in this file.
 - **Configuration file permissions**: `save_trigger_config()` now creates and updates `/var/mobile/Documents/rc_triggers.plist` with `0600` permissions (read/write by owner only), preventing unprivileged local mobile processes from inspecting stored tokens and secrets.
 
 ### Fixed
+- **Control Center on iOS 18**: later iOS 18 releases dropped the single Control Center controller RC used, so the action and `rc control-center` did nothing. They now open it through `SBControlCenterCoordinator` (#148).
 - **Center Bottom Swipe Up blocked Control Center**: with only the center zone set up, swiping up from the bottom-right corner no longer opens Control Center because the touch was counted as a bottom gesture for every zone. A touch now counts only when its own zone has actions.
 - **SSH banner toggle never fired**: ticking SSH in Settings > Banners saved the picker's internal id as the match pattern, so no real `ssh-run` command could match it. It now matches the `ssh-run ` prefix, so enabled SSH actions banner like everything else (re-tick SSH once to pick up the fix).
 - **SSH action editor stranded on Save**: creating an SSH action via + left you on the picker instead of returning to the actions list like other editors. Save now dismisses both and lands back on the actions sequence.
