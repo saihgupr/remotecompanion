@@ -180,6 +180,14 @@ Access the desktop-class automation hub at `http://[DEVICE_IP]:8080` from any co
 - `rc button triggers pause [minutes]` / `rc button triggers resume` - Temporarily return buttons and gestures to stock behavior.
 - `rc nfc scanner [pause|resume|toggle]` - Pause or resume NFC tag scanning.
 
+### Backup
+- `rc export [path]` - Export the same JSON as Settings > Backup > Export Configuration. The file lands wherever `rc` runs, on your computer or on the device over SSH.
+  ```bash
+  rc export                    # ./rc_config_20261111_0716.json
+  rc export ~/Desktop          # ~/Desktop/rc_config_20261111_0716.json
+  rc export ~/Desktop/rc.json  # ~/Desktop/rc.json, overwrites if it exists
+  ```
+
 <details>
 <summary><b>Hardware Triggers Reference (Tweak App)</b></summary>
 

@@ -15,6 +15,9 @@
 #include <ifaddrs.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
 
 @interface RCSettingsViewController () <UIDocumentPickerDelegate>
 @property (nonatomic, strong) UITableView *tableView;
@@ -482,7 +485,8 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
 }
 
 - (void)importConfig {
-    // iOS 14+ supported
+    // iOS 14+ supported. Open in place keeps the picker's own flow; the read path
+    // below falls back to a coordinated copy for provider-backed files.
     NSArray *types = @[[UTType typeWithIdentifier:@"public.json"], [UTType typeWithIdentifier:@"public.plain-text"]];
     UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:types];
     picker.delegate = self;
@@ -496,20 +500,29 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     NSURL *url = urls.firstObject;
     if (!url) return;
 
-    NSLog(@"[RemoteCompanion] Import selected URL: %@", url);
-
-    // Security scoped access is mandatory for 'Opening' mode
+    // Scope access for open-in-place URLs. Provider-backed files can still refuse
+    // a direct read, so fall back to a coordinated copy.
     BOOL accessing = [url startAccessingSecurityScopedResource];
 
     NSError *readError = nil;
     NSData *data = [NSData dataWithContentsOfURL:url options:0 error:&readError];
+
+    if (!data) {
+        NSError *coordError = nil;
+        data = [self coordinatedCopyOfURL:url error:&coordError];
+    }
 
     if (accessing) {
         [url stopAccessingSecurityScopedResource];
     }
 
     if (!data) {
-        NSLog(@"[RemoteCompanion] Failed to read file: %@", readError);
+        // The app is sandboxed, so provider files can stay unreadable even with a
+        // security scope. The tweak runs in SpringBoard and can read them.
+        data = [self readFileThroughTweak:url.path];
+    }
+
+    if (!data) {
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Import Failed" message:[NSString stringWithFormat:@"Could not read file: %@", readError.localizedDescription] preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
         [self presentViewController:alert animated:YES completion:nil];
@@ -535,6 +548,62 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
 
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {
     NSLog(@"[RemoteCompanion] Import cancelled by user");
+}
+
+// Ask the tweak to read the file and hand back base64. The tweak lives in
+// SpringBoard, outside the app sandbox, so iCloud Drive files are readable there.
+- (NSData *)readFileThroughTweak:(NSString *)path {
+    if (path.length == 0) return nil;
+
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0) return nil;
+
+    struct timeval timeout = { .tv_sec = 5, .tv_usec = 0 };
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strlcpy(addr.sun_path, "/var/mobile/Documents/rc.sock", sizeof(addr.sun_path));
+
+    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        close(fd);
+        return nil;
+    }
+
+    NSString *command = [NSString stringWithFormat:@"read file %@", path];
+    NSData *commandData = [command dataUsingEncoding:NSUTF8StringEncoding];
+    write(fd, commandData.bytes, commandData.length);
+
+    NSMutableData *response = [NSMutableData data];
+    uint8_t buffer[4096];
+    ssize_t count;
+    while ((count = read(fd, buffer, sizeof(buffer))) > 0) {
+        [response appendBytes:buffer length:(NSUInteger)count];
+    }
+    close(fd);
+
+    NSString *encoded = [[NSString alloc] initWithData:response encoding:NSUTF8StringEncoding];
+    encoded = [encoded stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (encoded.length == 0 || [encoded hasPrefix:@"Error"]) return nil;
+    return [[NSData alloc] initWithBase64EncodedString:encoded options:NSDataBase64DecodingIgnoreUnknownCharacters];
+}
+
+// Ask the file provider for a local copy. Works even when a direct read of the
+// picked URL is refused, which is common for iCloud Drive and SMB sources.
+- (NSData *)coordinatedCopyOfURL:(NSURL *)url error:(NSError **)error {
+    NSFileCoordinator *coordinator = [[NSFileCoordinator alloc] initWithFilePresenter:nil];
+    __block NSData *result = nil;
+    __block NSError *copyError = nil;
+    NSError *coordError = nil;
+
+    [coordinator coordinateReadingItemAtURL:url options:NSFileCoordinatorReadingForUploading error:&coordError byAccessor:^(NSURL *newURL) {
+        result = [NSData dataWithContentsOfURL:newURL options:0 error:&copyError];
+    }];
+
+    if (!result && error) *error = copyError ?: coordError;
+    return result;
 }
 
 @end

@@ -69,9 +69,71 @@ if [ -z "$1" ]; then
     echo "  mqtt <pub|publish> <topic> [payload] - Publish MQTT topic"
     echo "  blacklist <list|add|remove|reset> - Manage app exclusion"
     echo "  nav <panel>       - Navigate companion app (triggers, settings, ha, km, mqtt, add)"
+    echo "  export [path]     - Export preferences (default: current directory; a directory or file)"
     echo "  log               - Stream device logs"
     echo ""
     exit 1
+fi
+
+# Send one command and print the reply, using the same delivery paths as below
+rc_send_command() {
+    local command="$1"
+    if [[ "$IP" == "127.0.0.1" ]]; then
+        echo -n "$command" | rc-client 2>/dev/null || echo -n "$command" | nc -U "$SOCKET_PATH" 2>/dev/null
+    else
+        local remote_cmd="echo -n '$command' | /var/jb/usr/bin/rc-client 2>/dev/null || echo -n '$command' | /usr/bin/rc-client 2>/dev/null || echo -n '$command' | nc -U $SOCKET_PATH 2>/dev/null"
+        ssh -o ConnectTimeout=3 -o ServerAliveInterval=2 -o ServerAliveCountMax=2 -o StrictHostKeyChecking=no mobile@$IP "$remote_cmd" 2>/dev/null
+    fi
+}
+
+# Export preferences: the same JSON as Settings > Backup > Export Configuration.
+# No path or a directory gets the default name; a file path is used as given and overwritten.
+if [[ "$1" == "export" || "$1" == "export-config" ]]; then
+    EXPORT_ARG="${2:-}"
+    DEFAULT_NAME="rc_config_$(date +%Y%m%d_%H%M).json"
+
+    if [ -z "$EXPORT_ARG" ]; then
+        TARGET="$PWD/$DEFAULT_NAME"
+    else
+        case "$EXPORT_ARG" in
+            "~") EXPORT_ARG="$HOME" ;;
+            "~/"*) EXPORT_ARG="$HOME/${EXPORT_ARG#\~/}" ;;
+        esac
+        if [ -d "$EXPORT_ARG" ]; then
+            TARGET="${EXPORT_ARG%/}/$DEFAULT_NAME"
+        elif [[ "$EXPORT_ARG" == */ ]]; then
+            echo "Error: No such directory: $EXPORT_ARG" >&2
+            exit 1
+        else
+            TARGET="$EXPORT_ARG"
+        fi
+    fi
+
+    TARGET_DIR="$(dirname "$TARGET")"
+    if [ ! -d "$TARGET_DIR" ]; then
+        echo "Error: No such directory: $TARGET_DIR" >&2
+        exit 1
+    fi
+    TARGET="$(cd "$TARGET_DIR" && pwd)/$(basename "$TARGET")"
+
+    RESPONSE="$(rc_send_command "export config")"
+    if [ $? -ne 0 ] || [ -z "$RESPONSE" ]; then
+        echo "Error: Cannot connect to iPhone at $IP via SSH/Socket." >&2
+        exit 1
+    fi
+    case "$RESPONSE" in
+        \{*) ;;
+        *) echo "$RESPONSE" >&2; exit 1 ;;
+    esac
+
+    if ! (umask 077; printf '%s\n' "$RESPONSE" > "$TARGET"); then
+        echo "Error: Could not write $TARGET" >&2
+        exit 1
+    fi
+    # The config holds SSH passwords and tokens: keep an existing file private too
+    chmod 600 "$TARGET" 2>/dev/null || true
+    echo "Exported to $TARGET"
+    exit 0
 fi
 
 # Construct the command string

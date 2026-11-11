@@ -2349,6 +2349,74 @@ static void load_trigger_config() {
     }
 }
 
+// The Settings > Backup > Export Configuration JSON, for "rc export" (the app writes the same
+// dictionary with NSJSONWritingPrettyPrinted)
+static NSString *rc_export_config_json(void) {
+    load_trigger_config();
+    NSDictionary *config = nil;
+    @synchronized (rc_trigger_config_lock()) { config = [g_triggerConfig copy]; }
+    if (![config isKindOfClass:[NSDictionary class]]) return @"Error: No configuration found\n";
+    if (![NSJSONSerialization isValidJSONObject:config]) return @"Error: Configuration cannot be exported as JSON\n";
+    NSError *error = nil;
+    NSData *data = [NSJSONSerialization dataWithJSONObject:config options:NSJSONWritingPrettyPrinted error:&error];
+    NSString *json = data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
+    if (!json) {
+        SRLogMin(@"Export config error: %@", error);
+        return @"Error: Could not export configuration\n";
+    }
+    return json;
+}
+
+// Read a file on behalf of the app. The app is sandboxed and cannot read picked
+// iCloud Drive or provider files, and the tweak's own process is denied those
+// paths too, so spawn cat and collect its stdout. Returns base64 to keep the
+// response a single line on the command socket.
+static NSString *rc_read_file_base64(NSString *path) {
+    if (path.length == 0) return @"Error: No path given\n";
+
+    NSString *catPath = nil;
+    for (NSString *candidate in @[@"/var/jb/usr/bin/cat", @"/var/jb/bin/cat", @"/usr/bin/cat", @"/bin/cat"]) {
+        if (access([candidate fileSystemRepresentation], X_OK) == 0) {
+            catPath = candidate;
+            break;
+        }
+    }
+    if (!catPath) return @"Error: No cat binary found\n";
+
+    int pipefd[2];
+    if (pipe(pipefd) != 0) return @"Error: Could not open file\n";
+
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+    posix_spawn_file_actions_adddup2(&actions, pipefd[1], STDOUT_FILENO);
+    posix_spawn_file_actions_addclose(&actions, pipefd[0]);
+    posix_spawn_file_actions_addclose(&actions, pipefd[1]);
+
+    const char *argv[] = {[catPath UTF8String], [path fileSystemRepresentation], NULL};
+    extern char **environ;
+    pid_t pid = 0;
+    int spawnResult = posix_spawn(&pid, [catPath UTF8String], &actions, NULL, (char *const *)argv, environ);
+    posix_spawn_file_actions_destroy(&actions);
+    close(pipefd[1]);
+
+    if (spawnResult != 0) {
+        close(pipefd[0]);
+        return [NSString stringWithFormat:@"Error: Could not read file (%d)\n", spawnResult];
+    }
+
+    NSMutableData *data = [NSMutableData data];
+    uint8_t buffer[65536];
+    ssize_t count;
+    while ((count = read(pipefd[0], buffer, sizeof(buffer))) > 0) {
+        [data appendBytes:buffer length:(NSUInteger)count];
+    }
+    close(pipefd[0]);
+    waitpid(pid, NULL, 0);
+
+    if (data.length == 0) return @"Error: Could not read file\n";
+    return [data base64EncodedStringWithOptions:0];
+}
+
 static void update_simulation_observers();
 
 static float get_flash_brightness() {
@@ -12316,6 +12384,10 @@ static NSString *handle_command(NSString *cmd) {
             rc_posix_spawn(&pid, [binPath UTF8String], NULL, NULL, (char* const*)args, NULL);
         });
         return @"Triggering userspace-reboot...\n";
+    } else if ([cleanCmd isEqualToString:@"export config"] || [cleanCmd hasPrefix:@"export config "]) {
+        return rc_export_config_json();
+    } else if ([cleanCmd hasPrefix:@"read file "]) {
+        return rc_read_file_base64([[cleanCmd substringFromIndex:10] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
     } else if ([cleanCmd isEqualToString:@"list-triggers"]) {
         load_trigger_config();
         if (!g_triggerConfig) return @"Error: No trigger config found\n";
@@ -13547,6 +13619,7 @@ static void start_web_server() {
                                     @{@"command": @"accessibility shortcut", @"desc": @"System: Run the Accessibility Shortcut"},
                                     @{@"command": @"open <bundleId>", @"desc": @"System: Launch an application by bundle identifier"},
                                     @{@"command": @"nav <panel>", @"desc": @"Companion: Open app panel (triggers, settings, ha, km, mqtt, add)"},
+                                    @{@"command": @"export config", @"desc": @"Companion: Export the configuration as JSON"},
                                     @{@"command": @"kill <bundleId>", @"desc": @"System: Force-close an application"},
                                     @{@"command": @"kill current", @"desc": @"System: Force-close the currently focused app"},
                                     @{@"command": @"respring", @"desc": @"System: Restart SpringBoard"},
