@@ -142,7 +142,7 @@ static const NSInteger kRCRecentRunsShown = 5;
     }];
 }
 
-// Stop on a row: just that run (a trigger set to Run Alongside can have several)
+// Stop on a row: just that run (a trigger set to Run in Parallel can have several)
 - (void)stopRun:(NSDictionary *)run {
     NSString *runID = [run[@"id"] isKindOfClass:[NSString class]] ? run[@"id"] : nil;
     if (!runID.length) return;
