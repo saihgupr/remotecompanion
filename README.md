@@ -3,20 +3,14 @@
 RemoteCompanion provides fast, scriptable system control for modern rootless jailbreaks. It lets you bind physical gestures and hardware buttons, or send commands remotely from your computer, to trigger system actions, control media playback, and run custom scripts.
 
 > [!IMPORTANT]
-> **What’s New in v4.4.0**
-> - **New Triggers**: Rotated to Landscape / Portrait, Find My Sound, Incoming Call / Call Started / Call Ended, Battery Level (1-100%), and Focus on / off for a chosen Focus or any Focus.
-> - **Gesture Recorder**: Settings > Gestures records taps, swipes and scrolls, names the recording, and plays it back at 0.5x to 3x with trim, re-record, replace, rename, export and import.
-> - **Faster Building**: compact layout with tile grids, trigger icons, copy and paste for actions, search in the New Trigger screen, and a searchable Stop Trigger picker styled like the Triggers screen.
-> - **Loops and Waits**: Repeat, Repeat While, Exit Repeat and Wait Until blocks, `{round}` inside a loop, and nesting with If blocks in either order.
-> - **Running & History**: see every trigger running now, stop one or all, follow a run step by step, and review past runs with the actions as they ran. Keep 0 to 50 runs per trigger, on iOS and in the Web UI.
-> - **Variables**: the Set Variable action saves a value, changes it with math or an RC command, or keeps it for one run. `{name}` in action text becomes its value, a Variable condition compares it, and Settings > Advanced Settings > Variables lists what is saved.
-> - **App Quick Action**: pick an app, then one of its registered shortcuts, read live from SpringBoard so the Home Screen menu never has to be opened first.
-> - **Excluded Apps**: Settings > Advanced Settings > Options lists every trigger that has actions, grouped like the Triggers page, and sets the apps where each one should stay quiet.
-> - **Toasts on the Lock Screen**: toasts show over the lock screen, wait for the next wake when the screen is off, and can wake the screen with the new Wake Screen switch.
-> - **Web UI Light Mode**: the Web UI follows system appearance with a full light palette, and the Running sheet covers live runs and recent history.
-> - **Web UI Security Hardening**: an optional token in Settings > Web UI > Access gates privileged `/api/command` calls (`root`, `sudo`, `exec`), privileged triggers, and TestKit execution. Secret credentials in `/api/config` are masked, CORS is restricted to local/private network origins, and SSH variables are POSIX single-quoted.
-> - **Two-Finger Slides**: slide up from the bottom bar or down from the status bar with two fingers, each firing its own trigger, with distance-based firing, a widened landing zone, and Control Center suppression mid-gesture.
-> - **Lock Scrolling During Gestures**: an off-by-default toggle that keeps lists still while gesturing.
+> **What’s New in v4.5.0**
+> - **Full Backup**: Export Configuration writes one file with everything on this device, including settings, integrations, triggers, add-ons, gestures, notification filters and variables. Import it on a new device to put it all back, and `rc backup` / `rc restore` do the same from a terminal.
+> - **Triggers only when added**: the Triggers screen starts empty and every built-in trigger lives in the + menu, so the list holds only what you use. Removing a trigger puts it back in the menu.
+> - **Remote RC actions**: add another device under Settings > Integrations > Remote RC Clients, then run any RC command on it over its Web UI, with the same pickers and editors as local actions.
+> - **Duplicate actions**: the long-press action menu can duplicate a row in place, whole If and Repeat blocks included, and the Web UI's right-click menu has the same.
+> - **AudioStream auto-start is opt-in**: `/api/audiostream/start` now returns 403 unless you turn it on in Settings > Integrations > AudioStream, so a client timing out can no longer wake the streaming daemon.
+> - **iOS 18 and 26 fixes**: Control Center and App Switcher work on iOS 18, Quick Shortcuts and Camera modes work on iOS 26, and `objc_call` with arguments no longer crashes SpringBoard.
+> - **Smaller fixes**: a trigger's title updates as soon as its schedule changes, two-finger slides and Bluetooth triggers have their own icons, and Test Kit finds Spotlight and the Today view on iOS 26.
 
 <p align="center">
   <a href="https://saihgupr.github.io/remotecompanion/">Official Website</a> •
@@ -39,7 +33,7 @@ RemoteCompanion provides fast, scriptable system control for modern rootless jai
 ## Features
 - **Hardware Triggers**: Bind actions to Power/Volume buttons, Home button, Touch ID (Tap/Hold), or the Ringer Switch.
 - **Only Unlock Out of Pocket**: an off-by-default option in Settings > Advanced Settings > Options that makes Unlock Device and lock toggle skip unlocking while the proximity sensor is covered, such as in a pocket.
-- **New Triggers in 4.4.0**: Rotated to Landscape / Portrait, Find My Sound (with optional silent ping), Incoming Call / Call Started / Call Ended, Battery Level (fires once at 1-100%), and Focus on / off for a chosen Focus or any Focus.
+- **New Triggers**: Rotated to Landscape / Portrait, Find My Sound (with optional silent ping), Incoming Call / Call Started / Call Ended, Battery Level (fires once at 1-100%), and Focus on / off for a chosen Focus or any Focus.
 - **Gesture Recorder**: Settings > Gestures records a mix of taps, swipes and scrolls, saves it under a name, and plays it back at 0.5x to 3x. Each recording can be trimmed, re-recorded, replaced, renamed, exported and imported.
 - **Two-Finger Slides**: two-finger slide up from the bottom bar and slide down from the status bar are their own triggers, with distance-based firing, a widened landing zone, and an optional Lock Scrolling During Gestures toggle.
 - **Compact Layout and Trigger Icons**: Triggers, Select Action and Settings > Banners can each show a grid of tiles instead of a list (Advanced Settings > Layout, list stays default). Button and gesture triggers show a small phone or screen-area icon, app triggers show the app icon, and "Screen Gestures" now reads "Status Bar".

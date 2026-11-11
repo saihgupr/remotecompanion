@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [4.5.0] - 2026-11-11
 
 ### Added
 - **Full backup and restore**: Settings > Backup > Export Configuration now writes one file with everything on the device, including integrations, SSH hosts, tokens, add-ons, gestures, notification filters, variables and the app blacklist. Import Configuration puts it back on a new device exactly as it was, and still accepts older configuration files. `rc backup [path]` and `rc restore <path>` do the same from a terminal.
@@ -22,6 +22,13 @@ All notable changes to this project will be documented in this file.
 - **REST API Call editor**: the app's editor uses one-line hints instead of long footer paragraphs and shorter header and body fields, so the whole request fits without the dead space.
 
 ### Fixed
+- **Control Center on iOS 18**: later iOS 18 releases dropped the single Control Center controller RC used, so the action and `rc control-center` did nothing. They now open it through `SBControlCenterCoordinator` (#148).
+- **App Switcher on iOS 18 and 26**: the old toggle method is gone on iOS 18, so the action and `rc switcher` failed. They now use the main screen's switcher controller, and iOS 17 keeps the old call (#149).
+- **Quick Shortcuts and Camera modes on iOS 26**: a Quick Shortcut now runs through the class iOS 26 moved it to, and a Camera action with a mode or lens applies it now that the mode method has a new name. The two fallbacks behind it were also wrong and are fixed (#150).
+- **Lua objc_call with arguments**: arguments are kept alive until the call finishes, so a string, number or boolean argument no longer crashes SpringBoard. Float arguments arrive at their real size, and float, double and unsigned returns come back correctly (#144).
+- **Trigger name after editing a schedule**: the trigger's screen updates its title as soon as a new time or days are saved, instead of showing the old name until you go back and open it again (#145).
+- **Test Kit on iOS 26**: Spotlight and the Today view are found and closed through the home screen controller, so a step starts on the right screen. Test Kit only, no user-facing change (#151).
+- **Two-finger and Bluetooth trigger icons**: each two-finger slide has its own drawing instead of the same generic hand, and Bluetooth Device triggers show a drawn Bluetooth logo instead of a lightning bolt (#154).
 - **Add-on programs run again**: every add-on `exec` step and exec condition failed with "stopped or killed" on rootless, because the runner waited on its output pipes with `poll()`, which SpringBoard's sandbox refuses with `EPERM`. The pipes are read without `poll()` now, so `exec` steps and exec conditions work, including the Uptime add-on.
 
 ## [4.4.0] - 2026-11-06
