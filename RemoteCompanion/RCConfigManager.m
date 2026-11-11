@@ -1232,6 +1232,27 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         }];
     }
     
+    // 3. Keyboard Maestro names (Merge)
+    // KM actions store the macro's UUID, so the name map is what makes an imported
+    // action read as "KM: Macro Name" instead of a bare UUID. It is display-only,
+    // and both devices' entries stay useful, so keep the local ones and add the rest.
+    NSDictionary *importedKMMacroNames = importedConfig[@"kmNamesByUuid"];
+    if (importedKMMacroNames && [importedKMMacroNames isKindOfClass:[NSDictionary class]] && importedKMMacroNames.count > 0) {
+        NSMutableDictionary *currentKMMacroNames = _config[@"kmNamesByUuid"];
+        if (!currentKMMacroNames) {
+            currentKMMacroNames = [NSMutableDictionary dictionary];
+            _config[@"kmNamesByUuid"] = currentKMMacroNames;
+        } else if (![currentKMMacroNames isKindOfClass:[NSMutableDictionary class]]) {
+            currentKMMacroNames = [currentKMMacroNames mutableCopy];
+            _config[@"kmNamesByUuid"] = currentKMMacroNames;
+        }
+        [importedKMMacroNames enumerateKeysAndObjectsUsingBlock:^(id key, id obj, BOOL *stop) {
+            if ([key isKindOfClass:[NSString class]] && [obj isKindOfClass:[NSString class]] && [(NSString *)obj length] > 0) {
+                currentKMMacroNames[key] = [obj copy];
+            }
+        }];
+    }
+
     [self saveConfig];
     NSLog(@"[RCConfigManager] Config merged successfully. Master: %@, Triggers Updated: %lu", 
           _config[@"masterEnabled"], (unsigned long)importedTriggers.count);
