@@ -123,7 +123,7 @@
     } else if (indexPath.row == 1) {
         cell.textLabel.text = @"Keyboard Maestro";
         cell.detailTextLabel.text = cm.kmEnabled ? (cm.kmUrl.length ? cm.kmUrl : @"Enabled (Default URL)") : @"Disabled";
-        cell.imageView.image = [UIImage systemImageNamed:@"keyboard.fill"];
+        cell.imageView.image = [UIImage systemImageNamed:@"keyboard.fill"] ?: [UIImage systemImageNamed:@"keyboard"]; // iOS 15+
         cell.imageView.tintColor = cm.kmEnabled ? [UIColor systemPurpleColor] : [UIColor secondaryLabelColor];
     } else if (indexPath.row == 2) {
         cell.textLabel.text = @"MQTT";

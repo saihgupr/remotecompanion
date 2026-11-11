@@ -322,7 +322,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     if ([triggerKey hasPrefix:@"trigger_device_battery_below_"]) return @"battery.25";
     if ([RCAddOnCatalog isAddOnTriggerKey:triggerKey]) return [RCAddOnCatalog iconForTriggerKey:triggerKey] ?: @"puzzlepiece.extension";
     if ([triggerKey hasPrefix:@"app_launch_"]) return @"app.badge";
-    if ([triggerKey hasPrefix:@"app_exit_"]) return @"rectangle.portrait.and.arrow.right";
+    if ([triggerKey hasPrefix:@"app_exit_"]) return [UIImage systemImageNamed:@"rectangle.portrait.and.arrow.right"] ? @"rectangle.portrait.and.arrow.right" : @"arrow.right.square"; // iOS 15+
     if ([triggerKey hasPrefix:@"notif_"] || [triggerKey hasPrefix:@"notify_"]) return @"bell.badge.fill";
     if ([triggerKey hasPrefix:@"sched_"]) return @"clock.fill";
     if ([triggerKey hasPrefix:@"mqtt_"] || [triggerKey hasPrefix:@"mqtt_sub_"]) return @"antenna.radiowaves.left.and.right";

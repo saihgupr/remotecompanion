@@ -1055,7 +1055,7 @@ static BOOL RCTKWaitForReady(NSMutableDictionary *run, NSString *title, NSUInteg
             since = [event[@"seq"] unsignedLongLongValue];
             if (![event[@"button"] isEqualToString:@"up"] || ![event[@"down"] boolValue]) continue;
             if ([RCTKProbeLight()[@"frontApp"] isEqualToString:@"com.apple.springboard"]) {
-                RCShowPrompt(title, [NSString stringWithFormat:@"%lu steps - starting...", (unsigned long)steps], @"checklist", 2.5);
+                RCShowPrompt(title, [NSString stringWithFormat:@"%lu steps - starting...", (unsigned long)steps], ([UIImage systemImageNamed:@"checklist"] ? @"checklist" : @"list.bullet.rectangle"), 2.5);
                 RCTKSleep(3.0);
                 return YES;
             }
@@ -1286,7 +1286,7 @@ static void RCTKSuiteGuided(NSMutableDictionary *run) {
     g_tkCapture = NO;
     RCTKEvent(@"testkit.capture", @{ @"on": @NO });
     if (started) RCShowPrompt(@"Gestures & Sensors", [NSString stringWithFormat:@"Done: %lu of %lu passed", (unsigned long)passed, (unsigned long)steps.count],
-                 @"flag.checkered", 3.0);
+                 ([UIImage systemImageNamed:@"flag.checkered"] ? @"flag.checkered" : @"flag.fill"), 3.0);
 }
 
 
@@ -1823,7 +1823,7 @@ static void RCTKSuiteDifferential(NSMutableDictionary *run) {
     // By hand, the last press may have put the phone to sleep: wake it for the result
     if (started && !replay && ![RCTKProbeLight()[@"screenOn"] boolValue]) RCTKReplayWake(stockConfig);
     if (started) RCShowPrompt(@"Stock vs Tweak", [NSString stringWithFormat:@"Done: %lu of %lu same as stock", (unsigned long)same, (unsigned long)steps.count],
-                 @"flag.checkered", 3.0);
+                 ([UIImage systemImageNamed:@"flag.checkered"] ? @"flag.checkered" : @"flag.fill"), 3.0);
 }
 
 #pragma mark Running

@@ -95,10 +95,11 @@ static NSString *RCSuiteBlurb(NSString *suite) {
 }
 
 static NSString *RCSuiteIcon(NSString *suite) {
-    NSDictionary *icons = @{ @"conditions": @"questionmark.diamond", @"toggles": @"switch.2", @"all": @"checklist",
+    NSString *checklist = [UIImage systemImageNamed:@"checklist"] ? @"checklist" : @"list.bullet.rectangle"; // iOS 15+
+    NSDictionary *icons = @{ @"conditions": @"questionmark.diamond", @"toggles": @"switch.2", @"all": checklist,
                              @"guided": @"hand.point.up.left", @"differential": @"square.split.2x1",
                              @"replay": @"play.circle", @"addons": [RCAddOnCatalog defaultSymbol] };
-    return icons[suite] ?: @"checklist";
+    return icons[suite] ?: checklist;
 }
 
 - (instancetype)init {

@@ -347,7 +347,7 @@ static void rc_ha_mark_action_selected(UIAlertAction *action, BOOL selected) {
         symbolName = @"lock.fill";
         symbolColor = [UIColor systemRedColor];
     } else if ([domain isEqualToString:@"fan"]) {
-        symbolName = @"fanblades.fill";
+        symbolName = [UIImage systemImageNamed:@"fanblades.fill"] ? @"fanblades.fill" : @"wind"; // iOS 15+
         symbolColor = [UIColor systemTealColor];
     }
     
