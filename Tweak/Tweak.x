@@ -29,6 +29,7 @@
 #import "native_curl.h"
 #import "RCTestKit.h"
 #import "RCToastPill.h"
+#import "RCNotifyCommand.h"
 #import "RCTriggerAppExclusions.h"
 #import "RCAddOns.h"
 #import <CoreFoundation/CoreFoundation.h>
@@ -1782,25 +1783,112 @@ static NSString *resolve_bundle_id(NSString *input) {
     return mapped ? mapped : input; // Return mapped ID or original input if not found
 }
 
-// IPC for RemoteCompanion app notifications (use Documents for TrollStore access)
-#define kIPCPath @"/var/mobile/Documents/rc_notify.plist"
-#define kNotifyName "com.pizzaman.show_banner"
+// Posts a standard iOS notification as the RemoteCompanion app, which shows whether or not the app
+// is running. SpringBoard isn't allowed to post for another app, so the rc-notify helper does it.
+static int rc_posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *file_actions, const posix_spawnattr_t *attrp, char *const argv[], char *const envp[]);
 
-static void send_notification(NSString *title, NSString *message, BOOL urgent) {
-    NSDictionary *payload = @{
-        @"title": title ?: @"RemoteCommand",
-        @"message": message ?: @"",
-        @"urgent": @(urgent)
-    };
-    [payload writeToFile:kIPCPath atomically:YES];
-    
-    // Post Darwin notification to wake companion app
-    CFNotificationCenterPostNotification(
-        CFNotificationCenterGetDarwinNotifyCenter(),
-        CFSTR(kNotifyName),
-        NULL, NULL, true);
-    
-    SRLog(@"Sent notification IPC: %@ - %@", title, message);
+// Runs rc-notify with these arguments and waits for it; returns its exit code (-1: didn't run).
+// 4 from --exists: the notification is gone.
+static int rc_notify_helper_sync(NSArray<NSString *> *args) {
+    NSString *helper = @"/var/jb/usr/bin/rc-notify";
+    if (![[NSFileManager defaultManager] fileExistsAtPath:helper]) helper = @"/usr/bin/rc-notify";
+    extern char **environ;
+    char **argv = calloc(args.count + 2, sizeof(char *));
+    argv[0] = (char *)helper.fileSystemRepresentation;
+    for (NSUInteger i = 0; i < args.count; i++) argv[i + 1] = (char *)args[i].UTF8String;
+    pid_t pid = 0;
+    int err = rc_posix_spawn(&pid, helper.fileSystemRepresentation, NULL, NULL, argv, environ);
+    free(argv);
+    if (err != 0) {
+        SRLogMin(@"[Notify] Can't run %@: %s", helper, strerror(err));
+        return -1;
+    }
+    int status = 0;
+    waitpid(pid, &status, 0);
+    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+}
+
+// Runs rc-notify with these arguments off the main thread; returns at once
+static void rc_run_notify_helper(NSArray<NSString *> *args) {
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        int code = rc_notify_helper_sync(args);
+        if (code == 2) SRLogMin(@"[Notify] Not shown: notifications are off for RemoteCompanion");
+        else if (code != 0 && code != -1) SRLogMin(@"[Notify] rc-notify failed (%d)", code);
+    });
+}
+
+// Notifications a Notification action is waiting on (Wait for Response): identifier -> { wake: the
+// waiting action's semaphore, response: the answer once there is one (Tap, a button's name, Cleared,
+// Expired), pending: a passcode button's answer until RC confirms it }. Set by the tap hook.
+static NSMutableDictionary<NSString *, NSMutableDictionary *> *rc_notify_waiters(void) {
+    static NSMutableDictionary *waiters;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ waiters = [NSMutableDictionary dictionary]; });
+    return waiters;
+}
+
+// Wakes a waiting action that's asleep (only then: the semaphore is its run's, and a signal left
+// over would cut a later Delay short). Called holding rc_notify_waiters().
+static void rc_notify_wake_locked(NSMutableDictionary *waiter) {
+    if (![waiter[@"sleeping"] boolValue]) return;
+    [waiter removeObjectForKey:@"sleeping"];
+    dispatch_semaphore_signal(waiter[@"wake"]);
+}
+
+// Records the answer for a notification being waited on; NO when nothing waits on it
+static BOOL rc_notify_answer(NSString *identifier, NSString *response) {
+    if (!identifier.length) return NO;
+    @synchronized (rc_notify_waiters()) {
+        NSMutableDictionary *waiter = rc_notify_waiters()[identifier];
+        if (!waiter) return NO;
+        if (!waiter[@"response"] && response.length) {
+            waiter[@"response"] = response;
+            rc_notify_wake_locked(waiter); // it sleeps until then, with no checks in between
+        }
+        return YES;
+    }
+}
+
+// Posts a notify command's notification (see RCNotifyCommand): removeAfter > 0 takes it out of
+// Notification Center after that many seconds (while SpringBoard keeps running); its tap ID's
+// trigger notiftap_<ID> runs on a tap, a button's notifbtn_<ID> when pressed; its image ("app:BUNDLE"
+// or "sf:NAME") shows in place of RC's icon. identifier: the notification's own (nil: one is made
+// when needed). sync: posts before returning, and returns the helper's exit code (0: posted);
+// otherwise it returns 0 at once.
+static int send_notification(RCNotifyCommand *notify, NSString *identifier, BOOL sync) {
+    NSMutableArray *args = [NSMutableArray arrayWithObjects:(notify.title.length ? notify.title : @"RemoteCompanion"), (notify.message ?: @""), nil];
+    if (notify.urgent) [args addObject:@"--urgent"];
+    if (notify.tapID.length) [args addObjectsFromArray:@[@"--tap", notify.tapID]];
+    for (NSDictionary *button in notify.buttons) {
+        NSMutableArray *flags = [NSMutableArray array];
+        if ([button[@"red"] boolValue]) [flags addObject:@"red"];
+        if ([button[@"unlock"] boolValue]) [flags addObject:@"unlock"];
+        if (![button[@"id"] length] || ![button[@"title"] length]) continue;
+        [args addObjectsFromArray:@[@"--button", button[@"id"], button[@"title"], flags.count ? [flags componentsJoinedByString:@","] : @"-"]];
+    }
+    if (notify.image.length) [args addObjectsFromArray:@[@"--icon", notify.image]];
+    NSTimeInterval removeAfter = notify.removeAfter;
+    if (!identifier.length && removeAfter > 0) identifier = [@"rc-" stringByAppendingString:[NSUUID UUID].UUIDString];
+    if (identifier.length) [args addObjectsFromArray:@[@"--id", identifier]];
+    // A notification an action waits on is a group of its own: stacked with another, using one's
+    // button could clear both
+    if (sync && identifier.length) [args addObjectsFromArray:@[@"--thread", identifier]];
+    int code = 0;
+    if (sync) {
+        code = rc_notify_helper_sync(args);
+        if (code == 2) SRLogMin(@"[Notify] Not shown: notifications are off for RemoteCompanion");
+        else if (code != 0) SRLogMin(@"[Notify] rc-notify failed (%d)", code);
+    } else {
+        rc_run_notify_helper(args);
+    }
+    SRLog(@"[Notify] %@ - %@%@", args[0], args[1], removeAfter > 0 ? [NSString stringWithFormat:@" (removed after %.0f s)", removeAfter] : @"");
+    if (identifier.length && removeAfter > 0) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(removeAfter * NSEC_PER_SEC)), dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+            rc_notify_answer(identifier, @"Expired");
+            rc_run_notify_helper(@[@"--remove", identifier]);
+        });
+    }
+    return code;
 }
 
 // ============ TRIGGER CONFIG SYSTEM ============
@@ -2239,6 +2327,8 @@ static NSString *get_human_name_for_trigger(NSString *key, NSDictionary *trigger
     if ([key hasPrefix:@"output_unset_"]) return [NSString stringWithFormat:@"Audio Output Unset: %@", [key substringFromIndex:13]];
     if ([key hasPrefix:@"notif_"] || [key hasPrefix:@"notify_"]) return @"Notification Trigger";
     if ([key hasPrefix:@"sched_"]) return @"Scheduled Automation";
+    if ([key hasPrefix:@"notiftap_"]) return @"Notification Tap";
+    if ([key hasPrefix:@"notifbtn_"]) return @"Notification Button";
     if ([key hasPrefix:@"trigger_device_battery_below_"]) return [NSString stringWithFormat:@"Battery Drops to %@%%", [key substringFromIndex:29]];
     if ([key hasPrefix:@"trigger_device_battery_above_"]) return [NSString stringWithFormat:@"Battery Rises to %@%%", [key substringFromIndex:29]];
     
@@ -2606,6 +2696,134 @@ void RCNFCConfigChanged(void);
 #define kRCWatchPingArmed "com.pizzaman.rc.watch_ping_armed"
 #define kRCWatchPing      "com.pizzaman.rc.watch_ping"
 void RCExecuteTrigger(NSString *triggerKey);
+
+// Notification Tap triggers: tapping one of RC's notifications that carries a tap ID (notify
+// ... --tap ID) runs the trigger notiftap_<ID> right here, and RC stays closed; a button of its
+// long-press menu (--button "ID|...") runs notifbtn_<ID>. Without that
+// trigger (or with it off or empty) the tap opens RC as usual. This dispatcher runs the actions
+// of banners, the lock screen and Notification Center alike (iOS 14-26).
+@interface NCNotificationRequest (RCNotificationTap)
+- (id)userNotification;
+- (id)defaultAction;
+- (NSDictionary *)context;
+@end
+
+// One of RC's own notifications (the helper posts them as the app)
+static BOOL rc_is_rc_notification(id request) {
+    return [request respondsToSelector:@selector(sectionIdentifier)] && [[request sectionIdentifier] isEqual:@"com.saihgupr.remotecompanion"];
+}
+
+// The tap ID an RC notification carries (notify ... --tap ID), or nil
+static NSString *rc_notification_tap_id(id request) {
+    NSDictionary *info = nil;
+    if ([request respondsToSelector:@selector(userNotification)]) {
+        id note = [request userNotification];
+        id unRequest = [note respondsToSelector:@selector(request)] ? ((id (*)(id, SEL))objc_msgSend)(note, @selector(request)) : nil;
+        id content = [unRequest respondsToSelector:@selector(content)] ? ((id (*)(id, SEL))objc_msgSend)(unRequest, @selector(content)) : nil;
+        if ([content respondsToSelector:@selector(userInfo)]) info = [content userInfo];
+    }
+    if (![info isKindOfClass:[NSDictionary class]] && [request respondsToSelector:@selector(context)]) {
+        id context = [request context];
+        info = [context isKindOfClass:[NSDictionary class]] ? context[@"userInfo"] : nil;
+    }
+    id tap = [info isKindOfClass:[NSDictionary class]] ? info[@"rcTap"] : nil;
+    return [tap isKindOfClass:[NSString class]] && [tap length] ? tap : nil;
+}
+
+static NSString *rc_notification_identifier(id request) {
+    id note = [request respondsToSelector:@selector(userNotification)] ? [request userNotification] : nil;
+    id unRequest = [note respondsToSelector:@selector(request)] ? ((id (*)(id, SEL))objc_msgSend)(note, @selector(request)) : nil;
+    id identifier = [unRequest respondsToSelector:@selector(identifier)] ? ((id (*)(id, SEL))objc_msgSend)(unRequest, @selector(identifier)) : nil;
+    return [identifier isKindOfClass:[NSString class]] ? identifier : nil;
+}
+
+// The tap trigger is there to run: RC on, the trigger on and with actions
+static BOOL rc_tap_trigger_ready(NSString *key) {
+    if (!g_triggerConfig) load_trigger_config();
+    if (![g_triggerConfig[@"masterEnabled"] boolValue]) return NO;
+    id trigger = g_triggerConfig[@"triggers"][key];
+    if (![trigger isKindOfClass:[NSDictionary class]] || ![trigger[@"enabled"] boolValue]) return NO;
+    id actions = trigger[@"actions"];
+    return [actions isKindOfClass:[NSArray class]] && [actions count] > 0;
+}
+
+// A long-press menu button of an RC notification: its ID (from its action, "rcbtn-<ID>")
+static NSString *rc_notification_button_id(id action) {
+    id identifier = [action respondsToSelector:@selector(identifier)] ? ((id (*)(id, SEL))objc_msgSend)(action, @selector(identifier)) : nil;
+    if (![identifier isKindOfClass:[NSString class]] || ![identifier hasPrefix:@"rcbtn-"] || [identifier length] <= 6) return nil;
+    return [identifier substringFromIndex:6];
+}
+
+static BOOL rc_ui_locked(void) {
+    id manager = [objc_getClass("SBLockScreenManager") sharedInstance];
+    return [manager respondsToSelector:@selector(isUILocked)] && [manager isUILocked];
+}
+
+%hook NCNotificationDispatcher
+- (void)destination:(id)destination executeAction:(id)action forNotificationRequest:(id)request requestAuthentication:(BOOL)requestAuthentication withParameters:(id)parameters completion:(id)completion {
+    if (!rc_is_rc_notification(request) || !action) {
+        %orig;
+        return;
+    }
+    NSString *tap = rc_notification_tap_id(request);
+    // The tap itself (the default action), or one of its long-press menu buttons; not Clear
+    BOOL isTap = [request respondsToSelector:@selector(defaultAction)] && [action isEqual:[request defaultAction]];
+    NSString *button = isTap ? nil : rc_notification_button_id(action);
+    NSString *key = (isTap && tap) ? [@"notiftap_" stringByAppendingString:tap] : (button ? [@"notifbtn_" stringByAppendingString:button] : nil);
+    NSString *identifier = rc_notification_identifier(request);
+    // A Notification action waiting for the answer (Wait for Response) gets it: Tap, the button's
+    // name, or Cleared (iOS's own clear action; a banner swiped up only moves to Notification
+    // Center, and when it really goes the waiting action notices it's gone)
+    NSString *answer = isTap ? @"Tap" : nil;
+    if (button) {
+        id title = [action respondsToSelector:@selector(title)] ? ((id (*)(id, SEL))objc_msgSend)(action, @selector(title)) : nil;
+        answer = [title isKindOfClass:[NSString class]] && [title length] ? title : @"Button";
+    }
+    if (!answer && [request respondsToSelector:@selector(clearAction)] && [action isEqual:((id (*)(id, SEL))objc_msgSend)(request, @selector(clearAction))]) answer = @"Cleared";
+    // A button that needs the phone unlocked goes through iOS while it's locked: it asks for the
+    // passcode, then hands the button to RC's app, which runs its trigger and confirms the answer
+    // (notify confirm, see RCAppDelegate). Until then the waiting action only holds it.
+    BOOL needsPasscode = button && rc_ui_locked() && [action respondsToSelector:@selector(requiresAuthentication)] && ((BOOL (*)(id, SEL))objc_msgSend)(action, @selector(requiresAuthentication));
+    if (needsPasscode) {
+        @synchronized (rc_notify_waiters()) { rc_notify_waiters()[identifier ?: @""][@"pending"] = answer; }
+        %orig;
+        return;
+    }
+    BOOL waited = rc_notify_answer(identifier, answer);
+    // A tap or button that answers a waiting action is handled here even without a trigger
+    // (RC doesn't open for it); one with a trigger runs that too
+    BOOL ready = key && rc_tap_trigger_ready(key);
+    if (!(isTap || button) || (!ready && !waited)) {
+        %orig;
+        return;
+    }
+    if (ready) {
+        SRLogMin(@"[Notify] %@ -> %@", button ? @"Button" : @"Tapped", key);
+        dispatch_async(dispatch_get_main_queue(), ^{ RCExecuteTrigger(key); });
+    } else {
+        SRLogMin(@"[Notify] %@ answered a waiting action", button ? @"Button" : @"Tap");
+    }
+    // A tap takes the notification away, as one that opens its app does
+    if (identifier) rc_run_notify_helper(@[@"--remove", identifier]);
+    if (completion) ((void (^)(BOOL))completion)(YES);
+}
+
+// Taken away: cleared by the user (one at a time or Clear All) or withdrawn (removed by RC or another
+// app). An action waiting on it gets Cleared right away; an answer it already has (Tap, a button,
+// Expired) stays.
+- (void)destination:(id)destination requestsClearingNotificationRequests:(id)requests {
+    for (id request in ([requests respondsToSelector:@selector(countByEnumeratingWithState:objects:count:)] ? requests : @[])) {
+        if (rc_is_rc_notification(request)) rc_notify_answer(rc_notification_identifier(request), @"Cleared");
+    }
+    %orig;
+}
+
+- (void)withdrawNotificationWithRequest:(id)request {
+    if (rc_is_rc_notification(request)) rc_notify_answer(rc_notification_identifier(request), @"Cleared");
+    %orig;
+}
+%end
+
 
 static BOOL rc_watch_ping_quiets(NSString *key) {
     if (!RC_MasterEnabled()) return NO;
@@ -3309,8 +3527,8 @@ static NSString *rc_fill_action(NSString *text) {
     for (NSString *prefix in @[@"exec ", @"root ", @"sudo ", @"ssh-run "]) {
         if ([lower hasPrefix:prefix]) return rc_fill_placeholders_mode(text, RCFillShell);
     }
-    // A Toast's parts are in double quotes: a " in a value would end one early
-    if ([lower hasPrefix:@"toast "]) return rc_fill_placeholders_mode(text, RCFillQuoted);
+    // A Toast's and a notification's parts are in double quotes: a " in a value would end one early
+    if ([lower hasPrefix:@"toast "] || [lower hasPrefix:@"notify "]) return rc_fill_placeholders_mode(text, RCFillQuoted);
     return rc_fill_placeholders_mode(text, RCFillPlain);
 }
 
@@ -10118,46 +10336,78 @@ static NSString *handle_command(NSString *cmd) {
         }
         return @"Error: Flashlight not available\n";
     } else if ([cleanCmd isEqualToString:@"flashlight off"] || [cleanCmd isEqualToString:@"torch off"]) {
-    } else if ([cleanCmd hasPrefix:@"notify "]) {
-        // notify "Title" "Body" [--urgent]
-        // Parse: notify "Title" "Message" OR notify Title Message
-        NSString *args = [[cleanCmd substringFromIndex:7] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-        NSString *title = @"RemoteCommand";
-        NSString *body = @"";
-        BOOL urgent = NO;
-        
-        // Check for --urgent flag
-        if ([args hasSuffix:@" --urgent"]) {
-            urgent = YES;
-            args = [[args substringToIndex:args.length - 9] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-        }
-        
-        // Parse quoted strings: "Title" "Body"
-        if ([args hasPrefix:@"\""]) {
-            NSRange endTitle = [args rangeOfString:@"\"" options:0 range:NSMakeRange(1, args.length - 1)];
-            if (endTitle.location != NSNotFound) {
-                title = [args substringWithRange:NSMakeRange(1, endTitle.location - 1)];
-                NSString *rest = [[args substringFromIndex:endTitle.location + 1] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-                if ([rest hasPrefix:@"\""]) {
-                    NSRange endBody = [rest rangeOfString:@"\"" options:0 range:NSMakeRange(1, rest.length - 1)];
-                    if (endBody.location != NSNotFound) {
-                        body = [rest substringWithRange:NSMakeRange(1, endBody.location - 1)];
-                    } else {
-                        body = [rest substringFromIndex:1];
-                    }
-                } else {
-                    body = rest;
-                }
-            }
-        } else {
-            // Simple split: notify Title Body
-            NSArray *parts = [args componentsSeparatedByString:@" "];
-            if (parts.count >= 1) title = parts[0];
-            if (parts.count >= 2) body = [[parts subarrayWithRange:NSMakeRange(1, parts.count - 1)] componentsJoinedByString:@" "];
-        }
-        
-        send_notification(title, body, urgent);
+    } else if ([cleanCmd isEqualToString:@"notify clear"]) {
+        // Removes all of RC's notifications from Notification Center
+        rc_run_notify_helper(@[@"--clear"]);
         return @"OK\n";
+    } else if ([cleanCmd hasPrefix:@"notify confirm "]) {
+        // A button that needed the passcode was pressed and the passcode given (RC's app reports
+        // it): its answer goes to the action waiting on that notification
+        NSString *identifier = [[cleanCmd substringFromIndex:15] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        @synchronized (rc_notify_waiters()) {
+            NSMutableDictionary *waiter = rc_notify_waiters()[identifier];
+            if (waiter[@"pending"] && !waiter[@"response"]) {
+                waiter[@"response"] = waiter[@"pending"];
+                rc_notify_wake_locked(waiter);
+            }
+        }
+        return @"OK\n";
+    } else if ([cleanCmd hasPrefix:@"notify "]) {
+        // notify "Title" "Body" [--urgent] [--remove-after SECONDS] [--image "sf:NAME"|"app:BUNDLE"]
+        //        [--tap ID] [--button "ID|Title|flags"]... [--wait SECONDS]
+        // (or notify Title Body); read the same way as the app's editor does (RCNotifyCommand)
+        RCNotifyCommand *notify = [RCNotifyCommand commandWithString:cleanCmd];
+        NSString *title = notify.title.length ? notify.title : @"RemoteCompanion";
+        NSTimeInterval wait = MIN(notify.wait, 24 * 3600);
+
+        // Wait for Response: the action waits (not on the main thread) until the notification is
+        // tapped, a button pressed, it's cleared or removed, or the time is up; the answer goes in
+        // the run's {notify_response}
+        BOOL waits = wait > 0 && ![NSThread isMainThread];
+        if (!waits) {
+            send_notification(notify, nil, NO);
+            return @"OK\n";
+        }
+        NSString *identifier = [@"rc-" stringByAppendingString:[NSUUID UUID].UUIDString];
+        // The run's own semaphore when there is one: Stop wakes it too
+        dispatch_semaphore_t wake = [NSThread currentThread].threadDictionary[@"rcRunWait"] ?: dispatch_semaphore_create(0);
+        @synchronized (rc_notify_waiters()) { rc_notify_waiters()[identifier] = [@{ @"wake": wake } mutableCopy]; }
+        // Posted before waiting; not shown at all (notifications off for RC, or the helper failed) is
+        // an answer of its own
+        CFAbsoluteTime started = CFAbsoluteTimeGetCurrent();
+        NSString *response = send_notification(notify, identifier, YES) == 0 ? nil : @"Not Shown";
+        BOOL stopped = NO;
+        // Sleeps until SpringBoard has the answer (a tap, a button, a clear, Remove After), Stop, or
+        // the time limit: no checks in between, so waiting costs nothing
+        while (!response) {
+            if (rc_run_stopped()) { stopped = YES; break; }
+            double left = wait - (CFAbsoluteTimeGetCurrent() - started);
+            if (left <= 0) {
+                // A last check, in case it was taken away by a path the hooks above don't see
+                response = rc_notify_helper_sync(@[@"--exists", identifier]) == 4 ? @"Cleared" : @"Timed Out";
+                break;
+            }
+            NSMutableDictionary *waiter;
+            @synchronized (rc_notify_waiters()) {
+                waiter = rc_notify_waiters()[identifier];
+                response = waiter[@"response"];
+                if (!response) waiter[@"sleeping"] = @YES;
+            }
+            if (response) break;
+            long timedOut = dispatch_semaphore_wait(wake, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(left * NSEC_PER_SEC)));
+            @synchronized (rc_notify_waiters()) {
+                // Woken by Stop or the time limit: not asleep any more. An answer that signalled just
+                // as the time ran out leaves a signal behind, taken back here.
+                if (timedOut && !waiter[@"sleeping"]) dispatch_semaphore_wait(wake, DISPATCH_TIME_NOW);
+                [waiter removeObjectForKey:@"sleeping"];
+                response = waiter[@"response"];
+            }
+        }
+        @synchronized (rc_notify_waiters()) { [rc_notify_waiters() removeObjectForKey:identifier]; }
+        if (stopped) return @"Stopped\n";
+        rc_variable_set(@"notify_response", response, YES);
+        SRLogMin(@"[Notify] %@ -> %@ after %.1f s", title, response, CFAbsoluteTimeGetCurrent() - started);
+        return [response stringByAppendingString:@"\n"];
     } else if ([cleanCmd isEqualToString:@"shortcuts list"]) {
         // The app's shortcut picker; an empty answer makes it try SpringCuts. Not answered on the
         // main thread, where the helper's replies arrive.
