@@ -4,8 +4,9 @@
 #import "RCTriggerIcons.h"
 
 // A trigger in Compact: a wide card, its icon beside its name (up to three lines), or at 3 per row
-// a tile, its icon above its name. Dimmed when it has no actions yet. In Edit, a star (favorite)
-// and a minus (delete): on the card's right, or at the tile's top right.
+// a tile, its icon above its name. Dimmed when it has no actions yet, or when its integration is
+// switched off. In Edit, a star (favorite) and a minus (delete): on the card's right, or at the
+// tile's top right.
 @interface RCTriggerCardCell : UICollectionViewCell
 @property (nonatomic, strong) UIImageView *iconView;
 @property (nonatomic, strong) UILabel *nameLabel;
@@ -190,7 +191,7 @@
     [self applyLook];
 }
 
-// Dimmed for a reason the tile can name ("No actions", "MQTT off"); nil is the normal look
+// Dimmed, with the reason shown to VoiceOver ("No actions", "MQTT off"); nil is the normal look
 - (void)setDimmedReason:(NSString *)reason {
     _dimmedReason = [reason copy];
     self.dimmed = reason.length > 0;
