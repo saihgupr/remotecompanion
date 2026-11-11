@@ -9894,6 +9894,19 @@ static NSString *handle_command(NSString *cmd) {
                 SRLog(@"Using Method 0: toggleMainSwitcherNoninteractivelyWithSource: -> %d", success);
             }
 
+            // Method 0b: iOS 18+ dropped the coordinator's toggle; the main screen's own
+            // SBSwitcherController has toggleMainSwitcherWithSource:animated: (same arguments)
+            if (!success) {
+                id wsm = [sb respondsToSelector:@selector(windowSceneManager)] ? [sb performSelector:@selector(windowSceneManager)] : nil;
+                id scene = [wsm respondsToSelector:@selector(embeddedDisplayWindowScene)] ? [wsm performSelector:@selector(embeddedDisplayWindowScene)] : nil;
+                id sceneSwitcher = [scene respondsToSelector:@selector(switcherController)] ? [scene performSelector:@selector(switcherController)] : nil;
+                SEL sceneToggle = NSSelectorFromString(@"toggleMainSwitcherWithSource:animated:");
+                if ([sceneSwitcher respondsToSelector:sceneToggle]) {
+                    success = ((BOOL (*)(id, SEL, long long, BOOL))objc_msgSend)(sceneSwitcher, sceneToggle, 1, YES);
+                    SRLog(@"Using Method 0b: toggleMainSwitcherWithSource:animated: -> %d", success);
+                }
+            }
+
             // Method 1: SBMainSwitcherViewController (iOS 15/16 discovered methods)
             Class viewCtrlClass = objc_getClass("SBMainSwitcherViewController");
             if (!success && viewCtrlClass) {
