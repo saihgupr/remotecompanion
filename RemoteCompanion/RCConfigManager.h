@@ -152,7 +152,6 @@
 - (NSString *)generateRandomApiToken;
 
 // Backup/Restore
-- (NSData *)exportConfigAsJSON;
 - (BOOL)importConfigFromJSON:(NSData *)jsonData error:(NSError **)error;
 
 extern NSString *const RCConfigChangedNotification;

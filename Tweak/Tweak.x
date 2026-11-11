@@ -2330,6 +2330,236 @@ static NSString *rc_read_file_base64(NSString *path) {
     return [data base64EncodedStringWithOptions:0];
 }
 
+// ---- Full backup ----------------------------------------------------------
+// One JSON file with the whole config and the files that live beside it, so a new
+// device can be put back exactly as this one was. "backup config" builds it, and
+// "restore backup" applies the bundle the app (or rc restore) leaves at the path
+// below. The app reads both, so there is one implementation of the format.
+
+#define kRCBackupRestorePath @"/var/mobile/Documents/rc_restore.json"
+#define kRCBackupFormat @"rc-backup"
+#define kRCBackupVersion 1
+
+static NSString *rc_backup_timestamp(void) {
+    static NSDateFormatter *formatter;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        formatter = [[NSDateFormatter alloc] init];
+        formatter.dateFormat = @"yyyyMMdd-HHmmss";
+        formatter.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+    });
+    return [formatter stringFromDate:[NSDate date]] ?: @"backup";
+}
+
+// A name from a bundle is used in a path and in a root shell command: keep it to
+// the characters real files use.
+static BOOL rc_backup_name_is_safe(NSString *name) {
+    if (name.length == 0 || name.length > 128) return NO;
+    NSCharacterSet *allowed = [NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._+-"];
+    return [name rangeOfCharacterFromSet:[allowed invertedSet]].location == NSNotFound;
+}
+
+static BOOL rc_write_file(NSString *path, NSData *data, mode_t mode) {
+    if (!path.length || !data) return NO;
+    [[NSFileManager defaultManager] createDirectoryAtPath:[path stringByDeletingLastPathComponent]
+                                                     withIntermediateDirectories:YES
+                                                                      attributes:nil
+                                                                           error:NULL];
+    int fd = open([path fileSystemRepresentation], O_WRONLY | O_CREAT | O_TRUNC, mode);
+    if (fd < 0) return NO;
+
+    const uint8_t *bytes = data.bytes;
+    size_t left = data.length;
+    BOOL ok = YES;
+    while (left > 0) {
+        ssize_t written = write(fd, bytes, left);
+        if (written <= 0) { ok = NO; break; }
+        bytes += written;
+        left -= (size_t)written;
+    }
+    fchmod(fd, mode);
+    close(fd);
+    return ok;
+}
+
+static NSDictionary *rc_backup_file_entry(NSString *path) {
+    NSData *data = [NSData dataWithContentsOfFile:path];
+    if (!data) return nil;
+    NSDictionary *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:NULL];
+    NSNumber *mode = attributes[NSFilePosixPermissions] ?: @(0644);
+    return @{ @"data": [data base64EncodedStringWithOptions:0], @"mode": mode };
+}
+
+static NSArray<NSString *> *rc_backup_document_names(void) {
+    return @[@"rc_addons.json", @"rc_addons_root.json", @"rc_gestures.plist",
+             @"rc_notify.plist", @"rc_variables.json"];
+}
+
+// Add-on definitions are root-owned, so they are read from the same folders the
+// add-on loader uses and written back through rc-root.
+static NSArray<NSString *> *rc_backup_addon_folders(void) {
+    NSString *rootless = @"/var/jb/Library/RemoteCompanion/AddOns";
+    NSString *rootful = @"/Library/RemoteCompanion/AddOns";
+    return [[NSFileManager defaultManager] fileExistsAtPath:rootless] ? @[rootless] : @[rootful];
+}
+
+static NSString *rc_backup_json(void) {
+    load_trigger_config();
+    NSDictionary *config = nil;
+    @synchronized (rc_trigger_config_lock()) { config = [g_triggerConfig copy]; }
+    if (![config isKindOfClass:[NSDictionary class]]) return @"Error: No configuration found\n";
+    if (![NSJSONSerialization isValidJSONObject:config]) return @"Error: Configuration cannot be exported as JSON\n";
+
+    NSMutableDictionary *files = [NSMutableDictionary dictionary];
+
+    for (NSString *name in rc_backup_document_names()) {
+        NSDictionary *entry = rc_backup_file_entry([@"/var/mobile/Documents" stringByAppendingPathComponent:name]);
+        if (entry) files[[@"documents/" stringByAppendingString:name]] = entry;
+    }
+
+    NSString *blacklist = @"/var/mobile/Library/Preferences/com.saihgupr.remotecompanion.blacklist.plist";
+    NSDictionary *blacklistEntry = rc_backup_file_entry(blacklist);
+    if (blacklistEntry) files[@"preferences/com.saihgupr.remotecompanion.blacklist.plist"] = blacklistEntry;
+
+    for (NSString *folder in rc_backup_addon_folders()) {
+        for (NSString *name in [[NSFileManager defaultManager] contentsOfDirectoryAtPath:folder error:NULL]) {
+            if (![name.pathExtension.lowercaseString isEqualToString:@"json"]) continue;
+            NSDictionary *entry = rc_backup_file_entry([folder stringByAppendingPathComponent:name]);
+            if (entry) files[[@"addons/" stringByAppendingString:name]] = entry;
+        }
+    }
+
+    NSDictionary *bundle = @{
+        @"format": kRCBackupFormat,
+        @"version": @(kRCBackupVersion),
+        @"createdAt": [[[NSISO8601DateFormatter alloc] init] stringFromDate:[NSDate date]] ?: @"",
+        @"config": config,
+        @"files": files,
+    };
+    if (![NSJSONSerialization isValidJSONObject:bundle]) return @"Error: Backup cannot be written as JSON\n";
+
+    NSError *error = nil;
+    NSData *data = [NSJSONSerialization dataWithJSONObject:bundle options:NSJSONWritingPrettyPrinted error:&error];
+    NSString *json = data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
+    if (!json) {
+        SRLogMin(@"Backup error: %@", error);
+        return @"Error: Could not build the backup\n";
+    }
+    return json;
+}
+
+// Copy a root-owned add-on definition into place
+static BOOL rc_backup_install_root_file(NSString *path, NSData *data, mode_t mode) {
+    NSString *temp = [NSTemporaryDirectory() stringByAppendingPathComponent:
+                      [NSString stringWithFormat:@"rc-restore-%@", path.lastPathComponent]];
+    if (!rc_write_file(temp, data, 0600)) return NO;
+
+    NSString *rootHelper = @"/var/jb/usr/bin/rc-root";
+    if (access([rootHelper fileSystemRepresentation], X_OK) != 0) rootHelper = @"/usr/bin/rc-root";
+    if (access([rootHelper fileSystemRepresentation], X_OK) != 0) {
+        [[NSFileManager defaultManager] removeItemAtPath:temp error:NULL];
+        return NO;
+    }
+
+    NSString *command = [NSString stringWithFormat:@"mkdir -p '%@' && cp '%@' '%@' && chmod %o '%@' && rm -f '%@'",
+                         path.stringByDeletingLastPathComponent, temp, path, (unsigned int)mode, path, temp];
+    const char *argv[] = {[rootHelper UTF8String], [command UTF8String], NULL};
+    extern char **environ;
+    pid_t pid = 0;
+    int spawnResult = posix_spawn(&pid, [rootHelper UTF8String], NULL, NULL, (char *const *)argv, environ);
+    if (spawnResult != 0) {
+        [[NSFileManager defaultManager] removeItemAtPath:temp error:NULL];
+        return NO;
+    }
+    int status = 0;
+    waitpid(pid, &status, 0);
+    [[NSFileManager defaultManager] removeItemAtPath:temp error:NULL];
+    return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+
+static NSString *rc_restore_backup(void) {
+    NSData *data = [NSData dataWithContentsOfFile:kRCBackupRestorePath];
+    if (!data) return @"Error: No backup to restore\n";
+
+    // Do not leave a bundle with all the passwords sitting in Documents
+    [[NSFileManager defaultManager] removeItemAtPath:kRCBackupRestorePath error:NULL];
+
+    id parsed = [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
+    if (![parsed isKindOfClass:[NSDictionary class]]) return @"Error: Not a backup file\n";
+    NSDictionary *bundle = parsed;
+    if (![bundle[@"format"] isEqual:kRCBackupFormat]) return @"Error: Not a full backup\n";
+
+    NSInteger version = [bundle[@"version"] integerValue];
+    if (version < 1 || version > kRCBackupVersion) {
+        return [NSString stringWithFormat:@"Error: Backup version %ld is not supported\n", (long)version];
+    }
+
+    NSDictionary *config = bundle[@"config"];
+    if (![config isKindOfClass:[NSDictionary class]]) return @"Error: Backup has no configuration\n";
+
+    // Keep the current state next to it in case the wrong file was picked
+    NSString *stamp = rc_backup_timestamp();
+    NSFileManager *fm = [NSFileManager defaultManager];
+    [fm copyItemAtPath:@"/var/mobile/Documents/rc_triggers.plist"
+                toPath:[NSString stringWithFormat:@"/var/mobile/Documents/rc_triggers.plist.bak-%@", stamp]
+                 error:NULL];
+    [fm copyItemAtPath:@"/var/mobile/Documents/rc_addons.json"
+                toPath:[NSString stringWithFormat:@"/var/mobile/Documents/rc_addons.json.bak-%@", stamp]
+                 error:NULL];
+
+    NSError *error = nil;
+    NSData *plist = [NSPropertyListSerialization dataWithPropertyList:config
+                                                               format:NSPropertyListXMLFormat_v1_0
+                                                              options:0
+                                                                error:&error];
+    if (!plist) return [NSString stringWithFormat:@"Error: %@\n", error.localizedDescription ?: @"Could not read the configuration"];
+    if (!rc_write_file(@"/var/mobile/Documents/rc_triggers.plist", plist, 0600)) {
+        return @"Error: Could not write the configuration\n";
+    }
+
+    NSInteger written = 0;
+    NSInteger failed = 0;
+    NSDictionary *files = bundle[@"files"];
+    if ([files isKindOfClass:[NSDictionary class]]) {
+        for (NSString *key in files) {
+            NSDictionary *entry = files[key];
+            if (![entry isKindOfClass:[NSDictionary class]]) continue;
+            NSData *fileData = [[NSData alloc] initWithBase64EncodedString:entry[@"data"] options:0];
+            if (!fileData.length) { failed++; continue; }
+
+            mode_t mode = (mode_t)([entry[@"mode"] unsignedShortValue] & 0777);
+            if (mode == 0) mode = 0644;
+
+            BOOL ok = NO;
+            if ([key hasPrefix:@"documents/"]) {
+                NSString *name = [key substringFromIndex:10];
+                if (rc_backup_name_is_safe(name)) {
+                    ok = rc_write_file([@"/var/mobile/Documents" stringByAppendingPathComponent:name], fileData, mode);
+                }
+            } else if ([key hasPrefix:@"preferences/"]) {
+                NSString *name = [key substringFromIndex:12];
+                if (rc_backup_name_is_safe(name)) {
+                    ok = rc_write_file([@"/var/mobile/Library/Preferences" stringByAppendingPathComponent:name], fileData, mode);
+                }
+            } else if ([key hasPrefix:@"addons/"]) {
+                NSString *name = [key substringFromIndex:7];
+                if (rc_backup_name_is_safe(name)) {
+                    ok = rc_backup_install_root_file([rc_backup_addon_folders().firstObject stringByAppendingPathComponent:name], fileData, mode);
+                }
+            }
+            if (ok) written++; else failed++;
+        }
+    }
+
+    load_trigger_config();
+    notify_post(kConfigChangedNotification);
+
+    if (failed > 0) {
+        return [NSString stringWithFormat:@"Restored the configuration, %ld file(s) failed\n", (long)failed];
+    }
+    return [NSString stringWithFormat:@"Restored the configuration and %ld file(s)\n", (long)written];
+}
+
 static void update_simulation_observers();
 
 static float get_flash_brightness() {
@@ -3616,6 +3846,7 @@ BOOL RCIsPrivilegedCommand(NSString *cmd) {
     return [trimmed hasPrefix:@"root "] || [trimmed isEqualToString:@"root"] ||
            [trimmed hasPrefix:@"sudo "] || [trimmed isEqualToString:@"sudo"] ||
            [trimmed hasPrefix:@"exec "] || [trimmed isEqualToString:@"exec"] ||
+           [trimmed hasPrefix:@"backup config"] || [trimmed hasPrefix:@"restore backup"] ||
            [trimmed hasPrefix:@"lua "] || [trimmed hasPrefix:@"lua_eval "] || [trimmed hasPrefix:@"Lua "] ||
            [trimmed hasPrefix:@"ssh-run "] ||
            [trimmed hasPrefix:@"rc-run "] ||
@@ -12516,6 +12747,10 @@ static NSString *handle_command(NSString *cmd) {
             rc_posix_spawn(&pid, [binPath UTF8String], NULL, NULL, (char* const*)args, NULL);
         });
         return @"Triggering userspace-reboot...\n";
+    } else if ([cleanCmd isEqualToString:@"backup config"]) {
+        return rc_backup_json();
+    } else if ([cleanCmd isEqualToString:@"restore backup"]) {
+        return rc_restore_backup();
     } else if ([cleanCmd hasPrefix:@"read file "]) {
         return rc_read_file_base64([[cleanCmd substringFromIndex:10] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
     } else if ([cleanCmd isEqualToString:@"list-triggers"]) {
@@ -13783,6 +14018,8 @@ static void start_web_server() {
                                     @{@"command": @"accessibility shortcut", @"desc": @"System: Run the Accessibility Shortcut"},
                                     @{@"command": @"open <bundleId>", @"desc": @"System: Launch an application by bundle identifier"},
                                     @{@"command": @"nav <panel>", @"desc": @"Companion: Open app panel (triggers, settings, ha, km, mqtt, add)"},
+                                    @{@"command": @"backup config", @"desc": @"Companion: Save everything (settings, integrations, add-ons) as one backup JSON"},
+                                    @{@"command": @"restore backup", @"desc": @"Companion: Apply the full backup left at /var/mobile/Documents/rc_restore.json"},
                                     @{@"command": @"kill <bundleId>", @"desc": @"System: Force-close an application"},
                                     @{@"command": @"kill current", @"desc": @"System: Force-close the currently focused app"},
                                     @{@"command": @"respring", @"desc": @"System: Restart SpringBoard"},

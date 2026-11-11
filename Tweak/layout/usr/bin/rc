@@ -70,9 +70,104 @@ if [ -z "$1" ]; then
     echo "  http-request <json|url> - Call a REST API with method, headers and body"
     echo "  blacklist <list|add|remove|reset> - Manage app exclusion"
     echo "  nav <panel>       - Navigate companion app (triggers, settings, ha, km, mqtt, add)"
+    echo "  backup [path]     - Save everything for an exact restore (default: current directory; a directory or file)"
+    echo "  restore <path>    - Restore a backup file on the device"
     echo "  log               - Stream device logs"
     echo ""
     exit 1
+fi
+
+# Send one command and print the reply, using the same delivery paths as below
+rc_send_command() {
+    local command="$1"
+    if [[ "$IP" == "127.0.0.1" ]]; then
+        echo -n "$command" | rc-client 2>/dev/null || echo -n "$command" | nc -U "$SOCKET_PATH" 2>/dev/null
+    else
+        local remote_cmd="echo -n '$command' | /var/jb/usr/bin/rc-client 2>/dev/null || echo -n '$command' | /usr/bin/rc-client 2>/dev/null || echo -n '$command' | nc -U $SOCKET_PATH 2>/dev/null"
+        ssh -o ConnectTimeout=3 -o ServerAliveInterval=2 -o ServerAliveCountMax=2 -o StrictHostKeyChecking=no mobile@$IP "$remote_cmd" 2>/dev/null
+    fi
+}
+
+# Full backup: everything Export Configuration writes, one JSON file.
+if [[ "$1" == "backup" || "$1" == "backup-config" ]]; then
+    BACKUP_ARG="${2:-}"
+    DEFAULT_NAME="rc_backup_$(date +%Y%m%d_%H%M).json"
+
+    if [ -z "$BACKUP_ARG" ]; then
+        TARGET="$PWD/$DEFAULT_NAME"
+    else
+        case "$BACKUP_ARG" in
+            "~") BACKUP_ARG="$HOME" ;;
+            "~/"*) BACKUP_ARG="$HOME/${BACKUP_ARG#\~/}" ;;
+        esac
+        if [ -d "$BACKUP_ARG" ]; then
+            TARGET="${BACKUP_ARG%/}/$DEFAULT_NAME"
+        elif [[ "$BACKUP_ARG" == */ ]]; then
+            echo "Error: No such directory: $BACKUP_ARG" >&2
+            exit 1
+        else
+            TARGET="$BACKUP_ARG"
+        fi
+    fi
+
+    TARGET_DIR="$(dirname "$TARGET")"
+    if [ ! -d "$TARGET_DIR" ]; then
+        echo "Error: No such directory: $TARGET_DIR" >&2
+        exit 1
+    fi
+    TARGET="$(cd "$TARGET_DIR" && pwd)/$(basename "$TARGET")"
+
+    RESPONSE="$(rc_send_command "backup config")"
+    if [ $? -ne 0 ] || [ -z "$RESPONSE" ]; then
+        echo "Error: Cannot connect to iPhone at $IP via SSH/Socket." >&2
+        exit 1
+    fi
+    case "$RESPONSE" in
+        \{*) ;;
+        *) echo "$RESPONSE" >&2; exit 1 ;;
+    esac
+
+    if ! (umask 077; printf '%s\n' "$RESPONSE" > "$TARGET"); then
+        echo "Error: Could not write $TARGET" >&2
+        exit 1
+    fi
+    chmod 600 "$TARGET" 2>/dev/null || true
+    echo "Backed up everything to $TARGET"
+    exit 0
+fi
+
+# Restore: copy the file to the device, then apply it there.
+if [[ "$1" == "restore" || "$1" == "restore-backup" ]]; then
+    RESTORE_FILE="${2:-}"
+    if [ -z "$RESTORE_FILE" ] || [ ! -f "$RESTORE_FILE" ]; then
+        echo "Error: Give a backup file: rc restore <path>" >&2
+        exit 1
+    fi
+
+    REMOTE_RESTORE="/var/mobile/Documents/rc_restore.json"
+    if [[ "$IP" == "127.0.0.1" ]]; then
+        if ! cp "$RESTORE_FILE" "$REMOTE_RESTORE"; then
+            echo "Error: Could not write $REMOTE_RESTORE" >&2
+            exit 1
+        fi
+        chmod 600 "$REMOTE_RESTORE" 2>/dev/null || true
+    else
+        if ! ssh -o ConnectTimeout=3 -o StrictHostKeyChecking=no mobile@$IP "umask 077; cat > $REMOTE_RESTORE" < "$RESTORE_FILE"; then
+            echo "Error: Could not copy the backup to $IP" >&2
+            exit 1
+        fi
+    fi
+
+    RESPONSE="$(rc_send_command "restore backup")"
+    if [ -z "$RESPONSE" ]; then
+        echo "Error: Cannot connect to iPhone at $IP via SSH/Socket." >&2
+        exit 1
+    fi
+    echo "$RESPONSE"
+    case "$RESPONSE" in
+        Error*) exit 1 ;;
+    esac
+    exit 0
 fi
 
 # Construct the command string

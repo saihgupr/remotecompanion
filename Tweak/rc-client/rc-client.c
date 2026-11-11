@@ -18,7 +18,10 @@ int main(int argc, char *argv[]) {
     strncpy(serv_addr.sun_path, "/var/mobile/Documents/rc.sock", sizeof(serv_addr.sun_path) - 1);
     
     struct timeval tv;
-    tv.tv_sec = 2;
+    // A full backup restore writes the configuration and the add-on files before it
+    // answers, which can take a few seconds. Long enough for that, short enough that
+    // a dead tweak does not hang a script.
+    tv.tv_sec = 15;
     tv.tv_usec = 0;
     setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
     setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, (const char*)&tv, sizeof tv);

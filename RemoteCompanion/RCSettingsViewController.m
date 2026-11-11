@@ -11,13 +11,11 @@
 #import "RCGesturesViewController.h"
 #import "RCAddOnCatalog.h"
 #import "RCAddOnsViewController.h"
+#import "RCBackup.h"
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #include <ifaddrs.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
-#include <sys/socket.h>
-#include <sys/un.h>
-#include <unistd.h>
 
 @interface RCSettingsViewController () <UIDocumentPickerDelegate>
 @property (nonatomic, strong) UITableView *tableView;
@@ -243,7 +241,7 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     } else if (section == RCSettingsSectionDiagnostics) {
         return @"See what's running on this device, and run tests that share their results.";
     } else if (section == RCSettingsSectionBackup) {
-        return @"Export your configuration to share or backup. Import to restore.";
+        return @"Export saves everything on this device: settings, integrations, triggers, add-ons, gestures and variables. Import puts it back on any device.";
     }
     return nil;
 }
@@ -252,8 +250,11 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     if (section == RCSettingsSectionGeneral) {
         return [RCConfigManager sharedManager].webUIEnabled ? 4 : 2;
     }
-    if (section == RCSettingsSectionBackup || section == RCSettingsSectionAdvanced) {
-        return 2; // Export / Import; Advanced Settings / Variables
+    if (section == RCSettingsSectionBackup) {
+        return 2; // Export / Import
+    }
+    if (section == RCSettingsSectionAdvanced) {
+        return 2; // Advanced Settings / Variables
     }
     if (section == RCSettingsSectionDiagnostics) {
         return 2; // Running, Test Kit
@@ -427,32 +428,27 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
 #pragma mark - Backup / Import
 
 - (void)exportConfig {
-    NSData *jsonData = [[RCConfigManager sharedManager] exportConfigAsJSON];
+    // One file with the configuration and everything that lives beside it (add-ons,
+    // gestures, notification filters, variables, blacklist), built by the tweak so
+    // Import Configuration can put a new device back exactly as this one is.
+    NSError *error = nil;
+    NSData *jsonData = [RCBackup fullBackupJSONDataWithError:&error];
     if (!jsonData) {
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Export Failed" message:@"Could not export configuration" preferredStyle:UIAlertControllerStyleAlert];
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Export Failed" message:error.localizedDescription ?: @"Could not export configuration" preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
         [self presentViewController:alert animated:YES completion:nil];
         return;
     }
 
-    NSDateFormatter *df = [[NSDateFormatter alloc] init];
-    [df setDateFormat:@"yyyyMMdd_HHmm"];
-    NSString *dateStr = [df stringFromDate:[NSDate date]];
-    if (!dateStr) dateStr = @"backup";
-
-    NSString *filename = [NSString stringWithFormat:@"rc_config_%@.json", dateStr];
-
     // Use system /tmp directly to avoid sandbox confusion for system app
-    NSString *exportPath = [@"/tmp" stringByAppendingPathComponent:filename];
+    NSString *exportPath = [@"/tmp" stringByAppendingPathComponent:[RCBackup defaultFileName]];
 
     NSError *writeError = nil;
     BOOL written = [jsonData writeToFile:exportPath options:NSDataWritingAtomic error:&writeError];
 
     if (!written || writeError) {
         NSLog(@"[RemoteCompanion] Error writing export file: %@", writeError);
-        // Show exact path in alert for debugging
-        NSString *debugMsg = [NSString stringWithFormat:@"Failed to write to:\n%@\n\nError: %@", exportPath, writeError.localizedDescription];
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Export Error" message:debugMsg preferredStyle:UIAlertControllerStyleAlert];
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Export Error" message:[NSString stringWithFormat:@"Failed to write to:\n%@\n\n%@", exportPath, writeError.localizedDescription] preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:@"Copy Path" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
             [UIPasteboard generalPasteboard].string = exportPath;
         }]];
@@ -461,27 +457,21 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
         return;
     }
 
+    // The file holds the stored passwords and tokens: keep the /tmp copy private
+    [[NSFileManager defaultManager] setAttributes:@{NSFilePosixPermissions: @0600} ofItemAtPath:exportPath error:NULL];
+
     NSURL *fileURL = [NSURL fileURLWithPath:exportPath];
     if (!fileURL) {
          NSLog(@"[RemoteCompanion] Error: fileURL is nil");
          return;
     }
 
-    // Use share sheet instead of document picker to avoid glitchy loading indicator
-    UIActivityViewController *activityVC = [[UIActivityViewController alloc] initWithActivityItems:@[fileURL] applicationActivities:nil];
-    activityVC.modalPresentationStyle = UIModalPresentationFormSheet;
-
-    // Success callback when user saves the file
-    activityVC.completionWithItemsHandler = ^(UIActivityType activityType, BOOL completed, NSArray *returnedItems, NSError *error) {
-        if (completed) {
-            NSLog(@"[RemoteCompanion] Export successful via: %@", activityType);
-            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Export Successful" message:@"Configuration file has been saved." preferredStyle:UIAlertControllerStyleAlert];
-            [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-            [self presentViewController:alert animated:YES completion:nil];
-        }
-    };
-
-    [self presentViewController:activityVC animated:YES completion:nil];
+    // The share sheet renders app icons for AirDrop and other activities, which
+    // crashes IconServices on this iPad. A document picker saves the file without
+    // building those icons, and Save to Files is the usual destination anyway.
+    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForExportingURLs:@[fileURL] asCopy:YES];
+    picker.modalPresentationStyle = UIModalPresentationFormSheet;
+    [self presentViewController:picker animated:YES completion:nil];
 }
 
 - (void)importConfig {
@@ -529,13 +519,21 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
         return;
     }
 
+    if ([RCBackup isFullBackupData:data]) {
+        [self confirmFullBackupRestore:data];
+    } else {
+        // An older export: every key it has is applied, the files it never had are skipped
+        [self confirmConfigImport:data];
+    }
+}
+
+- (void)importConfigData:(NSData *)data {
     NSError *error = nil;
     BOOL success = [[RCConfigManager sharedManager] importConfigFromJSON:data error:&error];
+    [self.tableView reloadData];
 
     if (success) {
-        [self.tableView reloadData];
-
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Import Successful" message:@"Configuration restored. Return to Triggers to see changes." preferredStyle:UIAlertControllerStyleAlert];
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Import Successful" message:@"Settings and triggers restored. Return to Triggers to see the changes." preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
         [self presentViewController:alert animated:YES completion:nil];
     } else {
@@ -546,6 +544,36 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     }
 }
 
+- (void)confirmConfigImport:(NSData *)data {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Import Configuration?"
+                                                                   message:@"This applies every setting and trigger in the file, including integrations, and replaces the values already set here."
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Import" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+        [self importConfigData:data];
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)confirmFullBackupRestore:(NSData *)data {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Restore Full Backup?"
+                                                                   message:@"This replaces all settings, triggers, integrations and add-ons on this device."
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Restore" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+        NSError *error = nil;
+        BOOL success = [RCBackup restoreFullBackupData:data error:&error];
+        [self.tableView reloadData];
+
+        UIAlertController *result = success
+            ? [UIAlertController alertControllerWithTitle:@"Restore Complete" message:@"Everything was put back exactly as it was in the backup." preferredStyle:UIAlertControllerStyleAlert]
+            : [UIAlertController alertControllerWithTitle:@"Restore Failed" message:error.localizedDescription ?: @"Could not restore the backup" preferredStyle:UIAlertControllerStyleAlert];
+        [result addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:result animated:YES completion:nil];
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {
     NSLog(@"[RemoteCompanion] Import cancelled by user");
 }
@@ -554,38 +582,7 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
 // SpringBoard, outside the app sandbox, so iCloud Drive files are readable there.
 - (NSData *)readFileThroughTweak:(NSString *)path {
     if (path.length == 0) return nil;
-
-    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (fd < 0) return nil;
-
-    struct timeval timeout = { .tv_sec = 5, .tv_usec = 0 };
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
-
-    struct sockaddr_un addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sun_family = AF_UNIX;
-    strlcpy(addr.sun_path, "/var/mobile/Documents/rc.sock", sizeof(addr.sun_path));
-
-    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        close(fd);
-        return nil;
-    }
-
-    NSString *command = [NSString stringWithFormat:@"read file %@", path];
-    NSData *commandData = [command dataUsingEncoding:NSUTF8StringEncoding];
-    write(fd, commandData.bytes, commandData.length);
-
-    NSMutableData *response = [NSMutableData data];
-    uint8_t buffer[4096];
-    ssize_t count;
-    while ((count = read(fd, buffer, sizeof(buffer))) > 0) {
-        [response appendBytes:buffer length:(NSUInteger)count];
-    }
-    close(fd);
-
-    NSString *encoded = [[NSString alloc] initWithData:response encoding:NSUTF8StringEncoding];
-    encoded = [encoded stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    NSString *encoded = [RCBackup sendTweakCommand:[NSString stringWithFormat:@"read file %@", path]];
     if (encoded.length == 0 || [encoded hasPrefix:@"Error"]) return nil;
     return [[NSData alloc] initWithBase64EncodedString:encoded options:NSDataBase64DecodingIgnoreUnknownCharacters];
 }
