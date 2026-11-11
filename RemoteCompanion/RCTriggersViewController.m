@@ -997,10 +997,10 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
                                         @"icon": [RCTriggersViewController iconNameForTrigger:key],
                                         @"section": section,
                                         @"handler": ^{
-            // A new trigger stays disabled until it has an action; the action editor
-            // switches it on. Opening one that already exists leaves its state alone.
+            // A new trigger starts enabled, so it is ready as soon as an action is added.
+            // Opening one that already exists leaves its state alone.
             if (![config triggerDataForKey:key]) {
-                [config updateTrigger:key withData:@{ @"name": title, @"enabled": @NO, @"actions": @[], @"added": @YES }];
+                [config updateTrigger:key withData:@{ @"name": title, @"enabled": @YES, @"actions": @[], @"added": @YES }];
             }
             replaceMenuWith([[RCActionsViewController alloc] initWithTriggerKey:key]);
         } } mutableCopy];
