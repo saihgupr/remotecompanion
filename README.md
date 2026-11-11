@@ -250,7 +250,7 @@ Combine status queries with actions for smart automation:
   ```
 - `rc import <path>` - Put an exported file back on the device exactly as it was.
 
-The file is plain text and holds your passwords and tokens. Keep it private.
+The file is plain text and may include saved passwords and tokens. Keep it private.
 
 </details>
 

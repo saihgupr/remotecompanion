@@ -2040,8 +2040,20 @@ static id rc_shared_instance(const char *className) {
     return instance;
 }
 
+static BOOL rc_can_present_control_center(id object) {
+    return [object respondsToSelector:@selector(presentAnimated:)] ||
+           [object respondsToSelector:@selector(_presentControlCenterGestureBeganWithReason:)];
+}
+
 static id rc_control_center_presenter(void) {
-    return rc_shared_instance("SBControlCenterCoordinator") ?: rc_shared_instance("SBControlCenterController");
+    // Class existence is not enough: a release can ship the coordinator class without
+    // the methods that open Control Center. Use whichever object can actually present
+    // it, and return a candidate that cannot only so the caller can log.
+    id coordinator = rc_shared_instance("SBControlCenterCoordinator");
+    if (rc_can_present_control_center(coordinator)) return coordinator;
+    id controller = rc_shared_instance("SBControlCenterController");
+    if (rc_can_present_control_center(controller)) return controller;
+    return coordinator ?: controller;
 }
 
 static void load_blacklist() {
@@ -10294,14 +10306,17 @@ static NSString *handle_command(NSString *cmd) {
                 return;
             }
 
-            if ([controller respondsToSelector:@selector(isVisible)] &&
-                [controller respondsToSelector:@selector(presentAnimated:)]) {
-                if ([controller isVisible]) {
-                    [controller dismissAnimated:YES];
-                } else {
-                    rc_mark_intentional_cc_open();
-                    [controller presentAnimated:YES];
-                }
+            BOOL canPresent = [controller respondsToSelector:@selector(presentAnimated:)];
+            BOOL canDismiss = [controller respondsToSelector:@selector(dismissAnimated:)];
+            // isVisible is not on every object that can open Control Center, so a
+            // missing method counts as not visible instead of blocking the toggle.
+            BOOL visible = [controller respondsToSelector:@selector(isVisible)] ? [controller isVisible] : NO;
+            if (visible && canDismiss) {
+                [controller dismissAnimated:YES];
+                opened = YES;
+            } else if (!visible && canPresent) {
+                rc_mark_intentional_cc_open();
+                [controller presentAnimated:YES];
                 opened = YES;
             } else if ([controller respondsToSelector:@selector(_presentControlCenterGestureBeganWithReason:)]) {
                  rc_mark_intentional_cc_open();
