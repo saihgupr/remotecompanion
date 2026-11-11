@@ -853,7 +853,7 @@ static id g_actionClipboard = nil;
 }
 
 // What happens when the trigger fires again while its actions are still running (in a wait):
-// "parallel" runs them again in parallel, "restart" stops the run that's going and starts over,
+// "parallel" runs them again alongside, "restart" stops the run that's going and starts over,
 // "single" ignores the new firing
 - (NSString *)runMode {
     NSString *mode = [[RCConfigManager sharedManager] triggerDataForKey:_triggerKey][@"mode"];
@@ -904,7 +904,7 @@ static id g_actionClipboard = nil;
         preferredStyle:UIAlertControllerStyleActionSheet];
     NSString *current = [self runMode];
     NSArray *choices = @[
-        @[@"parallel", @"Run in Parallel"],
+        @[@"parallel", @"Run Alongside"],
         @[@"restart", @"Restart"],
         @[@"single", @"Ignore"]
     ];
@@ -921,7 +921,7 @@ static id g_actionClipboard = nil;
     [self presentViewController:sheet animated:YES completion:nil];
 }
 
-// A trigger with a loop restarts when it fires again (instead of running a second copy in parallel),
+// A trigger with a loop restarts when it fires again (instead of running a second copy alongside),
 // unless When Triggered Again was already chosen
 - (void)defaultToRestartForLoop {
     if ([[RCConfigManager sharedManager] triggerDataForKey:_triggerKey][@"mode"]) return;
@@ -931,7 +931,7 @@ static id g_actionClipboard = nil;
 - (UIMenu *)moreMenu {
     __weak typeof(self) weakSelf = self;
     NSString *current = [self runMode];
-    NSString *currentTitle = @"Run in Parallel";
+    NSString *currentTitle = @"Run Alongside";
     if ([current isEqualToString:@"restart"]) {
         currentTitle = @"Restart";
     } else if ([current isEqualToString:@"single"]) {
@@ -4500,8 +4500,8 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     NSString *mode = [self runMode];
     if ([mode isEqualToString:@"restart"]) return @"If triggered again while running, this sequence will start over.";
     if ([mode isEqualToString:@"single"]) return @"If triggered again while running, the new trigger will be ignored.";
-    // Run in Parallel, the default: shown only where a run lasts long enough for it to matter
-    if ([self sequenceTakesTime]) return @"If triggered again while running, a second run starts in parallel.";
+    // Run Alongside, the default: shown only where a run lasts long enough for it to matter
+    if ([self sequenceTakesTime]) return @"If triggered again while running, another run will start alongside.";
     return nil;
 }
 
@@ -4552,13 +4552,8 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         banner.enabled = ![self runShown]; // the debugger view is read-only
         banner.accessibilityLabel = [self runModeBannerText];
         banner.accessibilityHint = @"Changes what happens when triggered again";
-        // Each mode gets its own icon. The prohibited sign belongs to Ignore, where the
-        // new run really is blocked, not to the default mode.
-        NSString *mode = [self runMode];
-        NSString *symbol = @"arrow.triangle.branch";
-        if ([mode isEqualToString:@"restart"]) symbol = @"arrow.counterclockwise";
-        else if ([mode isEqualToString:@"single"]) symbol = @"nosign";
-        UIImageView *icon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:symbol]];
+        BOOL restart = [[self runMode] isEqualToString:@"restart"];
+        UIImageView *icon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:restart ? @"arrow.counterclockwise" : @"nosign"]];
         icon.tintColor = [UIColor secondaryLabelColor];
         icon.contentMode = UIViewContentModeCenter;
         icon.frame = CGRectMake(12, 0, 22, bannerHeight);
