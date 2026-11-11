@@ -19183,13 +19183,21 @@ static void rc_apply_camera_intent_to_viewfinder(id viewfinder) {
           uuid, (long)targetMode, (long)targetDevice, targetZoom, (long)targetFlash, autoShutter, viewfinder);
     
     // 1. Primary Mode & Device Switch
+    // iOS 26 dropped the underscore from _handleUserChangedToMode:device:zoomFactor:
+    SEL userChangedToMode = @selector(_handleUserChangedToMode:device:zoomFactor:);
+    if (![viewfinder respondsToSelector:userChangedToMode]) userChangedToMode = NSSelectorFromString(@"handleUserChangedToMode:device:zoomFactor:");
+    SEL changeToMode = NSSelectorFromString(@"changeToMode:device:animated:");
+    BOOL modeChanged = NO;
     if (alreadyInMode) {
         SRLog(@"[CameraHook] Already in mode %ld, keeping current zoom", (long)targetMode);
-    } else if ([viewfinder respondsToSelector:@selector(_handleUserChangedToMode:device:zoomFactor:)]) {
-        SRLog(@"[CameraHook] Invoking _handleUserChangedToMode:%ld device:%ld zoomFactor:%.1f", (long)targetMode, (long)targetDevice, targetZoom);
-        ((void (*)(id, SEL, NSInteger, NSInteger, double))objc_msgSend)(viewfinder, @selector(_handleUserChangedToMode:device:zoomFactor:), targetMode, targetDevice, targetZoom);
-    } else if ([viewfinder respondsToSelector:@selector(changeToCaptureMode:device:animated:)]) {
-        [viewfinder changeToCaptureMode:targetMode device:targetDevice animated:NO];
+    } else if ([viewfinder respondsToSelector:userChangedToMode]) {
+        SRLog(@"[CameraHook] Invoking %@%ld device:%ld zoomFactor:%.1f", NSStringFromSelector(userChangedToMode), (long)targetMode, (long)targetDevice, targetZoom);
+        ((void (*)(id, SEL, NSInteger, NSInteger, double))objc_msgSend)(viewfinder, userChangedToMode, targetMode, targetDevice, targetZoom);
+        modeChanged = YES;
+    } else if ([viewfinder respondsToSelector:changeToMode]) {
+        SRLog(@"[CameraHook] Invoking changeToMode:%ld device:%ld animated:NO", (long)targetMode, (long)targetDevice);
+        ((void (*)(id, SEL, NSInteger, NSInteger, BOOL))objc_msgSend)(viewfinder, changeToMode, targetMode, targetDevice, NO);
+        modeChanged = YES;
     }
     
     // 2. Zoom Control Notification
@@ -19201,11 +19209,14 @@ static void rc_apply_camera_intent_to_viewfinder(id viewfinder) {
         ((void (*)(id, SEL, id, double, NSInteger))objc_msgSend)(viewfinder, @selector(zoomControl:didChangeZoomFactor:interactionType:), zc, targetZoom, 1);
     }
     
-    // 3. Mode Dial fallback
-    if (!alreadyInMode && [viewfinder respondsToSelector:@selector(modeDial)]) {
-        id dial = [viewfinder performSelector:@selector(modeDial)];
-        if (dial && [dial respondsToSelector:@selector(setSelectedMode:animated:)]) {
-            [dial performSelector:@selector(setSelectedMode:animated:) withObject:@(targetMode) withObject:@(NO)];
+    // 3. Mode Dial fallback, only when neither mode method exists. The dial is on the
+    // Camera's bottom bar, not the viewfinder.
+    if (!alreadyInMode && !modeChanged && [viewfinder respondsToSelector:@selector(_bottomBar)]) {
+        id bottomBar = [viewfinder performSelector:@selector(_bottomBar)];
+        id dial = [bottomBar respondsToSelector:@selector(modeDial)] ? [bottomBar performSelector:@selector(modeDial)] : nil;
+        if ([dial respondsToSelector:@selector(setSelectedMode:animated:)]) {
+            SRLog(@"[CameraHook] Mode dial fallback: setSelectedMode:%ld", (long)targetMode);
+            ((void (*)(id, SEL, NSInteger, BOOL))objc_msgSend)(dial, @selector(setSelectedMode:animated:), targetMode, NO);
         }
     }
     
