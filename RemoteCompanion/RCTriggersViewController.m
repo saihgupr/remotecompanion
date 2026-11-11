@@ -985,8 +985,13 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
         @{ @"title": @"Scheduled Trigger", @"icon": @"calendar.badge.clock", @"section": @"Time", @"handler": ^{ push([[RCScheduledTriggerViewController alloc] init]); } },
         @{ @"title": @"Battery Level", @"icon": [UIImage systemImageNamed:@"battery.50"] ? @"battery.50" : @"battery.25", @"section": @"Device", @"handler": ^{ push([[RCBatteryTriggerViewController alloc] init]); } },
         @{ @"title": @"Focus", @"icon": @"moon.fill", @"section": @"Device", @"handler": ^{ push([[RCFocusTriggerViewController alloc] init]); } },
-        @{ @"title": @"MQTT Topic", @"icon": @"antenna.radiowaves.left.and.right", @"section": @"Integrations", @"handler": ^{ push([[RCMQTTTriggerViewController alloc] init]); } },
     ] mutableCopy];
+
+    // MQTT is only worth offering once it is set up in Integrations. A topic added while it
+    // was on stays in the trigger list after it is turned off; it just cannot be added again.
+    if ([RCConfigManager sharedManager].mqttEnabled) {
+        [items addObject:@{ @"title": @"MQTT Topic", @"icon": @"antenna.radiowaves.left.and.right", @"section": @"Integrations", @"handler": ^{ push([[RCMQTTTriggerViewController alloc] init]); } }];
+    }
 
     // Every built-in trigger is added from here. It can only be added once: when it is
     // already in the list, its menu entry opens it instead.

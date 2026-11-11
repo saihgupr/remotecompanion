@@ -3561,6 +3561,8 @@ const PHONE_ICONS = (() => {
     trigger_bottom_swipe_up_left: { arrowAt: 'L' },
     trigger_bottom_swipe_up_center: { arrowAt: 'C' },
     trigger_bottom_swipe_up_right: { arrowAt: 'R' },
+    trigger_statusbar_two_finger_swipe_down: { zone: 'top', fingers: 'down' },
+    trigger_bottom_two_finger_swipe_up: { zone: 'bottom', fingers: 'up' },
     trigger_home_double_click: { home: true, mark: '2×' },
     trigger_home_triple_click: { home: true, mark: '3×' },
     trigger_home_quadruple_click: { home: true, mark: '4×' },
@@ -3607,6 +3609,13 @@ function phoneIconSVG(spec) {
     if (spec.arrowAt) {
       parts.push(svgArrow({ L: 15, C: 20, R: 25 }[spec.arrowAt], 26, 'up', 11, 2.8));
       rect(14, 35, 12, 1.8, 0.9);
+    }
+    if (spec.fingers) {
+      // Two fingertips in the zone, and the way they slide across the rest of the screen
+      const down = spec.fingers === 'down';
+      const fy = down ? 7 : 33;
+      parts.push(`<circle cx="15.5" cy="${fy}" r="3" fill="currentColor"/><circle cx="24.5" cy="${fy}" r="3" fill="currentColor"/>`);
+      parts.push(svgArrow(20, down ? 23 : 17, spec.fingers, 14, 2.6));
     }
     const mark = spec.mark;
     if (mark) {
