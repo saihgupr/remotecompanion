@@ -904,7 +904,7 @@ static id g_actionClipboard = nil;
         preferredStyle:UIAlertControllerStyleActionSheet];
     NSString *current = [self runMode];
     NSArray *choices = @[
-        @[@"parallel", @"Run Simultaneously"],
+        @[@"parallel", @"Run in Parallel"],
         @[@"restart", @"Restart"],
         @[@"single", @"Ignore"]
     ];
@@ -931,7 +931,7 @@ static id g_actionClipboard = nil;
 - (UIMenu *)moreMenu {
     __weak typeof(self) weakSelf = self;
     NSString *current = [self runMode];
-    NSString *currentTitle = @"Run Simultaneously";
+    NSString *currentTitle = @"Run in Parallel";
     if ([current isEqualToString:@"restart"]) {
         currentTitle = @"Restart";
     } else if ([current isEqualToString:@"single"]) {
@@ -4500,8 +4500,8 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     NSString *mode = [self runMode];
     if ([mode isEqualToString:@"restart"]) return @"If triggered again while running, this sequence will start over.";
     if ([mode isEqualToString:@"single"]) return @"If triggered again while running, the new trigger will be ignored.";
-    // Run Simultaneously, the default: shown only where a run lasts long enough for it to matter
-    if ([self sequenceTakesTime]) return @"If triggered again while running, a second run starts at the same time.";
+    // Run in Parallel, the default: shown only where a run lasts long enough for it to matter
+    if ([self sequenceTakesTime]) return @"If triggered again while running, a second run starts in parallel.";
     return nil;
 }
 
