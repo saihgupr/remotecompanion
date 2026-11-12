@@ -45,7 +45,7 @@ For a client with a JSON config:
 | Tool | What it does |
 |---|---|
 | `look` | A screenshot with a grid labelled in screen points (half size by default) |
-| `read_text` | The screen's text once it stops changing, a line each with its position in points |
+| `read_text` | The screen's text, a line each with its position in points |
 | `tap`, `hold`, `swipe`, `drag`, `two_finger_swipe`, `pinch` | Touches at points |
 | `tap_text`, `wait_text` | Tap text on the screen, or wait until it shows |
 | `type` | Types into the field being edited |
@@ -54,8 +54,6 @@ For a client with a JSON config:
 | `list_phones` | The phones it can reach |
 
 Each action returns a fresh screenshot once the screen stops changing, so one call both acts and shows the result. Pass `look: false` to skip it.
-
-`tap_text` taps the text itself. A home screen app's name is a label on iOS, not part of its button, so tapping it does nothing. Use `open_app` for apps.
 
 ## Locked phones
 `wake` turns the screen on and unlocks a phone without a passcode. For one with a passcode, the person holding it can enter the code in Settings › Diagnostics › Test Kit. The phone keeps it for a while and uses it only for requests made on the phone itself, such as this server's over SSH. The code is never sent to the assistant.

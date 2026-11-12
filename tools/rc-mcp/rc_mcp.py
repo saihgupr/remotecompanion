@@ -161,14 +161,7 @@ def t_look(args):
 
 def t_read_text(args):
     host = host_for(args.get("phone"))
-    command = rc("screen ocr" + (" fast" if args.get("fast") else ""))
-    if args.get("settle", True):
-        command = settle_steps() + "; " + command
-    code, out, err = ssh(host, command, timeout=40)
-    text = "\n".join(t for t in (out, err) if t)
-    if code != 0 or text.startswith("Error"):
-        raise ToolError(text or "Failed (exit %d)" % code)
-    return text
+    return run(host, "screen ocr" + (" fast" if args.get("fast") else ""), timeout=30)
 
 
 def gesture(args, words, seconds_default):
@@ -268,7 +261,7 @@ def t_rc_command(args):
 NUM = {"type": "number"}
 PHONE = {"type": "string", "description": "Which phone (a name from list_phones). Default: the first."}
 LOOK = {"type": "boolean", "description": "Return a screenshot once the screen has settled (default true)."}
-GRID = {"type": ["number", "boolean"], "description": "Grid line spacing in points on the screenshot (default 100; 0 for none; true is 100)."}
+GRID = {"type": "number", "description": "Grid line spacing in points on the screenshot (default 100; 0 for none)."}
 SECS = lambda d: {"type": "number", "description": "Duration in seconds (default %g)." % d}
 LINE = {"x1": NUM, "y1": NUM, "x2": NUM, "y2": NUM}
 
@@ -281,10 +274,8 @@ TOOLS = [
       "grid": GRID, "settle": {"type": "boolean", "description": "Wait for the screen to stop changing (default true)."}}, []),
     ("read_text", t_read_text,
      "The text on the screen, read with text recognition: one line per piece of text, 'x,y WxH  text' in screen "
-     "points. Waits for the screen to stop changing first, so the positions match what is there when the next "
-     "touch lands. Cheaper than look when the words are what you need; it can't see icons or pictures.",
-     {"fast": {"type": "boolean", "description": "A quicker, rougher read."},
-      "settle": {"type": "boolean", "description": "Wait for the screen to stop changing before reading (default true)."}}, []),
+     "points. Cheaper than look when the words are what you need; it can't see icons or pictures.",
+     {"fast": {"type": "boolean", "description": "A quicker, rougher read."}}, []),
     ("tap", t_tap, "A tap at x, y in screen points.", {"x": NUM, "y": NUM, "look": LOOK, "grid": GRID}, ["x", "y"]),
     ("hold", t_hold, "A long press at x, y.", {"x": NUM, "y": NUM, "seconds": SECS(1), "look": LOOK, "grid": GRID}, ["x", "y"]),
     ("swipe", t_swipe,
