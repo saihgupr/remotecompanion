@@ -233,12 +233,22 @@ static NSArray<RCScreenText *> *rc_screen_read(BOOL accurate, NSString **error) 
     NSString *done = rc_vision_run(busy, 15, ^NSString *{
         CGImageRef img = shot.CGImage;
         double W = CGImageGetWidth(img), H = CGImageGetHeight(img);
-        id req = [[NSClassFromString(@"VNRecognizeTextRequest") alloc] init];
-        [req setRecognitionLevel:accurate ? kRCOCRLevelAccurate : kRCOCRLevelFast];
-        [req setUsesLanguageCorrection:NO];
         id handler = [[NSClassFromString(@"VNImageRequestHandler") alloc] initWithCGImage:img options:@{}];
+        // The careful read fails in SpringBoard on some iOS versions ("Error computing NN outputs"
+        // on iOS 15): then the quick read is used, and remembered. (Running the careful one on the
+        // CPU instead hangs there.)
+        static BOOL carefulFails = NO;
+        id req = nil;
         NSError *err = nil;
-        [handler performRequests:@[req] error:&err];
+        for (int quick = (!accurate || carefulFails) ? 1 : 0; quick <= 1; quick++) {
+            req = [[NSClassFromString(@"VNRecognizeTextRequest") alloc] init];
+            [req setRecognitionLevel:quick ? kRCOCRLevelFast : kRCOCRLevelAccurate];
+            [req setUsesLanguageCorrection:NO];
+            err = nil;
+            [handler performRequests:@[req] error:&err];
+            if (!err) break;
+            if (!quick) { carefulFails = YES; SRLog(@"[Screen] Careful text recognition failed (%@): using the quick one", err.localizedDescription); }
+        }
         if (err) { failure = err.localizedDescription; return @""; }
         NSMutableArray *items = [NSMutableArray array];
         for (id obs in [req results]) {
