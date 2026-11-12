@@ -63,6 +63,8 @@ if [ -z "$1" ]; then
     echo "  camera shutter / snap - Press Camera shutter button to take photo or toggle recording"
     echo "  camera record     - Toggle video recording in Camera app"
     echo "  toast \"Title\" [\"Subtitle\"] [\"Icon\"] - Display HUD toast notification"
+    echo "  notify \"Title\" [\"Message\"] [--urgent] [--remove-after SECONDS] [--image \"sf:NAME\"|\"app:BUNDLE\"] - Post a standard iOS notification"
+    echo "  notify clear - Remove RC's notifications from Notification Center"
     echo "  ha <toggle|turn_on|turn_off|call> - Control Home Assistant"
     echo "  km <trigger|url>  - Trigger Keyboard Maestro Macro or URL"
     echo "  mqtt <pub|publish> <topic> [payload] - Publish MQTT topic"

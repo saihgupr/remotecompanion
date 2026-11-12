@@ -155,7 +155,7 @@ verify_arch() {
             *" arm64 "*) ;;
             *) echo "❌ ${f#Tweak/.theos/_/} has no arm64 slice (A11 and older support lost)"; bad=1 ;;
         esac
-    done < <(find Tweak/.theos/_ -type f \( -name "*.dylib" -o -name "rc-client" \))
+    done < <(find Tweak/.theos/_ -type f \( -name "*.dylib" -o -name "rc-client" -o -name "rc-notify" \))
     [ "$bad" -eq 0 ] || exit 1
 }
 

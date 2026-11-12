@@ -116,6 +116,21 @@
 - (NSString *)saveAppTriggerWithPrefix:(NSString *)prefix names:(NSArray<NSString *> *)names bundleIds:(NSArray<NSString *> *)bundleIds replacing:(NSString *)oldKey;
 - (void)renameTrigger:(NSString *)triggerKey toName:(NSString *)newName;
 - (NSArray<NSString *> *)nfcTriggerKeys;
+
+// Notification triggers: tapping a Notification action's notification runs notiftap_<its tap ID>,
+// a button of its long-press menu notifbtn_<the button's ID> (see RCNotifyCommand)
+- (NSArray<NSString *> *)notificationTapTriggerKeys;   // both kinds
+// Every Notification action, and each of its buttons: @{ kind: tap|button, trigger, index, title,
+// key? (the trigger it runs), tap?, button?, buttonID?, buttonTitle? }
+- (NSArray<NSDictionary *> *)notificationActionEntries;
+- (NSDictionary *)notificationEntryForTriggerKey:(NSString *)triggerKey;
+// The trigger an entry runs, giving a notification a tap ID (saved) when it has none
+- (NSString *)triggerKeyForNotificationEntry:(NSDictionary *)entry;
+// Links an entry (of the same kind) to that trigger; others linked to it lose the link
+- (void)linkNotificationEntry:(NSDictionary *)entry toTriggerKey:(NSString *)triggerKey;
++ (NSString *)tapIDInNotifyCommand:(NSString *)command;
++ (NSString *)titleInNotifyCommand:(NSString *)command;
++ (NSString *)newNotificationTapID;
 - (NSArray<NSDictionary *> *)notificationTriggers;
 - (void)setNotificationTriggers:(NSArray<NSDictionary *> *)triggers;
 - (void)saveConfig;

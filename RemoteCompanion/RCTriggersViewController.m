@@ -2,6 +2,7 @@
 #import "RCConfigManager.h"
 #import "RCActionsViewController.h"
 #import "RCNewTriggerViewController.h"
+#import "RCNotificationTapTriggerViewController.h"
 #import "RCSettingsViewController.h"
 #import "RCFocusTriggerViewController.h"
 #import "RCAddOnCatalog.h"
@@ -323,6 +324,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     if ([RCAddOnCatalog isAddOnTriggerKey:triggerKey]) return [RCAddOnCatalog iconForTriggerKey:triggerKey] ?: @"puzzlepiece.extension";
     if ([triggerKey hasPrefix:@"app_launch_"]) return @"app.badge";
     if ([triggerKey hasPrefix:@"app_exit_"]) return [UIImage systemImageNamed:@"rectangle.portrait.and.arrow.right"] ? @"rectangle.portrait.and.arrow.right" : @"arrow.right.square"; // iOS 15+
+    if ([triggerKey hasPrefix:@"notiftap_"] || [triggerKey hasPrefix:@"notifbtn_"]) return @"bell.fill";
     if ([triggerKey hasPrefix:@"notif_"] || [triggerKey hasPrefix:@"notify_"]) return @"bell.badge.fill";
     if ([triggerKey hasPrefix:@"sched_"]) return @"clock.fill";
     if ([triggerKey hasPrefix:@"mqtt_"] || [triggerKey hasPrefix:@"mqtt_sub_"]) return @"antenna.radiowaves.left.and.right";
@@ -788,6 +790,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
 
     // Dynamic Sections (Hide if empty/favorited)
     addSection([[RCConfigManager sharedManager] nfcTriggerKeys], @"NFC Tags", YES);
+    addSection([[RCConfigManager sharedManager] notificationTapTriggerKeys], @"Notifications", YES);
 
     // WiFi Section
     NSMutableArray *wifiKeys = [NSMutableArray array];
@@ -982,6 +985,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
             push(vc);
         } },
         @{ @"title": @"Notification", @"icon": @"bell.badge", @"section": @"Apps", @"handler": ^{ push([[RCNotificationTriggerViewController alloc] init]); } },
+        @{ @"title": @"Notification Tap", @"icon": @"hand.tap", @"image": RCTriggerIconImage(@"notiftap_", 22), @"section": @"Apps", @"handler": ^{ push([[RCNotificationTapTriggerViewController alloc] init]); } },
         @{ @"title": @"Scheduled Trigger", @"icon": @"calendar.badge.clock", @"section": @"Time", @"handler": ^{ push([[RCScheduledTriggerViewController alloc] init]); } },
         @{ @"title": @"Battery Level", @"icon": [UIImage systemImageNamed:@"battery.50"] ? @"battery.50" : @"battery.25", @"section": @"Device", @"handler": ^{ push([[RCBatteryTriggerViewController alloc] init]); } },
         @{ @"title": @"Focus", @"icon": @"moon.fill", @"section": @"Device", @"handler": ^{ push([[RCFocusTriggerViewController alloc] init]); } },
@@ -1547,7 +1551,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
 // schedule (their default names don't say anything a letter could).
 + (NSString *)letterForTrigger:(NSString *)triggerKey {
     BOOL created = NO;
-    for (NSString *prefix in @[@"nfc_", @"wifi_", @"bt_", @"output_", @"notif_", @"notify_", @"sched_", @"mqtt_"]) {
+    for (NSString *prefix in @[@"nfc_", @"wifi_", @"bt_", @"output_", @"notif_", @"notify_", @"sched_", @"mqtt_", @"notiftap_", @"notifbtn_"]) {
         if ([triggerKey hasPrefix:prefix]) { created = YES; break; }
     }
     if (!created) return nil;
@@ -1561,8 +1565,13 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
                 NSRange range = [name rangeOfString:joint];
                 if (range.location != NSNotFound) { source = [name substringFromIndex:NSMaxRange(range)]; break; }
             }
-        } else if ([triggerKey hasPrefix:@"mqtt_"] || [triggerKey hasPrefix:@"notif_"] || [triggerKey hasPrefix:@"notify_"]) {
-            // "MQTT: home/door (OPEN)": the topic; a name given when it was made: that name
+        } else if ([triggerKey hasPrefix:@"notifbtn_"]) {
+            // "Aerial › Verify": the button
+            NSRange arrow = [name rangeOfString:@" › "];
+            source = arrow.location != NSNotFound ? [name substringFromIndex:NSMaxRange(arrow)] : name;
+        } else if ([triggerKey hasPrefix:@"mqtt_"] || [triggerKey hasPrefix:@"notif_"] || [triggerKey hasPrefix:@"notify_"] || [triggerKey hasPrefix:@"notiftap_"]) {
+            // "MQTT: home/door (OPEN)": the topic; "Tap: Aerial": the notification's title; a name
+            // given when it was made: that name
             NSRange colon = [name rangeOfString:@": "];
             source = colon.location != NSNotFound ? [name substringFromIndex:NSMaxRange(colon)] : name;
         }

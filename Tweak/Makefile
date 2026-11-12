@@ -31,6 +31,8 @@ RemoteCommand_FILES += RCScreen.m
 RemoteCommand_FILES += RCAddOns.m
 # Shared with the app: the one toast pill (editor preview uses the same file)
 RemoteCommand_FILES += ../RemoteCompanion/RCToastPill.m
+# Shared with the app: reading notify commands the way the Notification editor writes them
+RemoteCommand_FILES += ../RemoteCompanion/RCNotifyCommand.m
 RemoteCommand_CFLAGS = -fobjc-arc -Ilua -I../RemoteCompanion -DLUA_USE_IOS -Wno-unused-function -Wno-unused-variable
 RemoteCommand_FRAMEWORKS = UIKit CoreNFC IOKit QuartzCore CoreLocation Security
 RemoteCommand_PRIVATE_FRAMEWORKS = AppSupport MediaRemote MobileCoreServices FrontBoardServices BackBoardServices MediaPlayer DoNotDisturb BiometricKit AccessibilityUtilities
@@ -59,5 +61,6 @@ include $(THEOS_MAKE_PATH)/tweak.mk
 
 SUBPROJECTS += rc-root
 SUBPROJECTS += rc-client
+SUBPROJECTS += rc-notify
 SUBPROJECTS += rc-ocr
 include $(THEOS_MAKE_PATH)/aggregate.mk

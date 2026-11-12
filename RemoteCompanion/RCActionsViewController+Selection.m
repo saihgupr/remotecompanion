@@ -1,4 +1,5 @@
 #import "RCActionsViewController+Selection.h"
+#import "RCNotifyCommand.h"
 #import <objc/runtime.h>
 
 static NSString *const kRCActionsPasteboardType = @"com.saihgupr.remotecompanion.actions";
@@ -84,7 +85,8 @@ static NSString *RCActionCountText(NSUInteger count) {
 - (void)rc_pasteActions {
     NSArray *copied = [RCActionsViewController rc_actionsOnPasteboard];
     if (!copied) return;
-    [self.actions addObjectsFromArray:copied];
+    // A pasted Notification action gets IDs of its own (its own tap and button triggers)
+    for (id item in copied) [self.actions addObject:[RCNotifyCommand copyOfActionWithNewIDs:item]];
     [self saveActions];
     [self.tableView reloadData];
     NSIndexPath *last = [NSIndexPath indexPathForRow:self.actions.count - 1 inSection:0];

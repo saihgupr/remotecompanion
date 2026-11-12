@@ -445,6 +445,8 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
             @{ @"name": @"Stop Trigger...", @"command": @"__STOP_TRIGGER__", @"icon": @"stop.circle" },
             @{ @"name": @"Terminal Command", @"command": @"__CUSTOM__", @"icon": @"terminal.fill" },
             @{ @"name": @"Toast...", @"command": @"__TOAST__", @"icon": @"text.bubble.fill" },
+            @{ @"name": @"Notification...", @"command": @"__NOTIFICATION__", @"icon": @"bell.badge.fill" },
+            @{ @"name": @"Clear RC Notifications", @"command": @"notify clear", @"icon": @"bell.slash.fill" },
             @{ @"name": @"Haptic Feedback", @"command": @"haptic", @"icon": @"hand.tap.fill" }
         ]
     ];
@@ -637,7 +639,7 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
     dispatch_once(&once, ^{
         more = [NSSet setWithArray:@[@"__SET_VOLUME__", @"__SET_RINGER_VOLUME__", @"__SET_BRIGHTNESS__", @"__SET_FLASHLIGHT__",
                                      @"__BT_CONNECT__", @"__BT_DISCONNECT__", @"__AIRPLAY_CONNECT__", @"__FOCUS__",
-                                     @"__SHORTCUT_PICKER__", @"__OPEN_APP__", @"__KILL_APP__", @"__LUA_SCRIPT__", @"__TOAST__",
+                                     @"__SHORTCUT_PICKER__", @"__OPEN_APP__", @"__KILL_APP__", @"__LUA_SCRIPT__", @"__TOAST__", @"__NOTIFICATION__",
                                      @"__IF_CONDITION__", @"__REPEAT__", @"__REPEAT_WHILE__", @"__WAIT_UNTIL__", @"__DELAY__",
                                      @"__STOP_TRIGGER__", @"__CUSTOM__", @"__HA_PICKER__", @"__KM_TRIGGER__", @"__MQTT_PUBLISH__",
                                      @"__CAMERA_PICKER__", @"__CAMERA_VIDEO_PICKER__", @"__TAP__", @"__HOLD__", @"__SWIPE__",
