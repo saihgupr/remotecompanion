@@ -3,6 +3,7 @@
 #import "RCConfigManager.h"
 #import "RCActionTile.h"
 #import "RCAddOnCatalog.h"
+#import "RCCategoryBar.h"
 
 // Lists the action picker's catalog; tapping an action adds/removes it from the
 // config's "bannerActions". Each entry tells the tweak how to recognise the action:
@@ -26,7 +27,12 @@
 @property (nonatomic, strong) NSArray<NSArray<NSDictionary *> *> *displaySections;
 @property (nonatomic, strong) NSMutableSet<NSString *> *selectedIds;
 @property (nonatomic, strong) NSMutableSet<NSString *> *optedOutIds;
+// All, Enabled, then a chip per category; the chip picked (nil: All)
+@property (nonatomic, strong) RCCategoryBar *categoryBar;
+@property (nonatomic, copy) NSString *selectedCategory;
 @end
+
+static NSString *const RCBannersEnabledTitle = @"Enabled";
 
 // Catalog commands of the actions that show a banner of their own (the ids the tweak checks)
 static NSSet<NSString *> *RCOwnBannerIds(void) {
@@ -110,10 +116,44 @@ static NSArray<NSArray<NSDictionary *> *> *RCBannerCatalog(NSArray<NSString *> *
     if ([self.selectedIds containsObject:@"anc off"] || [self.selectedIds containsObject:@"anc transparency"]) [self.selectedIds addObject:@"anc on"];
     self.optedOutIds = [NSMutableSet setWithArray:cm.bannerOptOut];
     [self buildDisplaySections];
+
+    // Category bar over the grid, as in Select Action. A chip shows only its actions.
+    self.categoryBar = [[RCCategoryBar alloc] initWithWidth:self.view.bounds.size.width];
+    NSArray *chips = [@[RCBannersEnabledTitle] arrayByAddingObjectsFromArray:self.sectionTitles];
+    [self.categoryBar setChipTitles:chips];
+    self.categoryBar.selectedIndex = -1;
+    __weak typeof(self) weakSelf = self;
+    self.categoryBar.onSelect = ^(NSInteger index) {
+        [weakSelf showCategory:(index >= 0 && index < (NSInteger)chips.count) ? chips[index] : nil];
+    };
+    [self.categoryBar attachToScrollView:self.collectionView];
 }
 
-// The checked actions in one section at the top, and each category without them (empty ones left out)
+- (void)showCategory:(NSString *)title {
+    self.selectedCategory = title;
+    [self buildDisplaySections];
+    [self.collectionView reloadData];
+    [self.collectionView setContentOffset:CGPointMake(0, -self.collectionView.adjustedContentInset.top) animated:NO];
+}
+
+- (void)scrollViewDidScroll:(UIScrollView *)scrollView {
+    [self.categoryBar scrollViewDidScroll:scrollView];
+}
+
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    [self.categoryBar layoutInScrollView:self.collectionView];
+}
+
+// The checked actions in one section at the top, and each category without them (empty ones left out).
+// With a category chip picked: that category, checked actions included. With Enabled: the checked ones.
 - (void)buildDisplaySections {
+    NSUInteger category = self.selectedCategory ? [self.sectionTitles indexOfObject:self.selectedCategory] : NSNotFound;
+    if (category != NSNotFound) {
+        self.displayTitles = @[self.sectionTitles[category]];
+        self.displaySections = @[self.sections[category]];
+        return;
+    }
     NSMutableArray *enabled = [NSMutableArray array], *titles = [NSMutableArray array], *sections = [NSMutableArray array];
     for (NSUInteger i = 0; i < self.sections.count; i++) {
         NSMutableArray *rest = [NSMutableArray array];
@@ -126,8 +166,14 @@ static NSArray<NSArray<NSDictionary *> *> *RCBannerCatalog(NSArray<NSString *> *
             [sections addObject:rest];
         }
     }
+    if ([self.selectedCategory isEqualToString:RCBannersEnabledTitle]) {
+        // Kept when empty, so the screen still says what it is
+        self.displayTitles = @[RCBannersEnabledTitle];
+        self.displaySections = @[enabled];
+        return;
+    }
     if (enabled.count) {
-        [titles insertObject:@"Enabled" atIndex:0];
+        [titles insertObject:RCBannersEnabledTitle atIndex:0];
         [sections insertObject:enabled atIndex:0];
     }
     self.displayTitles = titles;
