@@ -11,6 +11,9 @@ All notable changes to this project will be documented in this file.
 - **Text on Screen condition**: in If and Wait Until, true while the text shows anywhere on the screen (#158).
 - **MCP server for assistants**: `tools/rc-mcp` is one Python file that lets an MCP client look at the screen, tap, swipe, type and run any RC command over SSH. Nothing is installed on the phone (#159).
 
+### Fixed
+- **Tap Text on a home screen icon**: an app's name sits under its icon and iOS does not count the name as part of the icon, so tapping it did nothing. `screen tap` now moves the touch up to the icon when the text is an app's name and the home screen is showing. Text inside apps is unchanged.
+
 ## [4.5.0] - 2026-11-11
 
 ### Added
