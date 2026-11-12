@@ -46,6 +46,7 @@
 #import <notify.h>
 #import <objc/runtime.h>
 #import "RCFocusTriggerViewController.h"
+#import "RCControlCenterTriggerViewController.h"
 
 #define kSimulateNotificationPrefix "com.pizzaman.rc.simulate."
 
@@ -1449,6 +1450,7 @@ static void RCSetRunWatching(BOOL watching) {
                           [_triggerKey hasPrefix:@"notif_"] ||
                           [_triggerKey hasPrefix:@"notify_"] ||
                           [_triggerKey hasPrefix:@"trigger_device_focus_"] ||
+                          [_triggerKey hasPrefix:RCControlCenterButtonKeyPrefix] ||
                           [_triggerKey hasPrefix:@"wifi_"] ||
                           [_triggerKey hasPrefix:@"bt_"] ||
                           [_triggerKey hasPrefix:@"output_"] ||
@@ -1765,6 +1767,7 @@ static void RCSetRunWatching(BOOL watching) {
     }
     
     if (!vc && [_triggerKey hasPrefix:@"trigger_device_focus_"]) vc = [[RCFocusTriggerViewController alloc] initWithTriggerKey:_triggerKey];
+    if (!vc && [_triggerKey hasPrefix:RCControlCenterButtonKeyPrefix]) vc = [[RCControlCenterTriggerViewController alloc] initWithTriggerKey:_triggerKey];
     if (vc) {
         [self.navigationController pushViewController:vc animated:YES];
     }

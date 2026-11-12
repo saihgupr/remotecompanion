@@ -3654,6 +3654,7 @@ function triggerIconHTML(key) {
 
 function iconForKey(key) {
   if (TRIGGER_ICONS[key]) return TRIGGER_ICONS[key];
+  if (key.startsWith('trigger_cc_button_')) return { icon:'switch_2', cls:'icon-blue' };
   if (key.startsWith('trigger_device_focus_on')) return { icon:'moon_fill', cls:'icon-indigo' };
   if (key.startsWith('trigger_device_focus_off')) return { icon:'moon', cls:'icon-indigo' };
   if (key.startsWith('nfc_'))        return { icon:'antenna_radiowaves_left_right', cls:'icon-cyan' };
@@ -3709,6 +3710,7 @@ function defaultNameForKey(key) {
   if (TRIGGER_NAMES[key]) return TRIGGER_NAMES[key];
   const t = config.triggers[key];
   if (t && t.name) return t.name;
+  if (key.startsWith('trigger_cc_button_')) return `Control Center Button ${key.slice(18)}`;
   if (key === 'trigger_device_focus_on') return 'Focus On: Any';
   if (key === 'trigger_device_focus_off') return 'Focus Off: Any';
   if (key.startsWith('trigger_device_focus_on_')) return `Focus On: ${key.slice(24)}`;
@@ -10213,6 +10215,33 @@ function saveAppTrigger(kind, names, ids, replacingKey) {
 }
 
 // ── Focus Trigger Setup ─────────────────────────────────────────────────────
+function promptControlCenterTrigger() {
+  const slots = [1, 2, 3, 4];
+  const freeSlots = slots.filter(s => !config.triggers[`trigger_cc_button_${s}`]);
+  if (!freeSlots.length) {
+    showToast('All 4 Control Center buttons are in use.');
+    return;
+  }
+  showSheet('Control Center Button Number', freeSlots.map(s => ({
+    label: `Button ${s}`,
+    action: () => {
+      showDialog('Button Name', 'Name:', `Button ${s}`, 'Next', name => {
+        name = (name || `Button ${s}`).trim();
+        showDialog('Icon (SF Symbol)', 'Symbol name (e.g. bolt.fill, lightbulb.fill):', 'bolt.fill', 'Add', icon => {
+          icon = (icon || 'bolt.fill').trim();
+          const key = `trigger_cc_button_${s}`;
+          if (!config.triggers[key]) {
+            config.triggers[key] = { enabled: true, actions: [], name, icon };
+            saveConfig();
+          }
+          renderAll();
+          openActionsPanel(key);
+        });
+      });
+    }
+  })));
+}
+
 function promptFocusTrigger() {
   showSheet('Focus', [
     { label: 'Turns On', action: () => promptFocusName('on') },
@@ -10282,6 +10311,7 @@ function showAddTriggerSheet() {
     { label: 'WiFi Network Trigger', action: () => promptComplexTrigger('wifi') },
     { label: 'Bluetooth Device Trigger', action: () => promptComplexTrigger('bt') },
     { label: 'Audio Output Trigger', action: () => promptAudioOutputTrigger() },
+    { label: 'Control Center Button', action: () => promptControlCenterTrigger() },
     { label: 'Focus Trigger', action: () => promptFocusTrigger() },
     { label: 'Notification Trigger', action: () => promptNotifTrigger() },
     { label: 'App Launch Trigger', action: () => promptAppLaunchPicker() },

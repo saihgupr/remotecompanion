@@ -5,6 +5,7 @@
 #import "RCNotificationTapTriggerViewController.h"
 #import "RCSettingsViewController.h"
 #import "RCFocusTriggerViewController.h"
+#import "RCControlCenterTriggerViewController.h"
 #import "RCAddOnCatalog.h"
 #import "RCAddOnTriggersViewController.h"
 #import "RCNFCTriggerViewController.h"
@@ -295,6 +296,10 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
 }
 
 + (NSString *)iconNameForTrigger:(NSString *)triggerKey {
+    if ([triggerKey hasPrefix:RCControlCenterButtonKeyPrefix]) {
+        NSString *icon = [[RCConfigManager sharedManager] triggerDataForKey:triggerKey][@"icon"];
+        return [icon isKindOfClass:[NSString class]] && icon.length ? icon : @"switch.2";
+    }
     if ([triggerKey containsString:@"two_finger"]) return @"hand.draw";
     if ([triggerKey isEqualToString:@"volume_up_then_down"] || [triggerKey isEqualToString:@"volume_down_then_up"]) return @"arrow.up.and.down.circle.fill";
     if ([triggerKey hasPrefix:@"trigger_bottom_swipe_up"]) return @"chevron.compact.up";
@@ -786,6 +791,15 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
         if ([configuredKeys containsObject:key]) [deviceStateKeys addObject:key];
     }
     addSection(deviceStateKeys, @"Device State", YES);
+    // Control Center buttons, by number
+    NSMutableArray *ccButtonKeys = [NSMutableArray array];
+    for (NSString *key in [[RCConfigManager sharedManager] allConfiguredTriggerKeys]) {
+        if ([key hasPrefix:RCControlCenterButtonKeyPrefix]) [ccButtonKeys addObject:key];
+    }
+    [ccButtonKeys sortUsingComparator:^NSComparisonResult(NSString *a, NSString *b) {
+        return [a compare:b options:NSNumericSearch];
+    }];
+    addSection(ccButtonKeys, @"Control Center Buttons", YES);
     addSection(@[@"shake"], @"Motion Gestures", YES);
 
     // Dynamic Sections (Hide if empty/favorited)
@@ -991,6 +1005,9 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
         @{ @"title": @"Focus", @"icon": @"moon.fill", @"section": @"Device", @"handler": ^{ push([[RCFocusTriggerViewController alloc] init]); } },
         @{ @"title": @"MQTT Topic", @"icon": @"antenna.radiowaves.left.and.right", @"section": @"Integrations", @"handler": ^{ push([[RCMQTTTriggerViewController alloc] init]); } },
     ] mutableCopy];
+    if ([RCConfigManager supportsControlCenterButtons]) {
+        [items addObject:@{ @"title": @"Control Center Button", @"icon": @"switch.2", @"section": @"Device", @"handler": ^{ push([[RCControlCenterTriggerViewController alloc] init]); } }];
+    }
 
     // Every built-in trigger is added from here. It can only be added once: when it is
     // already in the list, its menu entry opens it instead.
