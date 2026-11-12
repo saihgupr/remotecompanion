@@ -1,4 +1,5 @@
 #import "RCConfigManager.h"
+#import "RCScreenActions.h"
 #import "RCHTTPAction.h"
 #import "RCGesturesViewController.h"
 #import <sys/sysctl.h>
@@ -1372,6 +1373,9 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
             NSString *expectedTitle = dict[@"expectedTitle"] ?: dict[@"expectedLabel"] ?: dict[@"expectedValue"];
             NSString *prefix = [type isEqualToString:@"else_if"] ? @"Else If" : @"If";
             NSString *condKey = dict[@"conditionKey"] ?: dict[@"conditionName"] ?: @"";
+            if ([condKey isEqualToString:@"screen_text"]) {
+                return [NSString stringWithFormat:@"%@ the Screen Shows \u201C%@\u201D", prefix, expectedTitle ?: @""];
+            }
             if ([condKey isEqualToString:@"time_between"] || [conditionTitle.lowercaseString containsString:@"time"]) {
                 return [NSString stringWithFormat:@"%@ Time is Between %@", prefix, expectedTitle ?: @"Time Range"];
             }
@@ -1874,6 +1878,8 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         } else if ([cmd hasPrefix:@"spotify "]) {
             result = @"Spotify";
         // Touch gestures with coordinates
+        } else if ([RCScreenActions nameForCommand:originalCmd]) {
+            result = [RCScreenActions nameForCommand:originalCmd]; // the text as typed, not lowercased
         } else if ([cmd hasPrefix:@"gesture record-toggle"]) {
             result = @"Record Gesture";
         } else if ([RCGesturesViewController gestureForCommand:originalCmd]) {
@@ -2036,6 +2042,8 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
     if ([cmd hasPrefix:@"kill "]) return [NSString stringWithFormat:@"USER_APP:%@", [cmd substringFromIndex:5]];
     // Touch gesture prefix icons
     if ([cmd hasPrefix:@"gesture play"]) return @"hand.draw.fill";
+    NSString *screenVerb = nil;
+    if ([RCScreenActions parseCommand:cmd verb:&screenVerb text:NULL seconds:NULL]) return [RCScreenActions iconForVerb:screenVerb];
     if ([cmd hasPrefix:@"gesture record-toggle"]) return @"record.circle";
     if ([cmd hasPrefix:@"tap "]) return @"hand.tap.fill";
     if ([cmd hasPrefix:@"hold "]) return @"hand.point.up.left.fill";

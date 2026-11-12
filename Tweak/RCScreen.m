@@ -3,6 +3,10 @@
 #import <sys/stat.h>
 #import <limits.h>
 #import <stdlib.h>
+#import <dlfcn.h>
+#import "RCGestures.h"
+
+void SRLog(NSString *format, ...);
 
 // UIKit's own screen grab: the whole screen as SpringBoard shows it (main thread only)
 extern UIImage *_UICreateScreenUIImage(void) NS_RETURNS_RETAINED;
@@ -116,6 +120,258 @@ static BOOL rc_capture_path_ok(NSString *path) {
     return NO;
 }
 
+// ---- Vision probe (screen ocr / screen shift) ----
+// A mobile CLI can't make IOSurfaces, so Vision dies there (probes/ocr-probe); in SpringBoard
+// it works. Vision itself is dlopened on first use so SpringBoard only loads it when asked.
+static void *rc_vision(void) {
+    static void *v;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ v = dlopen("/System/Library/Frameworks/Vision.framework/Vision", RTLD_LAZY); });
+    return v;
+}
+
+// One OCR or shift at a time
+static dispatch_semaphore_t rc_vision_busy(void) {
+    static dispatch_semaphore_t busy;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ busy = dispatch_semaphore_create(1); });
+    return busy;
+}
+
+// VN* messages, declared on NSObject so ARC is happy with classes from NSClassFromString
+@interface NSObject (RCVision)
+- (id)initWithCGImage:(CGImageRef)img options:(NSDictionary *)opts;
+- (BOOL)performRequests:(NSArray *)requests error:(NSError **)error;
+- (NSArray *)topCandidates:(NSUInteger)count;
+- (void)setRecognitionLevel:(long)level;
+- (void)setUsesLanguageCorrection:(BOOL)on;
+- (NSArray *)results;
+- (CGRect)boundingBox;
+- (NSString *)string;
+- (float)confidence;
+@end
+
+// The screen at points * scale pixels (scale 1 = point resolution, native = full pixels)
+static UIImage *rc_screen_grab(double scale) {
+    __block UIImage *out = nil;
+    void (^grab)(void) = ^{
+        UIImage *shot = _UICreateScreenUIImage();
+        if (!shot) return;
+        CGSize points = [UIScreen mainScreen].bounds.size;
+        CGSize size = CGSizeMake(round(points.width * scale), round(points.height * scale));
+        UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat defaultFormat];
+        format.scale = 1;
+        out = [[[UIGraphicsImageRenderer alloc] initWithSize:size format:format] imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+            [shot drawInRect:CGRectMake(0, 0, size.width, size.height)];
+        }];
+    };
+    if ([NSThread isMainThread]) grab(); else dispatch_sync(dispatch_get_main_queue(), grab);
+    return out;
+}
+
+// Runs `block` off the main thread with at most `seconds`. `busy` and the reply live in the
+// block, so on a timeout Vision keeps them until it really ends - the next request just sees
+// busy. Returns nil on timeout (the reply is only read once the block finished).
+static NSString *rc_vision_run(dispatch_semaphore_t busy, double seconds, NSString *(^block)(void)) {
+    dispatch_semaphore_t done = dispatch_semaphore_create(0);
+    __block NSString *reply = nil;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        @autoreleasepool { reply = block(); }
+        dispatch_semaphore_signal(done);
+        dispatch_semaphore_signal(busy);
+    });
+    if (dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(seconds * NSEC_PER_SEC))) != 0) return nil;
+    return reply;
+}
+
+// VNRequestTextRecognitionLevel: Accurate is 0, Fast is 1 - named, so the mapping can't flip
+static const long kRCOCRLevelAccurate = 0;
+static const long kRCOCRLevelFast = 1;
+
+// One line of text Vision found: its string and its box in screen points
+@interface RCScreenText : NSObject
+@property (nonatomic, copy) NSString *text;
+@property (nonatomic, assign) CGRect frame;
+@property (nonatomic, assign) float confidence;
+@end
+@implementation RCScreenText
+@end
+
+// Every line of text on the screen, read at full pixels (`accurate`) or quicker. Never on the main
+// thread (the grab needs it). nil with *error set when it couldn't read.
+static NSArray<RCScreenText *> *rc_screen_read(BOOL accurate, NSString **error) {
+    if ([NSThread isMainThread]) { if (error) *error = @"Can't read the screen from the main thread"; return nil; }
+    if (!rc_vision()) { if (error) *error = @"Vision couldn't load"; return nil; }
+    dispatch_semaphore_t busy = rc_vision_busy();
+    // Another read finishing first is fine: wait for it a little
+    if (dispatch_semaphore_wait(busy, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC))) != 0) {
+        if (error) *error = @"Busy reading the screen";
+        return nil;
+    }
+    double scale = [[UIScreen mainScreen] nativeScale];
+    if (!accurate) scale = MIN(scale, 2);
+    UIImage *shot = rc_screen_grab(scale);
+    if (!shot) { dispatch_semaphore_signal(busy); if (error) *error = @"Couldn't capture the screen"; return nil; }
+    __block NSArray *found = nil;
+    __block NSString *failure = nil;
+    NSString *done = rc_vision_run(busy, 15, ^NSString *{
+        CGImageRef img = shot.CGImage;
+        double W = CGImageGetWidth(img), H = CGImageGetHeight(img);
+        id req = [[NSClassFromString(@"VNRecognizeTextRequest") alloc] init];
+        [req setRecognitionLevel:accurate ? kRCOCRLevelAccurate : kRCOCRLevelFast];
+        [req setUsesLanguageCorrection:NO];
+        id handler = [[NSClassFromString(@"VNImageRequestHandler") alloc] initWithCGImage:img options:@{}];
+        NSError *err = nil;
+        [handler performRequests:@[req] error:&err];
+        if (err) { failure = err.localizedDescription; return @""; }
+        NSMutableArray *items = [NSMutableArray array];
+        for (id obs in [req results]) {
+            id best = [[obs topCandidates:1] firstObject];
+            if (!best) continue;
+            CGRect b = [obs boundingBox]; // normalized, origin bottom-left
+            RCScreenText *t = [RCScreenText new];
+            t.text = [best string];
+            t.confidence = [best confidence];
+            t.frame = CGRectMake(b.origin.x * W / scale, (1 - b.origin.y - b.size.height) * H / scale,
+                                 b.size.width * W / scale, b.size.height * H / scale);
+            [items addObject:t];
+        }
+        found = items;
+        return @"";
+    });
+    if (!done) { if (error) *error = @"Reading the screen took over 15 s"; return nil; }
+    if (failure) { if (error) *error = failure; return nil; }
+    return found;
+}
+
+// Lowercased with runs of spaces made one, for matching
+static NSString *rc_screen_norm(NSString *s) {
+    NSArray *parts = [[s lowercaseString] componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    return [[parts filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"length > 0"]] componentsJoinedByString:@" "];
+}
+
+// The line that best matches `query` (case doesn't matter): the same text, then one starting with
+// it, then one containing it; the shortest wins, then the highest. nil when none has it.
+static RCScreenText *rc_screen_match(NSArray<RCScreenText *> *items, NSString *query) {
+    NSString *q = rc_screen_norm(query);
+    if (!q.length) return nil;
+    RCScreenText *best = nil;
+    int bestRank = 9;
+    for (RCScreenText *t in items) {
+        NSString *n = rc_screen_norm(t.text);
+        int rank = [n isEqualToString:q] ? 0 : [n hasPrefix:q] ? 1 : [n containsString:q] ? 2 : 9;
+        if (rank == 9) continue;
+        BOOL better = rank < bestRank ||
+            (rank == bestRank && (t.text.length < best.text.length ||
+                                  (t.text.length == best.text.length && CGRectGetMinY(t.frame) < CGRectGetMinY(best.frame))));
+        if (better) { best = t; bestRank = rank; }
+    }
+    return best;
+}
+
+// Where the query's own words sit inside a longer line: the line's box narrowed in proportion, so
+// "Wi-Fi" in "Wi-Fi  Home Network" is tapped on "Wi-Fi", not the middle of the line
+static CGPoint rc_screen_target(RCScreenText *t, NSString *query) {
+    CGRect f = t.frame;
+    NSRange r = [t.text rangeOfString:query options:NSCaseInsensitiveSearch];
+    if (r.location != NSNotFound && t.text.length > 0) {
+        double per = f.size.width / t.text.length;
+        return CGPointMake(f.origin.x + per * (r.location + r.length / 2.0), CGRectGetMidY(f));
+    }
+    return CGPointMake(CGRectGetMidX(f), CGRectGetMidY(f));
+}
+
+BOOL RCScreenShowsText(NSString *text) {
+    NSString *error = nil;
+    NSArray *items = rc_screen_read(YES, &error);
+    if (!items) { SRLog(@"[Screen] Text on Screen \"%@\": %@", text, error); return NO; }
+    return rc_screen_match(items, text) != nil;
+}
+
+// The text in quotes after the verb (to the last quote, so quotes inside are kept), else the rest;
+// a number after the closing quote goes to *number
+static NSString *rc_screen_quoted(NSString *arg, double *number) {
+    arg = [arg stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    if ([arg hasPrefix:@"\""]) {
+        NSRange close = [arg rangeOfString:@"\"" options:NSBackwardsSearch];
+        if (close.location > 0) {
+            NSString *after = [[arg substringFromIndex:close.location + 1] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+            if (after.length && number) *number = after.doubleValue;
+            return [arg substringWithRange:NSMakeRange(1, close.location - 1)];
+        }
+    }
+    return arg;
+}
+
+static NSString *rc_screen_text_command(NSString *verb, NSString *arg) {
+    if ([verb isEqualToString:@"ocr"]) {
+        NSString *error = nil;
+        double t0 = CFAbsoluteTimeGetCurrent();
+        NSArray<RCScreenText *> *items = rc_screen_read(![arg containsString:@"fast"], &error);
+        if (!items) return [NSString stringWithFormat:@"Error: %@\n", error];
+        BOOL json = [arg containsString:@"--json"];
+        if (json) {
+            NSMutableArray *out = [NSMutableArray array];
+            for (RCScreenText *t in items) {
+                CGRect f = t.frame;
+                [out addObject:@{ @"text": t.text, @"conf": @(round(t.confidence * 100) / 100),
+                                  @"frame": @[@(round(f.origin.x)), @(round(f.origin.y)), @(round(f.size.width)), @(round(f.size.height))] }];
+            }
+            NSData *d = [NSJSONSerialization dataWithJSONObject:out options:0 error:nil];
+            return [[[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding] stringByAppendingString:@"\n"];
+        }
+        NSMutableString *out = [NSMutableString string];
+        for (RCScreenText *t in items) {
+            CGRect f = t.frame;
+            [out appendFormat:@"%.0f,%.0f %.0fx%.0f  %@\n", f.origin.x, f.origin.y, f.size.width, f.size.height, t.text];
+        }
+        [out appendFormat:@"(%lu lines, %.0f ms)\n", (unsigned long)items.count, (CFAbsoluteTimeGetCurrent() - t0) * 1000];
+        return out;
+    }
+    double seconds = 10;
+    NSString *query = rc_screen_quoted(arg, &seconds);
+    if (!query.length) return nil;
+    if ([verb isEqualToString:@"find"] || [verb isEqualToString:@"tap"]) {
+        // Text still sliding in would be tapped where it was: let the screen settle first
+        if ([verb isEqualToString:@"tap"]) RCScreenSettle(2, NULL);
+        NSString *error = nil;
+        NSArray *items = rc_screen_read(YES, &error);
+        if (!items) return [NSString stringWithFormat:@"Error: %@\n", error];
+        RCScreenText *t = rc_screen_match(items, query);
+        if (!t) return [NSString stringWithFormat:@"Error: \"%@\" isn't on the screen\n", query];
+        CGPoint p = rc_screen_target(t, query);
+        if ([verb isEqualToString:@"find"]) {
+            return [NSString stringWithFormat:@"\"%@\" at %.0f %.0f (box %.0f,%.0f %.0fx%.0f)\n", t.text, p.x, p.y,
+                    t.frame.origin.x, t.frame.origin.y, t.frame.size.width, t.frame.size.height];
+        }
+        NSString *tap = RCGestureCommand([NSString stringWithFormat:@"gesture tap %.1f %.1f", p.x, p.y]);
+        if ([tap hasPrefix:@"Error"]) return tap;
+        return [NSString stringWithFormat:@"Tapped \"%@\" at %.0f %.0f\n", t.text, p.x, p.y];
+    }
+    if ([verb isEqualToString:@"wait"]) {
+        seconds = MIN(MAX(seconds, 0.5), 120);
+        double until = CFAbsoluteTimeGetCurrent() + seconds;
+        NSString *lastError = nil;
+        do {
+            NSString *error = nil;
+            NSArray *items = rc_screen_read(YES, &error);
+            if (items) {
+                RCScreenText *t = rc_screen_match(items, query);
+                if (t) {
+                    // Found as soon as it shows, which can be mid-slide: done once the screen is still,
+                    // so a touch right after lands where it should
+                    RCScreenSettle(2, NULL);
+                    return [NSString stringWithFormat:@"Found \"%@\"\n", t.text];
+                }
+            } else lastError = error;
+            [NSThread sleepForTimeInterval:0.4];
+        } while (CFAbsoluteTimeGetCurrent() < until);
+        return lastError ? [NSString stringWithFormat:@"Error: %@\n", lastError]
+                         : [NSString stringWithFormat:@"Error: \"%@\" didn't show within %g s\n", query, seconds];
+    }
+    return nil;
+}
+
 NSString *RCScreenCommand(NSString *cmd) {
     NSString *rest = [cmd substringFromIndex:MIN(cmd.length, (NSUInteger)7)]; // after "screen "
     NSArray *words = [rest componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
@@ -129,7 +385,21 @@ NSString *RCScreenCommand(NSString *cmd) {
         BOOL settled = RCScreenSettle(max, &waited);
         return [NSString stringWithFormat:settled ? @"Settled after %.0f ms\n" : @"Still changing after %.0f ms\n", waited * 1000];
     }
-    if (![verb isEqualToString:@"capture"]) return @"Usage: screen capture [PATH] [SCALE] [QUALITY] [grid [SPACING]] | screen settle [MAX]\n";
+    if ([@[@"ocr", @"find", @"tap", @"wait"] containsObject:verb]) {
+        NSRange space = [rest rangeOfString:@" "];
+        NSString *arg = space.location == NSNotFound ? @"" : [rest substringFromIndex:space.location + 1];
+        // Reading the screen needs the main thread free: from it (the Web UI) this runs on its own
+        if ([NSThread isMainThread]) {
+            dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                NSString *reply = rc_screen_text_command(verb, arg);
+                SRLog(@"[Screen] screen %@ %@: %@", verb, arg, [reply stringByTrimmingCharactersInSet:[NSCharacterSet newlineCharacterSet]]);
+            });
+            return [NSString stringWithFormat:@"Started: screen %@ %@\n", verb, arg];
+        }
+        NSString *reply = rc_screen_text_command(verb, arg);
+        if (reply) return reply;
+    }
+    if (![verb isEqualToString:@"capture"]) return @"Usage: screen capture [PATH] [SCALE] [QUALITY] [grid [SPACING]] | screen settle [MAX] | screen ocr [fast] [--json] | screen find \"Text\" | screen tap \"Text\" | screen wait \"Text\" [SECONDS]\n";
     // screen capture [PATH] [SCALE] [QUALITY] [grid [SPACING]]
     double grid = 0;
     NSUInteger gridAt = [words indexOfObject:@"grid"];
