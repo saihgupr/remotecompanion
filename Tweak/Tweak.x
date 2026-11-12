@@ -3151,7 +3151,6 @@ static BOOL rc_condition_direct_match(NSString *key, NSString *expected, BOOL *h
     } else if ([@[@"ringer", @"rotation_lock", @"appearance", @"screen", @"wifi_network"] containsObject:key]) {
         // SpringBoard UI state - read on the main thread
         rc_dispatch_sync_main_safe(^{
-            id sb = [UIApplication sharedApplication];
             if ([key isEqualToString:@"ringer"]) {
                 int muted = rc_ringer_muted();
                 if (muted >= 0) actual = muted ? @"SILENT" : @"RING";
@@ -9371,10 +9370,6 @@ static NSString *rc_open_camera_unified(NSInteger mode, NSInteger device, double
     NSString *bannerId = (autoShutter && mode == 1) ? @"camera record" : (mode == 1 ? @"__CAMERA_VIDEO_PICKER__" : @"__CAMERA_PICKER__");
     if (rc_own_banner_enabled(bannerId)) rc_show_hud_toast(@"Camera", modeDesc, icon);
     return [NSString stringWithFormat:@"Opened Camera in %@\n", modeDesc];
-}
-
-static NSString *rc_open_camera_video(double zoomFactor, NSInteger flashMode) {
-    return rc_open_camera_unified(1, 0, zoomFactor, flashMode, NO);
 }
 
 static NSString *rc_handle_screenrecord(NSString *subcmd) {
