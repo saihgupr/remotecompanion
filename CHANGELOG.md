@@ -12,6 +12,9 @@ All notable changes to this project will be documented in this file.
 - **MCP server for assistants**: `tools/rc-mcp` is one Python file that lets an MCP client look at the screen, tap, swipe, type and run any RC command over SSH. Nothing is installed on the phone (#159).
 - **Compact New Trigger menu**: Settings > Advanced Settings > Layout has a New Trigger row, List or Compact. Compact shows the trigger types as tiles with the icons their triggers use, the same category bar as Triggers, and a check on types already added; a search stays within the picked category. Choosing a search result now opens its setup screen instead of dropping the tap (#146).
 
+### Changed
+- **Tighter bar gesture zones**: the status bar and bottom bar gesture areas now cover 25pt from the edge instead of 50pt, so a touch has to land closer to the bar. Two-finger slides keep their wider 75pt landing zone.
+
 ## [4.5.0] - 2026-11-11
 
 ### Added
