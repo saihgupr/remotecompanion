@@ -8,7 +8,8 @@ per line). See README.md next to this file.
 
 Settings (environment variables):
   RC_PHONES    phones by name, "name=host,name=host" (e.g. "15=192.168.1.20,8=192.168.1.21");
-               the first is the default
+               the first is the default. A phone can list fallbacks: "15=iphone.local|192.168.1.20"
+               is tried in turn, so a .local name that stops resolving after a respring still works
   RC_SSH_USER  SSH user on the phone (default: mobile)
   RC_SSH_KEY   SSH private key (default: SSH's own choice)
   RC_SSH_PORT  SSH port (default: 22)
@@ -19,6 +20,7 @@ import os
 import shlex
 import subprocess
 import sys
+import time
 
 VERSION = "1.0.0"
 PROTOCOL = "2025-06-18"
@@ -39,45 +41,66 @@ class ToolError(Exception):
 # ---- the phone ----
 
 def phones():
+    """Configured phones: name -> addresses, in the order to try them"""
     known = {}
     for part in os.environ.get("RC_PHONES", "").split(","):
         if "=" in part:
-            name, host = part.split("=", 1)
-            known[name.strip()] = host.strip()
+            name, hosts = part.split("=", 1)
+            addresses = [h.strip() for h in hosts.split("|") if h.strip()]
+            if addresses:
+                known[name.strip()] = addresses
     return known
 
 
-def host_for(name):
+_LAST_GOOD = {}  # phone -> the address that answered last, tried first
+
+
+def phone_for(name):
+    """The configured phone's name, checked against RC_PHONES"""
     known = phones()
     if not known:
         raise ToolError("No phones set up: set RC_PHONES, e.g. RC_PHONES=\"15=192.168.1.20\".")
     if not name:
-        return next(iter(known.values()))
+        return next(iter(known))
     if name not in known:
         raise ToolError("Unknown phone '%s'. Known: %s" % (name, ", ".join(known)))
-    return known[name]
+    return name
 
 
-def ssh(host, command, timeout=60):
-    """Runs a shell command on the phone; returns (exit status, stdout, stderr)."""
-    args = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
-            # One connection kept open between calls, so each call is quick
-            "-o", "ControlMaster=auto", "-o", "ControlPersist=120",
-            "-o", "ControlPath=" + os.path.join(os.path.expanduser("~"), ".ssh", "rc-mcp-%C")]
-    if os.environ.get("RC_SSH_KEY"):
-        args += ["-i", os.path.expanduser(os.environ["RC_SSH_KEY"]), "-o", "IdentitiesOnly=yes"]
-    if os.environ.get("RC_SSH_PORT"):
-        args += ["-p", os.environ["RC_SSH_PORT"]]
-    args += ["%s@%s" % (os.environ.get("RC_SSH_USER", "mobile"), host), PHONE_PATH + command]
-    try:
-        p = subprocess.run(args, stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout)
-    except subprocess.TimeoutExpired:
-        raise ToolError("The phone didn't answer within %d s." % timeout)
-    out = p.stdout.decode("utf-8", "replace").rstrip("\n")
-    err = p.stderr.decode("utf-8", "replace").rstrip("\n")
-    if p.returncode == 255:
-        raise ToolError("Couldn't reach the phone over SSH: %s" % (err or "no answer"))
-    return p.returncode, out, err
+def ssh(phone, command, timeout=60):
+    """Runs a shell command on the phone; returns (exit status, stdout, stderr). A phone with several
+    addresses is tried in turn (the one that answered last first), so a name that stopped resolving
+    does not fail the call while its IP works."""
+    addresses = phones().get(phone) or [phone]
+    last = _LAST_GOOD.get(phone)
+    if last in addresses:
+        addresses = [last] + [a for a in addresses if a != last]
+    failures = []
+    for address in addresses:
+        args = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
+                # One connection kept open between calls, so each call is quick
+                "-o", "ControlMaster=auto", "-o", "ControlPersist=120",
+                "-o", "ControlPath=" + os.path.join(os.path.expanduser("~"), ".ssh", "rc-mcp-%C")]
+        if os.environ.get("RC_SSH_KEY"):
+            args += ["-i", os.path.expanduser(os.environ["RC_SSH_KEY"]), "-o", "IdentitiesOnly=yes"]
+        if os.environ.get("RC_SSH_PORT"):
+            args += ["-p", os.environ["RC_SSH_PORT"]]
+        args += ["%s@%s" % (os.environ.get("RC_SSH_USER", "mobile"), address), PHONE_PATH + command]
+        try:
+            p = subprocess.run(args, stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            failures.append("%s (no answer in %d s)" % (address, timeout))
+            continue
+        out = p.stdout.decode("utf-8", "replace").rstrip("\n")
+        err = p.stderr.decode("utf-8", "replace").rstrip("\n")
+        if p.returncode != 255:
+            _LAST_GOOD[phone] = address
+            return p.returncode, out, err
+        failures.append("%s (%s)" % (address, (err or "no answer").splitlines()[-1]))
+    hint = ""
+    if len(addresses) == 1:
+        hint = " If a .local name stopped resolving, add the phone's IP: RC_PHONES=\"%s=%s|<ip>\"." % (phone, addresses[0])
+    raise ToolError("Couldn't reach %s over SSH. Tried %s.%s" % (phone, " and ".join(failures), hint))
 
 
 def rc(command):
@@ -85,9 +108,9 @@ def rc(command):
     return "rc-client " + shlex.quote(command)
 
 
-def run(host, command, timeout=60):
+def run(phone, command, timeout=60):
     """Runs a RemoteCompanion command; its reply, or ToolError when it failed"""
-    code, out, err = ssh(host, rc(command), timeout)
+    code, out, err = ssh(phone, rc(command), timeout)
     text = "\n".join(t for t in (out, err) if t)
     if code != 0 or text.startswith("Error"):
         raise ToolError(text or "Failed (exit %d)" % code)
@@ -98,6 +121,85 @@ def quoted(text):
     return '"%s"' % str(text).replace("\n", " ")
 
 
+# ---- what the phone is doing ----
+
+_STATE = {}  # phone -> (when read, state)
+STATE_TTL = 6.0
+
+
+def probe(phone, fresh=False):
+    """The phone's state from its Test Kit: locked, screenOn, frontApp, orientation, battery, and the
+    RemoteCompanion version. Cached for a moment, so a run of actions does not pay for it each time."""
+    hit = _STATE.get(phone)
+    if hit and not fresh and time.time() - hit[0] < STATE_TTL:
+        return hit[1]
+    _, out, _ = ssh(phone, rc("testkit probe"), timeout=20)
+    state = {}
+    for line in reversed(out.splitlines()):
+        try:
+            state = json.loads(line)
+            break
+        except ValueError:
+            continue
+    if not isinstance(state, dict) or not state:
+        raise ToolError("Couldn't read the phone's state (testkit probe returned nothing usable).")
+    _STATE[phone] = (time.time(), state)
+    return state
+
+
+def require_awake(phone):
+    """A tool that touches or reads the screen needs it on: a black screen otherwise looks like an
+    empty screen or a tap that worked and did nothing."""
+    state = probe(phone)
+    if state.get("screenOn") is False:
+        raise ToolError("The screen is off. Call wake to turn it on and unlock the phone.")
+    return state
+
+
+def screen_version(phone):
+    """The RemoteCompanion version and its numbers, for the screen-command check"""
+    state = probe(phone)
+    version = (state.get("device") or {}).get("tweakVersion") or ""
+    parts = []
+    for piece in version.split(".")[:3]:
+        if not piece.isdigit():
+            parts = []
+            break
+        parts.append(int(piece))
+    return version, tuple(parts)
+
+
+def require_screen(phone):
+    """Reading and tapping text needs RemoteCompanion 4.6's screen commands. Older versions answer
+    nothing at all, which used to look like an empty screen or a screenshot that failed."""
+    version, parts = screen_version(phone)
+    if parts and parts < (4, 6):
+        raise ToolError("RemoteCompanion %s on this phone has no screen commands, so look, read_text, "
+                        "tap_text and wait_text can't work. Touch, app and rc_command tools still do."
+                        % version)
+    return probe(phone)
+
+
+def locked_note(state):
+    """A line for a screenshot or text read while the lock screen is showing"""
+    if state.get("locked"):
+        return "The phone is locked: call wake to unlock it."
+    return ""
+
+
+def screen_ready(phone):
+    """The checks a tool that reads or touches the screen needs first"""
+    state = require_awake(phone)
+    require_screen(phone)
+    return state
+
+
+def screen_capable(phone):
+    """Whether this phone can take a screenshot at all (4.6's screen commands)"""
+    _, parts = screen_version(phone)
+    return not (parts and parts < (4, 6))
+
+
 # ---- the screen ----
 
 def settle_steps():
@@ -106,13 +208,13 @@ def settle_steps():
     return rc("screen settle 3") + " >/dev/null"
 
 
-def capture(host, scale, grid, settle):
+def capture(phone, scale, grid, settle):
     """The screen as a JPEG (base64) at `scale` of its points, with a grid every `grid` points
     when above 0, taken once the screen stops changing when `settle`. Returns (data, width, height)."""
     steps = [settle_steps()] if settle else []
     steps.append(rc("screen capture %s.jpg %g 0.6%s" % (SHOT, scale, (" grid %g" % grid) if grid else "")))
     steps.append("echo; base64 < %s.jpg | tr -d '\\n'; rm -f %s.jpg" % (SHOT, SHOT))
-    code, out, err = ssh(host, "; ".join(steps), timeout=40)
+    code, out, err = ssh(phone, "; ".join(steps), timeout=40)
     lines = [l for l in out.splitlines() if l.strip()]
     info = next((l for l in lines if l.startswith(SHOT + ".jpg") or l.startswith("Error")), "")
     if code != 0 or not info.startswith(SHOT) or len(lines) < 2:
@@ -121,12 +223,12 @@ def capture(host, scale, grid, settle):
     return lines[-1].strip(), width, height
 
 
-def look(host, args, note=""):
+def look(phone, args, note=""):
     """A screenshot as MCP content, with how to read positions off it"""
     grid = args.get("grid", 100)
     grid = 100 if grid is True else (0 if grid in (False, None) else float(grid))
     scale = min(max(float(args.get("scale", 0.5)), 0.2), 1.0)
-    data, w, h = capture(host, scale, grid, args.get("settle", True))
+    data, w, h = capture(phone, scale, grid, args.get("settle", True))
     text = ("Screenshot %dx%d px of the %.0fx%.0f point screen (1 px = %g points). Give positions in screen points."
             % (w, h, w / scale, h / scale, round(1 / scale, 2)))
     if grid:
@@ -136,14 +238,17 @@ def look(host, args, note=""):
     return {"content": [{"type": "image", "data": data, "mimeType": "image/jpeg"}, {"type": "text", "text": text}]}
 
 
-def after(host, reply, args, settle=False):
+def after(phone, reply, args, settle=False):
     """After an action: a fresh screenshot unless look is false. `settle`: even without one, wait
     for the screen to stop changing (an app opening), so the next call sees it."""
     if not args.get("look", True):
         if settle:
-            ssh(host, settle_steps(), timeout=20)
+            ssh(phone, settle_steps(), timeout=20)
         return reply
-    return look(host, {"grid": args["grid"]} if "grid" in args else {}, reply)
+    if not screen_capable(phone):
+        # The action may have worked on a phone older than 4.6, which can't take a screenshot
+        return "%s\nNo screenshot: this phone's RemoteCompanion has no screen commands (they need 4.6)." % reply
+    return look(phone, {"grid": args["grid"]} if "grid" in args else {}, reply)
 
 
 # ---- tools ----
@@ -152,34 +257,64 @@ def t_list_phones(args):
     known = phones()
     if not known:
         return "No phones set up (RC_PHONES)."
-    return "\n".join("%s%s: %s" % (n, " (default)" if i == 0 else "", h) for i, (n, h) in enumerate(known.items()))
+    lines = []
+    for i, (name, addresses) in enumerate(known.items()):
+        lines.append("%s%s: %s" % (name, " (default)" if i == 0 else "", ", ".join(addresses)))
+    return "\n".join(lines)
+
+
+def t_status(args):
+    phone = phone_for(args.get("phone"))
+    state = probe(phone, fresh=True)
+    device = state.get("device") or {}
+    battery = state.get("battery") or {}
+    bits = ["screen on" if state.get("screenOn") else "screen off",
+            "locked" if state.get("locked") else "unlocked"]
+    if state.get("orientation"):
+        bits.append(str(state["orientation"]).lower())
+    lines = ["%s: %s." % (phone, ", ".join(bits)),
+             "Front app: %s" % (state.get("frontApp") or "unknown")]
+    if device.get("tweakVersion"):
+        lines.append("RemoteCompanion %s on iOS %s" % (device["tweakVersion"], device.get("ios", "?")))
+    level = battery.get("level")
+    if isinstance(level, (int, float)):
+        lines.append("Battery %.0f%%%s" % (level * 100, ", charging" if battery.get("charging") else ""))
+    return "\n".join(lines)
 
 
 def t_look(args):
-    return look(host_for(args.get("phone")), args)
+    phone = phone_for(args.get("phone"))
+    state = screen_ready(phone)
+    return look(phone, args, locked_note(state))
 
 
 def t_read_text(args):
-    host = host_for(args.get("phone"))
+    phone = phone_for(args.get("phone"))
+    state = screen_ready(phone)
     command = rc("screen ocr" + (" fast" if args.get("fast") else ""))
     if args.get("settle", True):
         command = settle_steps() + "; " + command
-    code, out, err = ssh(host, command, timeout=40)
+    code, out, err = ssh(phone, command, timeout=40)
     text = "\n".join(t for t in (out, err) if t)
     if code != 0 or text.startswith("Error"):
         raise ToolError(text or "Failed (exit %d)" % code)
-    return text
+    if not text.strip():
+        text = "(no text on the screen)"
+    note = locked_note(state)
+    return note + "\n" + text if note else text
 
 
 def gesture(args, words, seconds_default):
-    host = host_for(args.get("phone"))
+    phone = phone_for(args.get("phone"))
+    require_awake(phone)
     seconds = float(args.get("seconds", seconds_default))
-    return after(host, run(host, "gesture " + " ".join(str(w) for w in words) + " %g" % seconds), args)
+    return after(phone, run(phone, "gesture " + " ".join(str(w) for w in words) + " %g" % seconds), args)
 
 
 def t_tap(args):
-    host = host_for(args.get("phone"))
-    return after(host, run(host, "gesture tap %g %g" % (args["x"], args["y"])), args)
+    phone = phone_for(args.get("phone"))
+    require_awake(phone)
+    return after(phone, run(phone, "gesture tap %g %g" % (args["x"], args["y"])), args)
 
 
 def t_hold(args):
@@ -203,65 +338,73 @@ def t_pinch(args):
 
 
 def t_tap_text(args):
-    host = host_for(args.get("phone"))
+    phone = phone_for(args.get("phone"))
+    screen_ready(phone)
     tap = rc("screen tap " + quoted(args["text"]))
-    code, out, _ = ssh(host, tap, timeout=30)
+    code, out, _ = ssh(phone, tap, timeout=30)
     if out.startswith("Error") and "isn't on the screen" in out:
         # It may still be on its way (a screen opening): wait for it a moment, then tap
-        code, out, _ = ssh(host, rc("screen wait %s 3" % quoted(args["text"])) + " && " + tap, timeout=40)
+        code, out, _ = ssh(phone, rc("screen wait %s 3" % quoted(args["text"])) + " && " + tap, timeout=40)
         out = out.splitlines()[-1] if out else out
     if code != 0 or out.startswith("Error"):
         raise ToolError(out or "\"%s\" isn't on the screen" % args["text"])
-    return after(host, out, args)
+    return after(phone, out, args)
 
 
 def t_wait_text(args):
-    host = host_for(args.get("phone"))
+    phone = phone_for(args.get("phone"))
+    screen_ready(phone)
     seconds = min(max(float(args.get("seconds", 10)), 0.5), 120)
-    reply = run(host, "screen wait %s %g" % (quoted(args["text"]), seconds), timeout=seconds + 20)
-    return after(host, reply, args) if args.get("look") else reply
+    reply = run(phone, "screen wait %s %g" % (quoted(args["text"]), seconds), timeout=seconds + 20)
+    return after(phone, reply, args) if args.get("look") else reply
 
 
 def t_type(args):
-    host = host_for(args.get("phone"))
-    return after(host, run(host, "type " + str(args["text"])), args)
+    phone = phone_for(args.get("phone"))
+    require_awake(phone)
+    return after(phone, run(phone, "type " + str(args["text"])), args)
 
 
 def t_open_app(args):
-    host = host_for(args.get("phone"))
-    reply = run(host, "open " + str(args["app"]))
+    phone = phone_for(args.get("phone"))
+    require_awake(phone)
+    reply = run(phone, "open " + str(args["app"]))
     # A launching app can show the same blank frame twice, which would pass for settled
-    ssh(host, "sleep 0.8")
-    return after(host, reply, args, settle=True)
+    ssh(phone, "sleep 0.8")
+    return after(phone, reply, args, settle=True)
 
 
 def t_home(args):
-    host = host_for(args.get("phone"))
-    return after(host, run(host, "home"), args, settle=True)
+    phone = phone_for(args.get("phone"))
+    require_awake(phone)
+    return after(phone, run(phone, "home"), args, settle=True)
 
 
 def t_wake(args):
-    host = host_for(args.get("phone"))
-    run(host, "unlock")
-    _, status, _ = ssh(host, "sleep 1.2; " + rc("lock status"))
+    phone = phone_for(args.get("phone"))
+    run(phone, "unlock")
+    _, status, _ = ssh(phone, "sleep 1.2; " + rc("lock status"))
     if "unlocked" in status.lower():
-        return after(host, "Awake and unlocked.", args)
+        _STATE.pop(phone, None)
+        return after(phone, "Awake and unlocked.", args)
     # The Test Kit can unlock with a passcode the person entered on the phone; the code never
     # leaves the phone, and only a local request (this one, over SSH) can use it
-    code, out, _ = ssh(host, rc("testkit unlock"), timeout=20)
+    code, out, _ = ssh(phone, rc("testkit unlock"), timeout=20)
+    _STATE.pop(phone, None)
     try:
         reply = json.loads(out.strip().splitlines()[-1]) if code == 0 and out.strip() else {}
     except (ValueError, IndexError):
         reply = {}
     if reply.get("unlocked"):
-        return after(host, "Awake, and unlocked with the passcode set in the Test Kit.", args)
+        return after(phone, "Awake, and unlocked with the passcode set in the Test Kit.", args)
     return ("The screen is on but the phone is still locked. Only the person holding the phone should enter "
             "its passcode (on the phone, or in Settings > Diagnostics > Test Kit to let assistants unlock it for a while).")
 
 
 def t_rc_command(args):
-    host = host_for(args.get("phone"))
-    _, out, err = ssh(host, rc(args["command"]), timeout=float(args.get("timeout", 60)))
+    phone = phone_for(args.get("phone"))
+    _, out, err = ssh(phone, rc(args["command"]), timeout=float(args.get("timeout", 60)))
+    _STATE.pop(phone, None)  # it may have locked, respringed or opened something
     return "\n".join(t for t in (out, err) if t) or "(no output)"
 
 
@@ -274,6 +417,9 @@ LINE = {"x1": NUM, "y1": NUM, "x2": NUM, "y2": NUM}
 
 TOOLS = [
     ("list_phones", t_list_phones, "The phones this server can reach.", {}, []),
+    ("status", t_status,
+     "What the phone is doing: screen on or off, locked or unlocked, the app in front, its RemoteCompanion "
+     "version, and the battery. Check it first, or when a screenshot looks wrong.", {}, []),
     ("look", t_look,
      "A screenshot of the phone with a grid labelled in screen points: see the screen and pick where to touch. "
      "Actions return one after they finish, so call look on its own only to start or after waiting.",
@@ -355,11 +501,11 @@ def handle(msg):
         reply(msg_id, {"protocolVersion": params.get("protocolVersion", PROTOCOL),
                        "capabilities": {"tools": {}},
                        "serverInfo": {"name": "rc-mcp", "version": VERSION},
-                       "instructions": "Use an iPhone running RemoteCompanion. See the screen with look (a screenshot "
+                       "instructions": "Use an iPhone running RemoteCompanion. Check status first: if the screen is "
+                                       "off or the phone is locked, call wake. See the screen with look (a screenshot "
                                        "with a grid labelled in screen points) or read_text; act with tap_text, tap, "
                                        "swipe, drag, type and the rest. Each action returns a fresh screenshot once "
-                                       "the screen settles. If the screenshot is black or shows the lock screen, "
-                                       "call wake first."})
+                                       "the screen settles."})
     elif method == "ping":
         reply(msg_id, {})
     elif method == "tools/list":
