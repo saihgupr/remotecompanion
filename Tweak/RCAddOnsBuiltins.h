@@ -95,7 +95,6 @@ static NSString *const kRCAOBuiltinPrefixes[] = {
     @"suffle playlist ",
     @"swipe ",
     @"tap ",
-    @"taptest ",
     @"testkit ",
     @"testkit passcode/set",
     @"toast ",
