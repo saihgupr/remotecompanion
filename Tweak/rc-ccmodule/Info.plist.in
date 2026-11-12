@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleName</key>
-	<string>RCCCButton@SLOT@</string>
+	<string>RemoteCompanion Button @SLOT@</string>
 	<key>CFBundleDisplayName</key>
 	<string>RemoteCompanion Button @SLOT@</string>
 	<key>CFBundleExecutable</key>

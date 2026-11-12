@@ -5609,7 +5609,7 @@ static void rc_schedule_audio_output_check(void) {
 
 // Control Center Button triggers: the module for slot N (Tweak/rc-ccmodule) posts
 // com.saihgupr.remotecompanion.ccbutton.N when it's tapped, and that runs trigger_cc_button_N
-#define RC_CC_BUTTON_SLOTS 8
+#define RC_CC_BUTTON_SLOTS 4
 static void handle_cc_button_notification(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
     NSString *notification = (__bridge NSString *)name;
     NSRange dot = [notification rangeOfString:@"." options:NSBackwardsSearch];

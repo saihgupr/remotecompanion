@@ -10216,10 +10216,10 @@ function saveAppTrigger(kind, names, ids, replacingKey) {
 
 // ── Focus Trigger Setup ─────────────────────────────────────────────────────
 function promptControlCenterTrigger() {
-  const slots = [1, 2, 3, 4, 5, 6, 7, 8];
+  const slots = [1, 2, 3, 4];
   const freeSlots = slots.filter(s => !config.triggers[`trigger_cc_button_${s}`]);
   if (!freeSlots.length) {
-    showToast('All 8 Control Center buttons are in use.');
+    showToast('All 4 Control Center buttons are in use.');
     return;
   }
   showSheet('Control Center Button Number', freeSlots.map(s => ({

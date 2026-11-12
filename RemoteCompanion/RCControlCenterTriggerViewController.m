@@ -3,7 +3,7 @@
 #import "RCConfigManager.h"
 #import "RCActionsViewController.h"
 
-const NSInteger RCControlCenterButtonSlots = 8;
+const NSInteger RCControlCenterButtonSlots = 4;
 NSString *const RCControlCenterButtonKeyPrefix = @"trigger_cc_button_";
 static NSString *const kRCDefaultButtonIcon = @"bolt.fill";
 

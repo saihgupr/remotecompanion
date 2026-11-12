@@ -6,7 +6,7 @@ ARCHS = arm64 arm64e
 
 include $(THEOS)/makefiles/common.mk
 
-RC_CC_SLOTS = 1 2 3 4 5 6 7 8
+RC_CC_SLOTS = 1 2 3 4
 
 BUNDLE_NAME = $(foreach s,$(RC_CC_SLOTS),RCCCButton$(s))
 
@@ -26,8 +26,10 @@ include $(THEOS_MAKE_PATH)/bundle.mk
 internal-stage::
 	@for s in $(RC_CC_SLOTS); do \
 		dir="$(THEOS_STAGING_DIR)/Library/ControlCenter/Bundles/RCCCButton$$s.bundle"; \
-		mkdir -p "$$dir"; \
+		mkdir -p "$$dir/en.lproj"; \
 		sed "s/@SLOT@/$$s/g" Info.plist.in > "$$dir/Info.plist"; \
-		cp Resources/SettingsIcon@2x.png "$$dir/SettingsIcon@2x.png" 2>/dev/null || true; \
+		cp Resources/*.png "$$dir/" 2>/dev/null || true; \
+		printf 'CFBundleName = "RemoteCompanion Button %s";\nCFBundleDisplayName = "RemoteCompanion Button %s";\n' "$$s" "$$s" > "$$dir/en.lproj/InfoPlist.strings"; \
+		printf '"RemoteCompanion Button %s" = "RemoteCompanion Button %s";\n"RCCCButton%s" = "RemoteCompanion Button %s";\n' "$$s" "$$s" "$$s" "$$s" > "$$dir/en.lproj/Localizable.strings"; \
 	done
 
