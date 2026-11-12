@@ -1,4 +1,4 @@
-# RemoteCompanion <img src="images/Icon.png" width="80" align="right" alt="RemoteCompanion" />
+# RemoteCompanion <img src="docs/images/Icon.png" width="80" align="right" alt="RemoteCompanion" />
 
 RemoteCompanion provides fast, scriptable system control for modern rootless jailbreaks. It lets you bind physical gestures and hardware buttons, or send commands remotely from your computer, to trigger system actions, control media playback, and run custom scripts.
 
@@ -24,10 +24,10 @@ RemoteCompanion provides fast, scriptable system control for modern rootless jai
 </p>
 
 <p align="center">
-  <img src="images/4.1.0/01_dashboard.png" width="200" alt="Main Dashboard" />
-  <img src="images/4.1.0/02_add_trigger.png" width="200" alt="Add Trigger" />
-  <img src="images/4.1.0/03_action_conditions.png" width="200" alt="Conditional Logic" />
-  <img src="images/4.1.0/04_settings.png" width="200" alt="Settings & Web UI" />
+  <img src="docs/images/4.1.0/01_dashboard.png" width="200" alt="Main Dashboard" />
+  <img src="docs/images/4.1.0/02_add_trigger.png" width="200" alt="Add Trigger" />
+  <img src="docs/images/4.1.0/03_action_conditions.png" width="200" alt="Conditional Logic" />
+  <img src="docs/images/4.1.0/04_settings.png" width="200" alt="Settings & Web UI" />
 </p>
 
 ## Features
@@ -64,12 +64,12 @@ RemoteCompanion provides fast, scriptable system control for modern rootless jai
 Access the desktop-class automation hub at `http://[DEVICE_IP]:8080` from any computer or tablet on your local network.
 
 <p align="center">
-  <img src="images/webui.png" width="600" alt="Web UI Interface" />
+  <img src="docs/images/webui.png" width="600" alt="Web UI Interface" />
 </p>
 
 <p align="center">
-  <img src="images/logs.png" width="380" alt="System & Trigger Logs" />
-  <img src="images/health.png" width="380" alt="Device Diagnostics & Health" />
+  <img src="docs/images/logs.png" width="380" alt="System & Trigger Logs" />
+  <img src="docs/images/health.png" width="380" alt="Device Diagnostics & Health" />
 </p>
 
 > [!TIP]
@@ -289,7 +289,7 @@ Enable two-way automation between your iOS device and Home Assistant:
 4. Click **Test Connection** to verify setup.
 
 <p align="center">
-  <img src="images/4.1.0/05_home_assistant.png" width="220" alt="Home Assistant Setup" />
+  <img src="docs/images/4.1.0/05_home_assistant.png" width="220" alt="Home Assistant Setup" />
 </p>
 
 Once configured:
@@ -332,7 +332,7 @@ Trigger macros on your Mac directly from iPhone hardware gestures, buttons, NFC 
 6. Click **Test Connection** to verify connectivity.
 
 <p align="center">
-  <img src="images/4.1.0/06_keyboard_maestro.png" width="220" alt="Keyboard Maestro Setup" />
+  <img src="docs/images/4.1.0/06_keyboard_maestro.png" width="220" alt="Keyboard Maestro Setup" />
 </p>
 
 Once configured:
