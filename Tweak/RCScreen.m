@@ -11,6 +11,22 @@ void SRLog(NSString *format, ...);
 // UIKit's own screen grab: the whole screen as SpringBoard shows it (main thread only)
 extern UIImage *_UICreateScreenUIImage(void) NS_RETURNS_RETAINED;
 
+// Draws the screen grab the way the screen is turned now, `scale` times its size in points. The grab
+// is always upright (portrait), so in landscape it's turned with the same mapping touches use.
+void RCScreenDrawShot(UIImage *shot, double scale) {
+    UIScreen *screen = [UIScreen mainScreen];
+    id<UICoordinateSpace> fixed = screen.fixedCoordinateSpace, now = screen.coordinateSpace;
+    CGPoint o = [fixed convertPoint:CGPointZero toCoordinateSpace:now];
+    CGPoint x = [fixed convertPoint:CGPointMake(1, 0) toCoordinateSpace:now];
+    CGPoint y = [fixed convertPoint:CGPointMake(0, 1) toCoordinateSpace:now];
+    CGContextRef ctx = UIGraphicsGetCurrentContext();
+    CGContextSaveGState(ctx);
+    CGContextScaleCTM(ctx, scale, scale);
+    CGContextConcatCTM(ctx, CGAffineTransformMake(x.x - o.x, x.y - o.y, y.x - o.x, y.y - o.y, o.x, o.y));
+    [shot drawInRect:fixed.bounds];
+    CGContextRestoreGState(ctx);
+}
+
 // Lines every `spacing` points with their positions, so a point can be read off the picture
 static void rc_screen_draw_grid(CGSize points, double scale, double spacing) {
     UIColor *line = [UIColor colorWithRed:1 green:0.2 blue:0.4 alpha:0.55];
@@ -41,7 +57,7 @@ static NSString *rc_screen_capture(NSString *path, double scale, double quality,
         UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat defaultFormat];
         format.scale = 1;
         UIImage *small = [[[UIGraphicsImageRenderer alloc] initWithSize:size format:format] imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
-            [shot drawInRect:CGRectMake(0, 0, size.width, size.height)];
+            RCScreenDrawShot(shot, scale);
             if (grid > 0) rc_screen_draw_grid(points, scale, grid);
         }];
         jpeg = UIImageJPEGRepresentation(small, quality);
@@ -162,7 +178,7 @@ static UIImage *rc_screen_grab(double scale) {
         UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat defaultFormat];
         format.scale = 1;
         out = [[[UIGraphicsImageRenderer alloc] initWithSize:size format:format] imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
-            [shot drawInRect:CGRectMake(0, 0, size.width, size.height)];
+            RCScreenDrawShot(shot, scale); // turned as the screen is, so boxes match touch points
         }];
     };
     if ([NSThread isMainThread]) grab(); else dispatch_sync(dispatch_get_main_queue(), grab);
