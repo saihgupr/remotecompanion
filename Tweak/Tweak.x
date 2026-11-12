@@ -26,7 +26,6 @@
 #import <mach/mach_time.h>
 #import <mach/mach.h>
 #import <mach/mach_host.h>
-#import <GraphicsServices/GraphicsServices.h>
 #import "native_curl.h"
 #import "RCTestKit.h"
 #import "RCToastPill.h"
@@ -105,7 +104,6 @@ typedef uint32_t IOOptionBits;
 @end
 
 extern void BKSHIDEventSetDigitizerInfo(IOHIDEventRef digitizerEvent, uint32_t contextID, uint8_t systemGestureisPossible, uint8_t isSystemGestureStateChangeEvent, CFStringRef displayUUID, CFTimeInterval initialTouchTimestamp, float maxForce);
-static UIWindow *g_rcTapTestWindow;
 static UIWindow *g_rcTapRecordWindow = nil;
 
 void SRLog(NSString *format, ...);
@@ -6232,12 +6230,6 @@ static BOOL rc_is_springboard_context(uint32_t cid) {
     if (cid == 0) return NO;
     __block BOOL isSB = NO;
     rc_dispatch_sync_main_safe(^{
-        if (g_rcTapTestWindow && !g_rcTapTestWindow.hidden) {
-            if ([g_rcTapTestWindow _contextId] == cid) {
-                isSB = YES;
-                return;
-            }
-        }
         if (g_rcTapRecordWindow && !g_rcTapRecordWindow.hidden) {
             if ([g_rcTapRecordWindow _contextId] == cid) {
                 isSB = YES;
@@ -6319,13 +6311,9 @@ static uint64_t rc_get_digitizer_sender_id(void) {
 
 static uint32_t rc_resolve_target_context(double x, double y) {
     __block uint32_t contextID = 0;
-    __block uint32_t testWindowContextID = 0;
     __block uint32_t recordWindowContextID = 0;
     rc_dispatch_sync_main_safe(^{
-        if (g_rcTapTestWindow && !g_rcTapTestWindow.hidden) {
-            testWindowContextID = [g_rcTapTestWindow _contextId];
-            contextID = testWindowContextID;
-        } else if (g_rcTapRecordWindow && !g_rcTapRecordWindow.hidden) {
+        if (g_rcTapRecordWindow && !g_rcTapRecordWindow.hidden) {
             recordWindowContextID = [g_rcTapRecordWindow _contextId];
             contextID = recordWindowContextID;
         } else {
@@ -7087,63 +7075,7 @@ static void rc_taprecord_start(void) {
     });
 }
 
-// -- GraphicsServices tap beta -------------------------------------------------
-// New candidate path for iOS 15 tap testing. This intentionally does not call
-// the older IOHID digitizer helpers above.
-
-static UIWindow *g_rcTapTestWindow = nil;
-static UIViewController *g_rcTapTestViewController = nil;
-static UIButton *g_rcTapTestButton = nil;
-static UILabel *g_rcTapTestLabel = nil;
-static id g_rcTapTestTarget = nil;
-static NSInteger g_rcTapTestHitCount = 0;
-static CGPoint g_rcTapTestLastHitPoint = {0, 0};
-static CFAbsoluteTime g_rcTapTestLastHitTime = 0;
-static CGRect g_rcTapTestButtonFrame = {{0, 0}, {0, 0}};
-
-static void rc_taptest_update_label(void);
-
-@interface RCTapTestButtonTarget : NSObject
-- (void)buttonTapped:(UIButton *)sender forEvent:(UIEvent *)event;
-@end
-
-@implementation RCTapTestButtonTarget
-- (void)buttonTapped:(UIButton *)sender forEvent:(UIEvent *)event {
-    (void)sender;
-    UITouch *touch = [[event allTouches] anyObject];
-    if (touch && g_rcTapTestWindow) {
-        g_rcTapTestLastHitPoint = [touch locationInView:g_rcTapTestWindow];
-    } else {
-        g_rcTapTestLastHitPoint = CGPointMake(CGRectGetMidX(g_rcTapTestButtonFrame),
-                                              CGRectGetMidY(g_rcTapTestButtonFrame));
-    }
-    g_rcTapTestHitCount++;
-    g_rcTapTestLastHitTime = CFAbsoluteTimeGetCurrent();
-    SRLog(@"[TapTest] target received tap #%ld at %.1f, %.1f",
-          (long)g_rcTapTestHitCount, g_rcTapTestLastHitPoint.x, g_rcTapTestLastHitPoint.y);
-    rc_taptest_update_label();
-}
-@end
-
-typedef mach_port_t (*RCGSGetPortFn)(void);
-typedef void (*RCGSSendEventFn)(const GSEventRecord *record, mach_port_t port);
-typedef void (*RCGSSendSystemEventFn)(const GSEventRecord *record);
-
-static RCGSSendEventFn g_rcGSSendEvent = NULL;
-static RCGSSendSystemEventFn g_rcGSSendSystemEvent = NULL;
-static RCGSGetPortFn g_rcGSGetSystemEventPort = NULL;
-static RCGSGetPortFn g_rcGSGetApplicationPort = NULL;
-static NSString *g_rcGraphicsServicesLoadError = nil;
-
-static dispatch_queue_t rc_gs_tap_queue(void) {
-    static dispatch_queue_t q;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        q = dispatch_queue_create("com.pizzaman.remotecommand.gstap", DISPATCH_QUEUE_SERIAL);
-    });
-    return q;
-}
-
+// ── Shared helpers ────────────────────────────────────────────────────────────
 static NSArray<NSString *> *rc_split_whitespace(NSString *input) {
     NSMutableArray<NSString *> *parts = [NSMutableArray array];
     for (NSString *part in [input componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceCharacterSet]]) {
@@ -7158,350 +7090,6 @@ static void rc_dispatch_sync_main_safe(dispatch_block_t block) {
     } else {
         dispatch_sync(dispatch_get_main_queue(), block);
     }
-}
-
-static BOOL rc_load_graphics_services_symbols(NSString **errorOut) {
-    static BOOL loaded = NO;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        void *handle = dlopen("/System/Library/PrivateFrameworks/GraphicsServices.framework/GraphicsServices", RTLD_NOW | RTLD_NOLOAD);
-        if (!handle) {
-            handle = dlopen("/System/Library/PrivateFrameworks/GraphicsServices.framework/GraphicsServices", RTLD_NOW);
-        }
-        if (!handle) {
-            const char *err = dlerror();
-            g_rcGraphicsServicesLoadError = [NSString stringWithFormat:@"dlopen GraphicsServices failed: %s", err ? err : "unknown"];
-            SRLog(@"[GSTap] %@", g_rcGraphicsServicesLoadError);
-            return;
-        }
-
-        g_rcGSSendEvent = (RCGSSendEventFn)dlsym(handle, "GSSendEvent");
-        g_rcGSSendSystemEvent = (RCGSSendSystemEventFn)dlsym(handle, "GSSendSystemEvent");
-        g_rcGSGetSystemEventPort = (RCGSGetPortFn)dlsym(handle, "GSGetPurpleSystemEventPort");
-        g_rcGSGetApplicationPort = (RCGSGetPortFn)dlsym(handle, "GSGetPurpleApplicationPort");
-
-        if ((!g_rcGSSendEvent && !g_rcGSSendSystemEvent) ||
-            (!g_rcGSGetSystemEventPort && !g_rcGSGetApplicationPort)) {
-            g_rcGraphicsServicesLoadError = [NSString stringWithFormat:
-                @"missing symbols send=%p systemSend=%p systemPort=%p appPort=%p",
-                g_rcGSSendEvent, g_rcGSSendSystemEvent,
-                g_rcGSGetSystemEventPort, g_rcGSGetApplicationPort];
-            SRLog(@"[GSTap] %@", g_rcGraphicsServicesLoadError);
-            return;
-        }
-
-        loaded = YES;
-        SRLog(@"[GSTap] GraphicsServices loaded send=%p systemSend=%p systemPort=%p appPort=%p",
-              g_rcGSSendEvent, g_rcGSSendSystemEvent,
-              g_rcGSGetSystemEventPort, g_rcGSGetApplicationPort);
-    });
-
-    if (!loaded && errorOut) *errorOut = g_rcGraphicsServicesLoadError ?: @"GraphicsServices unavailable";
-    return loaded;
-}
-
-typedef struct {
-    GSEventRecord record;
-    GSHandInfo handInfo;
-    GSPathInfo pathInfo;
-} RCGSTouchEvent;
-
-static BOOL rc_gs_send_hand_event(CGPoint point, GSHandInfoType type, NSString *mode, NSString **errorOut) {
-    NSString *loadError = nil;
-    if (!rc_load_graphics_services_symbols(&loadError)) {
-        if (errorOut) *errorOut = loadError;
-        return NO;
-    }
-
-    RCGSTouchEvent event;
-    memset(&event, 0, sizeof(event));
-
-    event.record.type = kGSEventHand;
-    event.record.subtype = kGSEventSubTypeUnknown;
-    event.record.location = point;
-    event.record.windowLocation = point;
-    event.record.windowContextId = 0;
-    event.record.timestamp = mach_absolute_time();
-    event.record.window = NULL;
-    event.record.flags = 0;
-    event.record.senderPID = (unsigned)getpid();
-    event.record.infoSize = sizeof(GSHandInfo) + sizeof(GSPathInfo);
-
-    event.handInfo.type = type;
-    event.handInfo.deltaX = 0;
-    event.handInfo.deltaY = 0;
-    event.handInfo.width = 1.0f;
-    event.handInfo.height = 1.0f;
-    event.handInfo.pathInfosCount = 1;
-
-    event.pathInfo.pathIndex = 1;
-    event.pathInfo.pathIdentity = 2;
-    event.pathInfo.pathProximity = (type == kGSHandInfoTypeTouchUp) ? 0 : 1;
-    event.pathInfo.pathPressure = (type == kGSHandInfoTypeTouchUp) ? 0.0 : 1.0;
-    event.pathInfo.pathMajorRadius = 4.0;
-    event.pathInfo.pathLocation = point;
-    event.pathInfo.pathWindow = NULL;
-
-    BOOL useApplicationPort = [mode isEqualToString:@"app"] || [mode isEqualToString:@"springboard"];
-    mach_port_t port = MACH_PORT_NULL;
-    if (useApplicationPort && g_rcGSGetApplicationPort) {
-        port = g_rcGSGetApplicationPort();
-    } else if (g_rcGSGetSystemEventPort) {
-        port = g_rcGSGetSystemEventPort();
-    }
-
-    if (g_rcGSSendEvent && port != MACH_PORT_NULL) {
-        g_rcGSSendEvent(&event.record, port);
-        return YES;
-    }
-
-    if (g_rcGSSendSystemEvent) {
-        g_rcGSSendSystemEvent(&event.record);
-        return YES;
-    }
-
-    if (errorOut) *errorOut = @"no GraphicsServices send port available";
-    return NO;
-}
-
-static BOOL rc_gs_send_tap(CGPoint point, NSString *mode, NSString **errorOut) {
-    NSString *downError = nil;
-    if (!rc_gs_send_hand_event(point, kGSHandInfoTypeTouchDown, mode, &downError)) {
-        if (errorOut) *errorOut = downError;
-        return NO;
-    }
-
-    usleep(90000);
-
-    NSString *upError = nil;
-    if (!rc_gs_send_hand_event(point, kGSHandInfoTypeTouchUp, mode, &upError)) {
-        if (errorOut) *errorOut = upError;
-        return NO;
-    }
-
-    return YES;
-}
-
-static void rc_taptest_layout_locked(void) {
-    if (!g_rcTapTestWindow || !g_rcTapTestButton || !g_rcTapTestLabel) return;
-
-    CGRect bounds = [UIScreen mainScreen].bounds;
-    g_rcTapTestWindow.frame = bounds;
-    g_rcTapTestViewController.view.frame = bounds;
-
-    CGFloat buttonWidth = MIN(220.0, MAX(160.0, bounds.size.width - 64.0));
-    CGFloat buttonHeight = 84.0;
-    CGFloat buttonX = round((bounds.size.width - buttonWidth) * 0.5);
-    CGFloat buttonY = round((bounds.size.height - buttonHeight) * 0.5);
-    g_rcTapTestButton.frame = CGRectMake(buttonX, buttonY, buttonWidth, buttonHeight);
-    g_rcTapTestButtonFrame = g_rcTapTestButton.frame;
-
-    g_rcTapTestLabel.frame = CGRectMake(18.0,
-                                        CGRectGetMinY(g_rcTapTestButton.frame) - 112.0,
-                                        bounds.size.width - 36.0,
-                                        86.0);
-}
-
-static void rc_taptest_update_label(void) {
-    if (!g_rcTapTestLabel || !g_rcTapTestButton) return;
-
-    NSString *last = g_rcTapTestLastHitTime > 0
-        ? [NSString stringWithFormat:@"last %.0f, %.0f", g_rcTapTestLastHitPoint.x, g_rcTapTestLastHitPoint.y]
-        : @"last none";
-
-    g_rcTapTestLabel.text = [NSString stringWithFormat:
-        @"RemoteCompanion Tap Test\nhits %ld\n%@",
-        (long)g_rcTapTestHitCount,
-        last];
-    [g_rcTapTestButton setTitle:[NSString stringWithFormat:@"Tap Target (%ld)", (long)g_rcTapTestHitCount]
-                       forState:UIControlStateNormal];
-}
-
-static void rc_taptest_show_locked(BOOL reset) {
-    if (reset) {
-        g_rcTapTestHitCount = 0;
-        g_rcTapTestLastHitPoint = CGPointZero;
-        g_rcTapTestLastHitTime = 0;
-    }
-
-    if (!g_rcTapTestTarget) {
-        g_rcTapTestTarget = [[RCTapTestButtonTarget alloc] init];
-    }
-
-    if (!g_rcTapTestWindow) {
-        CGRect bounds = [UIScreen mainScreen].bounds;
-        g_rcTapTestWindow = [[UIWindow alloc] initWithFrame:bounds];
-        g_rcTapTestWindow.windowLevel = UIWindowLevelAlert + 2500.0;
-        g_rcTapTestWindow.backgroundColor = [UIColor clearColor];
-        g_rcTapTestWindow.userInteractionEnabled = YES;
-
-        g_rcTapTestViewController = [[UIViewController alloc] init];
-        g_rcTapTestViewController.view.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.18];
-        g_rcTapTestWindow.rootViewController = g_rcTapTestViewController;
-
-        g_rcTapTestLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-        g_rcTapTestLabel.textAlignment = NSTextAlignmentCenter;
-        g_rcTapTestLabel.numberOfLines = 0;
-        g_rcTapTestLabel.font = [UIFont monospacedSystemFontOfSize:16.0 weight:UIFontWeightSemibold];
-        g_rcTapTestLabel.textColor = [UIColor whiteColor];
-        g_rcTapTestLabel.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.68];
-        g_rcTapTestLabel.layer.cornerRadius = 12.0;
-        g_rcTapTestLabel.layer.masksToBounds = YES;
-        [g_rcTapTestViewController.view addSubview:g_rcTapTestLabel];
-
-        g_rcTapTestButton = [UIButton buttonWithType:UIButtonTypeSystem];
-        g_rcTapTestButton.backgroundColor = [UIColor colorWithRed:0.10 green:0.72 blue:0.38 alpha:1.0];
-        g_rcTapTestButton.tintColor = [UIColor whiteColor];
-        g_rcTapTestButton.titleLabel.font = [UIFont boldSystemFontOfSize:22.0];
-        g_rcTapTestButton.layer.cornerRadius = 12.0;
-        g_rcTapTestButton.layer.borderColor = [UIColor whiteColor].CGColor;
-        g_rcTapTestButton.layer.borderWidth = 2.0;
-        g_rcTapTestButton.accessibilityIdentifier = @"remotecompanion.taptest.target";
-        [g_rcTapTestButton addTarget:g_rcTapTestTarget
-                              action:@selector(buttonTapped:forEvent:)
-                    forControlEvents:UIControlEventTouchUpInside];
-        [g_rcTapTestViewController.view addSubview:g_rcTapTestButton];
-    }
-
-    rc_taptest_layout_locked();
-    rc_taptest_update_label();
-    g_rcTapTestWindow.hidden = NO;
-    [g_rcTapTestWindow makeKeyAndVisible];
-    SRLog(@"[TapTest] shown target frame %.0f %.0f %.0f %.0f",
-          g_rcTapTestButtonFrame.origin.x, g_rcTapTestButtonFrame.origin.y,
-          g_rcTapTestButtonFrame.size.width, g_rcTapTestButtonFrame.size.height);
-}
-
-static void rc_taptest_hide_locked(void) {
-    if (g_rcTapTestWindow) {
-        g_rcTapTestWindow.hidden = YES;
-        SRLog(@"[TapTest] hidden");
-    }
-}
-
-static NSString *rc_taptest_status_string(void) {
-    __block NSString *status = nil;
-    rc_dispatch_sync_main_safe(^{
-        BOOL visible = g_rcTapTestWindow && !g_rcTapTestWindow.hidden;
-        CGPoint center = CGPointMake(CGRectGetMidX(g_rcTapTestButtonFrame), CGRectGetMidY(g_rcTapTestButtonFrame));
-        NSString *last = g_rcTapTestLastHitTime > 0
-            ? [NSString stringWithFormat:@"%.0f %.0f", g_rcTapTestLastHitPoint.x, g_rcTapTestLastHitPoint.y]
-            : @"none";
-        status = [NSString stringWithFormat:
-            @"taptest visible=%@ hits=%ld button=%.0f %.0f %.0f %.0f center=%.0f %.0f last=%@ backend=IOHIDEvent\n",
-            visible ? @"yes" : @"no",
-            (long)g_rcTapTestHitCount,
-            g_rcTapTestButtonFrame.origin.x,
-            g_rcTapTestButtonFrame.origin.y,
-            g_rcTapTestButtonFrame.size.width,
-            g_rcTapTestButtonFrame.size.height,
-            center.x,
-            center.y,
-            last];
-    });
-    return status ?: @"taptest unavailable\n";
-}
-
-static NSString *rc_handle_taptest_command(NSString *cleanCmd) {
-    NSArray<NSString *> *parts = rc_split_whitespace(cleanCmd);
-    NSString *subcommand = parts.count >= 2 ? [parts[1] lowercaseString] : @"status";
-
-    if ([subcommand isEqualToString:@"show"]) {
-        rc_dispatch_sync_main_safe(^{ rc_taptest_show_locked(NO); });
-        return rc_taptest_status_string();
-    }
-
-    if ([subcommand isEqualToString:@"reset"]) {
-        rc_dispatch_sync_main_safe(^{ rc_taptest_show_locked(YES); });
-        return rc_taptest_status_string();
-    }
-
-    if ([subcommand isEqualToString:@"hide"]) {
-        rc_dispatch_sync_main_safe(^{ rc_taptest_hide_locked(); });
-        return @"taptest hidden\n";
-    }
-
-    if ([subcommand isEqualToString:@"status"]) {
-        return rc_taptest_status_string();
-    }
-
-    if ([subcommand isEqualToString:@"run"]) {
-        NSString *backend = @"iohid";
-        NSString *mode = @"system";
-
-        if (parts.count >= 3) {
-            NSString *p2 = [parts[2] lowercaseString];
-            if ([p2 isEqualToString:@"iohid"] || [p2 isEqualToString:@"gsevent"]) {
-                backend = p2;
-                if (parts.count >= 4) {
-                    mode = [parts[3] lowercaseString];
-                }
-            } else {
-                mode = p2;
-            }
-        }
-
-        if (!([mode isEqualToString:@"system"] ||
-              [mode isEqualToString:@"app"] ||
-              [mode isEqualToString:@"springboard"])) {
-            return @"Usage: taptest run [iohid|gsevent] [system|app]\n";
-        }
-
-        __block CGPoint center = CGPointZero;
-        __block NSInteger startCount = 0;
-        rc_dispatch_sync_main_safe(^{
-            rc_taptest_show_locked(YES);
-            center = CGPointMake(CGRectGetMidX(g_rcTapTestButtonFrame), CGRectGetMidY(g_rcTapTestButtonFrame));
-            startCount = g_rcTapTestHitCount;
-        });
-
-        usleep(180000);
-
-        __block BOOL sent = NO;
-        __block NSString *sendError = nil;
-
-        if ([backend isEqualToString:@"gsevent"]) {
-            dispatch_sync(rc_gs_tap_queue(), ^{
-                sent = rc_gs_send_tap(center, mode, &sendError);
-            });
-        } else {
-            // IOHIDEvent backend
-            rc_load_touch_symbols();
-            dispatch_sync(rc_touch_queue(), ^{
-                perform_digitizer_touch(center.x, center.y, YES);
-                usleep(80000);
-                perform_digitizer_touch(center.x, center.y, NO);
-                sent = YES;
-            });
-        }
-
-        if (!sent) {
-            return [NSString stringWithFormat:@"taptest FAIL send-error=%@ backend=%@ mode=%@\n",
-                    sendError ?: @"unknown", backend, mode];
-        }
-
-        BOOL passed = NO;
-        for (int i = 0; i < 24; i++) {
-            __block NSInteger count = 0;
-            rc_dispatch_sync_main_safe(^{ count = g_rcTapTestHitCount; });
-            if (count > startCount) {
-                passed = YES;
-                break;
-            }
-            usleep(50000);
-        }
-
-        NSString *status = rc_taptest_status_string();
-        return [NSString stringWithFormat:@"taptest %@ backend=%@ mode=%@ target=%.0f %.0f\n%@",
-                passed ? @"PASS" : @"FAIL",
-                backend,
-                mode,
-                center.x,
-                center.y,
-                status];
-    }
-
-    return @"Usage: taptest show|hide|reset|status|run [iohid|gsevent] [system|app]\n";
 }
 
 // ── Lua-callable touch functions ──────────────────────────────────────────────
@@ -12438,10 +12026,6 @@ static NSString *handle_command(NSString *cmd) {
         return [NSString stringWithFormat:@"Executing SSH command on %@: %@\n", host, remoteCmd];
 
     // -- Touch gesture commands ------------------------------------------------
-    // taptest show|hide|reset|status|run [system|app]
-    } else if ([cleanCmd isEqualToString:@"taptest"] || [cleanCmd hasPrefix:@"taptest "]) {
-        return rc_handle_taptest_command(cleanCmd);
-
     // gesture record|play|list|delete|rename ... (RCGestures.m)
     } else if ([cleanCmd hasPrefix:@"gesture "]) {
         return RCGestureCommand(cleanCmd);
