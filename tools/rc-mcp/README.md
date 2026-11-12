@@ -55,6 +55,8 @@ For a client with a JSON config:
 
 Each action returns a fresh screenshot once the screen stops changing, so one call both acts and shows the result. Pass `look: false` to skip it.
 
+`tap_text` taps the text itself. A home screen app's name is a label on iOS, not part of its button, so tapping it does nothing. Use `open_app` for apps.
+
 ## Locked phones
 `wake` turns the screen on and unlocks a phone without a passcode. For one with a passcode, the person holding it can enter the code in Settings › Diagnostics › Test Kit. The phone keeps it for a while and uses it only for requests made on the phone itself, such as this server's over SSH. The code is never sent to the assistant.
 
