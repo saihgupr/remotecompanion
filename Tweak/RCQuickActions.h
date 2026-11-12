@@ -234,8 +234,10 @@ static NSString *RCQACommandOnMain(NSString *command) {
     }
     if (!selected) return error ?: @"Quick Shortcut changed or is no longer registered; choose it again";
     if (matches != 1) return @"Ambiguous Quick Shortcut; choose it again";
-    Class cls = NSClassFromString(@"SBIconView");
+    // iOS 26 moved this class method from SBIconView to the shortcuts menu provider
     SEL action = NSSelectorFromString(@"activateShortcut:withBundleIdentifier:forIconView:");
+    Class cls = NSClassFromString(@"SBIconView");
+    if (!RCQAMethod(cls, action, 'v', 3)) cls = NSClassFromString(@"SBHIconViewApplicationShortcutsContextMenuProvider");
     if (!RCQAMethod(cls, action, 'v', 3)) return @"Native Quick Shortcut activation unavailable or unsupported ABI";
     // No menu/view is needed for registered application items. Native code owns
     // activation; dispatch does not prove the target app handled the shortcut.
