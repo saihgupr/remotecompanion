@@ -418,6 +418,8 @@ cd remotecompanion
 ```
 By default, `./build.sh` builds the unified rootless `.deb` package (companion app, web UI, CLI, and tweak). You can also pass `--rootful`, `--roothide`, `--all`, or `--clean`.
 
+Always package through `./build.sh`. It stages the companion app, `rc` and the web UI into `Tweak/layout` on every run; `Tweak/layout` is generated and no longer tracked, so running `make package` in `Tweak/` by hand on a fresh clone would produce a package missing them.
+
 
 ### 3. Usage Methods
 
