@@ -22,8 +22,13 @@ import sys
 
 VERSION = "1.0.0"
 PROTOCOL = "2025-06-18"
-# Where rc-client and the shell tools are, rootless or rootful
-PHONE_PATH = "PATH=/var/jb/usr/bin:/var/jb/bin:/usr/bin:/bin:$PATH; "
+# Where rc-client and the shell tools are: rootless (/var/jb) or rootful (/usr) on the PATH, else
+# roothide's randomly named jailbreak folder. Shell built-ins only: stock iOS has no /bin/sh, and
+# nullglob keeps zsh from stopping on a pattern with no match (bash has no setopt and doesn't need it)
+PHONE_PATH = ("PATH=/var/jb/usr/bin:/var/jb/bin:/usr/bin:/bin:$PATH; "
+              "command -v rc-client >/dev/null 2>&1 || { setopt nullglob 2>/dev/null; "
+              "for d in /var/containers/Bundle/Application/.jbroot-*; do "
+              "[ -x \"$d/usr/bin/rc-client\" ] && PATH=\"$d/usr/bin:$d/bin:$PATH\" && break; done; }; ")
 SHOT = "/var/mobile/tmp/rc-mcp-look"
 
 
