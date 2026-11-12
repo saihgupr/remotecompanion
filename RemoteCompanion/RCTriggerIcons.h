@@ -24,3 +24,6 @@ UIImage *RCBluetoothIcon(CGFloat pointSize);
 // A Triggers section's icon, by its title ("Volume Buttons", "NFC Tags"...): for the category
 // chips and the section titles. A template symbol; nil for an unknown section.
 UIImage *RCTriggerCategoryIcon(NSString *sectionTitle);
+
+// The same for an action category ("Media", "Connectivity"...), and "Enabled". nil for an unknown one.
+UIImage *RCActionCategoryIcon(NSString *sectionTitle);

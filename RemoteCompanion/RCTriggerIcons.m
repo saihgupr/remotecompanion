@@ -348,3 +348,29 @@ UIImage *RCTriggerCategoryIcon(NSString *sectionTitle) {
     }
     return nil;
 }
+
+UIImage *RCActionCategoryIcon(NSString *sectionTitle) {
+    // Symbols in order of preference: the first this iOS has is used (the later ones are older)
+    static NSDictionary<NSString *, NSArray<NSString *> *> *icons;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        icons = @{
+            @"Enabled": @[@"checkmark.circle.fill"],
+            @"Media": @[@"music.note"],
+            @"Sound": @[@"speaker.wave.2.fill"],
+            @"Capture": @[@"camera.fill"],
+            @"Apps & Navigation": @[@"apps.iphone", @"app.fill"],
+            @"Device Controls": @[@"slider.horizontal.3"],
+            @"Connectivity": @[@"wifi"],
+            @"System": @[@"gearshape.fill", @"gear"],
+            @"Integrations": @[@"link"],
+            @"Scripting & Logic": @[@"chevron.left.forwardslash.chevron.right", @"curlybraces"],
+            @"Add-ons": @[@"puzzlepiece.extension.fill", @"puzzlepiece.fill"],
+        };
+    });
+    for (NSString *name in icons[sectionTitle ?: @""]) {
+        UIImage *image = [UIImage systemImageNamed:name];
+        if (image) return [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+    }
+    return nil;
+}

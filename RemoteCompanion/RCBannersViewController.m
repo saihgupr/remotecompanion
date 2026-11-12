@@ -4,6 +4,7 @@
 #import "RCActionTile.h"
 #import "RCAddOnCatalog.h"
 #import "RCCategoryBar.h"
+#import "RCTriggerIcons.h"
 
 // Lists the action picker's catalog; tapping an action adds/removes it from the
 // config's "bannerActions". Each entry tells the tweak how to recognise the action:
@@ -120,13 +121,27 @@ static NSArray<NSArray<NSDictionary *> *> *RCBannerCatalog(NSArray<NSString *> *
     // Category bar over the grid, as in Select Action. A chip shows only its actions.
     self.categoryBar = [[RCCategoryBar alloc] initWithWidth:self.view.bounds.size.width];
     NSArray *chips = [@[RCBannersEnabledTitle] arrayByAddingObjectsFromArray:self.sectionTitles];
-    [self.categoryBar setChipTitles:chips];
+    NSMutableArray *chipIcons = [NSMutableArray array];
+    for (NSString *title in chips) [chipIcons addObject:[self chipIconForCategory:title]];
+    [self.categoryBar setChipTitles:chips icons:chipIcons];
     self.categoryBar.selectedIndex = -1;
     __weak typeof(self) weakSelf = self;
     self.categoryBar.onSelect = ^(NSInteger index) {
         [weakSelf showCategory:(index >= 0 && index < (NSInteger)chips.count) ? chips[index] : nil];
     };
     [self.categoryBar attachToScrollView:self.collectionView];
+}
+
+// A category's chip icon: an action category's, else an add-on's own symbol
+- (id)chipIconForCategory:(NSString *)title {
+    UIImage *icon = RCActionCategoryIcon(title);
+    if (icon) return icon;
+    for (NSDictionary *addOn in [RCAddOnCatalog pickerSections]) {
+        if (![addOn[@"title"] isEqualToString:title]) continue;
+        icon = [addOn[@"icon"] isKindOfClass:[NSString class]] ? [UIImage systemImageNamed:addOn[@"icon"]] : nil;
+        return [icon imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate] ?: RCActionCategoryIcon(@"Add-ons") ?: [NSNull null];
+    }
+    return [NSNull null];
 }
 
 - (void)showCategory:(NSString *)title {
