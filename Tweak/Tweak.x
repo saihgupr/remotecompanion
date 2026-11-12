@@ -1,5 +1,6 @@
 #include <poll.h>
 #import <Foundation/Foundation.h>
+#import "RCScreen.h"
 #import <UIKit/UIKit.h>
 #import <netinet/in.h>
 #import <sys/socket.h>
@@ -3441,6 +3442,12 @@ static BOOL rc_evaluate_if_condition(NSDictionary *ifAction) {
         return rc_is_current_time_in_range(rawRange);
     }
     
+    // Text on Screen: a line on screen has this text (read with text recognition, RCScreen.m)
+    if ([conditionKey isEqualToString:@"screen_text"]) {
+        NSString *text = ifAction[@"expectedValue"] ?: ifAction[@"expected"];
+        return [text isKindOfClass:[NSString class]] && RCScreenShowsText(text);
+    }
+
     if ([conditionKey isEqualToString:@"front_app"]) {
         NSString *expectedValue = ifAction[@"expectedValue"] ?: ifAction[@"expected"];
         if (expectedValue.length == 0) return NO;
@@ -9715,7 +9722,6 @@ static NSString *rc_handle_http_request(NSString *action) {
 }
 
 #import "RCGestures.h"
-#import "RCScreen.h"
 
 static NSString *handle_command(NSString *cmd) {
     if (!cmd || ![cmd isKindOfClass:[NSString class]]) {

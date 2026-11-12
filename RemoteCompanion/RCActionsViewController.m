@@ -1,4 +1,5 @@
 #import "RCActionsViewController.h"
+#import "RCScreenActions.h"
 #import "RCAddOnCatalog.h"
 #import "RCConfigManager.h"
 #import "RCActionPickerViewController.h"
@@ -2580,6 +2581,16 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             @"section": @"Device"
         },
         @{
+            @"key": @"screen_text",
+            @"title": @"Text on Screen",
+            @"icon": ([UIImage systemImageNamed:@"text.viewfinder"] ? @"text.viewfinder" : @"doc.text.magnifyingglass"), // iOS 15+
+            @"section": @"Device",
+            @"input": @"text",
+            @"inputPrompt": @"Enter Text…",
+            @"placeholder": @"e.g. Wi-Fi",
+            @"inputMessage": @"True when this text shows anywhere on the screen (case doesn't matter)."
+        },
+        @{
             @"key": @"proximity",
             @"title": @"Proximity Sensor",
             @"icon": @"ear",
@@ -2715,7 +2726,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     // Text: a name to match (Wi-Fi network, Bluetooth device), case-insensitive
     if ([condition[@"input"] isEqualToString:@"text"]) {
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:condition[@"title"]
-                                                                       message:@"Matches the exact name (case doesn't matter)."
+                                                                       message:condition[@"inputMessage"] ?: @"Matches the exact name (case doesn't matter)."
                                                                 preferredStyle:UIAlertControllerStyleAlert];
         NSString *existing = [self existingExpectedValueForCondition:condition[@"key"] index:existingIndex];
         [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
@@ -3774,6 +3785,20 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         return;
     } else if ([currentAction hasPrefix:@"ha "] || [currentAction isEqualToString:@"ha"]) {
         [self presentHAActionOptionsAtIndex:indexPath.row];
+        return;
+    } else if ([RCScreenActions parseCommand:currentAction verb:NULL text:NULL seconds:NULL]) {
+        // A screen action: its text (and how long, to wait) again
+        NSString *verb = nil;
+        [RCScreenActions parseCommand:currentAction verb:&verb text:NULL seconds:NULL];
+        __weak typeof(self) weakSelf = self;
+        NSInteger row = indexPath.row;
+        [RCScreenActions promptForVerb:verb existing:currentAction from:self done:^(NSString *command) {
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf || row >= (NSInteger)strongSelf.actions.count) return;
+            strongSelf.actions[row] = command;
+            [strongSelf saveActions];
+            [strongSelf.tableView reloadData];
+        }];
         return;
     } else if ([RCGesturesViewController gestureForCommand:currentAction]) {
         // Play Gesture: its own page, with this action's gesture and speed

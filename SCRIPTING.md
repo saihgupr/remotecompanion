@@ -152,6 +152,19 @@ After a reboot, touch the screen once before the first `gesture` touch, so Remot
 
 The reply is the path, the picture's size and its bytes. Both `gesture` and `screen` need the API token when sent over the network.
 
+### Text on the Screen
+These read the screen with Apple's text recognition, so any text that's drawn counts, in any app.
+Matching ignores case: the same text first, then a line starting with it, then one containing it.
+
+| Command | What it does |
+|---|---|
+| `screen tap "Wi-Fi"` | Waits for the screen to stop moving, then taps the text where it shows (Tap Text on Screen in the app) |
+| `screen wait "Done" 10` | Waits up to 10 seconds for the text to show, then for the screen to stop moving (Wait for Text) |
+| `screen find "Wi-Fi"` | Where the text is, in points |
+| `screen ocr` | Every line of text with its box in points (`--json` for JSON, `fast` for a quicker, rougher read) |
+
+The **Text on Screen** condition (in If and Wait Until) is true while the text shows.
+
 ### Timing
 | Command | What it does |
 |---|---|

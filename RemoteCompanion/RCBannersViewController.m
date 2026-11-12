@@ -173,6 +173,8 @@ static NSArray<NSArray<NSDictionary *> *> *RCBannerCatalog(NSArray<NSString *> *
             @"__FOCUS__": @[@"focus on ", @"focus toggle ", @"focus off"],
             @"__OPEN_APP__": @[@"uiopen "],
             @"__KILL_APP__": @[@"kill "],
+            @"__SCREEN_TAP__": @[@"screen tap "],
+            @"__SCREEN_WAIT__": @[@"screen wait "],
             @"__HA_PICKER__": @[@"ha "],
             @"__KM_TRIGGER__": @[@"km "],
             @"__MQTT_PUBLISH__": @[@"mqtt "],
