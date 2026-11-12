@@ -97,6 +97,11 @@ static const CGFloat RCTileMinWidth = 80;
     [self applyLook];
 }
 
+- (void)setPlainChecked:(BOOL)plainChecked {
+    _plainChecked = plainChecked;
+    [self applyLook];
+}
+
 - (void)setDimmed:(BOOL)dimmed {
     _dimmed = dimmed;
     [self applyLook];
@@ -196,9 +201,10 @@ static const CGFloat RCTileMinWidth = 80;
 - (void)applyLook {
     RCConfigManager *cm = [RCConfigManager sharedManager];
     UIColor *tile = [cm tweakColorForKey:@"blockBackground" defaultVal:0.12];
-    self.contentView.backgroundColor = self.checked ? [[UIColor systemBlueColor] colorWithAlphaComponent:0.22] : tile;
-    self.contentView.layer.borderWidth = self.checked ? 1.5 : 0;
-    self.iconView.tintColor = self.checked ? [UIColor systemBlueColor] : self.dimmed ? [UIColor tertiaryLabelColor] : [UIColor labelColor];
+    BOOL tint = self.checked && !self.plainChecked;
+    self.contentView.backgroundColor = tint ? [[UIColor systemBlueColor] colorWithAlphaComponent:0.22] : tile;
+    self.contentView.layer.borderWidth = tint ? 1.5 : 0;
+    self.iconView.tintColor = tint ? [UIColor systemBlueColor] : self.dimmed ? [UIColor tertiaryLabelColor] : [UIColor labelColor];
     self.iconView.alpha = self.dimmed && !self.checked ? 0.6 : 1; // an app's own icon isn't tinted
     self.nameLabel.textColor = self.dimmed && !self.checked ? [UIColor secondaryLabelColor] : [UIColor labelColor];
     self.countLabel.hidden = self.count <= 0 || self.editing;
@@ -234,6 +240,7 @@ static const CGFloat RCTileMinWidth = 80;
     [super prepareForReuse];
     _opensMore = NO;
     _checked = NO;
+    _plainChecked = NO;
     _dimmed = NO;
     _count = 0;
     self.countLabel.hidden = YES;

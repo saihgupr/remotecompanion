@@ -7,8 +7,10 @@
 @property (nonatomic, strong, readonly) UILabel *nameLabel;
 // A small chevron in the corner: tapping opens another screen or asks for more
 @property (nonatomic, assign) BOOL opensMore;
-// Banners: a tinted tile with a checkmark
+// Banners: a checkmark
 @property (nonatomic, assign) BOOL checked;
+// Checked without tinting the whole tile: the check stays, the background and icon do not change
+@property (nonatomic, assign) BOOL plainChecked;
 - (void)setName:(NSString *)name icon:(NSString *)icon;
 // image: a picture of its own (an add-on's), shown instead of the symbol
 - (void)setName:(NSString *)name icon:(NSString *)icon image:(UIImage *)image;

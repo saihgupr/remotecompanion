@@ -328,6 +328,7 @@
     NSInteger count = [item[@"addedCount"] integerValue];
     cell.count = count;
     cell.checked = detail.length > 0 && count == 0;
+    cell.plainChecked = YES;
     cell.accessibilityValue = detail;
     return cell;
 }

@@ -347,6 +347,7 @@ static NSString *const RCBannersNote = @"Checked actions show a banner whenever 
     RCActionTileCell *cell = [collectionView dequeueReusableCellWithReuseIdentifier:@"Tile" forIndexPath:indexPath];
     [cell setName:item[@"name"] icon:item[@"icon"]];
     cell.checked = [self isChecked:item[@"command"]];
+    cell.plainChecked = YES;
     return cell;
 }
 
