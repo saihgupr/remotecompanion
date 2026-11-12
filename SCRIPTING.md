@@ -158,7 +158,7 @@ Matching ignores case: the same text first, then a line starting with it, then o
 
 | Command | What it does |
 |---|---|
-| `screen tap "Wi-Fi"` | Waits for the screen to stop moving, then taps the text where it shows (Tap Text on Screen in the app). An app's name on the home screen taps its icon instead, since iOS doesn't count the name as part of the icon |
+| `screen tap "Wi-Fi"` | Waits for the screen to stop moving, then taps the text where it shows (Tap Text on Screen in the app) |
 | `screen wait "Done" 10` | Waits up to 10 seconds for the text to show, then for the screen to stop moving (Wait for Text) |
 | `screen find "Wi-Fi"` | Where the text is, in points |
 | `screen ocr` | Every line of text with its box in points (`--json` for JSON, `fast` for a quicker, rougher read) |

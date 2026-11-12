@@ -1,6 +1,5 @@
 #import "RCScreen.h"
 #import <UIKit/UIKit.h>
-#import <objc/runtime.h>
 #import <sys/stat.h>
 #import <limits.h>
 #import <stdlib.h>
@@ -9,22 +8,6 @@
 #import "RCSpawn.h"
 
 void SRLog(NSString *format, ...);
-
-// SpringBoard's front app; RCScreen.m runs inside SpringBoard
-@interface UIApplication (RCScreenFrontmost)
-- (id)_accessibilityFrontMostApplication;
-@end
-
-// The installed-app list, for telling an app's name on the home screen from other text
-@interface RCScreenAppWorkspace : NSObject
-+ (instancetype)defaultWorkspace;
-- (NSArray *)allInstalledApplications;
-@end
-
-@interface RCScreenApp : NSObject
-- (NSString *)localizedName;
-- (NSString *)bundleIdentifier;
-@end
 
 // UIKit's own screen grab: the whole screen as SpringBoard shows it (main thread only)
 extern UIImage *_UICreateScreenUIImage(void) NS_RETURNS_RETAINED;
@@ -364,40 +347,6 @@ static CGPoint rc_screen_target(RCScreenText *t, NSString *query) {
     return CGPointMake(CGRectGetMidX(f), CGRectGetMidY(f));
 }
 
-// Whether an app on the phone has this name. On the home screen an app's name sits under its icon
-// and iOS doesn't count the name as part of the icon, so the text alone is not a target.
-static BOOL rc_screen_is_app_name(NSString *text) {
-    Class workspaceClass = objc_getClass("LSApplicationWorkspace");
-    if (!workspaceClass) return NO;
-    RCScreenAppWorkspace *workspace = [workspaceClass defaultWorkspace];
-    NSString *wanted = rc_screen_norm(text);
-    for (RCScreenApp *app in [workspace allInstalledApplications]) {
-        if (![app respondsToSelector:@selector(localizedName)]) continue;
-        NSString *name = [app localizedName];
-        if ([name isKindOfClass:[NSString class]] && [rc_screen_norm(name) isEqualToString:wanted]) return YES;
-    }
-    return NO;
-}
-
-// Whether SpringBoard itself is on screen (the home screen, a folder or the lock screen)
-static BOOL rc_screen_showing_springboard(void) {
-    __block BOOL home = NO;
-    void (^ask)(void) = ^{
-        RCScreenApp *front = [[UIApplication sharedApplication] _accessibilityFrontMostApplication];
-        NSString *bundle = [front respondsToSelector:@selector(bundleIdentifier)] ? [front bundleIdentifier] : nil;
-        home = ![bundle isKindOfClass:[NSString class]] || [bundle isEqualToString:@"com.apple.springboard"];
-    };
-    if ([NSThread isMainThread]) ask(); else dispatch_sync(dispatch_get_main_queue(), ask);
-    return home;
-}
-
-// Where to touch a line: where its words are, except an app's name on the home screen, which goes
-// to the icon instead. The icon's middle is about 36 points above the top of its name.
-static CGPoint rc_screen_tap_point(CGPoint p, RCScreenText *t) {
-    if (!rc_screen_showing_springboard() || !rc_screen_is_app_name(t.text)) return p;
-    return CGPointMake(p.x, MAX(12, CGRectGetMinY(t.frame) - 36));
-}
-
 BOOL RCScreenShowsText(NSString *text) {
     NSString *error = nil;
     NSArray *items = rc_screen_read(YES, &error);
@@ -461,7 +410,6 @@ static NSString *rc_screen_text_command(NSString *verb, NSString *arg) {
             return [NSString stringWithFormat:@"\"%@\" at %.0f %.0f (box %.0f,%.0f %.0fx%.0f)\n", t.text, p.x, p.y,
                     t.frame.origin.x, t.frame.origin.y, t.frame.size.width, t.frame.size.height];
         }
-        p = rc_screen_tap_point(p, t);
         NSString *tap = RCGestureCommand([NSString stringWithFormat:@"gesture tap %.1f %.1f", p.x, p.y]);
         if ([tap hasPrefix:@"Error"]) return tap;
         return [NSString stringWithFormat:@"Tapped \"%@\" at %.0f %.0f\n", t.text, p.x, p.y];
