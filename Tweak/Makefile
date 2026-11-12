@@ -27,6 +27,7 @@ LUA_FILES = $(wildcard lua/*.c)
 RemoteCommand_FILES = Tweak.x RCNFCManager.x $(LUA_FILES)
 RemoteCommand_FILES += RCTestKit.x
 RemoteCommand_FILES += RCGestures.m
+RemoteCommand_FILES += RCScreen.m
 RemoteCommand_FILES += RCAddOns.m
 # Shared with the app: the one toast pill (editor preview uses the same file)
 RemoteCommand_FILES += ../RemoteCompanion/RCToastPill.m

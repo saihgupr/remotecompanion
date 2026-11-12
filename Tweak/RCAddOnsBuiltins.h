@@ -74,6 +74,7 @@ static NSString *const kRCAOBuiltinPrefixes[] = {
     @"rotate ",
     @"run history ",
     @"run history all ",
+    @"screen ",
     @"screenrecord ",
     @"sd ",
     @"set-vol ",

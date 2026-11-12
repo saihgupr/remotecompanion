@@ -1186,10 +1186,173 @@ NSArray<NSDictionary *> *RCGestureList(void) {
     return out;
 }
 
+#pragma mark - Tap, hold and swipe
+
+// A touch made up on the spot (gesture tap / hold / swipe), played like a recording. Points are in
+// screen points as the screen is turned now (what rc-screen reports); they're turned upright here.
+static CGPoint rc_gesture_upright(CGPoint p, CGSize *fixedSize) {
+    __block CGPoint out = p;
+    __block CGSize size = CGSizeZero;
+    rc_on_main_sync(^{
+        UIScreen *screen = [UIScreen mainScreen];
+        out = [screen.coordinateSpace convertPoint:p toCoordinateSpace:screen.fixedCoordinateSpace];
+        size = screen.fixedCoordinateSpace.bounds.size;
+    });
+    if (fixedSize) *fixedSize = size;
+    return out;
+}
+
+// The edge a touch starts on (the touchscreen's edge bits >> 24): iOS starts the home bar
+// gesture, swipe back and the like only for touches that begin there
+static uint8_t rc_gesture_edge(CGPoint p, CGSize size) {
+    if (p.y >= size.height - 2) return 0x1; // bottom
+    if (p.x <= 2) return 0x8;               // left
+    if (p.y <= 2) return 0x2;               // top
+    if (p.x >= size.width - 2) return 0x4;  // right
+    return 0;
+}
+
+// Frames from (x1,y1) to (x2,y2) over `seconds`, lifting at the end; the same point for a tap
+// or hold. A still finger keeps reporting, as a real one does, so long presses register.
+// Where finger `i` is at `f` (0 at the start, 1 at the end), in upright screen points
+typedef CGPoint (^RCFingerPath)(int i, double f);
+
+// Frames for `fingers` fingers along their paths over `seconds`, all lifting at the end. A still
+// finger keeps reporting, as a real one does, so long presses register.
+static NSData *rc_gesture_make_path(int fingers, RCFingerPath path, double seconds, CGSize size) {
+    NSMutableData *data = [NSMutableData data];
+    fingers = MIN(MAX(fingers, 1), kRCGestureMaxFingers);
+    uint8_t edges[kRCGestureMaxFingers];
+    for (int i = 0; i < fingers; i++) edges[i] = rc_gesture_edge(path(i, 0), size);
+    double step = 1.0 / 60;
+    int moves = MAX(1, (int)ceil(seconds / step));
+    for (int m = 0; m <= moves + 1; m++) {
+        BOOL lift = m == moves + 1;
+        double f = lift ? 1 : (double)m / moves;
+        RCGestureFrame frame = {0};
+        frame.t = lift ? seconds + step : seconds * f;
+        frame.count = fingers;
+        for (int i = 0; i < fingers; i++) {
+            CGPoint p = path(i, f);
+            frame.fingers[i].slot = 2 + i;
+            frame.fingers[i].touching = !lift;
+            frame.fingers[i].edge = edges[i];
+            frame.fingers[i].x = MIN(MAX(p.x, 0), size.width - 0.5);
+            frame.fingers[i].y = MIN(MAX(p.y, 0), size.height - 0.5);
+        }
+        [data appendBytes:&frame length:sizeof(frame)];
+    }
+    return data;
+}
+
+static NSData *rc_gesture_make(CGPoint from, CGPoint to, double seconds, CGSize size) {
+    return rc_gesture_make_path(1, ^CGPoint(int i, double f) {
+        return CGPointMake(from.x + (to.x - from.x) * f, from.y + (to.y - from.y) * f);
+    }, seconds, size);
+}
+
+// Keeps a two-finger touch inside the screen, short of the edges (an edge touch is a system gesture)
+static CGPoint rc_gesture_inside(CGPoint p, CGSize size) {
+    return CGPointMake(MIN(MAX(p.x, 8), size.width - 8), MIN(MAX(p.y, 8), size.height - 8));
+}
+
+static NSString *rc_gesture_touch_command(NSString *verb, NSArray<NSString *> *words) {
+    // gesture tap X Y | hold X Y [SECONDS] | swipe X1 Y1 X2 Y2 [SECONDS]
+    //         pinch X Y SCALE [SECONDS] | rotate X Y DEGREES [SECONDS] | swipe2 X1 Y1 X2 Y2 [SECONDS]
+    BOOL swipe = [verb isEqualToString:@"swipe"] || [verb isEqualToString:@"swipe2"];
+    BOOL drag = [verb isEqualToString:@"drag"];
+    BOOL pinch = [verb isEqualToString:@"pinch"], rotate = [verb isEqualToString:@"rotate"];
+    NSUInteger points = swipe || drag || pinch || rotate ? (swipe || drag ? 4 : 3) : 2;
+    if (words.count < 2 + points) {
+        NSDictionary *usage = @{ @"swipe": @"swipe X1 Y1 X2 Y2 [SECONDS]", @"swipe2": @"swipe2 X1 Y1 X2 Y2 [SECONDS]", @"drag": @"drag X1 Y1 X2 Y2 [SECONDS]",
+                                 @"pinch": @"pinch X Y SCALE [SECONDS]", @"rotate": @"rotate X Y DEGREES [SECONDS]",
+                                 @"hold": @"hold X Y [SECONDS]", @"tap": @"tap X Y" };
+        return [NSString stringWithFormat:@"Error: Use gesture %@\n", usage[verb]];
+    }
+    for (NSUInteger i = 2; i < words.count; i++) {
+        NSScanner *scan = [NSScanner scannerWithString:words[i]];
+        if (![scan scanDouble:NULL] || !scan.isAtEnd) return [NSString stringWithFormat:@"Error: Not a number: %@\n", words[i]];
+    }
+    double seconds = [verb isEqualToString:@"tap"] ? 0.05 : [verb isEqualToString:@"swipe"] ? 0.3 : drag ? 0.62 : (pinch || rotate) ? 0.6 : [verb isEqualToString:@"swipe2"] ? 0.4 : 1;
+    if (words.count > 2 + points) seconds = MIN(MAX([words[2 + points] doubleValue], 0.02), 30);
+    CGSize size = CGSizeZero;
+    CGPoint from = rc_gesture_upright(CGPointMake([words[2] doubleValue], [words[3] doubleValue]), &size);
+    CGPoint to = swipe || drag ? rc_gesture_upright(CGPointMake([words[4] doubleValue], [words[5] doubleValue]), NULL) : from;
+    // A point on the edge (0, or the width) is kept just inside
+    from = CGPointMake(MIN(MAX(from.x, 0), size.width - 0.5), MIN(MAX(from.y, 0), size.height - 0.5));
+    to = CGPointMake(MIN(MAX(to.x, 0), size.width - 0.5), MIN(MAX(to.y, 0), size.height - 0.5));
+    if (g_playing) return @"Error: A gesture is already playing\n";
+    uint64_t sender = rc_touch_sender();
+    if (!sender) return @"Error: Touch the screen once first (after a respring the touchscreen's ID isn't known yet)\n";
+    NSData *frames = nil;
+    if (pinch) {
+        // Two fingers on either side of the point, spreading apart (SCALE above 1, zooming in) or
+        // closing (below 1). Their distance changes by SCALE, within the screen.
+        double scale = [words[4] doubleValue];
+        if (scale <= 0) return @"Error: SCALE must be above 0 (2 zooms in, 0.5 zooms out)\n";
+        double room = MIN(size.width, size.height) - 24;
+        double start = scale >= 1 ? MAX(40, MIN(120, room / scale)) : MIN(room, 240);
+        double finish = MIN(MAX(start * scale, 16), room);
+        CGPoint c = from;
+        frames = rc_gesture_make_path(2, ^CGPoint(int i, double f) {
+            double half = (start + (finish - start) * f) / 2 * (i ? 1 : -1);
+            return rc_gesture_inside(CGPointMake(c.x + half, c.y), size);
+        }, seconds, size);
+    } else if (rotate) {
+        // Two fingers opposite each other around the point, turning DEGREES (clockwise above 0)
+        double radians = [words[4] doubleValue] * M_PI / 180, radius = 70;
+        CGPoint c = from;
+        frames = rc_gesture_make_path(2, ^CGPoint(int i, double f) {
+            double a = (i ? M_PI : 0) + radians * f;
+            return rc_gesture_inside(CGPointMake(c.x + radius * cos(a), c.y + radius * sin(a)), size);
+        }, seconds, size);
+    } else if ([verb isEqualToString:@"swipe2"]) {
+        // Two fingers side by side, 40 points apart across the direction of the swipe
+        double dx = to.x - from.x, dy = to.y - from.y, len = MAX(hypot(dx, dy), 1);
+        double ox = -dy / len * 20, oy = dx / len * 20;
+        frames = rc_gesture_make_path(2, ^CGPoint(int i, double f) {
+            double side = i ? 1 : -1;
+            return rc_gesture_inside(CGPointMake(from.x + dx * f + ox * side, from.y + dy * f + oy * side), size);
+        }, seconds, size);
+    } else if (drag) {
+        // A decelerating pull that lets go going slow: the last 12% of the time crawls a point
+        // and a half, so iOS sees almost no release velocity and the content doesn't coast on
+        // the way it does when a swipe lifts at full speed
+        double dx = to.x - from.x, dy = to.y - from.y, len = MAX(hypot(dx, dy), 1);
+        double crawl = MIN(1.5, len / 2), ux = dx / len, uy = dy / len;
+        CGPoint main = CGPointMake(to.x - ux * crawl, to.y - uy * crawl);
+        double split = MAX(0.1, (seconds - 0.12) / seconds);
+        frames = rc_gesture_make_path(1, ^CGPoint(int i, double f) {
+            if (f <= split) {
+                double g = f / split, p = g * g * (3 - 2 * g); // smoothstep over most of it
+                return CGPointMake(from.x + (main.x - from.x) * p, from.y + (main.y - from.y) * p);
+            }
+            double t = (f - split) / (1 - split);
+            return CGPointMake(main.x + ux * crawl * t, main.y + uy * crawl * t);
+        }, seconds, size);
+    } else {
+        frames = rc_gesture_make(from, to, seconds, size);
+    }
+    NSUInteger count = frames.length / sizeof(RCGestureFrame);
+    NSString *name = verb;
+    dispatch_block_t play = ^{ rc_gesture_play(name, frames.bytes, count, sender, 1, size); };
+    // Waits for the touch to finish, so the next command sees its result; from the main thread
+    // (the Web UI) it can't wait
+    if ([NSThread isMainThread]) {
+        dispatch_async(rc_gesture_play_queue(), play);
+    } else {
+        dispatch_sync(rc_gesture_play_queue(), play);
+        if (g_playTouched) return @"Stopped by a touch\n";
+    }
+    return [NSString stringWithFormat:@"%@%@\n", [[verb substringToIndex:1] uppercaseString], [verb substringFromIndex:1]];
+}
+
 NSString *RCGestureCommand(NSString *cmd) {
     NSArray<NSString *> *words = rc_gesture_words(cmd);
     NSString *verb = words.count > 1 ? words[1].lowercaseString : @"";
     NSString *arg = words.count > 2 ? [words[2] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]] : @"";
+
+    if ([@[@"tap", @"hold", @"swipe", @"swipe2", @"drag", @"pinch", @"rotate"] containsObject:verb]) return rc_gesture_touch_command(verb, words);
 
     if ([verb isEqualToString:@"list"]) {
         NSMutableString *out = [NSMutableString string];
@@ -1460,5 +1623,5 @@ NSString *RCGestureCommand(NSString *cmd) {
         return [NSString stringWithFormat:@"Renamed to '%@'\n", to];
     }
 
-    return @"Usage: gesture list | record \"Name\" | record-toggle [\"Name\"] | record-stop | record-cancel | record-status | play \"Name\" [SPEED] | play-soon \"Name\" [SPEED] | play-latest [SPEED] | play-status | stop | idle-stop [SECONDS] | tab-size [small|medium|large] | stop-on-touch [on|off] | show-touches [on|off] | export PATH [\"Name\" ...] | import PATH | trim \"Name\" START END | delete \"Name\" | rename \"Old\" \"New\"\n";
+    return @"Usage: gesture tap X Y | hold X Y [SECONDS] | swipe X1 Y1 X2 Y2 [SECONDS] | drag X1 Y1 X2 Y2 [SECONDS] | swipe2 X1 Y1 X2 Y2 [SECONDS] | pinch X Y SCALE [SECONDS] | rotate X Y DEGREES [SECONDS] | list | record \"Name\" | record-toggle [\"Name\"] | record-stop | record-cancel | record-status | play \"Name\" [SPEED] | play-soon \"Name\" [SPEED] | play-latest [SPEED] | play-status | stop | idle-stop [SECONDS] | tab-size [small|medium|large] | stop-on-touch [on|off] | show-touches [on|off] | export PATH [\"Name\" ...] | import PATH | trim \"Name\" START END | delete \"Name\" | rename \"Old\" \"New\"\n";
 }

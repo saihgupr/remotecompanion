@@ -3872,7 +3872,8 @@ BOOL RCIsPrivilegedCommand(NSString *cmd) {
            [trimmed hasPrefix:@"ssh-run "] ||
            [trimmed hasPrefix:@"rc-run "] ||
            [trimmed hasPrefix:@"tap "] || [trimmed hasPrefix:@"hold "] || [trimmed hasPrefix:@"swipe "] ||
-           [trimmed hasPrefix:@"gesture "];
+           [trimmed hasPrefix:@"gesture "] ||
+           [trimmed hasPrefix:@"screen "]; // a screenshot shows whatever is on screen
 }
 
 static BOOL rc_is_privileged_command(NSString *cmd) {
@@ -9714,6 +9715,7 @@ static NSString *rc_handle_http_request(NSString *action) {
 }
 
 #import "RCGestures.h"
+#import "RCScreen.h"
 
 static NSString *handle_command(NSString *cmd) {
     if (!cmd || ![cmd isKindOfClass:[NSString class]]) {
@@ -12442,6 +12444,10 @@ static NSString *handle_command(NSString *cmd) {
     // gesture record|play|list|delete|rename ... (RCGestures.m)
     } else if ([cleanCmd hasPrefix:@"gesture "]) {
         return RCGestureCommand(cleanCmd);
+
+    // screen capture [PATH] [SCALE] [QUALITY]: a JPEG of the screen (RCScreen.m)
+    } else if ([cleanCmd hasPrefix:@"screen "]) {
+        return RCScreenCommand(cleanCmd);
 
     // taprecord
     } else if ([cleanCmd isEqualToString:@"taprecord"]) {
