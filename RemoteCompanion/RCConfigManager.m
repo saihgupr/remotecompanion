@@ -2369,6 +2369,23 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
     return [[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:(NSOperatingSystemVersion){15, 0, 0}];
 }
 
+// Control Center Button triggers use the iOS 11 - 17 Control Center; iOS 18 redesigned it. They
+// also need CCSupport to load their modules (controlCenterSupportInstalled)
++ (BOOL)supportsControlCenterButtons {
+    return ![[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:(NSOperatingSystemVersion){18, 0, 0}];
+}
+
++ (BOOL)controlCenterSupportInstalled {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    for (NSString *path in @[@"/var/jb/Library/MobileSubstrate/DynamicLibraries/CCSupport.dylib",
+                             @"/Library/MobileSubstrate/DynamicLibraries/CCSupport.dylib",
+                             @"/var/jb/usr/lib/TweakInject/CCSupport.dylib",
+                             @"/usr/lib/TweakInject/CCSupport.dylib"]) {
+        if ([fm fileExistsAtPath:path]) return YES;
+    }
+    return NO;
+}
+
 // The same format the tweak reads (rc_parse_shortcut_args): the name, quoted when it needs to be,
 // then -i, then -p and the input
 + (NSString *)shortcutNameForAction:(NSString *)action silent:(BOOL *)silent input:(NSString **)input {

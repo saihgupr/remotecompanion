@@ -160,6 +160,8 @@
 + (NSString *)shortcutActionWithName:(NSString *)name silent:(BOOL)silent input:(NSString *)input;
 // Focus modes (the Set Focus action, the Focus condition) came with iOS 15
 + (BOOL)supportsFocus;
++ (BOOL)supportsControlCenterButtons;
++ (BOOL)controlCenterSupportInstalled;
 - (BOOL)isActionDisabled:(id)actionItem;
 - (id)toggleActionDisabled:(id)actionItem;
 - (void)registerKMMacroName:(NSString *)name forUid:(NSString *)uid;

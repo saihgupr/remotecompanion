@@ -5607,6 +5607,32 @@ static void rc_schedule_audio_output_check(void) {
     });
 }
 
+// Control Center Button triggers: the module for slot N (Tweak/rc-ccmodule) posts
+// com.saihgupr.remotecompanion.ccbutton.N when it's tapped, and that runs trigger_cc_button_N
+#define RC_CC_BUTTON_SLOTS 8
+static void handle_cc_button_notification(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
+    NSString *notification = (__bridge NSString *)name;
+    NSRange dot = [notification rangeOfString:@"." options:NSBackwardsSearch];
+    if (!notification.length || dot.location == NSNotFound) return;
+    NSString *key = [@"trigger_cc_button_" stringByAppendingString:[notification substringFromIndex:dot.location + 1]];
+    SRLogMin(@"🎛️ [RCSystem] Control Center button: %@", key);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        RCExecuteTrigger(key);
+    });
+}
+
+static void rc_cc_button_start_observing(void) {
+    for (int slot = 1; slot <= RC_CC_BUTTON_SLOTS; slot++) {
+        NSString *name = [NSString stringWithFormat:@"com.saihgupr.remotecompanion.ccbutton.%d", slot];
+        CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),
+                                        NULL,
+                                        handle_cc_button_notification,
+                                        (__bridge CFStringRef)name,
+                                        NULL,
+                                        CFNotificationSuspensionBehaviorDeliverImmediately);
+    }
+}
+
 static void handle_wifi_notification(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
     dispatch_async(dispatch_get_main_queue(), ^{
         handle_wifi_transition();
@@ -6302,6 +6328,7 @@ static void register_system_event_observers() {
                                     CFNotificationSuspensionBehaviorDeliverImmediately);
 
     rc_focus_start_observing();
+    rc_cc_button_start_observing();
 
     // WiFi: Track network changes (Darwin Notification)
     CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), 
