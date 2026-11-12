@@ -2583,7 +2583,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         @{
             @"key": @"screen_text",
             @"title": @"Text on Screen",
-            @"icon": @"text.viewfinder",
+            @"icon": ([UIImage systemImageNamed:@"text.viewfinder"] ? @"text.viewfinder" : @"doc.text.magnifyingglass"), // iOS 15+
             @"section": @"Device",
             @"input": @"text",
             @"inputPrompt": @"Enter Text…",

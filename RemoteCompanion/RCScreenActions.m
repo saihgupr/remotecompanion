@@ -47,8 +47,9 @@
 
 + (NSString *)iconForVerb:(NSString *)verb {
     NSDictionary *icons = @{ @"tap": @"hand.tap.fill", @"wait": @"hourglass" };
-    NSString *icon = icons[verb] ?: @"text.viewfinder";
-    return [UIImage systemImageNamed:icon] ? icon : @"text.viewfinder";
+    NSString *icon = icons[verb];
+    if (icon && [UIImage systemImageNamed:icon]) return icon;
+    return [UIImage systemImageNamed:@"text.viewfinder"] ? @"text.viewfinder" : @"doc.text.magnifyingglass"; // iOS 15+
 }
 
 + (void)promptForVerb:(NSString *)verb existing:(NSString *)command from:(UIViewController *)controller
