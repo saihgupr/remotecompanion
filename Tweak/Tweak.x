@@ -17180,20 +17180,22 @@ static inline void RC_ScreenSL(CGFloat *outS, CGFloat *outL) {
 
 static inline BOOL RC_InTopRegion(CGPoint loc, UIInterfaceOrientation orientation, CGFloat S, CGFloat L) {
     (void)S; (void)L;
-    if (orientation == UIInterfaceOrientationPortrait) return (loc.y < 50);
-    if (orientation == UIInterfaceOrientationPortraitUpsideDown) return (loc.y > L - 50);
-    if (orientation == UIInterfaceOrientationLandscapeLeft) return (loc.x < 50);  // home left: UI-top = device left
-    if (orientation == UIInterfaceOrientationLandscapeRight) return (loc.x > S - 50); // home right: UI-top = device right
-    return (loc.y < 50);
+    CGFloat threshold = 25.0;
+    if (orientation == UIInterfaceOrientationPortrait) return (loc.y < threshold);
+    if (orientation == UIInterfaceOrientationPortraitUpsideDown) return (loc.y > L - threshold);
+    if (orientation == UIInterfaceOrientationLandscapeLeft) return (loc.x < threshold);  // home left: UI-top = device left
+    if (orientation == UIInterfaceOrientationLandscapeRight) return (loc.x > S - threshold); // home right: UI-top = device right
+    return (loc.y < threshold);
 }
 
 static inline BOOL RC_InBottomRegion(CGPoint loc, UIInterfaceOrientation orientation, CGFloat S, CGFloat L) {
     (void)S; (void)L;
-    if (orientation == UIInterfaceOrientationPortrait) return (loc.y > L - 50);
-    if (orientation == UIInterfaceOrientationPortraitUpsideDown) return (loc.y < 50);
-    if (orientation == UIInterfaceOrientationLandscapeLeft) return (loc.x > S - 50);  // home left: UI-bottom = device right
-    if (orientation == UIInterfaceOrientationLandscapeRight) return (loc.x < 50);     // home right: UI-bottom = device left
-    return (loc.y > L - 50);
+    CGFloat threshold = 25.0;
+    if (orientation == UIInterfaceOrientationPortrait) return (loc.y > L - threshold);
+    if (orientation == UIInterfaceOrientationPortraitUpsideDown) return (loc.y < threshold);
+    if (orientation == UIInterfaceOrientationLandscapeLeft) return (loc.x > S - threshold);  // home left: UI-bottom = device right
+    if (orientation == UIInterfaceOrientationLandscapeRight) return (loc.x < threshold);     // home right: UI-bottom = device left
+    return (loc.y > L - threshold);
 }
 
 static inline BOOL RC_InTopRegionMulti(CGPoint loc, UIInterfaceOrientation orientation, CGFloat S, CGFloat L) {
@@ -17285,10 +17287,10 @@ static inline void RC_EdgeZonesForLoc(CGPoint loc, UIInterfaceOrientation orient
 static NSString *get_bottom_swipe_trigger_for_touch(CGPoint loc, UIInterfaceOrientation orientation, BOOL *outInBottomRegion) {
     // Bottom zones always live on the edge that is currently UI-bottom.
     // Mapping (UIInterfaceOrientationLandscapeLeft = home on left):
-    //   Portrait:       bottom = device bottom (y > L-50), progress = x/S
-    //   UpsideDown:     bottom = device top (y < 50),       progress = 1-x/S
-    //   LandscapeLeft:  bottom = device right (x > S-50),   progress = y/L
-    //   LandscapeRight: bottom = device left (x < 50),      progress = 1-y/L
+    //   Portrait:       bottom = device bottom (y > L-25), progress = x/S
+    //   UpsideDown:     bottom = device top (y < 25),       progress = 1-x/S
+    //   LandscapeLeft:  bottom = device right (x > S-25),   progress = y/L
+    //   LandscapeRight: bottom = device left (x < 25),      progress = 1-y/L
     CGFloat S = 0, L = 0;
     RC_ScreenSL(&S, &L);
 
@@ -17530,7 +17532,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                 }
             }
             
-            // Bottom bar region = bottom 50pts
+            // Bottom bar region = bottom 25pts
             if (inBottomRegion && !g_twoFingerBottomActive) {
                 RC_SnapshotGestureOffsets();
                 g_bottomBarSwipeStartX = loc.x;
