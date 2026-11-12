@@ -53,11 +53,78 @@ static NSString *rc_symbol_tile_path(NSString *symbol) {
     return [UIImagePNGRepresentation(tile) writeToFile:path atomically:YES] ? path : nil;
 }
 
+// The photo attached to a notification: downloaded from an http(s) URL, kept in a cache file with
+// the extension the system reads the type from. nil when the URL or the download is no good.
+static NSString *rc_attachment_extension(NSString *mime, NSURL *url) {
+    NSString *type = mime.lowercaseString ?: @"";
+    if ([type containsString:@"jpeg"] || [type containsString:@"jpg"]) return @"jpg";
+    if ([type containsString:@"png"]) return @"png";
+    if ([type containsString:@"gif"]) return @"gif";
+    if ([type containsString:@"heic"] || [type containsString:@"heif"]) return @"heic";
+    if ([type containsString:@"webp"]) return @"webp";
+    if ([type containsString:@"tiff"]) return @"tiff";
+    if ([type containsString:@"bmp"]) return @"bmp";
+    NSString *ext = url.pathExtension.lowercaseString;
+    if ([@[@"jpg", @"jpeg", @"png", @"gif", @"heic", @"heif", @"webp", @"tiff", @"bmp"] containsObject:ext]) {
+        return [ext isEqualToString:@"jpeg"] ? @"jpg" : ext;
+    }
+    return nil;
+}
+
+static void rc_prune_attachments(void) {
+    NSString *dir = @"/var/mobile/Library/Caches/com.saihgupr.remotecompanion.attachments";
+    NSArray *files = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:dir error:nil];
+    NSDate *cutoff = [NSDate dateWithTimeIntervalSinceNow:-24 * 3600];
+    for (NSString *file in files) {
+        NSString *path = [dir stringByAppendingPathComponent:file];
+        NSDictionary *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil];
+        if ([attributes[NSFileModificationDate] compare:cutoff] == NSOrderedAscending) {
+            [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+        }
+    }
+}
+
+static NSString *rc_download_attachment(NSString *urlString) {
+    NSURL *url = [NSURL URLWithString:urlString];
+    NSString *scheme = url.scheme.lowercaseString;
+    if (!url || !([scheme isEqualToString:@"http"] || [scheme isEqualToString:@"https"])) return nil;
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
+    request.timeoutInterval = 12;
+    __block NSData *data = nil;
+    __block NSString *mime = nil;
+    dispatch_semaphore_t done = dispatch_semaphore_create(0);
+    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request
+        completionHandler:^(NSData *body, NSURLResponse *response, __unused NSError *error) {
+            if ([response isKindOfClass:[NSHTTPURLResponse class]] &&
+                ((NSHTTPURLResponse *)response).statusCode / 100 == 2) {
+                data = body;
+                mime = response.MIMEType;
+            }
+            dispatch_semaphore_signal(done);
+        }];
+    [task resume];
+    if (dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC)) != 0) {
+        [task cancel];
+        return nil;
+    }
+    if (data.length < 128 || data.length > 12 * 1024 * 1024) return nil;
+    NSString *ext = rc_attachment_extension(mime, url);
+    if (!ext) return nil;
+    NSString *dir = @"/var/mobile/Library/Caches/com.saihgupr.remotecompanion.attachments";
+    [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+    NSString *path = [dir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.%@", [NSUUID UUID].UUIDString, ext]];
+    if (![data writeToFile:path atomically:YES]) return nil;
+    [[NSFileManager defaultManager] setAttributes:@{ NSFileProtectionKey: NSFileProtectionCompleteUntilFirstUserAuthentication }
+                                     ofItemAtPath:path error:nil];
+    return path;
+}
+
 int main(int argc, char **argv) {
     @autoreleasepool {
+        rc_prune_attachments();
         NSMutableArray<NSString *> *texts = [NSMutableArray array];
         BOOL urgent = NO, clear = NO;
-        NSString *identifier = nil, *removeID = nil, *tap = nil, *existsID = nil;
+        NSString *identifier = nil, *removeID = nil, *tap = nil, *existsID = nil, *imageURL = nil;
         NSMutableArray<UNNotificationAction *> *buttons = [NSMutableArray array];
         NSString *icon = nil, *thread = nil;
         for (int i = 1; i < argc; i++) {
@@ -69,6 +136,7 @@ int main(int argc, char **argv) {
             else if ([arg isEqualToString:@"--tap"] && i + 1 < argc) tap = [NSString stringWithUTF8String:argv[++i]];
             else if ([arg isEqualToString:@"--exists"] && i + 1 < argc) existsID = [NSString stringWithUTF8String:argv[++i]];
             else if ([arg isEqualToString:@"--icon"] && i + 1 < argc) icon = [NSString stringWithUTF8String:argv[++i]];
+            else if ([arg isEqualToString:@"--image-url"] && i + 1 < argc) imageURL = [NSString stringWithUTF8String:argv[++i]];
             else if ([arg isEqualToString:@"--thread"] && i + 1 < argc) thread = [NSString stringWithUTF8String:argv[++i]];
             else if ([arg isEqualToString:@"--button"] && i + 3 < argc) {
                 NSString *buttonID = [NSString stringWithUTF8String:argv[++i]] ?: @"";
@@ -103,7 +171,7 @@ int main(int argc, char **argv) {
             return dispatch_semaphore_wait(sent, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC)) == 0 ? 0 : 3;
         }
         if (texts.count == 0 || texts.count > 2) {
-            fprintf(stderr, "usage: rc-notify \"Title\" [\"Body\"] [--urgent] [--id ID] [--tap TAP] [--icon SPEC] [--button ID TITLE FLAGS]... | --clear | --remove ID\n");
+            fprintf(stderr, "usage: rc-notify \"Title\" [\"Body\"] [--urgent] [--id ID] [--tap TAP] [--icon SPEC] [--image-url URL] [--button ID TITLE FLAGS]... | --clear | --remove ID\n");
             return 1;
         }
 
@@ -150,6 +218,16 @@ int main(int argc, char **argv) {
         if (notificationIcon && [content respondsToSelector:NSSelectorFromString(@"setIcon:")]) {
             ((void (*)(id, SEL, id))objc_msgSend)(content, NSSelectorFromString(@"setIcon:"), notificationIcon);
         }
+        // A photo from the web: downloaded now, then attached so iOS shows the thumbnail beside the
+        // notification and the full picture when it's held. A bad URL or download posts without it.
+        if (imageURL.length) {
+            NSString *path = rc_download_attachment(imageURL);
+            NSError *attachError = nil;
+            UNNotificationAttachment *attachment = path ? [UNNotificationAttachment attachmentWithIdentifier:@"rc-photo" URL:[NSURL fileURLWithPath:path] options:nil error:&attachError] : nil;
+            if (attachment) content.attachments = @[attachment];
+            else if (attachError) fprintf(stderr, "image: %s\n", attachError.localizedDescription.UTF8String);
+        }
+
         UNNotificationRequest *request = [UNNotificationRequest requestWithIdentifier:(identifier.length ? identifier : [NSUUID UUID].UUIDString) content:content trigger:nil];
 
         __block int result = 2;

@@ -1866,6 +1866,7 @@ static int send_notification(RCNotifyCommand *notify, NSString *identifier, BOOL
         [args addObjectsFromArray:@[@"--button", button[@"id"], button[@"title"], flags.count ? [flags componentsJoinedByString:@","] : @"-"]];
     }
     if (notify.image.length) [args addObjectsFromArray:@[@"--icon", notify.image]];
+    if (notify.imageURL.length) [args addObjectsFromArray:@[@"--image-url", notify.imageURL]];
     NSTimeInterval removeAfter = notify.removeAfter;
     if (!identifier.length && removeAfter > 0) identifier = [@"rc-" stringByAppendingString:[NSUUID UUID].UUIDString];
     if (identifier.length) [args addObjectsFromArray:@[@"--id", identifier]];

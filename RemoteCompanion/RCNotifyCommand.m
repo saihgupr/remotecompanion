@@ -19,12 +19,13 @@ static NSString *RCTrim(NSString *s) {
     c.title = @""; c.message = @""; c.buttons = @[];
     if (![self isNotifyCommand:command]) return c;
     NSString *args = RCTrim([command substringFromIndex:7]);
-    static NSRegularExpression *removeOption, *tapOption, *imageOption, *buttonOption, *waitOption;
+    static NSRegularExpression *removeOption, *tapOption, *imageOption, *imageURLOption, *buttonOption, *waitOption;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         removeOption = [NSRegularExpression regularExpressionWithPattern:@"(^|\\s)--remove-after\\s+(\\d+(\\.\\d+)?)$" options:0 error:nil];
         tapOption = [NSRegularExpression regularExpressionWithPattern:@"(^|\\s)--tap\\s+([A-Za-z0-9_-]+)$" options:0 error:nil];
-        imageOption = [NSRegularExpression regularExpressionWithPattern:@"(^|\\s)--image\\s+\"([^\"]*)\"$" options:0 error:nil];
+        imageOption = [NSRegularExpression regularExpressionWithPattern:@"(^|\\s)--image\\s+(?:\"([^\"]*)\"|(\\S+))$" options:0 error:nil];
+        imageURLOption = [NSRegularExpression regularExpressionWithPattern:@"(^|\\s)--image-url\\s+(?:\"([^\"]*)\"|(\\S+))$" options:0 error:nil];
         waitOption = [NSRegularExpression regularExpressionWithPattern:@"(^|\\s)--wait\\s+(\\d+(\\.\\d+)?)$" options:0 error:nil];
         buttonOption = [NSRegularExpression regularExpressionWithPattern:@"(^|\\s)--button\\s+\"([^\"]*)\"$" options:0 error:nil];
     });
@@ -51,8 +52,15 @@ static NSString *RCTrim(NSString *s) {
             args = RCTrim([args substringToIndex:m.range.location]); found = YES;
         }
         if ((m = [imageOption firstMatchInString:args options:0 range:NSMakeRange(0, args.length)])) {
-            NSString *image = [args substringWithRange:[m rangeAtIndex:2]];
+            NSRange quoted = [m rangeAtIndex:2], plain = [m rangeAtIndex:3];
+            NSString *image = quoted.location != NSNotFound ? [args substringWithRange:quoted] : [args substringWithRange:plain];
             c.image = image.length ? image : nil;
+            args = RCTrim([args substringToIndex:m.range.location]); found = YES;
+        }
+        if ((m = [imageURLOption firstMatchInString:args options:0 range:NSMakeRange(0, args.length)])) {
+            NSRange quoted = [m rangeAtIndex:2], plain = [m rangeAtIndex:3];
+            NSString *imageURL = quoted.location != NSNotFound ? [args substringWithRange:quoted] : [args substringWithRange:plain];
+            c.imageURL = imageURL.length ? imageURL : nil;
             args = RCTrim([args substringToIndex:m.range.location]); found = YES;
         }
         if ((m = [buttonOption firstMatchInString:args options:0 range:NSMakeRange(0, args.length)])) {
@@ -102,6 +110,7 @@ static NSString *RCQuotable(NSString *s) {
     if (self.urgent) [cmd appendString:@" --urgent"];
     if (self.removeAfter > 0) [cmd appendFormat:@" --remove-after %ld", (long)self.removeAfter];
     if (self.image.length) [cmd appendFormat:@" --image \"%@\"", RCQuotable(self.image)];
+    if (self.imageURL.length) [cmd appendFormat:@" --image-url \"%@\"", RCQuotable(self.imageURL)];
     if (self.tapID.length) [cmd appendFormat:@" --tap %@", self.tapID];
     NSUInteger count = 0;
     for (NSDictionary *button in self.buttons) {

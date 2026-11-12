@@ -45,8 +45,8 @@ typedef NS_ENUM(NSInteger, RCNESection) { RCNESectionPreview, RCNESectionText, R
 @implementation RCNotificationEditorViewController {
     RCNotifyCommand *_notify;
     BOOL _isNew;
-    UITextField *_titleField, *_messageField;
-    UITableViewCell *_titleCell, *_messageCell, *_previewCell;
+    UITextField *_titleField, *_messageField, *_imageURLField;
+    UITableViewCell *_titleCell, *_messageCell, *_imageURLCell, *_previewCell;
     UILabel *_previewTitle, *_previewMessage;
     UIImageView *_previewIcon;
     UIImage *_rcIcon;
@@ -78,7 +78,12 @@ typedef NS_ENUM(NSInteger, RCNESection) { RCNESectionPreview, RCNESectionText, R
     self.tableView.estimatedRowHeight = 52;
     _titleCell = [self fieldCellWithLabel:@"Title" placeholder:@"Required" text:_notify.title field:&_titleField];
     _messageCell = [self fieldCellWithLabel:@"Message" placeholder:@"Optional" text:_notify.message field:&_messageField];
+    _imageURLCell = [self fieldCellWithLabel:@"Image Link" placeholder:@"https://…" text:_notify.imageURL field:&_imageURLField];
+    _imageURLField.keyboardType = UIKeyboardTypeURL;
+    _imageURLField.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    _imageURLField.autocorrectionType = UITextAutocorrectionTypeNo;
     _titleField.returnKeyType = UIReturnKeyNext;
+    _messageField.returnKeyType = UIReturnKeyNext;
     [self buildPreviewCell];
     [self refresh];
     [self collectVariableNames];
@@ -131,7 +136,7 @@ typedef NS_ENUM(NSInteger, RCNESection) { RCNESectionPreview, RCNESectionText, R
 }
 
 - (void)rebuildVariableMenus {
-    for (UITextField *field in @[_titleField ?: [UITextField new], _messageField ?: [UITextField new]]) {
+    for (UITextField *field in @[_titleField ?: [UITextField new], _messageField ?: [UITextField new], _imageURLField ?: [UITextField new]]) {
         if (![field.rightView isKindOfClass:[UIButton class]]) continue;
         __weak UITextField *weakField = field;
         __weak typeof(self) weakSelf = self;
@@ -152,6 +157,8 @@ typedef NS_ENUM(NSInteger, RCNESection) { RCNESectionPreview, RCNESectionText, R
     cell.selectionStyle = UITableViewCellSelectionStyleNone;
     UILabel *label = [[UILabel alloc] init];
     label.text = labelText;
+    label.adjustsFontSizeToFitWidth = YES;
+    label.minimumScaleFactor = 0.8;
     label.translatesAutoresizingMaskIntoConstraints = NO;
     [cell.contentView addSubview:label];
     UITextField *field = [[UITextField alloc] init];
@@ -246,6 +253,7 @@ typedef NS_ENUM(NSInteger, RCNESection) { RCNESectionPreview, RCNESectionText, R
 
 - (BOOL)textFieldShouldReturn:(UITextField *)textField {
     if (textField == _titleField) [_messageField becomeFirstResponder];
+    else if (textField == _messageField) [_imageURLField becomeFirstResponder];
     else [textField resignFirstResponder];
     return YES;
 }
@@ -258,7 +266,7 @@ typedef NS_ENUM(NSInteger, RCNESection) { RCNESectionPreview, RCNESectionText, R
     switch (section) {
         case RCNESectionPreview: return 1;
         case RCNESectionText: return 2;
-        case RCNESectionPicture: return 1;
+        case RCNESectionPicture: return 2;
         case RCNESectionOptions: return 3;
         case RCNESectionButtons: return _buttons.count + (_buttons.count < 4 ? 1 : 0);
     }
@@ -278,7 +286,7 @@ typedef NS_ENUM(NSInteger, RCNESection) { RCNESectionPreview, RCNESectionText, R
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     switch (section) {
         case RCNESectionText: return @"Shows as a notification, also with RC closed.";
-        case RCNESectionPicture: return @"Optional. Shows in place of RC's icon.";
+        case RCNESectionPicture: return @"Optional. Picture replaces RC's icon. Image Link shows a photo from the web beside the notification, and larger when it is held.";
         case RCNESectionOptions: return @"Time Sensitive shows through Focus. Remove After takes it out of Notification Center. Wait for Response holds the next actions until it's answered, with the answer in {notify_response}.";
         case RCNESectionButtons: return @"Shown when the notification is held. Each runs a trigger of its own, listed under Notifications.";
     }
@@ -311,6 +319,7 @@ typedef NS_ENUM(NSInteger, RCNESection) { RCNESectionPreview, RCNESectionText, R
         case RCNESectionPreview: return _previewCell;
         case RCNESectionText: return indexPath.row == 0 ? _titleCell : _messageCell;
         case RCNESectionPicture: {
+            if (indexPath.row == 1) return _imageURLCell;
             UITableViewCell *cell = [self valueCell:@"Picture" value:[self pictureName]];
             UIImage *picture = RCNEPicture(_notify.image, 29);
             cell.imageView.image = picture;
@@ -354,7 +363,7 @@ typedef NS_ENUM(NSInteger, RCNESection) { RCNESectionPreview, RCNESectionText, R
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     [self.view endEditing:YES];
-    if (indexPath.section == RCNESectionPicture) [self choosePicture:[tableView cellForRowAtIndexPath:indexPath]];
+    if (indexPath.section == RCNESectionPicture && indexPath.row == 0) [self choosePicture:[tableView cellForRowAtIndexPath:indexPath]];
     else if (indexPath.section == RCNESectionOptions && indexPath.row == 1) [self chooseMinutes:NO];
     else if (indexPath.section == RCNESectionOptions && indexPath.row == 2) [self chooseMinutes:YES];
     else if (indexPath.section == RCNESectionButtons) {
@@ -524,6 +533,7 @@ typedef NS_ENUM(NSInteger, RCNESection) { RCNESectionPreview, RCNESectionText, R
     if (!title.length) return;
     _notify.title = title;
     _notify.message = [_messageField.text stringByTrimmingCharactersInSet:space] ?: @"";
+    _notify.imageURL = [_imageURLField.text stringByTrimmingCharactersInSet:space] ?: @"";
     _notify.buttons = _buttons;
     // Its tap ID stays, so an edit keeps its Notification Tap trigger
     if (!_notify.tapID.length) _notify.tapID = [RCNotifyCommand newID];

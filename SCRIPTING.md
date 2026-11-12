@@ -89,7 +89,7 @@ A sequence is a **JSON array** of actions. Each action is either:
 | `shortcut:My Shortcut Name` | Run an Apple Shortcut by name |
 | `shortcut:My Shortcut Name -i` | Run it silently (no Shortcuts progress on screen) |
 | `shortcut:My Shortcut Name -p Some text` | Run it with text input (`-i` goes before `-p`) |
-| `notify "Title" ["Message"]` | Post a standard iOS notification; add `--tap ID`, `--button "ID|Title|flags"` or `--wait SECONDS` |
+| `notify "Title" ["Message"]` | Post a standard iOS notification; add `--tap ID`, `--button "ID|Title|flags"`, `--image-url URL` or `--wait SECONDS` |
 | `notify clear` | Remove RC's notifications from Notification Center |
 
 ### Connectivity
