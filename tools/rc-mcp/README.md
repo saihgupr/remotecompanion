@@ -45,7 +45,7 @@ For a client with a JSON config:
 | Tool | What it does |
 |---|---|
 | `look` | A screenshot with a grid labelled in screen points (half size by default) |
-| `read_text` | The screen's text, a line each with its position in points |
+| `read_text` | The screen's text once it stops changing, a line each with its position in points |
 | `tap`, `hold`, `swipe`, `drag`, `two_finger_swipe`, `pinch` | Touches at points |
 | `tap_text`, `wait_text` | Tap text on the screen, or wait until it shows |
 | `type` | Types into the field being edited |
