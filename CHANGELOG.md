@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 - **Tap Text on Screen and Wait for Text**: actions that read the screen with Apple's text recognition, so any text that is drawn counts, in any app, then tap it where it shows or wait until it appears. Matching ignores case and takes the same text first, then a line starting with it, then one containing it. `screen tap`, `screen wait`, `screen find` and `screen ocr` do the same from the CLI, and the new `rc-ocr` tool reads the screen on iOS 15 where SpringBoard's own careful read fails (#158).
 - **Text on Screen condition**: in If and Wait Until, true while the text shows anywhere on the screen (#158).
 - **MCP server for assistants**: `tools/rc-mcp` is one Python file that lets an MCP client look at the screen, tap, swipe, type and run any RC command over SSH. Nothing is installed on the phone (#159).
+- **Compact New Trigger menu**: Settings > Advanced Settings > Layout has a New Trigger row, List or Compact. Compact shows the trigger types as tiles with the icons their triggers use, the same category bar as Triggers, and a check on types already added; a search stays within the picked category. Choosing a search result now opens its setup screen instead of dropping the tap (#146).
 
 ## [4.5.0] - 2026-11-11
 
