@@ -1262,7 +1262,6 @@
     .dialog-btns button:active { background-color: var(--rc-fill); }
     .dialog-btns button:not(:last-child) { border-right: 0.5px solid var(--rc-border-heavy); }
     .dialog-btns button:last-child { font-weight: 600; }
-    #dialog-record { color: var(--rc-orange); font-weight: 400; }
     .dialog-box.wide {
       width: 320px;
     }
@@ -2610,9 +2609,6 @@
 </div>
 
 <datalist id="app-datalist"></datalist>
-<datalist id="bt-datalist"></datalist>
-<datalist id="wifi-datalist"></datalist>
-<datalist id="airplay-datalist"></datalist>
 
 <!-- ══ STICKY FOOTER (Settings only) ══════════════════════════════════════ -->
 <div class="page-footer fixed" id="footer-settings-fixed">
@@ -2642,7 +2638,6 @@
     <div class="dialog-autocomplete" id="dialog-autocomplete"></div>
     <div class="dialog-btns">
       <button onclick="closeDialog()">Cancel</button>
-      <button id="dialog-record" style="display:none;" onclick="dialogRecord()">Record</button>
       <button id="dialog-ok" onclick="dialogOk()">OK</button>
     </div>
   </div>
@@ -2677,8 +2672,7 @@
         <div id="complex-seg-disconnect" onclick="setComplexSegment('disconnect')" style="flex:1; padding:8px; text-align:center; color:var(--rc-label); font-size:14px; font-weight:500; cursor:pointer;">Disconnect</div>
       </div>
       
-      <input list="complex-dialog-datalist" class="dialog-input" id="complex-dialog-input" type="text" placeholder="Name or SSID" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-      <datalist id="complex-dialog-datalist"></datalist>
+      <input class="dialog-input" id="complex-dialog-input" type="text" placeholder="Name or SSID" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
     </div>
     
     <div class="dialog-btns">
@@ -5254,7 +5248,6 @@ function promptApiTokenModal(retryAction, msg) {
       }
     },
     false,
-    false,
     true
   );
   const input = document.getElementById('dialog-input');
@@ -7400,8 +7393,6 @@ const COND_DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 
 let condPickerEditIdx = null;
 let condPickerExpandedKey = null;
 let condPickerTicked = []; // day codes, Monday first
-let condPickerBtDevices = null;
-let condPickerBtLoading = false;
 
 function condPickerExisting() {
   if (condPickerEditIdx === null) return null;
@@ -7446,11 +7437,8 @@ function openCondPicker(editIdx = null) {
     tickDaysFromCondValue(ex ? (ex.expectedValue || ex.expected || '') : '');
   }
   document.getElementById('cond-picker-search').value = '';
-  condPickerBtDevices = null;
-  condPickerBtLoading = false;
   renderCondPicker();
   document.getElementById('cond-picker-dialog-backdrop').classList.add('visible');
-  if (condPickerExpandedKey === 'bt_device') loadCondBtDevices();
   setTimeout(() => {
     const el = document.querySelector('#cond-picker-content [data-cond-key="' + condPickerExpandedKey + '"]');
     if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
@@ -7463,17 +7451,6 @@ function closeCondPicker() {
 
 function _condPickerBackdropClick(e) {
   if (e.target === document.getElementById('cond-picker-dialog-backdrop')) closeCondPicker();
-}
-
-function loadCondBtDevices() {
-  if (condPickerBtDevices || condPickerBtLoading) return;
-  condPickerBtLoading = true;
-  fetch('/api/bt-devices').then(r => r.json()).then(devices => {
-    condPickerBtDevices = (devices || []).map(d => d.name || d.address).filter(Boolean);
-  }).catch(() => { condPickerBtDevices = []; }).finally(() => {
-    condPickerBtLoading = false;
-    if (condPickerExpandedKey === 'bt_device') renderCondPicker();
-  });
 }
 
 function selectCond(key) {
@@ -7489,7 +7466,6 @@ function selectCond(key) {
   } else {
     condPickerExpandedKey = key;
     if (key === 'day_of_week' && condPickerExistingKey() !== 'day_of_week') condPickerTicked = [];
-    if (key === 'bt_device') loadCondBtDevices();
   }
   renderCondPicker();
   setTimeout(() => {
@@ -8295,14 +8271,6 @@ function condOptionsFor(d, exKey, exValue, exTitle) {
     return rows;
   }
   if (d.key === 'bt_device') {
-    if (!condPickerBtDevices) {
-      rows.push(condOptionRow('Loading devices…', 'dim', '', null));
-    } else {
-      condPickerBtDevices.forEach(name => {
-        const checked = exKey === d.key && String(exValue).toUpperCase() === String(name).toUpperCase();
-        rows.push(condOptionRow(name, '', checked ? '<i class="f7-icons cond-check">checkmark</i>' : '', () => finishCondValue(d, name, name)));
-      });
-    }
     rows.push(condOptionRow(`Other Name…${condNowSuffix(d, exKey, exTitle)}`, 'blue', '', () => promptCondText(d)));
     return rows;
   }
@@ -10403,7 +10371,7 @@ function promptNfcTrigger() {
     }
     renderAll();
     openActionsPanel(key);
-  }, false, true); // enables Record button
+  });
 }
 
 // ── Complex Trigger Dialog (WiFi / BT) ───────────────────────────────────────
@@ -10430,13 +10398,6 @@ function promptComplexTrigger(type, editKey = null) {
     setComplexSegment('connect');
     document.getElementById('complex-dialog-input').value = '';
   }
-
-  // Populate autocomplete datalist
-  const dl = document.getElementById('complex-dialog-datalist');
-  dl.innerHTML = '';
-  const listId = type === 'wifi' ? 'wifi-datalist' : 'bt-datalist';
-  const src = document.getElementById(listId);
-  if (src) dl.innerHTML = src.innerHTML;
 
   document.getElementById('complex-dialog-backdrop').classList.add('visible');
 }
@@ -10616,30 +10577,13 @@ function notifDialogOk() {
 // ── Refresh Datalists (Deduplicated autocomplete) ────────────────────────────
 async function refreshDatalists() {
   try {
-    const [appsRes, btRes, wifiRes, airplayRes] = await Promise.all([
-      fetch('/api/apps').catch(() => null),
-      fetch('/api/bt-devices').catch(() => null),
-      fetch('/api/wifi-networks').catch(() => null),
-      fetch('/api/airplay-devices').catch(() => null)
-    ]);
+    const appsRes = await fetch('/api/apps').catch(() => null);
 
     if (appsRes && appsRes.ok) {
       const apps = await appsRes.json();
       cachedApps = apps;
       try { localStorage.setItem('rc_cached_apps', JSON.stringify(apps)); } catch(e){}
       populateDatalist('app-datalist', apps.map(a => ({ value: a.bundleId, text: a.name })));
-    }
-    if (btRes && btRes.ok) {
-      const devices = await btRes.json();
-      populateDatalist('bt-datalist', devices.map(d => ({ value: d.name || d.address })));
-    }
-    if (wifiRes && wifiRes.ok) {
-      const networks = await wifiRes.json();
-      populateDatalist('wifi-datalist', networks.map(n => ({ value: n.ssid })));
-    }
-    if (airplayRes && airplayRes.ok) {
-      const receivers = await airplayRes.json();
-      populateDatalist('airplay-datalist', receivers.map(r => ({ value: r.name })));
     }
   } catch(e) {}
 }
@@ -10750,7 +10694,6 @@ function showConfirm(title, msg, onOk, okLabel) {
   document.getElementById('dialog-msg').textContent = msg;
   document.getElementById('dialog-input').style.display = 'none';
   document.getElementById('dialog-autocomplete').style.display = 'none';
-  document.getElementById('dialog-record').style.display = 'none';
   document.getElementById('dialog-ok').textContent = okLabel || 'OK';
   dialogCallback = () => { if (onOk) onOk(); };
   const box = document.querySelector('#dialog-backdrop .dialog-box');
@@ -10758,7 +10701,7 @@ function showConfirm(title, msg, onOk, okLabel) {
   document.getElementById('dialog-backdrop').classList.add('visible');
 }
 
-function showDialog(title, msg, defaultVal, okLabel, callback, isNumber = false, showRecordBtn = false, isPassword = false) {
+function showDialog(title, msg, defaultVal, okLabel, callback, isNumber = false, isPassword = false) {
   document.getElementById('dialog-title').textContent = title;
   document.getElementById('dialog-msg').textContent   = msg;
   const input = document.getElementById('dialog-input');
@@ -10767,9 +10710,6 @@ function showDialog(title, msg, defaultVal, okLabel, callback, isNumber = false,
   input.type  = isPassword ? 'password' : (isNumber ? 'number' : 'text');
   input.placeholder = isPassword ? 'Passcode (optional)' : '';
   document.getElementById('dialog-ok').textContent = okLabel || 'OK';
-  
-  const recBtn = document.getElementById('dialog-record');
-  recBtn.style.display = showRecordBtn ? 'inline-block' : 'none';
 
   dialogCallback = callback;
   
@@ -10782,7 +10722,7 @@ function showDialog(title, msg, defaultVal, okLabel, callback, isNumber = false,
 
   // Set modal width based on content type
   const box = document.querySelector('#dialog-backdrop .dialog-box');
-  if (isNumber || showRecordBtn || isPassword) box.classList.remove('wide');
+  if (isNumber || isPassword) box.classList.remove('wide');
   else box.classList.add('wide');
   
   document.getElementById('dialog-backdrop').classList.add('visible');
@@ -10817,7 +10757,6 @@ function promptUnlockDialog(initialPasscode = '', callback) {
       callback(pin ? `unlock ${pin}` : 'unlock');
     },
     false,
-    false,
     true
   );
 }
@@ -10832,7 +10771,6 @@ function promptLockToggleDialog(initialPasscode = '', callback) {
       const pin = (val || '').trim();
       callback(pin ? `lock-toggle ${pin}` : 'lock-toggle');
     },
-    false,
     false,
     true
   );
@@ -10849,28 +10787,12 @@ function dialogOk() {
   if (cb) cb(val);
 }
 
-function dialogRecord() {
-  showToast('📡 Tap NFC tag against phone now…');
-  fetch('/api/record-nfc', { method: 'POST' }).then(r => r.json()).then(data => {
-    if (data.id) {
-      document.getElementById('dialog-input').value = data.id;
-      showToast('✓ NFC Tag Recorded');
-    }
-  }).catch(() => showToast('⚠ Record Failed'));
-}
-
 function setupDialogAutocomplete(title, input, autoEl) {
   const lowTitle = title.toLowerCase();
   let listSource = [];
 
   if (lowTitle.includes('app')) {
     listSource = cachedApps.map(a => ({ name: a.name, sub: a.bundleId, val: a.bundleId }));
-  } else if (lowTitle.includes('bluetooth')) {
-    const opts = Array.from(document.querySelectorAll('#bt-datalist option'));
-    listSource = opts.map(o => ({ name: o.value, sub: '', val: o.value }));
-  } else if (lowTitle.includes('airplay')) {
-    const opts = Array.from(document.querySelectorAll('#airplay-datalist option'));
-    listSource = opts.map(o => ({ name: o.value, sub: '', val: o.value }));
   }
 
   if (listSource.length === 0) return;
