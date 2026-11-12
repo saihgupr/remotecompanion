@@ -43,5 +43,4 @@ rm -rf /tmp/Payload
 
 echo "✅ Created $IPA_NAME"
 echo ""
-echo "To install via TrollStore, run:"
-echo "  ./install_trollstore.sh"
+echo "Install it with TrollStore (open the IPA on the device, or use TrollStore's Install IPA)."
