@@ -127,6 +127,44 @@ A sequence is a **JSON array** of actions. Each action is either:
 | `hold 195 422 800` | Hold at x=195, y=422 for 800ms |
 | `swipe 195 700 195 200` | Swipe from (195,700) to (195,200) |
 
+The `gesture` touches below use the real touchscreen, so apps receive them like a finger. Points
+are screen points in the current orientation, and the next action starts once the touch is done.
+
+| Command | What it does |
+|---|---|
+| `gesture tap 195 422` | Tap at x=195, y=422 |
+| `gesture hold 195 422 0.8` | Hold for 0.8 seconds (default 1) |
+| `gesture swipe 195 700 195 200` | Swipe; add seconds to set the speed (default 0.3). Starting on a screen edge makes it an edge swipe: `gesture swipe 195 852 195 450` goes home |
+| `gesture drag 195 700 195 400` | Drag and let go slowly, so the content stops where it is put |
+| `gesture swipe2 195 600 195 300` | A two-finger swipe, e.g. to pan a map |
+| `gesture pinch 195 422 2` | Two fingers spreading around (195,422) to zoom in (0.5 zooms out) |
+| `gesture rotate 195 422 90` | Two fingers turning 90° clockwise (negative turns the other way) |
+
+After a reboot, touch the screen once before the first `gesture` touch, so RemoteCompanion knows the touchscreen.
+
+### Screenshot
+| Command | What it does |
+|---|---|
+| `screen capture` | Saves a JPEG of the screen to `/var/mobile/tmp/rc-screen.jpg` at half its size in points |
+| `screen capture /var/mobile/tmp/shot.jpg 1 0.8` | Another path (in `/var/mobile/tmp` or `/tmp`), full size, JPEG quality 0.8 |
+| `screen capture grid` | With labelled lines every 100 points (`grid 50` for every 50), to read positions off the picture |
+| `screen settle 3` | Waits until the screen stops changing (a page sliding in, an app opening), at most 3 seconds |
+
+The reply is the path, the picture's size and its bytes. Both `gesture` and `screen` need the API token when sent over the network.
+
+### Text on the Screen
+These read the screen with Apple's text recognition, so any text that's drawn counts, in any app.
+Matching ignores case: the same text first, then a line starting with it, then one containing it.
+
+| Command | What it does |
+|---|---|
+| `screen tap "Wi-Fi"` | Waits for the screen to stop moving, then taps the text where it shows (Tap Text on Screen in the app). A home screen app's name is a label on iOS, not part of its button, so use `open_app` or `uiopen` for those |
+| `screen wait "Done" 10` | Waits up to 10 seconds for the text to show, then for the screen to stop moving (Wait for Text) |
+| `screen find "Wi-Fi"` | Where the text is, in points |
+| `screen ocr` | Every line of text with its box in points (`--json` for JSON, `fast` for a quicker, rougher read) |
+
+The **Text on Screen** condition (in If and Wait Until) is true while the text shows.
+
 ### Timing
 | Command | What it does |
 |---|---|

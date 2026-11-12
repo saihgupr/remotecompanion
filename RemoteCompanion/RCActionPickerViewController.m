@@ -1,4 +1,5 @@
 #import "RCActionPickerViewController.h"
+#import "RCScreenActions.h"
 #import "RCAddOnCatalog.h"
 #import "RCAddOnActionsViewController.h"
 #import "RCServerClient.h"
@@ -292,6 +293,8 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
             @{ @"name": @"Activate Siri", @"command": @"siri", @"icon": @"mic.circle.fill" },
             @{ @"name": @"Play Gesture...", @"command": @"__PLAY_GESTURE__", @"icon": @"hand.draw.fill" },
             @{ @"name": @"Record Gesture", @"command": @"__RECORD_GESTURE__", @"icon": @"record.circle" },
+            @{ @"name": @"Tap Text on Screen...", @"command": @"__SCREEN_TAP__", @"icon": [RCScreenActions iconForVerb:@"tap"] },
+            @{ @"name": @"Wait for Text...", @"command": @"__SCREEN_WAIT__", @"icon": [RCScreenActions iconForVerb:@"wait"] },
             @{ @"name": @"Accessibility Shortcut", @"command": @"accessibility shortcut", @"icon": ([UIImage systemImageNamed:@"accessibility"] ? @"accessibility" : @"figure.stand") }
         ],
         // Device Controls
@@ -749,6 +752,16 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
 
     if ([command isEqualToString:@"__LOCK_TOGGLE__"]) {
         [self handleLockToggle];
+        return;
+    }
+
+    // Screen actions: the text to find (and, to wait, how long)
+    NSDictionary *screenVerbs = @{ @"__SCREEN_TAP__": @"tap", @"__SCREEN_WAIT__": @"wait" };
+    if (screenVerbs[command]) {
+        __weak typeof(self) weakSelf = self;
+        [RCScreenActions promptForVerb:screenVerbs[command] existing:nil from:self done:^(NSString *screenCommand) {
+            [weakSelf finishWithFocusCommand:screenCommand];
+        }];
         return;
     }
 

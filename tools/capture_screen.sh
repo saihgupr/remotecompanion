@@ -61,16 +61,16 @@ capture_panel() {
     fi
 }
 
-mkdir -p images/screenshots
+mkdir -p docs/images/screenshots
 
 if [[ "$1" == "--suite" || "$1" == "--all" ]]; then
     echo "🌟 Starting full showcase release suite capture..."
-    capture_panel "triggers" "images/screenshots/01_main_interface.png"
-    capture_panel "add" "images/screenshots/02_add_trigger.png"
-    capture_panel "trigger?key=volume_up_then_down" "images/screenshots/03_action_conditions.png"
-    capture_panel "settings" "images/screenshots/04_settings.png"
-    capture_panel "ha" "images/screenshots/05_home_assistant.png"
-    echo "🎉 Showcase suite capture complete! Files saved in images/screenshots/"
+    capture_panel "triggers" "docs/images/screenshots/01_main_interface.png"
+    capture_panel "add" "docs/images/screenshots/02_add_trigger.png"
+    capture_panel "trigger?key=volume_up_then_down" "docs/images/screenshots/03_action_conditions.png"
+    capture_panel "settings" "docs/images/screenshots/04_settings.png"
+    capture_panel "ha" "docs/images/screenshots/05_home_assistant.png"
+    echo "🎉 Showcase suite capture complete! Files saved in docs/images/screenshots/"
     exit 0
 fi
 
@@ -78,7 +78,7 @@ PANEL="${1:-triggers}"
 if [[ "$PANEL" == "actions" || "$PANEL" == "conditions" ]]; then
     PANEL="trigger?key=volume_up_then_down"
 fi
-OUTPUT="${2:-images/screenshots/${1:-triggers}.png}"
+OUTPUT="${2:-docs/images/screenshots/${1:-triggers}.png}"
 
 capture_panel "$PANEL" "$OUTPUT"
 

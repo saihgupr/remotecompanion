@@ -32,6 +32,18 @@ test_script.js
 *_test.sh
 rc_test.sh
 
+# Staged build outputs. build.sh fills these in on every build.
+Tweak/layout/Applications/
+Tweak/layout/usr/bin/rc
+Tweak/layout/Library/Application Support/RemoteCompanion/rc_webui.html
+Tweak/layout/Library/Application Support/RemoteCompanion/android-chrome-192x192.png
+Tweak/layout/Library/Application Support/RemoteCompanion/android-chrome-512x512.png
+Tweak/layout/Library/Application Support/RemoteCompanion/apple-touch-icon.png
+Tweak/layout/Library/Application Support/RemoteCompanion/favicon-16x16.png
+Tweak/layout/Library/Application Support/RemoteCompanion/favicon-32x32.png
+Tweak/layout/Library/Application Support/RemoteCompanion/favicon.ico
+Tweak/layout/Library/Application Support/RemoteCompanion/site.webmanifest
+
 # BEGIN parallel OpenCode lanes
 .slim/worktrees/
 .slim/worktrees.json

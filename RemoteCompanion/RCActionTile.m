@@ -472,6 +472,7 @@ CGSize RCActionRowSize(CGFloat listWidth, CGFloat height) {
 NSString *const RCLayoutTriggers = @"triggers";
 NSString *const RCLayoutActionPicker = @"actionPicker";
 NSString *const RCLayoutBanners = @"banners";
+NSString *const RCLayoutNewTrigger = @"newTrigger";
 NSString *const RCLayoutTriggerColumns = @"triggerColumns";
 NSString *const RCLayoutTriggerSections = @"triggerSectionsHidden";
 NSString *const RCLayoutCategoryBarLines = @"categoryBarTwoLines";
@@ -514,7 +515,7 @@ void RCLayoutSetTriggerColumnCount(NSInteger count) {
 
 NSArray<NSArray<NSString *> *> *RCLayoutScreens(void) {
     return @[@[@"Triggers", RCLayoutTriggers], @[@"Triggers per Row", RCLayoutTriggerColumns], @[@"Compact Sections", RCLayoutTriggerSections], @[@"Category Bar Lines", RCLayoutCategoryBarLines],
-             @[@"Select Action", RCLayoutActionPicker], @[@"Banners", RCLayoutBanners]];
+             @[@"New Trigger", RCLayoutNewTrigger], @[@"Select Action", RCLayoutActionPicker], @[@"Banners", RCLayoutBanners]];
 }
 
 // The segmented control's target: it carries its screen's key
