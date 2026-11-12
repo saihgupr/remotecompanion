@@ -1005,6 +1005,9 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
             replaceMenuWith([[RCActionsViewController alloc] initWithTriggerKey:key]);
         } } mutableCopy];
         if ([config triggerDataForKey:key]) item[@"detail"] = @"Added";
+        // Compact: the icon it has in the Triggers list
+        UIImage *compactImage = RCTriggerIconImage(key, 26) ?: RCTriggerSymbolImage([RCTriggersViewController iconNameForTrigger:key], 26);
+        if (compactImage) item[@"compactImage"] = compactImage;
         [items addObject:item];
     };
 
@@ -1058,8 +1061,33 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
         NSMutableDictionary *item = [@{ @"title": group[@"title"], @"icon": group[@"icon"], @"image": group[@"image"], @"section": @"Add-ons", @"handler": ^{
             push([[RCAddOnTriggersViewController alloc] initWithAddOn:group[@"id"] title:group[@"title"]]);
         } } mutableCopy];
-        if (added) item[@"detail"] = [NSString stringWithFormat:@"%lu added", (unsigned long)added];
+        if (added) {
+            item[@"detail"] = [NSString stringWithFormat:@"%lu added", (unsigned long)added];
+            item[@"addedCount"] = @(added); // Compact: a count on the tile
+        }
         [items addObject:item];
+    }
+    // Compact: each kind with the icon its triggers have in the Triggers list (a key of that kind
+    // picks it), and an add-on with its own picture
+    NSDictionary<NSString *, NSString *> *sampleKeys = @{ @"NFC Tag": @"nfc_", @"Wi-Fi Network": @"wifi_", @"Bluetooth Device": @"bt_",
+                                                          @"Audio Output": @"output_", @"App Launch": @"app_launch_", @"App Exit": @"app_exit_",
+                                                          @"Notification": @"notif_", @"Scheduled Trigger": @"sched_",
+                                                          @"Battery Level": @"trigger_device_battery_below_", @"Focus": @"trigger_device_focus_on",
+                                                          @"MQTT Topic": @"mqtt_" };
+    for (NSUInteger i = 0; i < items.count; i++) {
+        NSDictionary *item = items[i];
+        if (item[@"compactImage"]) continue;
+        UIImage *compactImage = nil;
+        if ([item[@"section"] isEqualToString:@"Add-ons"]) {
+            compactImage = [item[@"image"] isKindOfClass:[UIImage class]] ? item[@"image"] : RCTriggerSymbolImage(item[@"icon"], 26);
+        } else if (sampleKeys[item[@"title"]]) {
+            // A drawing for the kind itself (its bare key) when there is one, else its triggers' symbol
+            compactImage = RCTriggerIconImage(sampleKeys[item[@"title"]], 26) ?: RCTriggerSymbolImage([RCTriggersViewController iconNameForTrigger:sampleKeys[item[@"title"]]], 26);
+        }
+        if (!compactImage) continue;
+        NSMutableDictionary *withImage = [item mutableCopy];
+        withImage[@"compactImage"] = compactImage;
+        items[i] = withImage;
     }
     [self.navigationController pushViewController:[[RCNewTriggerViewController alloc] initWithItems:items] animated:YES];
 }

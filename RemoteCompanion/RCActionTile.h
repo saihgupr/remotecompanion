@@ -62,6 +62,8 @@ CGSize RCActionRowSize(CGFloat listWidth, CGFloat height);
 extern NSString *const RCLayoutTriggers;
 extern NSString *const RCLayoutActionPicker;
 extern NSString *const RCLayoutBanners;
+// The + menu on Triggers (New Trigger)
+extern NSString *const RCLayoutNewTrigger;
 // Triggers in Compact: how many per row, 2, 3 or 4 (its setting row is keyed by this)
 extern NSString *const RCLayoutTriggerColumns;
 NSInteger RCLayoutTriggerColumnCount(void);
