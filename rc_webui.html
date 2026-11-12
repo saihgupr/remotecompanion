@@ -9895,18 +9895,6 @@ function editHAAction(idx) {
   showSheet(parsed ? friendlyHAEntityName(parsed.entityId) : formatHACommandName(cmd), buttons);
 }
 
-function promptManualHAEntity() {
-  const editIdx = g_haEditIdx;
-  closeHADialog();
-  showDialog('Home Assistant Action', 'Enter command (e.g. toggle light.bedroom or call light.turn_on light.bedroom):', 'toggle light.bedroom', editIdx !== null ? 'Save' : 'Add', val => {
-    if (val) {
-      let clean = val.trim();
-      if (!clean.startsWith('ha ')) clean = 'ha ' + clean;
-      updateHAAction(editIdx, clean, editIdx !== null ? '✓ Home Assistant Action Updated' : '✓ Added HA Action');
-    }
-  });
-}
-
 // ── Banners (Settings > Banners) ─────────────────────────────────────────────
 // config.bannerActions: the picked actions, in the same format the app's
 // RCBannersViewController writes (see its header comment): { id, title, icon,
