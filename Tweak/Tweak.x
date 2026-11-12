@@ -9562,24 +9562,6 @@ static NSString *handle_command(NSString *cmd) {
             }
         });
         return @"Play/Pause toggled\n";
-    } else if ([cleanCmd isEqualToString:@"debug-media"]) {
-        // Introspect Media State
-        MRMediaRemoteGetNowPlayingApplicationPID(dispatch_get_main_queue(), ^(int pid) {
-            SRLog(@"DEBUG: Now Playing PID: %d", pid);
-            if (pid > 0) {
-                 // Try to get process name?
-                 // Simple check if it's Spotify (we don't have proc_name here easily without more headers)
-                 SRLog(@"DEBUG: System thinks an app is Now Playing (PID %d)", pid);
-            } else {
-                 SRLog(@"DEBUG: No Now Playing Application detected (PID 0)");
-            }
-        });
-        
-        MRMediaRemoteGetNowPlayingApplicationIsPlaying(dispatch_get_main_queue(), ^(Boolean isPlaying) {
-             SRLog(@"DEBUG: Is Playing Status: %@", isPlaying ? @"YES" : @"NO");
-        });
-        
-        return @"Dumping generic media state to logs...\n";
     } else if ([cleanCmd hasPrefix:@"blacklist"]) {
         NSArray *parts = [cleanCmd componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
         if (parts.count >= 2) {
@@ -10004,77 +9986,6 @@ static NSString *handle_command(NSString *cmd) {
         }
         SRLog(@"App Switcher toggle final success: %d", success);
         return success ? @"Switcher toggled\n" : @"Failed to toggle switcher\n";
-    } else if ([cleanCmd hasPrefix:@"debug-class "]) {
-        NSString *className = [[cleanCmd substringFromIndex:12] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-        SRLog(@"Debugging class: %@", className);
-        Class cls = objc_getClass([className UTF8String]);
-        if (!cls) {
-            SRLog(@"Class not found: %@", className);
-            return @"Class not found\n";
-        }
-        
-        unsigned int count = 0;
-        Method *methods = class_copyMethodList(cls, &count);
-        SRLog(@"Class %@ has %u methods:", className, count);
-        for (unsigned int i = 0; i < count; i++) {
-            SEL sel = method_getName(methods[i]);
-            SRLog(@"  - %@", NSStringFromSelector(sel));
-        }
-        free(methods);
-        return [NSString stringWithFormat:@"Found %u methods for %@. Check logs.\n", count, className];
-    } else if ([cleanCmd hasPrefix:@"debug-classes "]) {
-        NSString *search = [[cleanCmd substringFromIndex:14] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-        SRLog(@"Searching for classes containing: %@", search);
-        
-        int numClasses = objc_getClassList(NULL, 0);
-        if (numClasses > 0) {
-            Class *classes = (Class *)malloc(sizeof(Class) * numClasses);
-            numClasses = objc_getClassList(classes, numClasses);
-            SRLog(@"Found %d total classes. Filtering...", numClasses);
-            for (int i = 0; i < numClasses; i++) {
-                NSString *className = NSStringFromClass(classes[i]);
-                if ([className rangeOfString:search options:NSCaseInsensitiveSearch].location != NSNotFound) {
-                    SRLog(@"  * %@", className);
-                }
-            }
-            free(classes);
-        }
-        return @"Search complete. Check logs.\n";
-    } else if ([cleanCmd hasPrefix:@"debug-call "]) {
-        // debug-call ClassName selectorName
-        NSString *args = [cleanCmd substringFromIndex:11];
-        NSArray *parts = [args componentsSeparatedByString:@" "];
-        if (parts.count >= 2) {
-            NSString *className = parts[0];
-            NSString *selName = parts[1];
-            Class cls = objc_getClass([className UTF8String]);
-            if (cls) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    id target = nil;
-                    if ([cls respondsToSelector:@selector(sharedInstance)]) {
-                        target = [cls performSelector:@selector(sharedInstance)];
-                    } else if ([cls respondsToSelector:@selector(sharedController)]) {
-                        target = [cls performSelector:@selector(sharedController)];
-                    }
-                    
-                    if (target) {
-                        SEL sel = NSSelectorFromString(selName);
-                        if ([target respondsToSelector:sel]) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-                            id result = [target performSelector:sel];
-#pragma clang diagnostic pop
-                            SRLog(@"debug-call [%@ %@] returned: %@", className, selName, result);
-                        } else {
-                            SRLog(@"debug-call: Target does not respond to %@", selName);
-                        }
-                    } else {
-                        SRLog(@"debug-call: Could not get instance for %@", className);
-                    }
-                });
-            }
-        }
-        return @"Call initiated. Check logs.\n";
     } else if ([cleanCmd isEqualToString:@"lock"]) {
         // Smart lock: Only lock if currently unlocked
         // ensure we run on main thread for UI/SB checks
