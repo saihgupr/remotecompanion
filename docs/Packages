@@ -411,12 +411,12 @@ Depiction: https://saihgupr.github.io/remotecompanion/
 SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Architecture: iphoneos-arm64
 Version: 4.4.0
-Installed-Size: 5800
+Installed-Size: 5820
 Filename: ./com.saihgupr.remotecompanion_4.4.0_iphoneos-arm64.deb
-Size: 1536176
-MD5sum: e73a78babc17ef7a50946ebd0e109d6d
-SHA1: f4bcd15785c7ff2d6fa03e5f525833aaaa372ac6
-SHA256: e9fef3be383a7e5b01939434cfe0501cab319352d908bf13a848575c27d36753
+Size: 1545144
+MD5sum: 692a030fd9cffd6cf7ac7f12ad9823d7
+SHA1: 7ae0d79d90fb6c6e50565d6e8ffb62bd4d86d922
+SHA256: 49aee53783e55ac6c8adc49fce805631f6201819f6f3d350e6d9f736cbbf47ab
 
 Package: com.saihgupr.remotecompanion
 Name: RemoteCompanion
@@ -781,12 +781,12 @@ Depiction: https://saihgupr.github.io/remotecompanion/
 SileoDepiction: https://saihgupr.github.io/remotecompanion/depiction.json
 Architecture: iphoneos-arm
 Version: 4.4.0
-Installed-Size: 5800
+Installed-Size: 5820
 Filename: ./com.saihgupr.remotecompanion_4.4.0_iphoneos-arm.deb
-Size: 1535586
-MD5sum: a13b76471f7fa9a48322f7b201fb66c9
-SHA1: af19ef4b1bfb80a17c660962ec833ec71f01887a
-SHA256: 8cb16d337afaa79b7574d45f8179f5790755fe0986ce5c1c6555cca965f37ea9
+Size: 1545388
+MD5sum: af10b0bfcff051885c3ba1c03fe95a58
+SHA1: 8e5b35c6195184a4e9d82ab729620de4bf9f754b
+SHA256: a901b34c66e07e5045f8f00b25b47378ceabc3d70e310e3275a253cea0048510
 
 Package: com.saihgupr.remotecompanion
 Name: RemoteCompanion
