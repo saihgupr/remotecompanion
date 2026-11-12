@@ -1653,11 +1653,41 @@ static void inject_consumer_key(int usage) {
 }
 
 
+static BOOL rc_has_home_button(void);
+
+// The Home Button action. On a device with a Home button, a real press ends in
+// -[SBHomeHardwareButtonActions performSinglePressUpActions], and that method is what starts
+// the transition: calling it moves to the Home Screen at once. An injected Home press reaches
+// it only through SpringBoard's button pipeline, which on iPadOS 15 sits on it for about a
+// third of a second first (measured at 390 ms). Phones without a Home button have no such
+// handler to run, so they keep the injected press.
+// The live actions object is cached by the hook on the method (g_homeActionsTarget's sibling,
+// below); a bare one is enough for this call.
+static id g_rcHomeActions = nil;
+
 static void simulate_home_press() {
     dispatch_async(dispatch_get_main_queue(), ^{
         SRLog(@"Executing Home simulation...");
+
+        // 1. Direct: what a real Home press runs
+        if (rc_has_home_button()) {
+            id actions = g_rcHomeActions;
+            if (!actions) {
+                Class actionsClass = objc_getClass("SBHomeHardwareButtonActions");
+                if (actionsClass) {
+                    actions = [[actionsClass alloc] init];
+                    g_rcHomeActions = actions;
+                }
+            }
+            SEL singlePress = NSSelectorFromString(@"performSinglePressUpActions");
+            if (actions && [actions respondsToSelector:singlePress]) {
+                ((void (*)(id, SEL))objc_msgSend)(actions, singlePress);
+                SRLog(@"Triggered performSinglePressUpActions");
+                return;
+            }
+        }
         
-        // 1. Try SBUIController (Modern Home Tap)
+        // 2. Try SBUIController (Modern Home Tap)
         id uiCtrl = [objc_getClass("SBUIController") sharedInstance];
         if ([uiCtrl respondsToSelector:@selector(handleHomeButtonTap)]) {
             [uiCtrl handleHomeButtonTap];
@@ -1670,7 +1700,7 @@ static void simulate_home_press() {
             SRLog(@"Triggered clickedMenuButton");
         }
         
-        // 2. Fallback: SpringBoard simulation
+        // 3. Fallback: SpringBoard simulation
         SpringBoard *sb = (SpringBoard *)[UIApplication sharedApplication];
         if ([sb respondsToSelector:@selector(_simulateHomeButtonPress)]) {
             [sb _simulateHomeButtonPress];
@@ -1681,7 +1711,7 @@ static void simulate_home_press() {
             SRLog(@"Triggered _menuButtonDown/Up");
         }
         
-        // 3. HID Event (Last resort)
+        // 4. HID Event (Last resort)
         inject_hid_event(kHIDPage_Consumer, kHIDUsage_Csmr_Menu, 50000000, 0);
     });
 }
@@ -16836,6 +16866,7 @@ static BOOL RC_HomeSinglePressIsPartOfHeldClicks(void) {
 // See g_homeDoubleActionHeld
 %hook SBHomeHardwareButtonActions
 - (void)performSinglePressUpActions {
+    g_rcHomeActions = self;
     if (RC_HomeSinglePressIsPartOfHeldClicks()) return;
     %orig;
 }

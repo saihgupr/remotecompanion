@@ -26,6 +26,7 @@ All notable changes to this project will be documented in this file.
 - **Switched-off integrations show dimmed**: a trigger or action that needs MQTT, Home Assistant or Keyboard Maestro stays in its list and stays editable while that integration is off. The row is dimmed and marked "MQTT off" or "Home Assistant off" in the app and the Web UI, so it is clear why it does nothing; turning the integration back on restores the normal look.
 
 ### Fixed
+- **Home Button action is instant**: on a device with a Home button it now runs the handler a real Home press ends in, instead of injecting a press that SpringBoard then sits on for about a third of a second, so the Home Screen starts moving as soon as the action runs. Phones without a Home button keep the injected press.
 - **Web UI asked for the token on every edit**: creating a trigger or adding an action no longer asks for the API token on every save. The token is still required when a save changes protected settings such as the token itself, Web UI access and trusted networks, the root helper, or saved credentials.
 - **App Switcher on iOS 18 and 26**: the old toggle method is gone on iOS 18, so the action and `rc switcher` failed. They now use the main screen's switcher controller, and iOS 17 keeps the old call (#149).
 - **Quick Shortcuts and Camera modes on iOS 26**: a Quick Shortcut now runs through the class iOS 26 moved it to, and a Camera action with a mode or lens applies it now that the mode method has a new name. The two fallbacks behind it were also wrong and are fixed (#150).
