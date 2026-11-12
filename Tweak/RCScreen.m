@@ -5,6 +5,7 @@
 #import <stdlib.h>
 #import <dlfcn.h>
 #import "RCGestures.h"
+#import "RCSpawn.h"
 
 void SRLog(NSString *format, ...);
 
@@ -213,6 +214,31 @@ static const long kRCOCRLevelFast = 1;
 @implementation RCScreenText
 @end
 
+// The careful read in rc-ocr, a separate process, for where it fails inside SpringBoard (iOS 15).
+// nil with *error set when that doesn't work either.
+static NSArray<RCScreenText *> *rc_screen_read_helper(UIImage *shot, double scale, NSString **error) {
+    NSString *tool = rc_tool_path(@"rc-ocr");
+    if (!tool) { if (error) *error = @"rc-ocr isn't installed"; return nil; }
+    NSString *path = [NSString stringWithFormat:@"/var/mobile/tmp/rc-ocr-%d.jpg", getpid()];
+    NSData *jpeg = UIImageJPEGRepresentation(shot, 0.92);
+    if (![jpeg writeToFile:path atomically:YES]) { if (error) *error = @"Couldn't save the screen for rc-ocr"; return nil; }
+    NSString *output = nil;
+    int code = rc_run_tool(tool, @[path], 10, &output);
+    [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+    if (code != 0) { if (error) *error = [NSString stringWithFormat:@"rc-ocr: %@", output.length ? output : @"failed"]; return nil; }
+    NSMutableArray *items = [NSMutableArray array];
+    for (NSString *line in [output componentsSeparatedByString:@"\n"]) {
+        NSArray *f = [line componentsSeparatedByString:@"\t"];
+        if (f.count < 6) continue;
+        RCScreenText *t = [RCScreenText new];
+        t.frame = CGRectMake([f[0] doubleValue] / scale, [f[1] doubleValue] / scale, [f[2] doubleValue] / scale, [f[3] doubleValue] / scale);
+        t.confidence = [f[4] floatValue];
+        t.text = [[f subarrayWithRange:NSMakeRange(5, f.count - 5)] componentsJoinedByString:@" "];
+        [items addObject:t];
+    }
+    return items;
+}
+
 // Every line of text on the screen, read at full pixels (`accurate`) or quicker. Never on the main
 // thread (the grab needs it). nil with *error set when it couldn't read.
 static NSArray<RCScreenText *> *rc_screen_read(BOOL accurate, NSString **error) {
@@ -235,19 +261,33 @@ static NSArray<RCScreenText *> *rc_screen_read(BOOL accurate, NSString **error) 
         double W = CGImageGetWidth(img), H = CGImageGetHeight(img);
         id handler = [[NSClassFromString(@"VNImageRequestHandler") alloc] initWithCGImage:img options:@{}];
         // The careful read fails in SpringBoard on some iOS versions ("Error computing NN outputs"
-        // on iOS 15): then the quick read is used, and remembered. (Running the careful one on the
-        // CPU instead hangs there.)
-        static BOOL carefulFails = NO;
+        // on iOS 15; on the CPU instead it hangs). Then rc-ocr does it in its own process, and if
+        // that can't either, the quick read is used. What works is remembered.
+        static int way = 0; // 0 careful here, 1 careful in rc-ocr, 2 quick here
+        if (accurate && way == 1) {
+            NSString *helperError = nil;
+            NSArray *viaHelper = rc_screen_read_helper(shot, scale, &helperError);
+            if (viaHelper) { found = viaHelper; return @""; }
+            way = 2;
+            SRLog(@"[Screen] Careful text recognition in rc-ocr failed (%@): using the quick one", helperError);
+        }
         id req = nil;
         NSError *err = nil;
-        for (int quick = (!accurate || carefulFails) ? 1 : 0; quick <= 1; quick++) {
+        for (int quick = (!accurate || way == 2) ? 1 : 0; quick <= 1; quick++) {
             req = [[NSClassFromString(@"VNRecognizeTextRequest") alloc] init];
             [req setRecognitionLevel:quick ? kRCOCRLevelFast : kRCOCRLevelAccurate];
             [req setUsesLanguageCorrection:NO];
             err = nil;
             [handler performRequests:@[req] error:&err];
             if (!err) break;
-            if (!quick) { carefulFails = YES; SRLog(@"[Screen] Careful text recognition failed (%@): using the quick one", err.localizedDescription); }
+            if (!quick) {
+                SRLog(@"[Screen] Careful text recognition failed in SpringBoard (%@): trying rc-ocr", err.localizedDescription);
+                NSString *helperError = nil;
+                NSArray *viaHelper = rc_screen_read_helper(shot, scale, &helperError);
+                if (viaHelper) { way = 1; found = viaHelper; return @""; }
+                way = 2;
+                SRLog(@"[Screen] rc-ocr failed too (%@): using the quick read", helperError);
+            }
         }
         if (err) { failure = err.localizedDescription; return @""; }
         NSMutableArray *items = [NSMutableArray array];
