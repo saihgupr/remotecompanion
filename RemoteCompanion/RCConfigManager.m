@@ -3,6 +3,7 @@
 #import "RCHTTPAction.h"
 #import "RCNotifyCommand.h"
 #import "RCClearNotificationsCommand.h"
+#import "RCTimerCommand.h"
 #import "RCGesturesViewController.h"
 #import <sys/sysctl.h>
 #import "RCAddOnCatalog.h"
@@ -1833,6 +1834,8 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
             result = [clearCmd singleLineSummaryWithResolver:^NSString *(NSString *bundleId) {
                 return [self nameForBundleId:bundleId];
             }];
+        } else if ([RCTimerCommand isTimerCommand:originalCmd]) {
+            result = [[RCTimerCommand commandWithString:originalCmd] singleLineSummary] ?: @"Timer";
         } else if ([cmd hasPrefix:@"http-request"]) {
             NSDictionary *components = [RCHTTPAction componentsFromActionString:originalCmd];
             if (components) {
@@ -2176,6 +2179,7 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
     if ([cmd hasPrefix:@"mqtt "] || [cmd isEqualToString:@"mqtt"]) return @"dot.radiowaves.left.and.right";
     if ([cmd hasPrefix:@"toast"]) return @"text.bubble.fill";
     if ([RCClearNotificationsCommand isClearCommand:cmd]) return @"bell.slash.fill";
+    if ([RCTimerCommand isTimerCommand:cmd]) return @"timer";
     if ([cmd hasPrefix:@"notify "]) return @"bell.badge.fill";
     if ([cmd hasPrefix:@"root "] || [cmd hasPrefix:@"exec-root "]) return @"terminal.fill";
     if ([cmd hasPrefix:@"exec "]) return @"terminal.fill";
@@ -2365,6 +2369,7 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         if ([cmd hasPrefix:@"flashlight "] || [cmd hasPrefix:@"flash "]) return @"flashlight.on.fill";
         if ([cmd hasPrefix:@"low power "]) return @"battery.100.bolt";
         if ([cmd hasPrefix:@"autolock "] || [cmd hasPrefix:@"auto-lock "] || [cmd hasPrefix:@"display sleep "] || [cmd hasPrefix:@"display timeout "] || [cmd hasPrefix:@"display time off "]) return @"timer";
+        if ([RCTimerCommand isTimerCommand:cmd]) return @"timer";
         if ([cmd hasPrefix:@"unlock "]) return @"lock.open.fill";
         if ([cmd hasPrefix:@"lock-toggle "] || [cmd hasPrefix:@"lock toggle "]) return @"lock.circle";
     }

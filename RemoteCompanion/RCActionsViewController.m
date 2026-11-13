@@ -7,6 +7,8 @@
 #import "RCNotifyCommand.h"
 #import "RCClearNotificationsCommand.h"
 #import "RCClearNotificationsEditorViewController.h"
+#import "RCTimerCommand.h"
+#import "RCTimerEditorViewController.h"
 #import "RCConfigManager.h"
 #import "RCActionPickerViewController.h"
 #import "RCSSHActionEditorViewController.h"
@@ -272,6 +274,8 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
 - (void)showNotificationEditorWithCommand:(NSString *)command onSave:(void (^)(NSString *cmd))onSave;
 // Apps and text filters of a Clear Notifications action
 - (void)showClearNotificationsEditorWithCommand:(NSString *)command onSave:(void (^)(NSString *cmd))onSave;
+// Duration, mode, and optional label of a Timer action
+- (void)showTimerEditorWithCommand:(NSString *)command onSave:(void (^)(NSString *cmd))onSave;
 // The one toast editor. New toasts and edits both come through here,
 // so they always look and save the same way.
 - (void)showToastEditorWithTitle:(NSString *)title
@@ -848,6 +852,13 @@ static id g_actionClipboard = nil;
         paramText = [clearCmd actionAccentTextWithResolver:^NSString *(NSString *bundleId) {
             return [[RCConfigManager sharedManager] nameForBundleId:bundleId];
         }];
+    } else if ([RCTimerCommand isTimerCommand:cmd]) {
+        RCTimerCommand *timerCmd = [RCTimerCommand commandWithString:cmd];
+        NSString *accent = [timerCmd actionAccentText];
+        if (accent.length > 0) {
+            baseText = [NSString stringWithFormat:@"%@ ", timerCmd.actionTitle];
+            paramText = accent;
+        }
     } else if ([lower hasPrefix:@"notify "]) {
         baseText = @"Notification ";
         paramText = [RCNotifyCommand commandWithString:cmd].title;
@@ -2195,6 +2206,13 @@ static void RCSetRunWatching(BOOL watching) {
             __weak typeof(self) weakSelf = self;
             dispatch_async(dispatch_get_main_queue(), ^{
                 [weakSelf showClearNotificationsEditorWithCommand:nil onSave:^(NSString *cmd) {
+                    [weakSelf storeCommand:cmd atIndex:NSNotFound];
+                }];
+            });
+        } else if ([action isEqualToString:@"__TIMER__"]) {
+            __weak typeof(self) weakSelf = self;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [weakSelf showTimerEditorWithCommand:nil onSave:^(NSString *cmd) {
                     [weakSelf storeCommand:cmd atIndex:NSNotFound];
                 }];
             });
@@ -3966,6 +3984,12 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         [self showClearNotificationsEditorWithCommand:currentAction onSave:^(NSString *cmd) {
             [weakSelf storeCommand:cmd atIndex:index];
         }];
+    } else if ([RCTimerCommand isTimerCommand:currentAction]) {
+        __weak typeof(self) weakSelf = self;
+        NSInteger index = indexPath.row;
+        [self showTimerEditorWithCommand:currentAction onSave:^(NSString *cmd) {
+            [weakSelf storeCommand:cmd atIndex:index];
+        }];
     } else if ([RCNotifyCommand isNotifyCommand:currentAction]) {
         __weak typeof(self) weakSelf = self;
         NSInteger index = indexPath.row;
@@ -4175,6 +4199,15 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 // Apps and text filters of a Clear Notifications action (a card)
 - (void)showClearNotificationsEditorWithCommand:(NSString *)command onSave:(void (^)(NSString *cmd))onSave {
     RCClearNotificationsEditorViewController *editor = [[RCClearNotificationsEditorViewController alloc] initWithCommand:command];
+    editor.variableActions = self.actions;
+    editor.onSave = onSave;
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:editor];
+    [self presentViewController:nav animated:YES completion:nil];
+}
+
+// Mode, duration, and optional label of a Timer action (a card)
+- (void)showTimerEditorWithCommand:(NSString *)command onSave:(void (^)(NSString *cmd))onSave {
+    RCTimerEditorViewController *editor = [[RCTimerEditorViewController alloc] initWithCommand:command];
     editor.variableActions = self.actions;
     editor.onSave = onSave;
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:editor];
@@ -4882,6 +4915,8 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
                 if (silent) subtitle = @"Silent";
             } else if ([RCClearNotificationsCommand isClearCommand:action]) {
                 subtitle = [[RCClearNotificationsCommand commandWithString:action] actionDetailText];
+            } else if ([RCTimerCommand isTimerCommand:action]) {
+                subtitle = [[RCTimerCommand commandWithString:action] actionDetailText];
             }
         } else {
             if ([action hasPrefix:@"exec "]) {

@@ -101,6 +101,7 @@ static NSString *const kRCAOBuiltinPrefixes[] = {
     @"tap ",
     @"testkit ",
     @"testkit passcode/set",
+    @"timer ",
     @"toast ",
     @"trigger ",
     @"trigger:",

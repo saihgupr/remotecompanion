@@ -31,6 +31,7 @@
 #import "RCToastPill.h"
 #import "RCNotifyCommand.h"
 #import "RCClearNotificationsCommand.h"
+#import "RCTimerCommand.h"
 #import "RCTriggerAppExclusions.h"
 #import "RCAddOns.h"
 #import <CoreFoundation/CoreFoundation.h>
@@ -3070,6 +3071,428 @@ static NSUInteger rc_clear_notifications(RCClearNotificationsCommand *spec) {
     return clearedCount;
 }
 
+typedef NS_ENUM(NSUInteger, RCMTTimerState) {
+    RCMTTimerStateUnknown = 0,
+    RCMTTimerStateStopped = 1,
+    RCMTTimerStatePaused = 2,
+    RCMTTimerStateRunning = 3
+};
+
+static id rc_mt_await_future(id future, NSError **outError) {
+    if (!future) {
+        if (outError) {
+            *outError = [NSError errorWithDomain:@"RCTimer" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"No future returned by MobileTimer"}];
+        }
+        return nil;
+    }
+    SEL compSel = NSSelectorFromString(@"addCompletionBlock:");
+    if ([future respondsToSelector:compSel]) {
+        dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+        __block id result = nil;
+        __block NSError *err = nil;
+        void (^block)(id, NSError *) = ^(id res, NSError *error) {
+            result = res;
+            err = error;
+            dispatch_semaphore_signal(sem);
+        };
+        ((id (*)(id, SEL, void (^)(id, NSError *)))objc_msgSend)(future, compSel, block);
+        if (dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC))) != 0) {
+            if (outError) {
+                *outError = [NSError errorWithDomain:@"RCTimer" code:-2 userInfo:@{NSLocalizedDescriptionKey: @"Timed out waiting for MobileTimer"}];
+            }
+            return nil;
+        }
+        if (outError) *outError = err;
+        return [result isKindOfClass:[NSNull class]] ? nil : result;
+    }
+    SEL syncSel = NSSelectorFromString(@"mtSynchronousResult:");
+    if ([future respondsToSelector:syncSel]) {
+        id result = ((id (*)(id, SEL, NSError **))objc_msgSend)(future, syncSel, outError);
+        return [result isKindOfClass:[NSNull class]] ? nil : result;
+    }
+    return nil;
+}
+
+static NSUInteger rc_mt_timer_state(id timer) {
+    if (!timer) return RCMTTimerStateUnknown;
+    SEL sel = NSSelectorFromString(@"state");
+    return [timer respondsToSelector:sel] ? ((NSUInteger (*)(id, SEL))objc_msgSend)(timer, sel) : RCMTTimerStateUnknown;
+}
+
+static double rc_mt_timer_double(id timer, NSString *selectorName) {
+    if (!timer) return 0;
+    SEL sel = NSSelectorFromString(selectorName);
+    return [timer respondsToSelector:sel] ? ((double (*)(id, SEL))objc_msgSend)(timer, sel) : 0;
+}
+
+static NSString *rc_mt_timer_string(id timer, NSString *selectorName) {
+    if (!timer) return nil;
+    SEL sel = NSSelectorFromString(selectorName);
+    id val = [timer respondsToSelector:sel] ? ((id (*)(id, SEL))objc_msgSend)(timer, sel) : nil;
+    return [val isKindOfClass:[NSString class]] ? val : nil;
+}
+
+static BOOL rc_mt_timer_bool(id timer, NSString *selectorName) {
+    if (!timer) return NO;
+    SEL sel = NSSelectorFromString(selectorName);
+    return [timer respondsToSelector:sel] ? ((BOOL (*)(id, SEL))objc_msgSend)(timer, sel) : NO;
+}
+
+static BOOL rc_mt_has_custom_label(id timer) {
+    if (!timer) return NO;
+    if (rc_mt_timer_bool(timer, @"hasDefaultTitle")) return NO;
+    NSString *title = rc_mt_timer_string(timer, @"title");
+    if (title.length == 0 || [title isEqualToString:@"CURRENT_TIMER"]) return NO;
+    return YES;
+}
+
+static id rc_mt_find_labeled_timer(NSArray *timers, NSString *label, NSUInteger preferState) {
+    if (label.length == 0) return nil;
+    id best = nil;
+    int bestRank = -1;
+    for (id t in timers) {
+        if (!rc_mt_has_custom_label(t)) continue;
+        NSString *title = rc_mt_timer_string(t, @"title");
+        if (!title || [title localizedCaseInsensitiveCompare:label] != NSOrderedSame) continue;
+        NSUInteger st = rc_mt_timer_state(t);
+        int rank = (st == preferState) ? 3 : (st == RCMTTimerStateRunning ? 2 : (st == RCMTTimerStatePaused ? 1 : 0));
+        if (rank > bestRank) {
+            bestRank = rank;
+            best = t;
+        }
+    }
+    return best;
+}
+
+static id rc_mt_pick_timer(id mgr, NSArray *timers, NSString *label, NSUInteger preferState) {
+    if (label.length > 0) {
+        return rc_mt_find_labeled_timer(timers, label, preferState);
+    }
+    id best = nil;
+    int bestRank = -1;
+    for (id t in timers) {
+        NSUInteger st = rc_mt_timer_state(t);
+        BOOL cur = rc_mt_timer_bool(t, @"isCurrentTimer");
+        int rank = (st == preferState ? 20 : 0) +
+                   (st == RCMTTimerStateRunning ? 10 : (st == RCMTTimerStatePaused ? 5 : 0)) +
+                   (cur ? 2 : 0);
+        if (rank > bestRank) {
+            bestRank = rank;
+            best = t;
+        }
+    }
+    if (best) return best;
+    return rc_mt_await_future(((id (*)(id, SEL))objc_msgSend)(mgr, NSSelectorFromString(@"currentTimer")), NULL);
+}
+
+static BOOL rc_mt_stop_and_dismiss(id mgr, id timer, NSError **outError) {
+    if (!timer) return YES;
+    if (rc_mt_timer_bool(timer, @"isFiring")) {
+        NSString *tid = rc_mt_timer_string(timer, @"timerIDString");
+        SEL dismissSel = NSSelectorFromString(@"dismissTimerWithIdentifier:");
+        if (tid.length > 0 && [mgr respondsToSelector:dismissSel]) {
+            rc_mt_await_future(((id (*)(id, SEL, id))objc_msgSend)(mgr, dismissSel, tid), NULL);
+        }
+    }
+    if (rc_mt_timer_state(timer) == RCMTTimerStateStopped) return YES;
+    if (rc_mt_timer_bool(timer, @"isCurrentTimer")) {
+        id f = ((id (*)(id, SEL))objc_msgSend)(mgr, NSSelectorFromString(@"stopCurrentTimer"));
+        id res = rc_mt_await_future(f, outError);
+        if (outError && *outError) return NO;
+        return [res respondsToSelector:@selector(boolValue)] ? [res boolValue] : YES;
+    }
+    id mut = [timer mutableCopy];
+    ((void (*)(id, SEL, NSUInteger))objc_msgSend)(mut, NSSelectorFromString(@"setState:"), RCMTTimerStateStopped);
+    id f = ((id (*)(id, SEL, id))objc_msgSend)(mgr, NSSelectorFromString(@"updateTimer:"), mut);
+    rc_mt_await_future(f, outError);
+    return !(outError && *outError);
+}
+
+static NSString *rc_mt_format_status_line(id timer) {
+    NSUInteger st = rc_mt_timer_state(timer);
+    NSString *stateStr = @"Stopped";
+    if (st == RCMTTimerStateRunning) stateStr = @"Running";
+    else if (st == RCMTTimerStatePaused) stateStr = @"Paused";
+    else if (st != RCMTTimerStateStopped) stateStr = @"Unknown";
+
+    double rem = rc_mt_timer_double(timer, @"remainingTime");
+    double dur = rc_mt_timer_double(timer, @"duration");
+    NSString *durStr = [RCTimerCommand displayDurationForSeconds:dur];
+    NSString *labelTag = rc_mt_has_custom_label(timer)
+        ? [NSString stringWithFormat:@" [%@]", rc_mt_timer_string(timer, @"title")]
+        : @"";
+    if (st == RCMTTimerStateRunning || st == RCMTTimerStatePaused) {
+        NSString *remStr = [RCTimerCommand displayDurationForSeconds:MAX(0, rem)];
+        return [NSString stringWithFormat:@"%@%@: %@ remaining (%@)", stateStr, labelTag, remStr, durStr];
+    }
+    return [NSString stringWithFormat:@"%@%@ (%@)", stateStr, labelTag, durStr];
+}
+
+static NSString *rc_fill_placeholders(NSString *text);
+
+static NSString *rc_handle_timer_command(NSString *rawCmd) {
+    RCTimerCommand *parsed = [RCTimerCommand commandWithString:rawCmd];
+    if (!parsed) return @"Error: Invalid timer command\n";
+
+    NSString *resolvedDur = parsed.durationExpression
+        ? [rc_fill_placeholders(parsed.durationExpression) stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+        : nil;
+    NSString *resolvedLabel = parsed.label
+        ? [rc_fill_placeholders(parsed.label) stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+        : nil;
+
+    if (parsed.parseError.length > 0 && !(parsed.action == RCTimerActionStart && parsed.durationExpression && [RCTimerCommand containsVariable:parsed.durationExpression])) {
+        return [NSString stringWithFormat:@"Error: %@\n", parsed.parseError];
+    }
+
+    RCTimerCommand *spec = [[RCTimerCommand alloc] initWithAction:parsed.action durationExpression:resolvedDur label:resolvedLabel];
+    double durationSeconds = 0;
+    if (spec.action == RCTimerActionStart) {
+        durationSeconds = [RCTimerCommand parseDurationSeconds:spec.durationExpression];
+        if (durationSeconds <= 0) {
+            return @"Error: Invalid timer duration (expected e.g. 20m, 1h30m, 45s, 20:00, or seconds)\n";
+        }
+        if (durationSeconds > 86399.0) {
+            return @"Error: Timer duration exceeds 23h 59m 59s\n";
+        }
+    }
+
+    static dispatch_once_t loadOnce;
+    static Class mgrClass = Nil;
+    static Class mutClass = Nil;
+    static Class soundClass = Nil;
+    static dispatch_queue_t timerQueue;
+    dispatch_once(&loadOnce, ^{
+        dlopen("/System/Library/PrivateFrameworks/MobileTimer.framework/MobileTimer", RTLD_NOW);
+        mgrClass = objc_getClass("MTTimerManager");
+        mutClass = objc_getClass("MTMutableTimer");
+        soundClass = objc_getClass("MTSound");
+        timerQueue = dispatch_queue_create("com.saihgupr.rc.mobiletimer", DISPATCH_QUEUE_SERIAL);
+    });
+
+    if (!mgrClass || !mutClass) {
+        return @"Error: MobileTimer.framework unavailable\n";
+    }
+
+    __block NSString *output = nil;
+    dispatch_sync(timerQueue, ^{
+        static id sharedMgr = nil;
+        if (!sharedMgr) sharedMgr = [[mgrClass alloc] init];
+
+        BOOL (^shouldRetry)(NSError *) = ^BOOL(NSError *e) {
+            return e && [e.domain isEqualToString:NSCocoaErrorDomain] && (e.code == 4097 || e.code == 4099);
+        };
+
+        for (int attempt = 0; attempt < 2; attempt++) {
+            id mgr = sharedMgr;
+            NSError *err = nil;
+            NSArray *timers = rc_mt_await_future(((id (*)(id, SEL))objc_msgSend)(mgr, NSSelectorFromString(@"timers")), &err);
+            if (!timers && shouldRetry(err) && attempt == 0) {
+                sharedMgr = [[mgrClass alloc] init];
+                continue;
+            }
+            if (err && !timers) {
+                output = [NSString stringWithFormat:@"Error: %@\n", err.localizedDescription ?: @"MobileTimer XPC failed"];
+                break;
+            }
+            if (![timers isKindOfClass:[NSArray class]]) timers = @[];
+
+            BOOL multiTimerOS = [[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:(NSOperatingSystemVersion){17, 0, 0}];
+
+            if (spec.action == RCTimerActionStatus) {
+                if (spec.label.length > 0) {
+                    id match = rc_mt_find_labeled_timer(timers, spec.label, RCMTTimerStateRunning);
+                    output = match ? [NSString stringWithFormat:@"%@\n", rc_mt_format_status_line(match)]
+                                   : [NSString stringWithFormat:@"No timer labeled \"%@\"\n", spec.label];
+                } else {
+                    NSMutableArray<NSString *> *activeLines = [NSMutableArray array];
+                    if (multiTimerOS) {
+                        for (id t in timers) {
+                            NSUInteger st = rc_mt_timer_state(t);
+                            if (st == RCMTTimerStateRunning || st == RCMTTimerStatePaused) {
+                                [activeLines addObject:rc_mt_format_status_line(t)];
+                            }
+                        }
+                    }
+                    if (activeLines.count > 0) {
+                        output = [NSString stringWithFormat:@"%@\n", [activeLines componentsJoinedByString:@"\n"]];
+                    } else {
+                        id cur = rc_mt_pick_timer(mgr, timers, nil, RCMTTimerStateRunning);
+                        output = cur ? [NSString stringWithFormat:@"%@\n", rc_mt_format_status_line(cur)]
+                                     : @"No timers configured\n";
+                    }
+                }
+                break;
+            }
+
+            if (spec.action == RCTimerActionStart) {
+                NSString *durDisplay = [RCTimerCommand displayDurationForSeconds:durationSeconds];
+                BOOL usedLabeledMultiTimer = (multiTimerOS && spec.label.length > 0);
+
+                if (usedLabeledMultiTimer) {
+                    id existing = rc_mt_find_labeled_timer(timers, spec.label, RCMTTimerStateRunning);
+                    if (existing) {
+                        if (!rc_mt_stop_and_dismiss(mgr, existing, &err)) {
+                            output = [NSString stringWithFormat:@"Error: %@\n", err.localizedDescription ?: @"Failed to reset existing timer"];
+                            break;
+                        }
+                        id mut = [existing mutableCopy];
+                        ((void (*)(id, SEL, double))objc_msgSend)(mut, NSSelectorFromString(@"setDuration:"), durationSeconds);
+                        ((void (*)(id, SEL, NSUInteger))objc_msgSend)(mut, NSSelectorFromString(@"setState:"), RCMTTimerStateRunning);
+                        ((void (*)(id, SEL, id))objc_msgSend)(mut, NSSelectorFromString(@"setTitle:"), spec.label);
+                        rc_mt_await_future(((id (*)(id, SEL, id))objc_msgSend)(mgr, NSSelectorFromString(@"updateTimer:"), mut), &err);
+                    } else {
+                        id mut = ((id (*)(id, SEL, NSUInteger, double))objc_msgSend)([mutClass alloc], NSSelectorFromString(@"initWithState:duration:"), RCMTTimerStateRunning, durationSeconds);
+                        ((void (*)(id, SEL, id))objc_msgSend)(mut, NSSelectorFromString(@"setTitle:"), spec.label);
+                        if (soundClass && [soundClass respondsToSelector:NSSelectorFromString(@"defaultSoundForCategory:")]) {
+                            id sound = ((id (*)(id, SEL, NSUInteger))objc_msgSend)(soundClass, NSSelectorFromString(@"defaultSoundForCategory:"), 1);
+                            if (sound) ((void (*)(id, SEL, id))objc_msgSend)(mut, NSSelectorFromString(@"setSound:"), sound);
+                        }
+                        rc_mt_await_future(((id (*)(id, SEL, id))objc_msgSend)(mgr, NSSelectorFromString(@"addTimer:"), mut), &err);
+                    }
+                    if (err) {
+                        output = [NSString stringWithFormat:@"Error: %@\n", err.localizedDescription ?: @"Failed to start timer"];
+                    } else {
+                        SRLogMin(@"[Timer] Started %@ (%@)", durDisplay, spec.label);
+                        output = [NSString stringWithFormat:@"Timer started: %@ (%@)\n", durDisplay, spec.label];
+                    }
+                    break;
+                }
+
+                // Single-timer path (iOS 14-16 always; iOS 17+ when no custom label given)
+                id cur = nil;
+                for (id t in timers) {
+                    if (rc_mt_timer_bool(t, @"isCurrentTimer")) { cur = t; break; }
+                }
+                if (!cur) {
+                    cur = rc_mt_await_future(((id (*)(id, SEL))objc_msgSend)(mgr, NSSelectorFromString(@"currentTimer")), NULL);
+                }
+                if (!cur && multiTimerOS) {
+                    for (id t in timers) {
+                        if (!rc_mt_has_custom_label(t)) { cur = t; break; }
+                    }
+                }
+                if (cur) {
+                    // MobileTimer refuses startCurrentTimerWithDuration: while CURRENT_TIMER is running or paused
+                    if (!rc_mt_stop_and_dismiss(mgr, cur, &err)) {
+                        output = [NSString stringWithFormat:@"Error: %@\n", err.localizedDescription ?: @"Failed to stop active timer"];
+                        break;
+                    }
+                    if (rc_mt_timer_bool(cur, @"isCurrentTimer")) {
+                        rc_mt_await_future(((id (*)(id, SEL, double))objc_msgSend)(mgr, NSSelectorFromString(@"startCurrentTimerWithDuration:"), durationSeconds), &err);
+                    } else {
+                        id mut = [cur mutableCopy];
+                        ((void (*)(id, SEL, double))objc_msgSend)(mut, NSSelectorFromString(@"setDuration:"), durationSeconds);
+                        ((void (*)(id, SEL, NSUInteger))objc_msgSend)(mut, NSSelectorFromString(@"setState:"), RCMTTimerStateRunning);
+                        rc_mt_await_future(((id (*)(id, SEL, id))objc_msgSend)(mgr, NSSelectorFromString(@"updateTimer:"), mut), &err);
+                    }
+                } else {
+                    id mut = ((id (*)(id, SEL, NSUInteger, double))objc_msgSend)([mutClass alloc], NSSelectorFromString(@"initWithState:duration:"), RCMTTimerStateRunning, durationSeconds);
+                    ((void (*)(id, SEL, id))objc_msgSend)(mut, NSSelectorFromString(@"setTitle:"), @"CURRENT_TIMER");
+                    if (soundClass && [soundClass respondsToSelector:NSSelectorFromString(@"defaultSoundForCategory:")]) {
+                        id sound = ((id (*)(id, SEL, NSUInteger))objc_msgSend)(soundClass, NSSelectorFromString(@"defaultSoundForCategory:"), 1);
+                        if (sound) ((void (*)(id, SEL, id))objc_msgSend)(mut, NSSelectorFromString(@"setSound:"), sound);
+                    }
+                    rc_mt_await_future(((id (*)(id, SEL, id))objc_msgSend)(mgr, NSSelectorFromString(@"addTimer:"), mut), &err);
+                }
+                if (err) {
+                    if (shouldRetry(err) && attempt == 0) {
+                        sharedMgr = [[mgrClass alloc] init];
+                        continue;
+                    }
+                    output = [NSString stringWithFormat:@"Error: %@\n", err.localizedDescription ?: @"Failed to start timer"];
+                } else {
+                    SRLogMin(@"[Timer] Started %@", durDisplay);
+                    output = [NSString stringWithFormat:@"Timer started: %@\n", durDisplay];
+                }
+                break;
+            }
+
+            if (spec.action == RCTimerActionStop) {
+                id target = rc_mt_pick_timer(mgr, timers, multiTimerOS ? spec.label : nil, RCMTTimerStateRunning);
+                if (!target && multiTimerOS && spec.label.length > 0) {
+                    output = [NSString stringWithFormat:@"Error: No timer labeled \"%@\"\n", spec.label];
+                    break;
+                }
+                if (!target) {
+                    output = @"No active timer\n";
+                    break;
+                }
+                BOOL wasActive = (rc_mt_timer_state(target) != RCMTTimerStateStopped) || rc_mt_timer_bool(target, @"isFiring");
+                if (!rc_mt_stop_and_dismiss(mgr, target, &err)) {
+                    output = [NSString stringWithFormat:@"Error: %@\n", err.localizedDescription ?: @"Failed to stop timer"];
+                    break;
+                }
+                SRLogMin(@"[Timer] Stopped");
+                output = wasActive ? @"Timer stopped\n" : @"Timer already stopped\n";
+                break;
+            }
+
+            if (spec.action == RCTimerActionPause) {
+                id target = rc_mt_pick_timer(mgr, timers, multiTimerOS ? spec.label : nil, RCMTTimerStateRunning);
+                if (!target && multiTimerOS && spec.label.length > 0) {
+                    output = [NSString stringWithFormat:@"Error: No timer labeled \"%@\"\n", spec.label];
+                    break;
+                }
+                NSUInteger st = rc_mt_timer_state(target);
+                if (st == RCMTTimerStatePaused) {
+                    output = @"Timer already paused\n";
+                    break;
+                }
+                if (st != RCMTTimerStateRunning) {
+                    output = @"No running timer to pause\n";
+                    break;
+                }
+                if (rc_mt_timer_bool(target, @"isCurrentTimer")) {
+                    rc_mt_await_future(((id (*)(id, SEL))objc_msgSend)(mgr, NSSelectorFromString(@"pauseCurrentTimer")), &err);
+                } else {
+                    id mut = [target mutableCopy];
+                    ((void (*)(id, SEL, NSUInteger))objc_msgSend)(mut, NSSelectorFromString(@"setState:"), RCMTTimerStatePaused);
+                    rc_mt_await_future(((id (*)(id, SEL, id))objc_msgSend)(mgr, NSSelectorFromString(@"updateTimer:"), mut), &err);
+                }
+                if (err) {
+                    output = [NSString stringWithFormat:@"Error: %@\n", err.localizedDescription ?: @"Failed to pause timer"];
+                } else {
+                    NSString *remStr = [RCTimerCommand displayDurationForSeconds:MAX(0, rc_mt_timer_double(target, @"remainingTime"))];
+                    output = [NSString stringWithFormat:@"Timer paused (%@ remaining)\n", remStr];
+                }
+                break;
+            }
+
+            if (spec.action == RCTimerActionResume) {
+                id target = rc_mt_pick_timer(mgr, timers, multiTimerOS ? spec.label : nil, RCMTTimerStatePaused);
+                if (!target && multiTimerOS && spec.label.length > 0) {
+                    output = [NSString stringWithFormat:@"Error: No timer labeled \"%@\"\n", spec.label];
+                    break;
+                }
+                NSUInteger st = rc_mt_timer_state(target);
+                if (st == RCMTTimerStateRunning) {
+                    output = @"Timer already running\n";
+                    break;
+                }
+                if (st != RCMTTimerStatePaused) {
+                    output = @"No paused timer to resume\n";
+                    break;
+                }
+                if (rc_mt_timer_bool(target, @"isCurrentTimer")) {
+                    rc_mt_await_future(((id (*)(id, SEL))objc_msgSend)(mgr, NSSelectorFromString(@"resumeCurrentTimer")), &err);
+                } else {
+                    id mut = [target mutableCopy];
+                    ((void (*)(id, SEL, NSUInteger))objc_msgSend)(mut, NSSelectorFromString(@"setState:"), RCMTTimerStateRunning);
+                    rc_mt_await_future(((id (*)(id, SEL, id))objc_msgSend)(mgr, NSSelectorFromString(@"updateTimer:"), mut), &err);
+                }
+                if (err) {
+                    output = [NSString stringWithFormat:@"Error: %@\n", err.localizedDescription ?: @"Failed to resume timer"];
+                } else {
+                    output = @"Timer resumed\n";
+                }
+                break;
+            }
+        }
+    });
+    return output ?: @"Error: Timer operation failed\n";
+}
+
 
 static BOOL rc_watch_ping_quiets(NSString *key) {
     if (!RC_MasterEnabled()) return NO;
@@ -3781,6 +4204,15 @@ static NSString *rc_fill_action(NSString *text) {
             }
         }
     }
+    if ([RCTimerCommand isTimerCommand:text]) {
+        RCTimerCommand *parsed = [RCTimerCommand commandWithString:text];
+        if (parsed && !parsed.parseError) {
+            NSString *dur = parsed.durationExpression ? rc_fill_placeholders(parsed.durationExpression) : nil;
+            NSString *lbl = parsed.label ? rc_fill_placeholders(parsed.label) : nil;
+            return [[[RCTimerCommand alloc] initWithAction:parsed.action durationExpression:dur label:lbl] string];
+        }
+        return rc_fill_placeholders_mode(text, RCFillQuoted);
+    }
     // A Toast's and a notification's parts are in double quotes: a " in a value would end one early
     if ([lower hasPrefix:@"toast "] || [lower hasPrefix:@"notify "]) return rc_fill_placeholders_mode(text, RCFillQuoted);
     return rc_fill_placeholders_mode(text, RCFillPlain);
@@ -4294,6 +4726,10 @@ static void rc_maybe_show_action_banner(NSString *action) {
     else if ([cmd hasPrefix:@"shortcut:"]) subtitle = rc_parse_shortcut_args([original substringFromIndex:9], NULL, NULL);
     else if ([cmd hasPrefix:@"http-request"]) subtitle = rc_http_request_banner_subtitle(original);
     else if ([RCClearNotificationsCommand isClearCommand:original]) subtitle = rc_clear_banner_subtitle(original);
+    else if ([RCTimerCommand isTimerCommand:original]) {
+        RCTimerCommand *timerCmd = [RCTimerCommand commandWithString:original];
+        subtitle = [timerCmd bannerSubtitle];
+    }
     else if ([cmd hasPrefix:@"set-vol "] || [cmd hasPrefix:@"ringer volume "] || [cmd hasPrefix:@"brightness "]) {
         // All take 0-100
         float level = [[cmd substringFromIndex:[cmd rangeOfString:@" " options:NSBackwardsSearch].location + 1] floatValue];
@@ -10231,6 +10667,8 @@ static NSString *handle_command(NSString *cmd) {
         RCClearNotificationsCommand *resolved = [[RCClearNotificationsCommand alloc] initWithApps:filledApps texts:filledTexts];
         NSUInteger count = rc_clear_notifications(resolved);
         return [NSString stringWithFormat:@"Cleared %lu notification(s)\n", (unsigned long)count];
+    } else if ([cleanCmd isEqualToString:@"timer"] || [cleanCmd hasPrefix:@"timer "] || [RCTimerCommand isTimerCommand:cleanCmd]) {
+        return rc_handle_timer_command(cleanCmd);
     } else if ([cleanCmd hasPrefix:@"notify confirm "]) {
         // A button that needed the passcode was pressed and the passcode given (RC's app reports
         // it): its answer goes to the action waiting on that notification
@@ -13369,7 +13807,7 @@ static void start_web_server() {
                                 NSArray *commands = @[@"battery", @"volume", @"wifi status", @"bt status", @"cell status", @"airplane status",
                                                       @"location status", @"carplay status", @"ringer status", @"vibration silent-status",
                                                       @"haptics status", @"is-playing", @"lock status", @"low power status", @"flashlight status",
-                                                      @"dnd status", @"focus status", @"screenrecord status", @"proximity status",
+                                                      @"dnd status", @"focus status", @"screenrecord status", @"timer status", @"proximity status",
                                                       @"orientation status", @"appearance status", @"autolock status"];
                                 NSMutableDictionary *answers = [NSMutableDictionary dictionary];
                                 for (NSString *command in commands) {
@@ -13602,7 +14040,9 @@ static void start_web_server() {
                                         @"audiohandoff": @(is_audiohandoff_installed()),
                                         @"audiostream": @(is_audiostream_installed()),
                                         @"audiostream_running": @(is_audiostreamerd_running()),
-                                        @"home_button": @(rc_has_home_button())
+                                        @"home_button": @(rc_has_home_button()),
+                                        @"multi_timer": @([[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:(NSOperatingSystemVersion){17, 0, 0}]),
+                                        @"ios17": @([[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:(NSOperatingSystemVersion){17, 0, 0}])
                                     };
                                     NSData *jsonData = [NSJSONSerialization dataWithJSONObject:caps options:0 error:nil];
                                     NSString *jsonStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
@@ -14189,6 +14629,7 @@ static void start_web_server() {
                                     @{@"command": @"shortcut \"Name\"", @"desc": @"Automation: Run a Siri Shortcut"},
                                     @{@"command": @"http-request {\"method\":\"GET\",\"url\":\"https://…\"}", @"desc": @"Automation: Call a REST API endpoint with optional headers and body"},
                                     @{@"command": @"notify clear {\"apps\":[],\"texts\":[]}", @"desc": @"Notifications: Clear notifications by app and/or matching text"},
+                                    @{@"command": @"timer <duration|stop|pause|resume|status>", @"desc": @"Device: Start, pause, resume, stop, or inspect the Apple Clock timer"},
                                     @{@"command": @"trigger <ID>", @"desc": @"Automation: Fire a configured RemoteCompanion trigger"}
                                 ];
                                 NSDictionary *resp = @{@"ok": @YES, @"commands": commandList};

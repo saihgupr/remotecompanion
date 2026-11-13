@@ -105,6 +105,7 @@ Access the desktop-class automation hub at `http://[DEVICE_IP]:8080` from any co
 - `rc unlock [pin]` - Wakes and unlocks the device (or wakes screen if pin omitted). With Settings > Advanced Settings > Options > Only Unlock Out of Pocket on, it skips the unlock while the proximity sensor is covered.
 - `rc lock-toggle [pin]` / `rc lock toggle [pin]` - Toggle screen lock/unlock state (unlocks with optional passcode if locked).
 - `rc autolock [toggle|30s|1m|2m|3m|4m|5m|never|off]` / `rc display sleep [duration]` / `rc display time off` - Configure display sleep / auto-lock timeout.
+- `rc timer <duration|stop|pause|resume|status> [--label "Name"]` - Start (e.g. `20m`, `1h30m`, `45s`, `20:00`), pause, resume, stop, or inspect a real Apple Clock timer (mirrors to Lock Screen and Apple Watch).
 - `rc button [power|lock|home|volup|voldown|mute]` - Simulate physical button presses.
 - `rc brightness 0-100` - Set screen brightness.
 - `rc flashlight [on|off|toggle]` - Control the torch.

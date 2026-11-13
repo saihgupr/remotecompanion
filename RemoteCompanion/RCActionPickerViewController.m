@@ -312,6 +312,7 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
             @{ @"name": @"Set Focus...", @"command": @"__FOCUS__", @"icon": @"moon.circle" },
             @{ @"name": @"Low Power Mode", @"command": @"low power toggle", @"icon": @"battery.25" },
             @{ @"name": @"Auto-Lock (Display Sleep)", @"command": @"autolock toggle", @"icon": @"timer", @"keywords": @"display sleep timeout time off screen autolock" },
+            @{ @"name": @"Timer...", @"command": @"__TIMER__", @"icon": @"timer", @"keywords": @"timer countdown clock alarm watch nap reminder start stop pause resume" },
             @{ @"name": @"NFC Scanner", @"command": @"nfc scanner toggle", @"icon": @"wave.3.right" },
             @{ @"name": @"Button Triggers", @"command": @"button triggers pause 15", @"icon": @"pause.circle" }
         ],
@@ -641,7 +642,7 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
     dispatch_once(&once, ^{
         more = [NSSet setWithArray:@[@"__SET_VOLUME__", @"__SET_RINGER_VOLUME__", @"__SET_BRIGHTNESS__", @"__SET_FLASHLIGHT__",
                                      @"__BT_CONNECT__", @"__BT_DISCONNECT__", @"__AIRPLAY_CONNECT__", @"__FOCUS__",
-                                     @"__SHORTCUT_PICKER__", @"__OPEN_APP__", @"__KILL_APP__", @"__LUA_SCRIPT__", @"__TOAST__", @"__NOTIFICATION__", @"__CLEAR_NOTIFICATIONS__",
+                                     @"__SHORTCUT_PICKER__", @"__OPEN_APP__", @"__KILL_APP__", @"__LUA_SCRIPT__", @"__TOAST__", @"__NOTIFICATION__", @"__CLEAR_NOTIFICATIONS__", @"__TIMER__",
                                      @"__IF_CONDITION__", @"__REPEAT__", @"__REPEAT_WHILE__", @"__WAIT_UNTIL__", @"__DELAY__",
                                      @"__STOP_TRIGGER__", @"__CUSTOM__", @"__HA_PICKER__", @"__KM_TRIGGER__", @"__MQTT_PUBLISH__",
                                      @"__CAMERA_PICKER__", @"__CAMERA_VIDEO_PICKER__", @"__TAP__", @"__HOLD__", @"__SWIPE__",

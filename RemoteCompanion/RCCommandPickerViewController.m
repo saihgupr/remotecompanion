@@ -33,6 +33,7 @@ static NSArray<NSArray *> *RCValueCommandSections(void) {
                 @{ @"title": @"Do Not Disturb", @"command": @"dnd status", @"icon": @"moon.fill" },
                 @{ @"title": @"Focus", @"command": @"focus status", @"icon": @"moon.circle.fill" },
                 @{ @"title": @"Screen Recording", @"command": @"screenrecord status", @"icon": @"record.circle" },
+                @{ @"title": @"Timer", @"command": @"timer status", @"icon": @"timer" },
                 @{ @"title": @"Proximity", @"command": @"proximity status", @"icon": @"sensor.tag.radiowaves.forward.fill", @"fallbackIcon": @"hand.raised.fill" },
             ]],
             @[@"Display", @[

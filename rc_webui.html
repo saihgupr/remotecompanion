@@ -1610,6 +1610,42 @@
     .toggle-switch input:checked + .toggle-slider { background-color: var(--rc-green); }
     .toggle-switch input:checked + .toggle-slider:before { transform: translateX(20px); }
 
+    /* ── Timer dialog presets ── */
+    .timer-presets-grid {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+      padding: 10px 12px;
+    }
+    .timer-preset {
+      border: 0.5px solid var(--rc-border); border-radius: 10px;
+      background: var(--rc-surface); color: var(--rc-label);
+      font-family: inherit; font-size: 14px; font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      height: 36px; cursor: pointer;
+      transition: background 0.14s, color 0.14s, border-color 0.14s, transform 0.1s;
+    }
+    .timer-preset:active { transform: scale(0.95); }
+    .timer-preset.selected {
+      background: #ff9f0a; color: #fff; border-color: #ff9f0a;
+    }
+    .timer-hms-row {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+      padding: 8px 12px 10px; position: relative;
+    }
+    .timer-hms-row::before {
+      content: ''; position: absolute; top: 0; left: 14px; right: 0; height: 0.5px; background: var(--rc-fill-raised);
+    }
+    .timer-hms-box {
+      display: flex; align-items: center; gap: 4px;
+      background: var(--rc-surface); border: 0.5px solid var(--rc-border); border-radius: 9px;
+      padding: 6px 8px;
+    }
+    .timer-hms-box input {
+      width: 100%; min-width: 0; border: none; outline: none; background: transparent;
+      color: var(--rc-label); font-family: inherit; font-size: 16px; font-weight: 600;
+      font-variant-numeric: tabular-nums; text-align: center;
+    }
+    .timer-hms-box span { font-size: 12px; color: var(--rc-label-2); flex-shrink: 0; }
+
     /* ── Variable editors ── */
     .var-editor-box { width: 92%; max-width: 460px; display: flex; flex-direction: column; max-height: 88vh; max-height: 88dvh; }
     .var-editor-body { overflow-y: auto; padding: 4px 14px 6px; text-align: left; -webkit-overflow-scrolling: touch; }
@@ -2919,6 +2955,77 @@
   </div>
 </div>
 
+<!-- ══ TIMER ACTION DIALOG ═════════════════════════════════════════════ -->
+<div class="dialog-backdrop" id="timer-dialog-backdrop">
+  <div class="dialog-box toast-dialog">
+    <div class="dialog-title" id="timer-dialog-title">Timer</div>
+    <div class="dialog-msg">Runs a real Apple Clock timer synced with Lock Screen and Apple Watch.</div>
+
+    <div class="toast-dialog-body">
+      <div class="toast-section-header">Action</div>
+      <div class="var-ed-seg" id="timer-mode-seg" style="margin-top:0;">
+        <button type="button" data-mode="start" onclick="setTimerDialogMode('start')">Start</button>
+        <button type="button" data-mode="pause" onclick="setTimerDialogMode('pause')">Pause</button>
+        <button type="button" data-mode="resume" onclick="setTimerDialogMode('resume')">Resume</button>
+        <button type="button" data-mode="stop" onclick="setTimerDialogMode('stop')">Stop</button>
+      </div>
+
+      <div id="timer-duration-section">
+        <div class="toast-section-header">Duration</div>
+        <div class="var-ed-card">
+          <div class="timer-presets-grid" id="timer-presets-grid">
+            <button type="button" class="timer-preset" data-secs="60" onclick="selectTimerPreset(60)">1m</button>
+            <button type="button" class="timer-preset" data-secs="300" onclick="selectTimerPreset(300)">5m</button>
+            <button type="button" class="timer-preset" data-secs="600" onclick="selectTimerPreset(600)">10m</button>
+            <button type="button" class="timer-preset" data-secs="900" onclick="selectTimerPreset(900)">15m</button>
+            <button type="button" class="timer-preset" data-secs="1200" onclick="selectTimerPreset(1200)">20m</button>
+            <button type="button" class="timer-preset" data-secs="1800" onclick="selectTimerPreset(1800)">30m</button>
+            <button type="button" class="timer-preset" data-secs="2700" onclick="selectTimerPreset(2700)">45m</button>
+            <button type="button" class="timer-preset" data-secs="3600" onclick="selectTimerPreset(3600)">1h</button>
+          </div>
+          <div class="timer-hms-row">
+            <label class="timer-hms-box">
+              <input id="timer-hr-input" type="number" min="0" max="23" value="0" oninput="onTimerHmsInput()">
+              <span>hr</span>
+            </label>
+            <label class="timer-hms-box">
+              <input id="timer-min-input" type="number" min="0" max="59" value="15" oninput="onTimerHmsInput()">
+              <span>min</span>
+            </label>
+            <label class="timer-hms-box">
+              <input id="timer-sec-input" type="number" min="0" max="59" value="0" oninput="onTimerHmsInput()">
+              <span>sec</span>
+            </label>
+          </div>
+          <div class="var-ed-row">
+            <span class="var-ed-label">Duration</span>
+            <input class="var-ed-input" id="timer-duration-input" type="text" placeholder="20m, 90s, or {var}" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" style="text-align:right;" oninput="onTimerDurationTextInput()">
+            <button type="button" class="var-ed-insert" title="Insert Variable" aria-label="Insert Variable" onclick="timerInsertVariable(event, 'timer-duration-input')"><i class="f7-icons">plus_circle</i></button>
+          </div>
+        </div>
+        <div class="var-ed-note">Enter a duration like 20m, 1h30m, 45s, 20:00, or a {variable}.</div>
+      </div>
+
+      <div id="timer-options-section">
+        <div class="toast-section-header">Options</div>
+        <div class="var-ed-card">
+          <div class="var-ed-row">
+            <span class="var-ed-label">Label</span>
+            <input class="var-ed-input" id="timer-label-input" type="text" placeholder="Optional (e.g. Nap)" autocomplete="off" autocorrect="off" autocapitalize="words" spellcheck="false" style="text-align:right;">
+            <button type="button" class="var-ed-insert" title="Insert Variable" aria-label="Insert Variable" onclick="timerInsertVariable(event, 'timer-label-input')"><i class="f7-icons">plus_circle</i></button>
+          </div>
+        </div>
+        <div class="var-ed-note">Optional labels name individual timers on iOS 17+.</div>
+      </div>
+    </div>
+
+    <div class="dialog-btns">
+      <button onclick="closeTimerDialog()" style="color: var(--rc-red);">Cancel</button>
+      <button id="timer-save-btn" onclick="saveTimerDialog()" style="font-weight: 600;">Save</button>
+    </div>
+  </div>
+</div>
+
 <!-- ══ CLEAR NOTIFICATIONS ACTION DIALOG ═══════════════════════════════ -->
 <div class="dialog-backdrop" id="clear-notif-dialog-backdrop">
   <div class="dialog-box" style="max-width: 500px; width: 92%;">
@@ -4148,6 +4255,7 @@ function nameForCmd(cmd) {
   if (lowCmd.startsWith('mqtt ') || lowCmd === 'mqtt') return formatMQTTCommandName(cmd);
   if (lowCmd.startsWith('http-request')) return formatRESTCommandName(cmd);
   if (isClearNotifCmd(lowCmd)) return formatClearNotifName(cmd);
+  if (isTimerCmd(lowCmd)) return formatTimerName(cmd);
   // Recorded gestures
   if (lowCmd === 'gesture record-toggle' || lowCmd.startsWith('gesture record-toggle ')) return 'Record Gesture';
   const played = parseGestureCommand(cmd);
@@ -4348,6 +4456,7 @@ function iconForCmd(cmd) {
   if (lowCmd.startsWith('flashlight ')) return { icon:'bolt_fill',       cls:'icon-orange' };
   if (lowCmd.startsWith('toast'))         return { icon:'text_bubble',     cls:'icon-orange' };
   if (isClearNotifCmd(lowCmd))            return { icon:'bell_slash_fill', cls:'icon-red' };
+  if (isTimerCmd(lowCmd))                 return { icon:'timer',           cls:'icon-orange' };
   if (lowCmd.startsWith('lua:'))          return { icon:'doc_text_fill',         cls:'icon-purple' };
   if (lowCmd.startsWith('delay '))        return { icon:'hourglass',           cls:'icon-orange' };
   if (lowCmd.startsWith('bt connect '))   return { icon:'link',            cls:'icon-indigo' };
@@ -4434,6 +4543,7 @@ const ACTION_SECTIONS = [
     { name:'Set Focus…',        cmd:'__FOCUS__',     icon:'moon_circle_fill', needs_input:true },
     { name:'Low Power Mode',    cmd:'low power toggle',icon:'battery_25', is_toggle:true },
     { name:'Auto-Lock (Display Sleep)', cmd:'autolock toggle', icon:'timer', is_toggle:true, keywords:'display sleep timeout screen time off autolock' },
+    { name:'Timer…',            cmd:'__TIMER__',     icon:'timer', needs_input:true, keywords:'timer countdown clock alarm watch nap reminder start stop pause resume' },
   ]},
   { title:'Connectivity', actions:[
     { name:'Wi-Fi',             cmd:'wifi toggle',  icon:'wifi', is_toggle:true },
@@ -6135,6 +6245,289 @@ function saveRestDialog() {
   renderActionList();
 }
 
+// ── Timer Action ─────────────────────────────────────────────────────────────
+let g_editingTimerIdx = null;
+let g_timerMode = 'start';
+
+function isTimerCmd(lowCmd) {
+  const s = String(lowCmd || '').trim().toLowerCase();
+  return s === 'timer' || s.startsWith('timer ');
+}
+
+function tokenizeTimerArgs(raw) {
+  const tokens = [];
+  let cur = '', inDouble = false, inSingle = false, hasTok = false;
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw[i];
+    if (inDouble) {
+      if (c === '\\' && i + 1 < raw.length && (raw[i + 1] === '"' || raw[i + 1] === '\\')) {
+        cur += raw[++i];
+      } else if (c === '"') {
+        inDouble = false;
+      } else {
+        cur += c;
+      }
+      continue;
+    }
+    if (inSingle) {
+      if (c === "'") inSingle = false;
+      else cur += c;
+      continue;
+    }
+    if (/\s/.test(c)) {
+      if (hasTok) { tokens.push(cur); cur = ''; hasTok = false; }
+      continue;
+    }
+    hasTok = true;
+    if (c === '"') inDouble = true;
+    else if (c === "'") inSingle = true;
+    else cur += c;
+  }
+  if (hasTok) tokens.push(cur);
+  return tokens;
+}
+
+function parseTimerDurationSeconds(expr) {
+  const trimmed = String(expr || '').trim().toLowerCase();
+  if (!trimmed || trimmed.includes('{')) return -1;
+  if (trimmed.includes(':')) {
+    if (/\s/.test(trimmed)) return -1;
+    const parts = trimmed.split(':');
+    if (parts.length === 2 && /^\d+$/.test(parts[0]) && /^\d+(\.\d+)?$/.test(parts[1])) {
+      const s = parseFloat(parts[1]);
+      if (s >= 60) return -1;
+      const total = parseInt(parts[0], 10) * 60 + s;
+      return total > 0 ? total : -1;
+    }
+    if (parts.length === 3 && /^\d+$/.test(parts[0]) && /^\d+$/.test(parts[1]) && /^\d+(\.\d+)?$/.test(parts[2])) {
+      const m = parseInt(parts[1], 10), s = parseFloat(parts[2]);
+      if (m >= 60 || s >= 60) return -1;
+      const total = parseInt(parts[0], 10) * 3600 + m * 60 + s;
+      return total > 0 ? total : -1;
+    }
+    return -1;
+  }
+  const compact = trimmed.replace(/\s+/g, '');
+  if (/^\d+(\.\d+)?$/.test(compact)) {
+    const val = parseFloat(compact);
+    return val > 0 ? val : -1;
+  }
+  const rx = /(\d+(?:\.\d+)?)(hours|hour|hrs|hr|h|minutes|minute|mins|min|m|seconds|second|secs|sec|s)/g;
+  let total = 0, cursor = 0, m;
+  while ((m = rx.exec(compact)) !== null) {
+    if (m.index !== cursor) return -1;
+    cursor = rx.lastIndex;
+    const v = parseFloat(m[1]);
+    const u = m[2];
+    if (u.startsWith('h')) total += v * 3600;
+    else if (u.startsWith('m')) total += v * 60;
+    else total += v;
+  }
+  if (cursor === 0 || cursor !== compact.length) return -1;
+  return total > 0 ? total : -1;
+}
+
+function timerCompactToken(seconds) {
+  const total = Math.max(1, Math.round(seconds));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  let out = '';
+  if (h > 0) out += `${h}h`;
+  if (m > 0) out += `${m}m`;
+  if (s > 0 || !out) out += `${s}s`;
+  return out;
+}
+
+function timerDisplayDuration(seconds) {
+  if (seconds > 0 && seconds < 1) return `${Number(seconds.toFixed(1))}s`;
+  const total = Math.round(seconds);
+  if (total <= 0) return '0s';
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const parts = [];
+  if (h > 0) parts.push(`${h}h`);
+  if (m > 0) parts.push(`${m}m`);
+  if (s > 0 || !parts.length) parts.push(`${s}s`);
+  return parts.join(' ');
+}
+
+function parseTimerCmd(cmd) {
+  const tokens = tokenizeTimerArgs(String(cmd || '').trim());
+  if (!tokens.length || tokens[0].toLowerCase() !== 'timer') {
+    return { mode: 'start', duration: '15m', label: '' };
+  }
+  if (tokens.length === 1) return { mode: 'status', duration: '', label: '' };
+  let mode = 'start', idx = 1;
+  const first = tokens[1].toLowerCase();
+  if (first === 'start' || first === 'set') { mode = 'start'; idx = 2; }
+  else if (first === 'stop' || first === 'cancel' || first === 'off' || first === 'dismiss') { mode = 'stop'; idx = 2; }
+  else if (first === 'pause' || first === 'resume' || first === 'status') { mode = first; idx = 2; }
+
+  const pos = [];
+  let label = '';
+  while (idx < tokens.length) {
+    const t = tokens[idx], low = t.toLowerCase();
+    if ((low === '--label' || low === '-l' || low === '--title' || low === '-t') && idx + 1 < tokens.length) {
+      label = tokens[idx + 1];
+      idx += 2;
+      continue;
+    }
+    if (low.startsWith('--label=')) { label = t.slice(8); idx++; continue; }
+    if (low.startsWith('--title=')) { label = t.slice(8); idx++; continue; }
+    pos.push(t);
+    idx++;
+  }
+  let duration = '';
+  if (mode === 'start') duration = pos.join(' ');
+  else if (!label && pos.length) label = pos.join(' ');
+  return { mode, duration, label };
+}
+
+function formatTimerName(cmd) {
+  const p = parseTimerCmd(cmd);
+  const lbl = p.label ? ` (${p.label})` : '';
+  if (p.mode === 'stop') return `Stop Timer${lbl}`;
+  if (p.mode === 'pause') return `Pause Timer${lbl}`;
+  if (p.mode === 'resume') return `Resume Timer${lbl}`;
+  if (p.mode === 'status') return `Timer Status${lbl}`;
+  let dur = p.duration || '';
+  if (!dur.includes('{')) {
+    const secs = parseTimerDurationSeconds(dur);
+    if (secs > 0) dur = timerDisplayDuration(secs);
+  }
+  return dur ? `Start Timer ${dur}${lbl}` : `Start Timer${lbl}`;
+}
+
+function timerQuoteArg(v) {
+  return '"' + String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+}
+
+function updateTimerPresetHighlight() {
+  const raw = document.getElementById('timer-duration-input').value.trim();
+  const secs = raw.includes('{') ? -1 : parseTimerDurationSeconds(raw);
+  const rounded = secs > 0 && Math.abs(secs - Math.round(secs)) < 0.001 ? Math.round(secs) : -1;
+  document.querySelectorAll('#timer-presets-grid .timer-preset').forEach(btn => {
+    btn.classList.toggle('selected', parseInt(btn.dataset.secs, 10) === rounded);
+  });
+}
+
+function updateTimerSaveState() {
+  const btn = document.getElementById('timer-save-btn');
+  if (g_timerMode !== 'start') { btn.disabled = false; btn.style.opacity = ''; return; }
+  const val = document.getElementById('timer-duration-input').value.trim();
+  const ok = (val.includes('{') && val.includes('}')) || parseTimerDurationSeconds(val) > 0;
+  btn.disabled = !ok;
+  btn.style.opacity = ok ? '' : '0.4';
+}
+
+function syncTimerHmsFromSeconds(secs) {
+  const total = Math.max(0, Math.round(secs));
+  document.getElementById('timer-hr-input').value = Math.min(23, Math.floor(total / 3600));
+  document.getElementById('timer-min-input').value = Math.floor((total % 3600) / 60);
+  document.getElementById('timer-sec-input').value = total % 60;
+}
+
+function setTimerDialogMode(mode) {
+  g_timerMode = mode;
+  document.querySelectorAll('#timer-mode-seg button').forEach(b => {
+    b.classList.toggle('selected', b.dataset.mode === mode);
+  });
+  document.getElementById('timer-duration-section').style.display = mode === 'start' ? '' : 'none';
+  updateTimerSaveState();
+}
+
+function selectTimerPreset(secs) {
+  syncTimerHmsFromSeconds(secs);
+  document.getElementById('timer-duration-input').value = timerCompactToken(secs);
+  updateTimerPresetHighlight();
+  updateTimerSaveState();
+}
+
+function onTimerHmsInput() {
+  const h = Math.max(0, Math.min(23, parseInt(document.getElementById('timer-hr-input').value, 10) || 0));
+  const m = Math.max(0, Math.min(59, parseInt(document.getElementById('timer-min-input').value, 10) || 0));
+  const s = Math.max(0, Math.min(59, parseInt(document.getElementById('timer-sec-input').value, 10) || 0));
+  const total = h * 3600 + m * 60 + s;
+  document.getElementById('timer-duration-input').value = total > 0 ? timerCompactToken(total) : '';
+  updateTimerPresetHighlight();
+  updateTimerSaveState();
+}
+
+function onTimerDurationTextInput() {
+  const raw = document.getElementById('timer-duration-input').value.trim();
+  const secs = raw.includes('{') ? -1 : parseTimerDurationSeconds(raw);
+  if (secs > 0) syncTimerHmsFromSeconds(secs);
+  updateTimerPresetHighlight();
+  updateTimerSaveState();
+}
+
+function timerInsertVariable(e, id) {
+  e.stopPropagation();
+  const input = document.getElementById(id);
+  varEdOpenMenu(e.currentTarget, name => {
+    const token = `{${name}}`;
+    const s = input.selectionStart ?? input.value.length, en = input.selectionEnd ?? input.value.length;
+    input.value = input.value.slice(0, s) + token + input.value.slice(en);
+    input.focus();
+    input.setSelectionRange(s + token.length, s + token.length);
+    if (id === 'timer-duration-input') onTimerDurationTextInput();
+  });
+}
+
+function openTimerDialog(editIdx) {
+  g_editingTimerIdx = (typeof editIdx === 'number' && !Number.isNaN(editIdx)) ? editIdx : null;
+  const existing = (g_editingTimerIdx !== null) ? actionCommand(triggerData(currentKey).actions[g_editingTimerIdx]) : '';
+  const parsed = existing ? parseTimerCmd(existing) : { mode: 'start', duration: '15m', label: '' };
+  const mode = parsed.mode === 'status' ? 'start' : parsed.mode;
+  document.getElementById('timer-dialog-title').textContent = g_editingTimerIdx !== null ? 'Edit Timer' : 'Timer';
+  document.getElementById('timer-duration-input').value = parsed.duration || '15m';
+  document.getElementById('timer-label-input').value = parsed.label || '';
+  const hasMultiTimer = !!(serverCapabilities && (serverCapabilities.multi_timer || serverCapabilities.ios17));
+  const optSec = document.getElementById('timer-options-section');
+  if (optSec) optSec.style.display = hasMultiTimer ? '' : 'none';
+  const secs = (parsed.duration && !parsed.duration.includes('{')) ? parseTimerDurationSeconds(parsed.duration) : 900;
+  syncTimerHmsFromSeconds(secs > 0 ? secs : 900);
+  setTimerDialogMode(mode);
+  updateTimerPresetHighlight();
+  updateTimerSaveState();
+  document.getElementById('timer-dialog-backdrop').classList.add('visible');
+}
+
+function closeTimerDialog() {
+  document.getElementById('timer-dialog-backdrop').classList.remove('visible');
+  g_editingTimerIdx = null;
+}
+
+function saveTimerDialog() {
+  let command = '';
+  const hasMultiTimer = !!(serverCapabilities && (serverCapabilities.multi_timer || serverCapabilities.ios17));
+  const label = hasMultiTimer ? document.getElementById('timer-label-input').value.trim() : '';
+  if (g_timerMode === 'start') {
+    let dur = document.getElementById('timer-duration-input').value.trim();
+    if (!dur) return;
+    if (!dur.includes('{')) {
+      const secs = parseTimerDurationSeconds(dur);
+      if (secs <= 0) return;
+      dur = Math.abs(secs - Math.round(secs)) < 0.001 ? timerCompactToken(Math.round(secs)) : `${secs}s`;
+    }
+    command = 'timer ' + (/\s/.test(dur) ? timerQuoteArg(dur) : dur);
+  } else {
+    command = `timer ${g_timerMode}`;
+  }
+  if (label) command += ` --label ${timerQuoteArg(label)}`;
+  const actions = triggerData(currentKey).actions || [];
+  if (g_editingTimerIdx !== null && g_editingTimerIdx < actions.length) {
+    storeCommandAt(actions, g_editingTimerIdx, command);
+  } else {
+    addActionToCurrent(command);
+  }
+  closeTimerDialog();
+  saveConfig();
+  renderActionList();
+}
+
 // ── Clear Notifications Action ───────────────────────────────────────────────
 let g_editingClearNotifIdx = null;
 let g_clearNotifApps = [];
@@ -7020,6 +7413,8 @@ function editAction(idx) {
       openRestActionDialog(idx);
     } else if (isClearNotifCmd(low)) {
       openClearNotifDialog(idx);
+    } else if (isTimerCmd(low)) {
+      openTimerDialog(idx);
     } else {
       promptTerminalModal(act, idx, true); // any other command, as text with the + menu
     }
@@ -7439,6 +7834,8 @@ function selectPickerAction(act) {
     openRestActionDialog(null);
   } else if (c === '__CLEAR_NOTIFICATIONS__') {
     openClearNotifDialog(null);
+  } else if (c === '__TIMER__') {
+    openTimerDialog(null);
   } else if (c === 'unlock') {
     promptUnlockDialog('', val => {
       addActionToCurrent(val);
@@ -8290,7 +8687,7 @@ const VALUE_COMMANDS = [
   ['Device', [['Lock State', 'lock status', 'lock_fill'], ['Low Power Mode', 'low power status', 'battery_25'],
     ['Flashlight', 'flashlight status', 'lightbulb_fill'], ['Do Not Disturb', 'dnd status', 'moon_fill'],
     ['Focus', 'focus status', 'moon_circle_fill'], ['Screen Recording', 'screenrecord status', 'record_circle_fill'],
-    ['Proximity', 'proximity status', 'hand_raised_fill']]],
+    ['Timer', 'timer status', 'timer'], ['Proximity', 'proximity status', 'hand_raised_fill']]],
   ['Display', [['Orientation', 'orientation status', 'rotate_right_fill'], ['Appearance', 'appearance status', 'circle_lefthalf_fill'],
     ['Auto-Lock', 'autolock status', 'timer']]],
 ];
@@ -10065,6 +10462,7 @@ const BANNER_PLACEHOLDERS = {
   '__SSH_COMMAND__': ['ssh-run '],
   '__HTTP_REQUEST__': ['http-request '],
   '__CLEAR_NOTIFICATIONS__': ['notify clear ', 'notify clear', 'clear notification ', 'clear notification', 'clear notifications ', 'clear notifications', 'clear-notification ', 'clear-notification', 'clear-notifications ', 'clear-notifications'],
+  '__TIMER__': ['timer ', 'timer'],
   '__CUSTOM__': ['exec ', 'root ', 'sudo ']
 };
 
