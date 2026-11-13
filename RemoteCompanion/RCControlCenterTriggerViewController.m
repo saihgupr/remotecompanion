@@ -116,7 +116,7 @@ static NSString *const kRCDefaultButtonIcon = @"bolt.fill";
     }
     if (indexPath.row == 0) {
         cell.textLabel.text = @"Name";
-        cell.detailTextLabel.text = self.buttonName.length ? self.buttonName : @"Button";
+        cell.detailTextLabel.text = self.buttonName.length ? self.buttonName : [NSString stringWithFormat:@"Control Center Button %ld", (long)self.slot];
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         return cell;
     }
@@ -141,9 +141,10 @@ static NSString *const kRCDefaultButtonIcon = @"bolt.fill";
 
 - (void)editName {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Name" message:nil preferredStyle:UIAlertControllerStyleAlert];
+    NSString *placeholder = [NSString stringWithFormat:@"Control Center Button %ld", (long)self.slot];
     [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
         field.text = self.buttonName;
-        field.placeholder = @"Button";
+        field.placeholder = placeholder;
         field.autocapitalizationType = UITextAutocapitalizationTypeWords;
         field.clearButtonMode = UITextFieldViewModeWhileEditing;
     }];
@@ -205,6 +206,12 @@ static NSString *const kRCDefaultButtonIcon = @"bolt.fill";
         if (!data[@"actions"]) data[@"actions"] = @[];
         if (!data[@"enabled"]) data[@"enabled"] = @YES;
         [config updateTrigger:key withData:data];
+        NSArray *vcs = self.navigationController.viewControllers;
+        NSUInteger index = [vcs indexOfObject:self];
+        if (index != NSNotFound && index > 0 && [vcs[index - 1] isKindOfClass:[RCActionsViewController class]]) {
+            RCActionsViewController *actionsVC = vcs[index - 1];
+            actionsVC.title = name;
+        }
         [self.navigationController popViewControllerAnimated:YES];
         return;
     }

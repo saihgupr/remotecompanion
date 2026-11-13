@@ -10225,8 +10225,8 @@ function promptControlCenterTrigger() {
   showSheet('Control Center Button Number', freeSlots.map(s => ({
     label: `Button ${s}`,
     action: () => {
-      showDialog('Button Name', 'Name:', `Button ${s}`, 'Next', name => {
-        name = (name || `Button ${s}`).trim();
+      showDialog('Button Name', 'Name:', `Control Center Button ${s}`, 'Next', name => {
+        name = (name || `Control Center Button ${s}`).trim();
         showDialog('Icon (SF Symbol)', 'Symbol name (e.g. bolt.fill, lightbulb.fill):', 'bolt.fill', 'Add', icon => {
           icon = (icon || 'bolt.fill').trim();
           const key = `trigger_cc_button_${s}`;
