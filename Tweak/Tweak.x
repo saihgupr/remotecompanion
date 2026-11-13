@@ -17029,6 +17029,8 @@ static NSTimeInterval g_lastTwoFingerTopSwipeTriggerTime = 0;
 // The system's top-edge swipes (Notification Center, Control Center), kept so a two-finger
 // top swipe can stop one that the first finger already started
 static NSHashTable<UIGestureRecognizer *> *g_rcTopEdgeRecognizers = nil;
+// The system's bottom-edge swipes (Home, App Switcher), for the same reason at the bottom
+static NSHashTable<UIGestureRecognizer *> *g_rcBottomEdgeRecognizers = nil;
 // A Control Center pull that iOS already started (the first finger moved before the second landed)
 static BOOL g_rcCCPullStarted = NO;
 
@@ -17346,6 +17348,33 @@ static inline BOOL RC_InBottomRegionMulti(CGPoint loc, UIInterfaceOrientation or
     return (loc.y > L - threshold);
 }
 
+static inline BOOL RC_InBottomRegionMultiLoose(CGPoint loc, UIInterfaceOrientation orientation, CGFloat S, CGFloat L) {
+    (void)S; (void)L;
+    CGFloat threshold = 150.0;
+    if (orientation == UIInterfaceOrientationPortrait) return (loc.y > L - threshold);
+    if (orientation == UIInterfaceOrientationPortraitUpsideDown) return (loc.y < threshold);
+    if (orientation == UIInterfaceOrientationLandscapeLeft) return (loc.x > S - threshold);
+    if (orientation == UIInterfaceOrientationLandscapeRight) return (loc.x < threshold);
+    return (loc.y > L - threshold);
+}
+
+// Two real fingers near the bottom, from the touchscreen: a one-finger swipe there is iOS's
+// Home gesture and is left alone
+static BOOL rc_hid_two_bottom_fingers(UIInterfaceOrientation orientation, CGFloat S, CGFloat L) {
+    os_unfair_lock_lock(&g_hidFingerLock);
+    uint32_t mask = g_hidFingerMask;
+    double xs[32], ys[32];
+    memcpy(xs, g_hidFingerX, sizeof(xs));
+    memcpy(ys, g_hidFingerY, sizeof(ys));
+    os_unfair_lock_unlock(&g_hidFingerLock);
+    int near = 0;
+    for (int slot = 0; slot < 32; slot++) {
+        if (!(mask & (1u << slot))) continue;
+        if (RC_InBottomRegionMultiLoose(CGPointMake(xs[slot] * S, ys[slot] * L), orientation, S, L)) near++;
+    }
+    return near >= 2;
+}
+
 // Progress 0..1 along the UI-top / UI-bottom edge, left-to-right as the user sees it.
 // In landscape the bar edges are long edges, so progress runs along y with divisor L.
 static inline CGFloat RC_ProgressAlongEdge(CGPoint loc, UIInterfaceOrientation orientation, CGFloat S, CGFloat L) {
@@ -17477,16 +17506,18 @@ static inline BOOL rc_is_two_finger_top_active(void) {
 
 // Stop a top-edge swipe the first finger started before the second one landed. Turning a
 // recognizer off and on cancels it, and the panel it was pulling slides back.
-static void rc_cancel_top_edge_recognizers(void) {
-    for (UIGestureRecognizer *recognizer in [g_rcTopEdgeRecognizers allObjects]) {
+static void rc_cancel_edge_recognizers(NSHashTable<UIGestureRecognizer *> *table) {
+    for (UIGestureRecognizer *recognizer in [table allObjects]) {
         if (!recognizer.enabled) continue;
         UIGestureRecognizerState state = recognizer.state;
         if (state != UIGestureRecognizerStateBegan && state != UIGestureRecognizerStateChanged) continue;
-        SRLog(@"[RCMultiFinger] Cancelling top-edge recognizer %@", recognizer);
+        SRLog(@"[RCMultiFinger] Cancelling edge recognizer %@", recognizer);
         recognizer.enabled = NO;
         recognizer.enabled = YES;
     }
 }
+
+static void rc_cancel_top_edge_recognizers(void) { rc_cancel_edge_recognizers(g_rcTopEdgeRecognizers); }
 
 static inline BOOL rc_is_bottom_gesture_active(void) {
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
@@ -17513,7 +17544,8 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
     
     CGFloat S = 0, L = 0;
     RC_ScreenSL(&S, &L);
-    if (RC_InBottomRegionMulti(loc, orientation, S, L) && RC_TriggerIsActionable(@"trigger_bottom_two_finger_swipe_up")) {
+    if (RC_InBottomRegionMulti(loc, orientation, S, L) && RC_TriggerIsActionable(@"trigger_bottom_two_finger_swipe_up") &&
+        rc_hid_two_bottom_fingers(orientation, S, L)) {
         return YES;
     }
     
@@ -17619,6 +17651,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                 g_rcLatchedTouchOrientation = orientation;
                 g_rcLatchedTouchOrientationValid = YES;
                 SRLog(@"[RCMultiFinger] Two Finger Bottom Active at (%.0f, %.0f)", g_twoFingerBottomStartX, g_twoFingerBottomStartY);
+                if (RC_TriggerIsActionable(@"trigger_bottom_two_finger_swipe_up")) rc_cancel_edge_recognizers(g_rcBottomEdgeRecognizers);
             }
         }
 
@@ -18115,6 +18148,15 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
     RC_UserDeltaForOrientation(loc.x - self.startPoint.x, loc.y - self.startPoint.y,
                               orientation, &dx, &dy);
     CGFloat ax = fabs(dx), ay = fabs(dy);
+    // Kept only for a possible two-finger slide: once moving with one finger, it's iOS's Home swipe
+    if ([self.zoneTriggerKey isEqualToString:@"trigger_bottom_two_finger_swipe_up"] && (ax > 8 || ay > 8)) {
+        CGFloat S = 0, L = 0;
+        RC_ScreenSL(&S, &L);
+        if (!rc_hid_two_bottom_fingers(orientation, S, L)) {
+            self.state = UIGestureRecognizerStateFailed;
+            return;
+        }
+    }
     // Contradicting motion (sideways or downward beyond slop): not ours.
     // Failing releases any competing recognizers immediately.
     if ((ax > 25 && ax > ay * 1.5) || dy > 18) {
@@ -18816,6 +18858,11 @@ static BOOL RC_ShouldKeepBottomBarSideSwipe(void) {
         if (!g_rcTopEdgeRecognizers) g_rcTopEdgeRecognizers = [NSHashTable weakObjectsHashTable];
         [g_rcTopEdgeRecognizers addObject:recognizer];
         SRLog(@"[RCMultiFinger] Top-edge system gesture type %lu: %@", (unsigned long)type, recognizer);
+    }
+    if (recognizer && [recognizer respondsToSelector:@selector(edges)] &&
+        ([(UIScreenEdgePanGestureRecognizer *)recognizer edges] & UIRectEdgeBottom)) {
+        if (!g_rcBottomEdgeRecognizers) g_rcBottomEdgeRecognizers = [NSHashTable weakObjectsHashTable];
+        [g_rcBottomEdgeRecognizers addObject:recognizer];
     }
 }
 
