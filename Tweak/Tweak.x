@@ -2331,6 +2331,7 @@ static NSString *get_human_name_for_trigger(NSString *key, NSDictionary *trigger
     if ([key hasPrefix:@"notifbtn_"]) return @"Notification Button";
     if ([key hasPrefix:@"trigger_device_battery_below_"]) return [NSString stringWithFormat:@"Battery Drops to %@%%", [key substringFromIndex:29]];
     if ([key hasPrefix:@"trigger_device_battery_above_"]) return [NSString stringWithFormat:@"Battery Rises to %@%%", [key substringFromIndex:29]];
+    if ([key hasPrefix:@"trigger_cc_button_"]) return [NSString stringWithFormat:@"Control Center Button %@", [key substringFromIndex:18]];
     
     return key;
 }

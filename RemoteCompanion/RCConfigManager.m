@@ -1008,7 +1008,7 @@ static NSString *RCActionCommand(id item) {
 // topic) can have a name of their own; the built-in ones (Power Double Click...) keep theirs, so
 // they always say what they are
 + (BOOL)canRenameTrigger:(NSString *)triggerKey {
-    for (NSString *prefix in @[@"nfc_", @"wifi_", @"bt_", @"output_", @"app_launch_", @"app_exit_", @"notif_", @"notify_", @"sched_", @"mqtt_", @"notiftap_", @"notifbtn_"]) {
+    for (NSString *prefix in @[@"nfc_", @"wifi_", @"bt_", @"output_", @"app_launch_", @"app_exit_", @"notif_", @"notify_", @"sched_", @"mqtt_", @"notiftap_", @"notifbtn_", @"trigger_cc_button_"]) {
         if ([triggerKey hasPrefix:prefix]) return YES;
     }
     return NO;
@@ -1019,15 +1019,27 @@ static NSString *RCActionCommand(id item) {
 - (NSString *)customNameForTrigger:(NSString *)triggerKey {
     if (![RCConfigManager canRenameTrigger:triggerKey]) return nil;
     id trigger = _config[@"triggers"][triggerKey];
-    NSString *name = [trigger isKindOfClass:[NSDictionary class]] ? [trigger[@"customName"] description] : nil;
-    return name.length ? name : nil;
+    if (![trigger isKindOfClass:[NSDictionary class]]) return nil;
+    NSString *custom = [trigger[@"customName"] description];
+    if (custom.length) return custom;
+    if ([triggerKey hasPrefix:@"trigger_cc_button_"]) {
+        NSString *name = [trigger[@"name"] description];
+        NSString *def = [self defaultNameForTrigger:triggerKey];
+        if (name.length && ![name isEqualToString:def]) return name;
+    }
+    return nil;
 }
 
 - (void)setCustomName:(NSString *)name forTrigger:(NSString *)triggerKey {
     NSString *trimmed = [name stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     NSMutableDictionary *trigger = [self triggerDict:triggerKey];
-    if (trimmed.length) trigger[@"customName"] = trimmed;
-    else [trigger removeObjectForKey:@"customName"];
+    if (trimmed.length) {
+        trigger[@"customName"] = trimmed;
+        if ([triggerKey hasPrefix:@"trigger_cc_button_"]) trigger[@"name"] = trimmed;
+    } else {
+        [trigger removeObjectForKey:@"customName"];
+        if ([triggerKey hasPrefix:@"trigger_cc_button_"]) trigger[@"name"] = [self defaultNameForTrigger:triggerKey];
+    }
     [self saveConfig];
 }
 
@@ -1112,6 +1124,12 @@ static NSString *RCActionCommand(id item) {
 
     if ([triggerKey hasPrefix:@"trigger_device_battery_"]) {
         return _config[@"triggers"][triggerKey][@"name"] ?: triggerKey;
+    }
+
+    if ([triggerKey hasPrefix:@"trigger_cc_button_"]) {
+        NSString *name = _config[@"triggers"][triggerKey][@"name"];
+        if (name.length) return name;
+        return [NSString stringWithFormat:@"Control Center Button %@", [triggerKey substringFromIndex:18]];
     }
 
     if ([triggerKey hasPrefix:@"wifi_"] || [triggerKey hasPrefix:@"bt_"] || [triggerKey hasPrefix:@"app_launch_"] || [triggerKey hasPrefix:@"app_exit_"] || [triggerKey hasPrefix:@"output_"] || [triggerKey hasPrefix:@"notif_"] || [triggerKey hasPrefix:@"notify_"] || [triggerKey hasPrefix:@"sched_"] || [triggerKey hasPrefix:@"mqtt_"] || [triggerKey hasPrefix:@"mqtt_sub_"]) {
