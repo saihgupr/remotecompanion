@@ -54,6 +54,7 @@ if [ -z "$1" ]; then
     echo "  is-locked         - Check if device is locked"
     echo "  autolock [30s|1m-5m|never|off|toggle|status] - Configure auto-lock timeout"
     echo "  display sleep [30s|1m-5m|never|off] - Change when display goes to sleep"
+    echo "  timer <duration|stop|pause|resume|status> [--label \"Name\"] - Control Apple Clock timer"
     echo "  dnd on/off/debug   - Toggle Do Not Disturb or inspect state"
     echo "  audiomix on/off/toggle/status - Control AudioMix tweak"
     echo "  screenrecord [toggle|start|stop] - Control system screen recording"
@@ -183,6 +184,66 @@ rc_json_escape() {
     s="${s//$'\n'/\\n}"
     printf '"%s"' "$s"
 }
+
+rc_quote_arg() {
+    local s="$1"
+    s="${s//\\/\\\\}"
+    s="${s//\"/\\\"}"
+    printf '"%s"' "$s"
+}
+
+if [[ "$1" == "timer" ]]; then
+    shift 1
+    print_timer_help() {
+        echo "Usage:"
+        echo "  rc timer <duration> [--label \"Name\"]   (e.g. 20m, 1h30m, 45s, 20:00, 1200)"
+        echo "  rc timer start <duration> [--label \"Name\"]"
+        echo "  rc timer pause [--label \"Name\"]"
+        echo "  rc timer resume [--label \"Name\"]"
+        echo "  rc timer stop [--label \"Name\"]"
+        echo "  rc timer status [--label \"Name\"]"
+    }
+
+    if [ "$#" -eq 0 ] || [[ "$1" == "--help" || "$1" == "-h" ]]; then
+        print_timer_help
+        exit 0
+    fi
+
+    TIMER_CMD="timer"
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --help|-h)
+                print_timer_help
+                exit 0
+                ;;
+            --label=*)
+                TIMER_CMD="$TIMER_CMD --label $(rc_quote_arg "${1#--label=}")"
+                shift
+                ;;
+            --title=*)
+                TIMER_CMD="$TIMER_CMD --label $(rc_quote_arg "${1#--title=}")"
+                shift
+                ;;
+            *)
+                if [[ "$1" == *[[:space:]]* || "$1" == *\"* || "$1" == *\\* || -z "$1" ]]; then
+                    TIMER_CMD="$TIMER_CMD $(rc_quote_arg "$1")"
+                else
+                    TIMER_CMD="$TIMER_CMD $1"
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    RESPONSE="$(rc_send_command "$TIMER_CMD")"
+    if [ $? -ne 0 ] || [ -z "$RESPONSE" ]; then
+        echo "Error: Cannot connect to iPhone at $IP via SSH/Socket." >&2
+        exit 1
+    fi
+    echo "$RESPONSE"
+    case "$RESPONSE" in Error*) exit 1 ;; esac
+    exit 0
+fi
 
 # Clear notifications: file paths, inline filter terms, --app, or --all
 if [[ "$1" == "clear-notification" || "$1" == "clear-notifications" || ( "$1" == "clear" && ( "$2" == "notification" || "$2" == "notifications" ) ) || ( "$1" == "notify" && "$2" == "clear" ) ]]; then

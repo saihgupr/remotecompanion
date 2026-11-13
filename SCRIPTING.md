@@ -92,6 +92,7 @@ A sequence is a **JSON array** of actions. Each action is either:
 | `notify "Title" ["Message"]` | Post a standard iOS notification; add `--tap ID`, `--button "ID|Title|flags"`, `--image-url URL` or `--wait SECONDS` |
 | `notify clear` | Remove RC's notifications from Notification Center |
 | `clear notification [--all] [--app BUNDLE\|rc] [--text TEXT]` | Clear notifications by app and/or matching text (`notify clear {"apps":[...],"texts":[...]}`) |
+| `timer <duration\|stop\|pause\|resume\|status>` | Start (`20m`, `1h30m`, `45s`, `20:00`), pause, resume, stop, or inspect the Apple Clock timer (supports `--label "Name"`) |
 
 ### Connectivity
 | Command | What it does |

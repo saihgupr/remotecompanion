@@ -245,6 +245,7 @@ static NSArray<NSArray<NSDictionary *> *> *RCBannerCatalog(NSArray<NSString *> *
             @"__REMOTE_RC_COMMAND__": @[@"rc-run "],
             @"__HTTP_REQUEST__": @[@"http-request "],
             @"__CLEAR_NOTIFICATIONS__": @[@"notify clear ", @"notify clear", @"clear notification ", @"clear notification", @"clear notifications ", @"clear notifications", @"clear-notification ", @"clear-notification", @"clear-notifications ", @"clear-notifications"],
+            @"__TIMER__": @[@"timer ", @"timer"],
             @"__CUSTOM__": @[@"exec ", @"root ", @"sudo "]
         };
     });
