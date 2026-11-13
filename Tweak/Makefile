@@ -34,6 +34,7 @@ RemoteCommand_FILES += RCAddOns.m
 RemoteCommand_FILES += ../RemoteCompanion/RCToastPill.m
 # Shared with the app: reading notify commands the way the Notification editor writes them
 RemoteCommand_FILES += ../RemoteCompanion/RCNotifyCommand.m
+RemoteCommand_FILES += ../RemoteCompanion/RCClearNotificationsCommand.m
 RemoteCommand_CFLAGS = -fobjc-arc -Ilua -I../RemoteCompanion -DLUA_USE_IOS -Wno-unused-function -Wno-unused-variable
 RemoteCommand_FRAMEWORKS = UIKit CoreNFC IOKit QuartzCore CoreLocation Security
 RemoteCommand_PRIVATE_FRAMEWORKS = AppSupport MediaRemote MobileCoreServices FrontBoardServices BackBoardServices MediaPlayer DoNotDisturb BiometricKit AccessibilityUtilities

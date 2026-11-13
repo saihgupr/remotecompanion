@@ -17,6 +17,7 @@ All notable changes to this project will be documented in this file.
 - **Standard iOS notifications**: `notify` now posts a real notification as the RemoteCompanion app, with a banner, a sound and an entry in Notification Center, whether or not the app is running. The Notification action gets an editor for the title, message, a symbol or app icon, Time Sensitive, Remove After, up to four buttons, and Wait for Response, whose answer becomes `{notify_response}`. Notification Tap triggers run from a tap or a button, and `notify clear` removes them (#153).
 
 ### Changed
+- **Clear Notifications action and CLI**: replaced **Clear RC Notifications** with **Clear Notifications**, letting you target Any App or specific apps (including RemoteCompanion) and add or paste as many case-insensitive text filters as you want. `rc clear notification` (and `rc notify clear`) now accepts `--all`, `--app`, inline filter strings, and line-by-line `.txt` files.
 - **Tighter bar gesture zones**: the status bar and bottom bar gesture areas now cover 25pt from the edge instead of 50pt, so a touch has to land closer to the bar. Two-finger slides keep their wider 75pt landing zone.
 
 ## [4.5.0] - 2026-11-11

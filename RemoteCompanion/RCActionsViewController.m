@@ -5,6 +5,8 @@
 #import "RCNotificationTapTriggerViewController.h"
 #import "RCNotificationEditorViewController.h"
 #import "RCNotifyCommand.h"
+#import "RCClearNotificationsCommand.h"
+#import "RCClearNotificationsEditorViewController.h"
 #import "RCConfigManager.h"
 #import "RCActionPickerViewController.h"
 #import "RCSSHActionEditorViewController.h"
@@ -268,6 +270,8 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
 @property (nonatomic, copy) NSString *pendingRemoteEditClientId;
 // Title and message of a Notification action
 - (void)showNotificationEditorWithCommand:(NSString *)command onSave:(void (^)(NSString *cmd))onSave;
+// Apps and text filters of a Clear Notifications action
+- (void)showClearNotificationsEditorWithCommand:(NSString *)command onSave:(void (^)(NSString *cmd))onSave;
 // The one toast editor. New toasts and edits both come through here,
 // so they always look and save the same way.
 - (void)showToastEditorWithTitle:(NSString *)title
@@ -838,9 +842,12 @@ static id g_actionClipboard = nil;
             }
         }
         paramText = firstArg;
-    } else if ([lower isEqualToString:@"notify clear"]) {
-        baseText = @"Clear RC Notifications";
-        paramText = @"";
+    } else if ([RCClearNotificationsCommand isClearCommand:cmd]) {
+        RCClearNotificationsCommand *clearCmd = [RCClearNotificationsCommand commandWithString:cmd];
+        baseText = @"Clear Notifications ";
+        paramText = [clearCmd actionAccentTextWithResolver:^NSString *(NSString *bundleId) {
+            return [[RCConfigManager sharedManager] nameForBundleId:bundleId];
+        }];
     } else if ([lower hasPrefix:@"notify "]) {
         baseText = @"Notification ";
         paramText = [RCNotifyCommand commandWithString:cmd].title;
@@ -2181,6 +2188,13 @@ static void RCSetRunWatching(BOOL watching) {
             __weak typeof(self) weakSelf = self;
             dispatch_async(dispatch_get_main_queue(), ^{
                 [weakSelf showNotificationEditorWithCommand:nil onSave:^(NSString *cmd) {
+                    [weakSelf storeCommand:cmd atIndex:NSNotFound];
+                }];
+            });
+        } else if ([action isEqualToString:@"__CLEAR_NOTIFICATIONS__"]) {
+            __weak typeof(self) weakSelf = self;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [weakSelf showClearNotificationsEditorWithCommand:nil onSave:^(NSString *cmd) {
                     [weakSelf storeCommand:cmd atIndex:NSNotFound];
                 }];
             });
@@ -3946,7 +3960,13 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     } else if ([currentAction isEqualToString:@"lock-toggle"] || [currentAction isEqualToString:@"lock toggle"] || [currentAction hasPrefix:@"lock-toggle "] || [currentAction hasPrefix:@"lock toggle "]) {
         [self promptEditLockToggleActionAtIndex:indexPath.row];
         return;
-    } else if ([currentAction hasPrefix:@"notify "] && ![currentAction isEqualToString:@"notify clear"]) {
+    } else if ([RCClearNotificationsCommand isClearCommand:currentAction]) {
+        __weak typeof(self) weakSelf = self;
+        NSInteger index = indexPath.row;
+        [self showClearNotificationsEditorWithCommand:currentAction onSave:^(NSString *cmd) {
+            [weakSelf storeCommand:cmd atIndex:index];
+        }];
+    } else if ([RCNotifyCommand isNotifyCommand:currentAction]) {
         __weak typeof(self) weakSelf = self;
         NSInteger index = indexPath.row;
         [self showNotificationEditorWithCommand:currentAction onSave:^(NSString *cmd) {
@@ -4146,6 +4166,15 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 // The Notification action's editor (a card); onSave gets the new command
 - (void)showNotificationEditorWithCommand:(NSString *)command onSave:(void (^)(NSString *cmd))onSave {
     RCNotificationEditorViewController *editor = [[RCNotificationEditorViewController alloc] initWithCommand:command];
+    editor.variableActions = self.actions;
+    editor.onSave = onSave;
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:editor];
+    [self presentViewController:nav animated:YES completion:nil];
+}
+
+// Apps and text filters of a Clear Notifications action (a card)
+- (void)showClearNotificationsEditorWithCommand:(NSString *)command onSave:(void (^)(NSString *cmd))onSave {
+    RCClearNotificationsEditorViewController *editor = [[RCClearNotificationsEditorViewController alloc] initWithCommand:command];
     editor.variableActions = self.actions;
     editor.onSave = onSave;
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:editor];
@@ -4851,6 +4880,8 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
                 BOOL silent = NO;
                 [RCConfigManager shortcutNameForAction:action silent:&silent input:NULL];
                 if (silent) subtitle = @"Silent";
+            } else if ([RCClearNotificationsCommand isClearCommand:action]) {
+                subtitle = [[RCClearNotificationsCommand commandWithString:action] actionDetailText];
             }
         } else {
             if ([action hasPrefix:@"exec "]) {
