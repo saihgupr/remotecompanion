@@ -15754,10 +15754,43 @@ static void RC_CheckAndFirePower() {
     }];
 }
 
+extern CFArrayRef IOHIDEventGetChildren(IOHIDEventRef event);
+extern double IOHIDEventGetFloatValue(IOHIDEventRef event, int field);
+
+// Real fingers on the touchscreen, from the HID stream (0..1, device portrait). Unlike SpringBoard's
+// own touches, this includes a finger iOS hands to the app in front.
+static os_unfair_lock g_hidFingerLock = OS_UNFAIR_LOCK_INIT;
+static uint32_t g_hidFingerMask = 0;
+static double g_hidFingerX[32], g_hidFingerY[32];
+
+static void rc_track_hid_fingers(IOHIDEventRef event) {
+    CFArrayRef children = IOHIDEventGetChildren(event);
+    if (!children) return;
+    os_unfair_lock_lock(&g_hidFingerLock);
+    BOOL anyTouching = NO;
+    for (CFIndex i = 0; i < CFArrayGetCount(children); i++) {
+        IOHIDEventRef child = (IOHIDEventRef)CFArrayGetValueAtIndex(children, i);
+        if (IOHIDEventGetType(child) != 11) continue;
+        if (fabs(IOHIDEventGetFloatValue(child, 0xB0014) - 0.04) < 1e-4) continue; // RC's own injected finger
+        uint32_t slot = (uint32_t)IOHIDEventGetIntegerValue(child, 0xB0005) & 31;
+        if (IOHIDEventGetIntegerValue(child, 0xB0009) != 0) {
+            anyTouching = YES;
+            g_hidFingerMask |= (1u << slot);
+            g_hidFingerX[slot] = IOHIDEventGetFloatValue(child, 0xB0000);
+            g_hidFingerY[slot] = IOHIDEventGetFloatValue(child, 0xB0001);
+        } else {
+            g_hidFingerMask &= ~(1u << slot);
+        }
+    }
+    if (!anyTouching) g_hidFingerMask = 0; // every finger is up
+    os_unfair_lock_unlock(&g_hidFingerLock);
+}
+
 static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientRef service, IOHIDEventRef event) {
     // Before the exclusion check: a touch is a touch whatever app is in front
     if (IOHIDEventGetType(event) == 11) g_lastTouchAt = CFAbsoluteTimeGetCurrent(); // kIOHIDEventTypeDigitizer
     if (IOHIDEventGetType(event) == 11) RCGestureHIDEvent(event); // gestures: recording, and the touchscreen's sender ID
+    if (IOHIDEventGetType(event) == 11) rc_track_hid_fingers(event); // fingers SpringBoard may not get
     if (RC_IsForegroundAppExcluded()) return;
     int type = IOHIDEventGetType(event);
     
@@ -17280,6 +17313,29 @@ static inline BOOL RC_InTopRegionMultiLoose(CGPoint loc, UIInterfaceOrientation 
     return (loc.y < threshold);
 }
 
+// Is another real finger down in the top area, besides SpringBoard's touch at loc? iOS gives a
+// finger that lands below the status bar to the app, so only the touchscreen sees it.
+static BOOL rc_hid_second_top_finger(CGPoint loc, UIInterfaceOrientation orientation, CGFloat S, CGFloat L, CGPoint *other) {
+    os_unfair_lock_lock(&g_hidFingerLock);
+    uint32_t mask = g_hidFingerMask;
+    double xs[32], ys[32];
+    memcpy(xs, g_hidFingerX, sizeof(xs));
+    memcpy(ys, g_hidFingerY, sizeof(ys));
+    os_unfair_lock_unlock(&g_hidFingerLock);
+    int count = 0;
+    BOOL found = NO;
+    for (int slot = 0; slot < 32; slot++) {
+        if (!(mask & (1u << slot))) continue;
+        count++;
+        CGPoint p = CGPointMake(xs[slot] * S, ys[slot] * L);
+        if (hypot(p.x - loc.x, p.y - loc.y) > 40 && RC_InTopRegionMultiLoose(p, orientation, S, L)) {
+            found = YES;
+            if (other) *other = p;
+        }
+    }
+    return count >= 2 && found;
+}
+
 static inline BOOL RC_InBottomRegionMulti(CGPoint loc, UIInterfaceOrientation orientation, CGFloat S, CGFloat L) {
     (void)S; (void)L;
     CGFloat threshold = 75.0;
@@ -17487,6 +17543,35 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
         UIInterfaceOrientation orientation = g_rcLatchedTouchOrientationValid ? g_rcLatchedTouchOrientation : get_current_interface_orientation();
         CGFloat S = 0, L = 0;
         RC_ScreenSL(&S, &L);
+
+        // SpringBoard sees one touch at the top while the touchscreen sees a second finger the app got
+        if (allTouches.count == 1 && !g_twoFingerTopActive && !g_twoFingerTopTriggered &&
+            RC_TriggerIsActionable(@"trigger_statusbar_two_finger_swipe_down")) {
+            CGPoint loc = [touch locationInView:nil];
+            BOOL startedTop = (touch.phase == UITouchPhaseBegan && RC_InTopRegionMulti(loc, orientation, S, L)) ||
+                              (touch.phase == UITouchPhaseMoved && g_statusBarTouchActive && !g_statusBarSwipeTriggered && !g_statusBarHoldTriggered);
+            CGPoint other = CGPointZero;
+            if (startedTop && rc_hid_second_top_finger(loc, orientation, S, L, &other)) {
+                RC_SnapshotGestureOffsets();
+                if (g_statusBarHoldTimer) {
+                    [g_statusBarHoldTimer invalidate];
+                    g_statusBarHoldTimer = nil;
+                }
+                g_pendingStatusBarTrigger = nil;
+                g_statusBarTouchActive = NO;
+                g_statusBarSwipeTriggered = NO;
+                g_statusBarHoldTriggered = NO;
+                g_twoFingerTopActive = YES;
+                g_twoFingerTopTriggered = NO;
+                g_twoFingerTopStartX = loc.x; // only this finger's moves reach SpringBoard
+                g_twoFingerTopStartY = loc.y;
+                g_rcLatchedTouchOrientation = orientation;
+                g_rcLatchedTouchOrientationValid = YES;
+                SRLogMin(@"[RCMultiFinger] Two-finger top slide (second finger from the touchscreen): (%.0f, %.0f) and (%.0f, %.0f)", loc.x, loc.y, other.x, other.y);
+                rc_cancel_top_edge_recognizers();
+                if (touch.phase == UITouchPhaseBegan) { %orig; return; }
+            }
+        }
 
         // Check for multi-finger (2-finger) activation
         if (allTouches.count >= 2) {
