@@ -17500,6 +17500,10 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
 
             BOOL twoFingerTop = (p0Top && RC_InTopRegionMultiLoose(p1, orientation, S, L)) ||
                                 (p1Top && RC_InTopRegionMultiLoose(p0, orientation, S, L));
+            if ((p0Top || p1Top) && !twoFingerTop && !g_twoFingerTopActive && !g_twoFingerTopTriggered &&
+                RC_TriggerIsActionable(@"trigger_statusbar_two_finger_swipe_down")) {
+                SRLogMin(@"[RCMultiFinger] Two fingers down, not a top slide: (%.0f, %.0f) and (%.0f, %.0f)", p0.x, p0.y, p1.x, p1.y);
+            }
             if (twoFingerTop && !g_twoFingerTopActive && !g_twoFingerTopTriggered) {
                 RC_SnapshotGestureOffsets();
                 if (g_statusBarHoldTimer) {
@@ -17516,7 +17520,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                 g_twoFingerTopStartY = (p0.y + p1.y) / 2.0;
                 g_rcLatchedTouchOrientation = orientation;
                 g_rcLatchedTouchOrientationValid = YES;
-                SRLog(@"[RCMultiFinger] Two Finger Top Active at (%.0f, %.0f)", g_twoFingerTopStartX, g_twoFingerTopStartY);
+                SRLogMin(@"[RCMultiFinger] Two-finger top slide: (%.0f, %.0f) and (%.0f, %.0f)", p0.x, p0.y, p1.x, p1.y);
                 if (RC_TriggerIsActionable(@"trigger_statusbar_two_finger_swipe_down")) rc_cancel_top_edge_recognizers();
             } else if (p0Bottom && p1Bottom && !g_twoFingerBottomActive && !g_twoFingerBottomTriggered) {
                 RC_SnapshotGestureOffsets();
