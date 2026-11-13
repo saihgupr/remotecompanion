@@ -2919,6 +2919,28 @@
   </div>
 </div>
 
+<!-- ══ CLEAR NOTIFICATIONS ACTION DIALOG ═══════════════════════════════ -->
+<div class="dialog-backdrop" id="clear-notif-dialog-backdrop">
+  <div class="dialog-box" style="max-width: 500px; width: 92%;">
+    <div class="dialog-title">Clear Notifications</div>
+    <div class="dialog-msg" style="padding-bottom: 10px;">Choose specific apps (or leave blank for Any App) and optional phrases to match.</div>
+    <div style="margin: 0 16px 12px; text-align:left;">
+      <div style="font-size:12px; font-weight:600; color:var(--rc-label-2); margin:0 0 4px 2px;">Apps <span style="font-weight:400;">(optional; Blank = Any App)</span></div>
+      <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+        <input list="app-datalist" class="dialog-input" id="clear-notif-app-input" type="text" placeholder="App Bundle ID or picker (e.g. com.saihgupr.remotecompanion)" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" style="flex:1; margin:0; height:38px; text-align:left; font-size:13px;" onkeydown="if(event.key==='Enter'){event.preventDefault();addClearNotifApp();}">
+        <button type="button" onclick="addClearNotifApp()" style="height:38px; padding:0 12px; border:none; border-radius:10px; background:var(--rc-fill); color:var(--rc-blue); font-size:13px; font-weight:600; cursor:pointer;">Add</button>
+      </div>
+      <div id="clear-notif-apps-chips" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px;"></div>
+      <div style="font-size:12px; font-weight:600; color:var(--rc-label-2); margin:0 0 4px 2px;">Match Text <span style="font-weight:400;">(optional, one phrase per line)</span></div>
+      <textarea class="dialog-input" id="clear-notif-texts" rows="5" placeholder="Person Detected&#10;is Open...&#10;Leave empty to clear all" autocorrect="off" autocapitalize="none" spellcheck="false" style="height:120px; margin:0; width:100%; box-sizing:border-box; text-align:left; resize:vertical; font-size:13px;"></textarea>
+    </div>
+    <div class="dialog-btns">
+      <button onclick="closeClearNotifDialog()" style="color: var(--rc-red);">Cancel</button>
+      <button onclick="saveClearNotifDialog()" style="font-weight: 600;">Save</button>
+    </div>
+  </div>
+</div>
+
 <!-- ══ TOAST ACTION DIALOG ═════════════════════════════════════════════ -->
 <div class="dialog-backdrop" id="toast-dialog-backdrop">
   <div class="dialog-box toast-dialog">
@@ -4125,6 +4147,7 @@ function nameForCmd(cmd) {
   if (lowCmd.startsWith('km ') || lowCmd === 'km') return formatKMCommandName(cmd);
   if (lowCmd.startsWith('mqtt ') || lowCmd === 'mqtt') return formatMQTTCommandName(cmd);
   if (lowCmd.startsWith('http-request')) return formatRESTCommandName(cmd);
+  if (isClearNotifCmd(lowCmd)) return formatClearNotifName(cmd);
   // Recorded gestures
   if (lowCmd === 'gesture record-toggle' || lowCmd.startsWith('gesture record-toggle ')) return 'Record Gesture';
   const played = parseGestureCommand(cmd);
@@ -4324,6 +4347,7 @@ function iconForCmd(cmd) {
   if (lowCmd.startsWith('mqtt ') || lowCmd === 'mqtt') return { icon:'dot_radiowaves_left_right', cls:'icon-blue' };
   if (lowCmd.startsWith('flashlight ')) return { icon:'bolt_fill',       cls:'icon-orange' };
   if (lowCmd.startsWith('toast'))         return { icon:'text_bubble',     cls:'icon-orange' };
+  if (isClearNotifCmd(lowCmd))            return { icon:'bell_slash_fill', cls:'icon-red' };
   if (lowCmd.startsWith('lua:'))          return { icon:'doc_text_fill',         cls:'icon-purple' };
   if (lowCmd.startsWith('delay '))        return { icon:'hourglass',           cls:'icon-orange' };
   if (lowCmd.startsWith('bt connect '))   return { icon:'link',            cls:'icon-indigo' };
@@ -4452,6 +4476,7 @@ const ACTION_SECTIONS = [
     { name:'Terminal Command…', cmd:'__CUSTOM__',    icon:'chevron_right_square_fill', needs_input:true },
     { name:'Lua Script…',       cmd:'__LUA_SCRIPT__',icon:'doc_text_fill', needs_input:true },
     { name:'HUD Toast…',        cmd:'__TOAST__',     icon:'text_bubble', needs_input:true },
+    { name:'Clear Notifications…', cmd:'__CLEAR_NOTIFICATIONS__', icon:'bell_slash_fill', needs_input:true },
     { name:'Haptic Feedback',   cmd:'haptic',        icon:'hand_raised_fill' },
     { name:'Set Volume…',       cmd:'__SET_VOLUME__',icon:'slider_horizontal_3', needs_input:true },
     { name:'Set Ringer Volume…', cmd:'__SET_RINGER_VOLUME__',icon:'bell_fill', needs_input:true },
@@ -6110,6 +6135,142 @@ function saveRestDialog() {
   renderActionList();
 }
 
+// ── Clear Notifications Action ───────────────────────────────────────────────
+let g_editingClearNotifIdx = null;
+let g_clearNotifApps = [];
+
+function isClearNotifCmd(lowCmd) {
+  const s = String(lowCmd || '').trim().toLowerCase();
+  return s === 'notify clear' || s.startsWith('notify clear ') ||
+         s === 'clear notification' || s.startsWith('clear notification ') ||
+         s === 'clear notifications' || s.startsWith('clear notifications ') ||
+         s === 'clear-notification' || s.startsWith('clear-notification ') ||
+         s === 'clear-notifications' || s.startsWith('clear-notifications ');
+}
+
+function parseClearNotifAction(cmd) {
+  const raw = String(cmd || '').trim();
+  const low = raw.toLowerCase();
+  if (low === 'notify clear') return { apps: ['com.saihgupr.remotecompanion'], texts: [] };
+  let payload = '';
+  for (const prefix of ['notify clear', 'clear notifications', 'clear notification', 'clear-notifications', 'clear-notification']) {
+    if (low === prefix) return { apps: [], texts: [] };
+    if (low.startsWith(prefix + ' ')) { payload = raw.slice(prefix.length).trim(); break; }
+  }
+  if (!payload) return { apps: [], texts: [] };
+  if (payload.startsWith('{')) {
+    try {
+      const obj = JSON.parse(payload);
+      if (obj && typeof obj === 'object') {
+        const apps = Array.isArray(obj.apps) ? obj.apps.filter(x => typeof x === 'string' && x.trim()) : [];
+        const texts = Array.isArray(obj.texts) ? obj.texts.filter(x => typeof x === 'string' && x.trim()) : [];
+        return { apps, texts };
+      }
+    } catch (e) {}
+  }
+  return { apps: [], texts: payload ? [payload] : [] };
+}
+
+function clearNotifAppName(bid) {
+  if (!bid) return '';
+  if (bid.toLowerCase() === 'com.saihgupr.remotecompanion') return 'RemoteCompanion';
+  const app = (cachedApps || []).find(a => (a.bundleId || '').toLowerCase() === bid.toLowerCase());
+  return app ? app.name : bid;
+}
+
+function formatClearNotifName(cmd) {
+  const parsed = parseClearNotifAction(cmd);
+  let appPart = '';
+  if (parsed.apps.length === 1) appPart = clearNotifAppName(parsed.apps[0]);
+  else if (parsed.apps.length === 2) appPart = `${clearNotifAppName(parsed.apps[0])}, ${clearNotifAppName(parsed.apps[1])}`;
+  else if (parsed.apps.length > 2) appPart = `${parsed.apps.length} Apps`;
+
+  let textPart = '';
+  if (parsed.texts.length === 1) textPart = `"${parsed.texts[0]}"`;
+  else if (parsed.texts.length > 1) textPart = `${parsed.texts.length} Filters`;
+
+  if (!appPart && !textPart) return 'Clear Notifications (All Apps)';
+  if (appPart && !textPart) return `Clear Notifications (${appPart})`;
+  if (!appPart && textPart) return `Clear Notifications (${textPart})`;
+  return `Clear Notifications (${appPart} · ${textPart})`;
+}
+
+function renderClearNotifAppChips() {
+  const box = document.getElementById('clear-notif-apps-chips');
+  if (!box) return;
+  box.innerHTML = '';
+  g_clearNotifApps.forEach((bid, i) => {
+    const chip = document.createElement('span');
+    chip.style.cssText = 'display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:14px;background:var(--rc-fill);color:var(--rc-label);font-size:12px;font-weight:500;';
+    const label = document.createElement('span');
+    label.textContent = clearNotifAppName(bid);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = '×';
+    btn.style.cssText = 'background:none;border:none;color:var(--rc-label-2);font-size:14px;line-height:1;padding:0;cursor:pointer;';
+    btn.onclick = () => { g_clearNotifApps.splice(i, 1); renderClearNotifAppChips(); };
+    chip.appendChild(label);
+    chip.appendChild(btn);
+    box.appendChild(chip);
+  });
+}
+
+function addClearNotifApp() {
+  const input = document.getElementById('clear-notif-app-input');
+  let val = (input.value || '').trim();
+  if (!val) return;
+  if (val.toLowerCase() === 'rc' || val.toLowerCase() === 'remotecompanion') val = 'com.saihgupr.remotecompanion';
+  const match = (cachedApps || []).find(a => (a.name || '').toLowerCase() === val.toLowerCase());
+  if (match && match.bundleId) val = match.bundleId;
+  if (!g_clearNotifApps.some(x => x.toLowerCase() === val.toLowerCase())) {
+    g_clearNotifApps.push(val);
+    renderClearNotifAppChips();
+  }
+  input.value = '';
+}
+
+function openClearNotifDialog(editIdx) {
+  g_editingClearNotifIdx = (typeof editIdx === 'number' && !Number.isNaN(editIdx)) ? editIdx : null;
+  if (typeof cachedApps === 'undefined' || !cachedApps.length) {
+    if (typeof loadAppDatalist === 'function') loadAppDatalist();
+  }
+  const existing = (g_editingClearNotifIdx !== null) ? actionCommand(triggerData(currentKey).actions[g_editingClearNotifIdx]) : '';
+  const parsed = existing ? parseClearNotifAction(existing) : { apps: [], texts: [] };
+  g_clearNotifApps = parsed.apps.slice();
+  document.getElementById('clear-notif-app-input').value = '';
+  document.getElementById('clear-notif-texts').value = parsed.texts.join('\n');
+  renderClearNotifAppChips();
+  document.getElementById('clear-notif-dialog-backdrop').classList.add('visible');
+}
+
+function closeClearNotifDialog() {
+  document.getElementById('clear-notif-dialog-backdrop').classList.remove('visible');
+  g_editingClearNotifIdx = null;
+}
+
+function saveClearNotifDialog() {
+  addClearNotifApp();
+  const seen = new Set();
+  const texts = [];
+  for (const rawLine of document.getElementById('clear-notif-texts').value.split(/\r?\n/)) {
+    if (!rawLine.trim()) continue;
+    if (!seen.has(rawLine)) { seen.add(rawLine); texts.push(rawLine); }
+  }
+  const obj = {};
+  if (g_clearNotifApps.length) obj.apps = g_clearNotifApps.slice();
+  if (texts.length) obj.texts = texts;
+  const command = 'notify clear ' + JSON.stringify(obj);
+  const actions = triggerData(currentKey).actions || [];
+  if (g_editingClearNotifIdx !== null && g_editingClearNotifIdx < actions.length) {
+    storeCommandAt(actions, g_editingClearNotifIdx, command);
+  } else {
+    addActionToCurrent(command);
+  }
+  closeClearNotifDialog();
+  saveConfig();
+  renderActionList();
+}
+
 // Puts a command at idx, keeping any settings around it
 function storeCommandAt(actions, idx, command) {
   if (actions[idx] && typeof actions[idx] === 'object' && typeof actions[idx].command === 'string') actions[idx].command = command;
@@ -6857,6 +7018,8 @@ function editAction(idx) {
       editKMAction(idx);
     } else if (low.startsWith('http-request')) {
       openRestActionDialog(idx);
+    } else if (isClearNotifCmd(low)) {
+      openClearNotifDialog(idx);
     } else {
       promptTerminalModal(act, idx, true); // any other command, as text with the + menu
     }
@@ -7274,6 +7437,8 @@ function selectPickerAction(act) {
     promptMQTTActionPicker();
   } else if (c === '__HTTP_REQUEST__') {
     openRestActionDialog(null);
+  } else if (c === '__CLEAR_NOTIFICATIONS__') {
+    openClearNotifDialog(null);
   } else if (c === 'unlock') {
     promptUnlockDialog('', val => {
       addActionToCurrent(val);
@@ -9899,6 +10064,7 @@ const BANNER_PLACEHOLDERS = {
   '__LUA_SCRIPT__': ['lua ', 'lua_eval '],
   '__SSH_COMMAND__': ['ssh-run '],
   '__HTTP_REQUEST__': ['http-request '],
+  '__CLEAR_NOTIFICATIONS__': ['notify clear ', 'notify clear', 'clear notification ', 'clear notification', 'clear notifications ', 'clear notifications', 'clear-notification ', 'clear-notification', 'clear-notifications ', 'clear-notifications'],
   '__CUSTOM__': ['exec ', 'root ', 'sudo ']
 };
 

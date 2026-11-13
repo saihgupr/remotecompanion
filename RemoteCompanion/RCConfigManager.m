@@ -2,6 +2,7 @@
 #import "RCScreenActions.h"
 #import "RCHTTPAction.h"
 #import "RCNotifyCommand.h"
+#import "RCClearNotificationsCommand.h"
 #import "RCGesturesViewController.h"
 #import <sys/sysctl.h>
 #import "RCAddOnCatalog.h"
@@ -1827,6 +1828,11 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
             } else {
                 result = [NSString stringWithFormat:@"Remote: %@", payload];
             }
+        } else if ([RCClearNotificationsCommand isClearCommand:originalCmd]) {
+            RCClearNotificationsCommand *clearCmd = [RCClearNotificationsCommand commandWithString:originalCmd];
+            result = [clearCmd singleLineSummaryWithResolver:^NSString *(NSString *bundleId) {
+                return [self nameForBundleId:bundleId];
+            }];
         } else if ([cmd hasPrefix:@"http-request"]) {
             NSDictionary *components = [RCHTTPAction componentsFromActionString:originalCmd];
             if (components) {
@@ -2169,7 +2175,7 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
     if ([cmd hasPrefix:@"km "] || [cmd isEqualToString:@"km"]) return @"command";
     if ([cmd hasPrefix:@"mqtt "] || [cmd isEqualToString:@"mqtt"]) return @"dot.radiowaves.left.and.right";
     if ([cmd hasPrefix:@"toast"]) return @"text.bubble.fill";
-    if ([cmd isEqualToString:@"notify clear"]) return @"bell.slash.fill";
+    if ([RCClearNotificationsCommand isClearCommand:cmd]) return @"bell.slash.fill";
     if ([cmd hasPrefix:@"notify "]) return @"bell.badge.fill";
     if ([cmd hasPrefix:@"root "] || [cmd hasPrefix:@"exec-root "]) return @"terminal.fill";
     if ([cmd hasPrefix:@"exec "]) return @"terminal.fill";

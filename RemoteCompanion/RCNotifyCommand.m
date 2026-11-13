@@ -1,9 +1,10 @@
 #import "RCNotifyCommand.h"
+#import "RCClearNotificationsCommand.h"
 
 @implementation RCNotifyCommand
 
 + (BOOL)isNotifyCommand:(NSString *)command {
-    return [command isKindOfClass:[NSString class]] && [command hasPrefix:@"notify "] && ![command isEqualToString:@"notify clear"];
+    return [command isKindOfClass:[NSString class]] && [command hasPrefix:@"notify "] && ![RCClearNotificationsCommand isClearCommand:command];
 }
 
 + (NSString *)newID {

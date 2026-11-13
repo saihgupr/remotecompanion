@@ -47,6 +47,7 @@ RemoteCompanion_FILES += RCRCClientSettingsViewController.m
 RemoteCompanion_FILES += RCRCClientEditorViewController.m
 RemoteCompanion_FILES += RCRemoteActionEditorViewController.m
 RemoteCompanion_FILES += RCHTTPAction.m RCHTTPRequestEditorViewController.m
+RemoteCompanion_FILES += RCClearNotificationsCommand.m RCClearNotificationsEditorViewController.m
 RemoteCompanion_FILES += RCConfigManager+AppExclusions.m RCExcludedAppsViewController.m
 
 include $(THEOS_MAKE_PATH)/application.mk

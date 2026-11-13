@@ -30,6 +30,7 @@
 #import "RCTestKit.h"
 #import "RCToastPill.h"
 #import "RCNotifyCommand.h"
+#import "RCClearNotificationsCommand.h"
 #import "RCTriggerAppExclusions.h"
 #import "RCAddOns.h"
 #import <CoreFoundation/CoreFoundation.h>
@@ -2760,7 +2761,39 @@ static BOOL rc_ui_locked(void) {
     return [manager respondsToSelector:@selector(isUILocked)] && [manager isUILocked];
 }
 
+static __weak id g_rcNotificationDispatcher = nil;
+
+static NSMutableDictionary<NSString *, id> *rc_tracked_requests(void) {
+    static NSMutableDictionary *dict;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ dict = [NSMutableDictionary dictionary]; });
+    return dict;
+}
+
+static NSString *rc_tracked_request_key(id request) {
+    NSString *ident = rc_notification_identifier(request);
+    return ident.length ? ident : [NSString stringWithFormat:@"%p", request];
+}
+
 %hook NCNotificationDispatcher
+- (void)postNotificationWithRequest:(id)request {
+    g_rcNotificationDispatcher = self;
+    if (request) {
+        NSMutableDictionary *tracked = rc_tracked_requests();
+        @synchronized (tracked) { tracked[rc_tracked_request_key(request)] = request; }
+    }
+    %orig;
+}
+
+- (void)modifyNotificationWithRequest:(id)request {
+    g_rcNotificationDispatcher = self;
+    if (request) {
+        NSMutableDictionary *tracked = rc_tracked_requests();
+        @synchronized (tracked) { tracked[rc_tracked_request_key(request)] = request; }
+    }
+    %orig;
+}
+
 - (void)destination:(id)destination executeAction:(id)action forNotificationRequest:(id)request requestAuthentication:(BOOL)requestAuthentication withParameters:(id)parameters completion:(id)completion {
     if (!rc_is_rc_notification(request) || !action) {
         %orig;
@@ -2813,17 +2846,229 @@ static BOOL rc_ui_locked(void) {
 // app). An action waiting on it gets Cleared right away; an answer it already has (Tap, a button,
 // Expired) stays.
 - (void)destination:(id)destination requestsClearingNotificationRequests:(id)requests {
+    NSMutableDictionary *tracked = rc_tracked_requests();
     for (id request in ([requests respondsToSelector:@selector(countByEnumeratingWithState:objects:count:)] ? requests : @[])) {
         if (rc_is_rc_notification(request)) rc_notify_answer(rc_notification_identifier(request), @"Cleared");
+        @synchronized (tracked) { [tracked removeObjectForKey:rc_tracked_request_key(request)]; }
     }
     %orig;
 }
 
 - (void)withdrawNotificationWithRequest:(id)request {
+    if (request) {
+        NSMutableDictionary *tracked = rc_tracked_requests();
+        @synchronized (tracked) { [tracked removeObjectForKey:rc_tracked_request_key(request)]; }
+    }
     if (rc_is_rc_notification(request)) rc_notify_answer(rc_notification_identifier(request), @"Cleared");
     %orig;
 }
 %end
+
+static NSString *rc_clear_safe_string(id val) {
+    return [val isKindOfClass:[NSString class]] ? val : nil;
+}
+
+static id rc_clear_safe_kvc(id obj, NSString *key) {
+    if (!obj || !key.length) return nil;
+    @try {
+        return [obj valueForKey:key];
+    } @catch (NSException *e) {
+        return nil;
+    }
+}
+
+static void rc_clear_extract_fields(id request, NSString **sectionIDOut, NSString **parentSectionIDOut, NSString **titleOut, NSString **subtitleOut, NSString **messageOut, id *bulletinOut) {
+    id content = [request respondsToSelector:@selector(content)] ? [request content] : nil;
+    SEL bulletinSel = NSSelectorFromString(@"bulletin");
+    id bulletin = [request respondsToSelector:bulletinSel] ? ((id (*)(id, SEL))objc_msgSend)(request, bulletinSel) : nil;
+
+    NSString *sectionID = [request respondsToSelector:@selector(sectionIdentifier)] ? rc_clear_safe_string([request sectionIdentifier]) : nil;
+    SEL sectionIDSel = NSSelectorFromString(@"sectionID");
+    if (!sectionID.length && [bulletin respondsToSelector:sectionIDSel]) {
+        sectionID = rc_clear_safe_string(((id (*)(id, SEL))objc_msgSend)(bulletin, sectionIDSel));
+    }
+
+    SEL parentSel = NSSelectorFromString(@"parentSectionIdentifier");
+    NSString *parentSectionID = [request respondsToSelector:parentSel] ? rc_clear_safe_string(((id (*)(id, SEL))objc_msgSend)(request, parentSel)) : nil;
+
+    NSString *title = ([content respondsToSelector:@selector(title)] ? rc_clear_safe_string([content title]) : nil)
+                   ?: ([bulletin respondsToSelector:@selector(title)] ? rc_clear_safe_string([bulletin title]) : nil);
+    NSString *subtitle = ([content respondsToSelector:@selector(subtitle)] ? rc_clear_safe_string([content subtitle]) : nil)
+                      ?: ([bulletin respondsToSelector:@selector(subtitle)] ? rc_clear_safe_string([bulletin subtitle]) : nil);
+    NSString *message = ([content respondsToSelector:@selector(message)] ? rc_clear_safe_string([content message]) : nil)
+                     ?: ([bulletin respondsToSelector:@selector(message)] ? rc_clear_safe_string([bulletin message]) : nil);
+
+    if (!message.length && content) {
+        SEL attrMsgSel = NSSelectorFromString(@"attributedMessage");
+        if ([content respondsToSelector:attrMsgSel]) {
+            id attr = ((id (*)(id, SEL))objc_msgSend)(content, attrMsgSel);
+            if ([attr respondsToSelector:@selector(string)]) {
+                message = rc_clear_safe_string([attr string]);
+            }
+        }
+    }
+
+    if (sectionIDOut) *sectionIDOut = sectionID;
+    if (parentSectionIDOut) *parentSectionIDOut = parentSectionID;
+    if (titleOut) *titleOut = title;
+    if (subtitleOut) *subtitleOut = subtitle;
+    if (messageOut) *messageOut = message;
+    if (bulletinOut) *bulletinOut = bulletin;
+}
+
+static NSString *rc_clear_resolve_app(NSString *appSpec) {
+    NSString *trimmed = [appSpec stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (trimmed.length == 0) return trimmed;
+    NSString *lower = [trimmed lowercaseString];
+    if ([lower isEqualToString:@"rc"] || [lower isEqualToString:@"remotecompanion"]) {
+        return kRCRemoteCompanionBundleId;
+    }
+    if ([lower isEqualToString:@"shortcuts"]) return @"com.apple.shortcuts";
+    NSString *resolved = resolve_bundle_id(trimmed);
+    if ([resolved containsString:@"."]) return resolved;
+
+    @try {
+        id ws = [LSApplicationWorkspace defaultWorkspace];
+        NSArray *apps = [ws allInstalledApplications];
+        for (id proxy in apps) {
+            NSString *name = [proxy respondsToSelector:@selector(localizedName)] ? [proxy localizedName] : nil;
+            NSString *bid = [proxy respondsToSelector:@selector(applicationIdentifier)] ? [proxy applicationIdentifier] : nil;
+            if (name.length && bid.length && [name compare:trimmed options:NSCaseInsensitiveSearch] == NSOrderedSame) {
+                return bid;
+            }
+        }
+    } @catch (NSException *e) {}
+    return resolved;
+}
+
+static NSUInteger rc_clear_notifications(RCClearNotificationsCommand *spec) {
+    if (!spec) return 0;
+
+    NSMutableArray<NSString *> *resolvedApps = [NSMutableArray array];
+    for (NSString *app in spec.apps) {
+        NSString *bid = rc_clear_resolve_app(app);
+        if (bid.length) [resolvedApps addObject:bid];
+    }
+    RCClearNotificationsCommand *effective = [[RCClearNotificationsCommand alloc] initWithApps:resolvedApps texts:spec.texts];
+
+    __block NSUInteger clearedCount = 0;
+    void (^clearBlock)(void) = ^{
+        id app = [UIApplication sharedApplication];
+        id sbDisp = rc_clear_safe_kvc(app, @"_notificationDispatcher");
+        if (!sbDisp) {
+            SEL dispSel = NSSelectorFromString(@"notificationDispatcher");
+            if ([app respondsToSelector:dispSel]) {
+                sbDisp = ((id (*)(id, SEL))objc_msgSend)(app, dispSel);
+            }
+        }
+
+        id source = rc_clear_safe_kvc(sbDisp, @"_notificationSource");
+        id dispatcher = rc_clear_safe_kvc(sbDisp, @"_dispatcher") ?: rc_clear_safe_kvc(source, @"_dispatcher") ?: g_rcNotificationDispatcher;
+        id dest = rc_clear_safe_kvc(sbDisp, @"_dashBoardDestination")
+               ?: rc_clear_safe_kvc(sbDisp, @"_notificationCenterDestination")
+               ?: rc_clear_safe_kvc(sbDisp, @"_bannerDestination");
+        id observer = rc_clear_safe_kvc(source, @"_observer");
+
+        NSMutableArray *candidates = [NSMutableArray array];
+        NSMutableSet<NSString *> *seenKeys = [NSMutableSet set];
+
+        id uuidsToRequests = rc_clear_safe_kvc(source, @"_uuidsToRequests");
+        if ([uuidsToRequests isKindOfClass:[NSDictionary class]]) {
+            for (id req in [(NSDictionary *)uuidsToRequests allValues]) {
+                NSString *key = rc_tracked_request_key(req);
+                if (![seenKeys containsObject:key]) {
+                    [seenKeys addObject:key];
+                    [candidates addObject:req];
+                }
+            }
+        }
+
+        NSArray *trackedSnapshot = nil;
+        NSMutableDictionary *tracked = rc_tracked_requests();
+        @synchronized (tracked) { trackedSnapshot = [tracked allValues]; }
+        for (id req in trackedSnapshot) {
+            NSString *key = rc_tracked_request_key(req);
+            if (![seenKeys containsObject:key]) {
+                [seenKeys addObject:key];
+                [candidates addObject:req];
+            }
+        }
+
+        NSMutableArray *matchedRequests = [NSMutableArray array];
+        NSMutableDictionary<NSString *, NSMutableSet *> *bulletinsBySection = [NSMutableDictionary dictionary];
+        NSMutableArray<NSString *> *matchedRCIdentifiers = [NSMutableArray array];
+
+        for (id req in candidates) {
+            NSString *sectionID = nil, *parentSectionID = nil, *title = nil, *subtitle = nil, *message = nil;
+            id bulletin = nil;
+            rc_clear_extract_fields(req, &sectionID, &parentSectionID, &title, &subtitle, &message, &bulletin);
+
+            if ([effective matchesSectionID:sectionID parentSectionID:parentSectionID title:title subtitle:subtitle message:message]) {
+                [matchedRequests addObject:req];
+                if (bulletin && sectionID.length) {
+                    NSMutableSet *set = bulletinsBySection[sectionID];
+                    if (!set) {
+                        set = [NSMutableSet set];
+                        bulletinsBySection[sectionID] = set;
+                    }
+                    [set addObject:bulletin];
+                }
+                if (rc_is_rc_notification(req)) {
+                    NSString *ident = rc_notification_identifier(req);
+                    if (ident.length) [matchedRCIdentifiers addObject:ident];
+                }
+            }
+        }
+
+        clearedCount = matchedRequests.count;
+        SRLogMin(@"[NotifyClear] candidates=%lu matched=%lu apps=%lu texts=%lu disp=%d dest=%d obs=%d",
+                 (unsigned long)candidates.count, (unsigned long)clearedCount,
+                 (unsigned long)effective.apps.count, (unsigned long)effective.texts.count,
+                 dispatcher != nil, dest != nil, observer != nil);
+
+        if (matchedRequests.count > 0) {
+            SEL clearReqSel = NSSelectorFromString(@"destination:requestsClearingNotificationRequests:");
+            if (dispatcher && dest && [dispatcher respondsToSelector:clearReqSel]) {
+                ((void (*)(id, SEL, id, id))objc_msgSend)(dispatcher, clearReqSel, dest, [NSSet setWithArray:matchedRequests]);
+            } else {
+                SEL clearBulletinsSel = NSSelectorFromString(@"clearBulletins:inSection:");
+                if (observer && [observer respondsToSelector:clearBulletinsSel]) {
+                    for (NSString *sec in bulletinsBySection) {
+                        ((void (*)(id, SEL, id, id))objc_msgSend)(observer, clearBulletinsSel, bulletinsBySection[sec], sec);
+                    }
+                }
+                SEL withdrawSel = NSSelectorFromString(@"withdrawNotificationWithRequest:");
+                if (dispatcher && [dispatcher respondsToSelector:withdrawSel]) {
+                    for (id req in matchedRequests) {
+                        ((void (*)(id, SEL, id))objc_msgSend)(dispatcher, withdrawSel, req);
+                    }
+                }
+            }
+
+            @synchronized (tracked) {
+                for (id req in matchedRequests) {
+                    [tracked removeObjectForKey:rc_tracked_request_key(req)];
+                }
+            }
+        }
+
+        if (effective.texts.count == 0 &&
+            (effective.apps.count == 0 || [effective matchesSectionID:kRCRemoteCompanionBundleId parentSectionID:nil title:nil subtitle:nil message:nil])) {
+            rc_run_notify_helper(@[@"--clear"]);
+        } else {
+            for (NSString *ident in matchedRCIdentifiers) {
+                rc_run_notify_helper(@[@"--remove", ident]);
+            }
+        }
+    };
+
+    if ([NSThread isMainThread]) {
+        clearBlock();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), clearBlock);
+    }
+    return clearedCount;
+}
 
 
 static BOOL rc_watch_ping_quiets(NSString *key) {
@@ -3527,6 +3772,15 @@ static NSString *rc_fill_action(NSString *text) {
     for (NSString *prefix in @[@"exec ", @"root ", @"sudo ", @"ssh-run "]) {
         if ([lower hasPrefix:prefix]) return rc_fill_placeholders_mode(text, RCFillShell);
     }
+    // Clear Notifications JSON already quotes values safely; placeholders inside fields are filled after JSON parse
+    if ([RCClearNotificationsCommand isClearCommand:text]) {
+        for (NSString *prefix in @[@"notify clear", @"clear notifications", @"clear notification", @"clear-notifications", @"clear-notification"]) {
+            if ([lower hasPrefix:prefix] && lower.length > prefix.length) {
+                NSString *after = [[lower substringFromIndex:prefix.length] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+                if ([after hasPrefix:@"{"]) return text;
+            }
+        }
+    }
     // A Toast's and a notification's parts are in double quotes: a " in a value would end one early
     if ([lower hasPrefix:@"toast "] || [lower hasPrefix:@"notify "]) return rc_fill_placeholders_mode(text, RCFillQuoted);
     return rc_fill_placeholders_mode(text, RCFillPlain);
@@ -3960,6 +4214,20 @@ static NSString *rc_http_request_banner_subtitle(NSString *action) {
     return [NSString stringWithFormat:@"%@ %@", method, shown];
 }
 
+static NSString *rc_clear_banner_subtitle(NSString *action) {
+    RCClearNotificationsCommand *clearCmd = [RCClearNotificationsCommand commandWithString:action];
+    if (!clearCmd) return nil;
+    if (clearCmd.apps.count == 0 && clearCmd.texts.count == 0) return @"All Apps";
+    if (clearCmd.apps.count > 0) {
+        return [clearCmd appsSummaryWithResolver:^NSString *(NSString *bundleId) {
+            return rc_banner_app_name(bundleId);
+        }];
+    }
+    return [clearCmd actionAccentTextWithResolver:^NSString *(NSString *bundleId) {
+        return rc_banner_app_name(bundleId);
+    }];
+}
+
 static void rc_maybe_show_action_banner(NSString *action) {
     load_trigger_config();
     NSString *cmd = [[action lowercaseString] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
@@ -4025,6 +4293,7 @@ static void rc_maybe_show_action_banner(NSString *action) {
     else if ([cmd hasPrefix:@"kill "]) subtitle = rc_banner_app_name([original substringFromIndex:5]);
     else if ([cmd hasPrefix:@"shortcut:"]) subtitle = rc_parse_shortcut_args([original substringFromIndex:9], NULL, NULL);
     else if ([cmd hasPrefix:@"http-request"]) subtitle = rc_http_request_banner_subtitle(original);
+    else if ([RCClearNotificationsCommand isClearCommand:original]) subtitle = rc_clear_banner_subtitle(original);
     else if ([cmd hasPrefix:@"set-vol "] || [cmd hasPrefix:@"ringer volume "] || [cmd hasPrefix:@"brightness "]) {
         // All take 0-100
         float level = [[cmd substringFromIndex:[cmd rangeOfString:@" " options:NSBackwardsSearch].location + 1] floatValue];
@@ -9939,10 +10208,29 @@ static NSString *handle_command(NSString *cmd) {
         }
         return @"Error: Flashlight not available\n";
     } else if ([cleanCmd isEqualToString:@"flashlight off"] || [cleanCmd isEqualToString:@"torch off"]) {
-    } else if ([cleanCmd isEqualToString:@"notify clear"]) {
-        // Removes all of RC's notifications from Notification Center
-        rc_run_notify_helper(@[@"--clear"]);
-        return @"OK\n";
+    } else if ([cleanCmd isEqualToString:@"notify clear"] || [cleanCmd hasPrefix:@"notify clear "] ||
+               [cleanCmd isEqualToString:@"clear notification"] || [cleanCmd hasPrefix:@"clear notification "] ||
+               [cleanCmd isEqualToString:@"clear notifications"] || [cleanCmd hasPrefix:@"clear notifications "] ||
+               [cleanCmd isEqualToString:@"clear-notification"] || [cleanCmd hasPrefix:@"clear-notification "] ||
+               [cleanCmd isEqualToString:@"clear-notifications"] || [cleanCmd hasPrefix:@"clear-notifications "] ||
+               [RCClearNotificationsCommand isClearCommand:cleanCmd]) {
+        RCClearNotificationsCommand *clearCmd = [RCClearNotificationsCommand commandWithString:cleanCmd];
+        if (!clearCmd) return @"Error: invalid clear notification command\n";
+        NSMutableArray<NSString *> *filledApps = [NSMutableArray array];
+        for (NSString *app in clearCmd.apps) {
+            NSString *val = [rc_fill_placeholders(app) stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            if (val.length > 0) [filledApps addObject:val];
+        }
+        NSMutableArray<NSString *> *filledTexts = [NSMutableArray array];
+        for (NSString *t in clearCmd.texts) {
+            NSString *val = rc_fill_placeholders(t);
+            if ([val stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]].length > 0) {
+                [filledTexts addObject:val];
+            }
+        }
+        RCClearNotificationsCommand *resolved = [[RCClearNotificationsCommand alloc] initWithApps:filledApps texts:filledTexts];
+        NSUInteger count = rc_clear_notifications(resolved);
+        return [NSString stringWithFormat:@"Cleared %lu notification(s)\n", (unsigned long)count];
     } else if ([cleanCmd hasPrefix:@"notify confirm "]) {
         // A button that needed the passcode was pressed and the passcode given (RC's app reports
         // it): its answer goes to the action waiting on that notification
@@ -13900,6 +14188,7 @@ static void start_web_server() {
                                     // Automations & Discovery
                                     @{@"command": @"shortcut \"Name\"", @"desc": @"Automation: Run a Siri Shortcut"},
                                     @{@"command": @"http-request {\"method\":\"GET\",\"url\":\"https://…\"}", @"desc": @"Automation: Call a REST API endpoint with optional headers and body"},
+                                    @{@"command": @"notify clear {\"apps\":[],\"texts\":[]}", @"desc": @"Notifications: Clear notifications by app and/or matching text"},
                                     @{@"command": @"trigger <ID>", @"desc": @"Automation: Fire a configured RemoteCompanion trigger"}
                                 ];
                                 NSDictionary *resp = @{@"ok": @YES, @"commands": commandList};

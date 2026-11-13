@@ -67,6 +67,8 @@ if [ -z "$1" ]; then
     echo "         --image sets its icon; --image-url attaches a photo from the web; --tap ID runs notiftap_ID on a tap"
     echo "         --button \"ID|Title|flags\" adds a button; --wait SECONDS waits for the answer"
     echo "  notify clear - Remove RC's notifications from Notification Center"
+    echo "  clear notification [--all] [--app BUNDLE|rc] [--text TEXT] [FILE.txt|TEXT...]"
+    echo "         Clear notifications by app and/or matching text (or a line-by-line .txt file)"
     echo "  ha <toggle|turn_on|turn_off|call> - Control Home Assistant"
     echo "  km <trigger|url>  - Trigger Keyboard Maestro Macro or URL"
     echo "  mqtt <pub|publish> <topic> [payload] - Publish MQTT topic"
@@ -84,10 +86,9 @@ fi
 rc_send_command() {
     local command="$1"
     if [[ "$IP" == "127.0.0.1" ]]; then
-        echo -n "$command" | rc-client 2>/dev/null || echo -n "$command" | nc -U "$SOCKET_PATH" 2>/dev/null
+        printf '%s' "$command" | rc-client 2>/dev/null || printf '%s' "$command" | nc -U "$SOCKET_PATH" 2>/dev/null
     else
-        local remote_cmd="echo -n '$command' | /var/jb/usr/bin/rc-client 2>/dev/null || echo -n '$command' | /usr/bin/rc-client 2>/dev/null || echo -n '$command' | nc -U $SOCKET_PATH 2>/dev/null"
-        ssh -o ConnectTimeout=3 -o ServerAliveInterval=2 -o ServerAliveCountMax=2 -o StrictHostKeyChecking=no mobile@$IP "$remote_cmd" 2>/dev/null
+        printf '%s' "$command" | ssh -o ConnectTimeout=3 -o ServerAliveInterval=2 -o ServerAliveCountMax=2 -o StrictHostKeyChecking=no mobile@$IP 'if [ -x /var/jb/usr/bin/rc-client ]; then /var/jb/usr/bin/rc-client; elif [ -x /usr/bin/rc-client ]; then /usr/bin/rc-client; else nc -U '"$SOCKET_PATH"'; fi' 2>/dev/null
     fi
 }
 
@@ -170,6 +171,224 @@ if [[ "$1" == "restore" || "$1" == "restore-backup" ]]; then
     case "$RESPONSE" in
         Error*) exit 1 ;;
     esac
+    exit 0
+fi
+
+rc_json_escape() {
+    local s="$1"
+    s="${s//\\/\\\\}"
+    s="${s//\"/\\\"}"
+    s="${s//$'\r'/}"
+    s="${s//$'\t'/\\t}"
+    s="${s//$'\n'/\\n}"
+    printf '"%s"' "$s"
+}
+
+# Clear notifications: file paths, inline filter terms, --app, or --all
+if [[ "$1" == "clear-notification" || "$1" == "clear-notifications" || ( "$1" == "clear" && ( "$2" == "notification" || "$2" == "notifications" ) ) || ( "$1" == "notify" && "$2" == "clear" ) ]]; then
+    IS_LEGACY_NOTIFY_CLEAR=0
+    if [[ "$1" == "notify" && "$2" == "clear" ]]; then
+        IS_LEGACY_NOTIFY_CLEAR=1
+        shift 2
+    elif [[ "$1" == "clear" ]]; then
+        shift 2
+    else
+        shift 1
+    fi
+
+    print_clear_help() {
+        echo "Usage:"
+        echo "  rc clear notification --all"
+        echo "  rc clear notification /path/to/list.txt"
+        echo "  rc clear notification \"Motion Detected\" \"System Monitor\""
+        echo "  rc clear notification --app rc \"Test\""
+        echo "  rc clear notification --app com.apple.MobileSMS"
+        echo "  rc notify clear"
+    }
+
+    if [ "$#" -eq 0 ]; then
+        if [ "$IS_LEGACY_NOTIFY_CLEAR" -eq 1 ]; then
+            RESPONSE="$(rc_send_command "notify clear")"
+            if [ $? -ne 0 ] || [ -z "$RESPONSE" ]; then
+                echo "Error: Cannot connect to iPhone at $IP via SSH/Socket." >&2
+                exit 1
+            fi
+            echo "$RESPONSE"
+            case "$RESPONSE" in Error*) exit 1 ;; esac
+            exit 0
+        fi
+        print_clear_help
+        exit 0
+    fi
+
+    if [ "$#" -eq 1 ] && [[ "$1" == \{*\} ]]; then
+        RESPONSE="$(rc_send_command "notify clear $1")"
+        if [ $? -ne 0 ] || [ -z "$RESPONSE" ]; then
+            echo "Error: Cannot connect to iPhone at $IP via SSH/Socket." >&2
+            exit 1
+        fi
+        echo "$RESPONSE"
+        case "$RESPONSE" in Error*) exit 1 ;; esac
+        exit 0
+    fi
+
+    CLEAR_APPS=()
+    CLEAR_TEXTS=()
+    HAD_FILE=0
+
+    append_clear_file_stream() {
+        while IFS= read -r line || [ -n "$line" ]; do
+            line="${line%$'\r'}"
+            local trimmed="${line#"${line%%[![:space:]]*}"}"
+            if [ -n "$trimmed" ]; then
+                CLEAR_TEXTS+=("$line")
+            fi
+        done
+    }
+
+    append_clear_app() {
+        local app="$1"
+        local low
+        low=$(printf '%s' "$app" | tr '[:upper:]' '[:lower:]')
+        if [[ "$low" == "all" || "$low" == "any" || "$low" == "*" ]]; then
+            CLEAR_APPS=()
+        elif [ -n "$app" ]; then
+            CLEAR_APPS+=("$app")
+        fi
+    }
+
+    expand_clear_path() {
+        local p="$1"
+        case "$p" in
+            "~/"*) printf '%s' "$HOME/${p#\~/}" ;;
+            *) printf '%s' "$p" ;;
+        esac
+    }
+
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --help|-h)
+                print_clear_help
+                exit 0
+                ;;
+            --all|-a)
+                CLEAR_APPS=()
+                shift
+                ;;
+            --app|-A)
+                if [ -z "${2:-}" ]; then
+                    echo "Error: $1 requires an app name or bundle ID" >&2
+                    exit 1
+                fi
+                append_clear_app "$2"
+                shift 2
+                ;;
+            --app=*)
+                append_clear_app "${1#--app=}"
+                shift
+                ;;
+            --text|-t)
+                if [ "$#" -lt 2 ]; then
+                    echo "Error: $1 requires text to match" >&2
+                    exit 1
+                fi
+                if [ -n "$2" ]; then CLEAR_TEXTS+=("$2"); fi
+                shift 2
+                ;;
+            --text=*)
+                if [ -n "${1#--text=}" ]; then CLEAR_TEXTS+=("${1#--text=}"); fi
+                shift
+                ;;
+            --file|-f)
+                if [ -z "${2:-}" ]; then
+                    echo "Error: $1 requires a file path" >&2
+                    exit 1
+                fi
+                HAD_FILE=1
+                if [ "$2" = "-" ]; then
+                    append_clear_file_stream
+                else
+                    p="$(expand_clear_path "$2")"
+                    if [ ! -f "$p" ]; then
+                        echo "Error: File not found: $2" >&2
+                        exit 1
+                    fi
+                    append_clear_file_stream < "$p"
+                fi
+                shift 2
+                ;;
+            --file=*)
+                HAD_FILE=1
+                raw_p="${1#--file=}"
+                if [ "$raw_p" = "-" ]; then
+                    append_clear_file_stream
+                else
+                    p="$(expand_clear_path "$raw_p")"
+                    if [ ! -f "$p" ]; then
+                        echo "Error: File not found: $raw_p" >&2
+                        exit 1
+                    fi
+                    append_clear_file_stream < "$p"
+                fi
+                shift
+                ;;
+            -)
+                HAD_FILE=1
+                append_clear_file_stream
+                shift
+                ;;
+            *)
+                p="$(expand_clear_path "$1")"
+                if [ -f "$p" ]; then
+                    HAD_FILE=1
+                    append_clear_file_stream < "$p"
+                elif [[ "$p" == *.txt || "$p" == /* || "$p" == ./* || "$p" == ../* ]]; then
+                    echo "Error: File not found: $1 (use --text \"$1\" to match literal text)" >&2
+                    exit 1
+                else
+                    CLEAR_TEXTS+=("$1")
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    if [ "$HAD_FILE" -eq 1 ] && [ "${#CLEAR_TEXTS[@]}" -eq 0 ]; then
+        echo "No filters found in file (nothing cleared)."
+        exit 0
+    fi
+
+    APPS_JSON=""
+    if [ "${#CLEAR_APPS[@]}" -gt 0 ]; then
+        for a in "${CLEAR_APPS[@]}"; do
+            esc="$(rc_json_escape "$a")"
+            APPS_JSON="${APPS_JSON:+$APPS_JSON,}$esc"
+        done
+    fi
+
+    TEXTS_JSON=""
+    if [ "${#CLEAR_TEXTS[@]}" -gt 0 ]; then
+        for t in "${CLEAR_TEXTS[@]}"; do
+            esc="$(rc_json_escape "$t")"
+            TEXTS_JSON="${TEXTS_JSON:+$TEXTS_JSON,}$esc"
+        done
+    fi
+
+    JSON_PARTS=""
+    if [ -n "$APPS_JSON" ]; then
+        JSON_PARTS="\"apps\":[$APPS_JSON]"
+    fi
+    if [ -n "$TEXTS_JSON" ]; then
+        JSON_PARTS="${JSON_PARTS:+$JSON_PARTS,}\"texts\":[$TEXTS_JSON]"
+    fi
+
+    RESPONSE="$(rc_send_command "notify clear {$JSON_PARTS}")"
+    if [ $? -ne 0 ] || [ -z "$RESPONSE" ]; then
+        echo "Error: Cannot connect to iPhone at $IP via SSH/Socket." >&2
+        exit 1
+    fi
+    echo "$RESPONSE"
+    case "$RESPONSE" in Error*) exit 1 ;; esac
     exit 0
 fi
 
