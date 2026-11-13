@@ -94,6 +94,8 @@ Access the desktop-class automation hub at `http://[DEVICE_IP]:8080` from any co
 
 ## CLI Commands & System Control
 
+> Run `rc help` (or `rc -h`) for this whole list in the terminal, and `rc help <word>` to show only matching commands.
+
 ### Media, Sound & Volume
 - `rc play` / `rc pause` / `rc playpause` / `rc next` / `rc prev` - Control media playback.
 - `rc volume 0-100` - Set volume level.

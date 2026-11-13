@@ -9287,6 +9287,157 @@ BOOL RCCommandFromLocalSocket(void) {
 
 #import "RCGestures.h"
 
+// The CLI's command reference: `rc help` prints it, `rc help <word>` narrows it. One list, so the
+// help stays with the commands it describes.
+static NSArray *RCCommandHelpSections(void) {
+    return @[
+        @{@"title": @"Media", @"rows": @[
+            @[@"play | pause | playpause", @"Play, pause, or toggle playback"],
+            @[@"next | prev", @"Next or previous track"],
+            @[@"volume <0-100>", @"Set the volume"],
+            @[@"volume up|down [N]", @"Step the volume up or down"],
+            @[@"mute [on|off|toggle|status]", @"Media mute"],
+            @[@"ringer [silent|ring|toggle]", @"Ringer switch position"],
+            @[@"ringer volume <0-100>", @"Ringer volume"],
+            @[@"haptics <mode>", @"always, silent-only, ring-only, never"],
+            @[@"anc [on|off|transparency]", @"Headphone ANC (requires Sonitus)"],
+            @[@"audiomix [on|off|toggle]", @"AudioMix simultaneous playback"],
+            @[@"audiohandoff [on|off|toggle]", @"Automatic audio switching"],
+            @[@"airplay list", @"AirPlay receivers and their UIDs"],
+            @[@"airplay connect <name|UID>", @"Start AirPlay streaming"],
+            @[@"airplay disconnect", @"Stop AirPlay streaming"],
+            @[@"spotify play", @"Resume Spotify"],
+            @[@"spotify <type> <id>", @"type: playlist, album, or artist"],
+            @[@"playlist <id>", @"Play a Spotify playlist"],
+            @[@"shuffle playlist <id>", @"Shuffle a Spotify playlist"],
+        ]},
+        @{@"title": @"Device", @"rows": @[
+            @[@"lock", @"Lock the screen"],
+            @[@"unlock [passcode]", @"Wake and unlock the device"],
+            @[@"lock-toggle [passcode]", @"Toggle the lock state"],
+            @[@"is-locked", @"Print locked or unlocked"],
+            @[@"autolock [time|toggle|status]", @"30s to 5m, never, or off"],
+            @[@"display sleep <time>", @"Alias for autolock"],
+            @[@"button <name>", @"power, lock, home, volup, voldown, mute"],
+            @[@"button triggers pause [min] | resume", @"Return buttons to stock behavior"],
+            @[@"brightness <0-100>", @"Set screen brightness"],
+            @[@"flashlight [on|off|toggle|status]", @"Control the torch"],
+            @[@"rotate [lock|unlock|toggle|status]", @"Orientation lock"],
+            @[@"orientation status", @"Print PORTRAIT or LANDSCAPE"],
+            @[@"appearance [dark|light|toggle]", @"Light or dark appearance"],
+            @[@"dnd [on|off|toggle|status]", @"Do Not Disturb"],
+            @[@"low power mode [on|off|toggle|status]", @"Low Power Mode"],
+            @[@"haptic", @"Play a haptic tap"],
+            @[@"screenshot", @"Take a screenshot"],
+            @[@"proximity [on|off]", @"Read or force the proximity sensor"],
+            @[@"nfc scanner [pause|resume|toggle]", @"Pause or resume NFC scanning"],
+            @[@"screenrecord [toggle|start|stop|status]", @"Screen recording"],
+            @[@"camera [mode] [zoom] [front] [flash]", @"photo, video, portrait, slomo, timelapse"],
+            @[@"camera shutter | snap", @"Press the Camera shutter"],
+            @[@"camera record-toggle", @"Start or stop video recording"],
+        ]},
+        @{@"title": @"Apps & Input", @"rows": @[
+            @[@"open <alias|bundleID>", @"Launch an app"],
+            @[@"uiopen <bundleID>", @"Launch an app by bundle ID"],
+            @[@"kill <alias|bundleID>", @"Force close an app"],
+            @[@"kill current", @"Force close the front app"],
+            @[@"home", @"Press Home"],
+            @[@"switcher", @"Open the App Switcher"],
+            @[@"previous app", @"Switch to the previous app"],
+            @[@"control-center", @"Open Control Center"],
+            @[@"url <url>", @"Open a link"],
+            @[@"nav <panel>", @"triggers, settings, ha, km, mqtt, add"],
+            @[@"type \"Text\"", @"Type text"],
+            @[@"paste \"Text\"", @"Paste text"],
+            @[@"key <hex>", @"Press a HID key (0x28 is Return)"],
+            @[@"toast \"Title\" [\"Subtitle\"] [\"Symbol\"]", @"Show a HUD toast"],
+            @[@"notify \"Title\" [\"Body\"] [--urgent]", @"Post a notification"],
+        ]},
+        @{@"title": @"Connectivity", @"rows": @[
+            @[@"wifi [on|off|toggle|status]", @"Wi-Fi"],
+            @[@"bluetooth [on|off|toggle|status]", @"Bluetooth"],
+            @[@"cellular [on|off|toggle|status]", @"Cellular Data"],
+            @[@"location [on|off|toggle|status]", @"Location Services"],
+            @[@"airplane [on|off|toggle|status]", @"Airplane Mode"],
+            @[@"bluetooth connect|disconnect <name>", @"Manage paired devices"],
+            @[@"carplay status", @"CarPlay connection state"],
+            @[@"battery status", @"Battery level and charging state"],
+        ]},
+        @{@"title": @"Automation", @"rows": @[
+            @[@"shortcut \"Name\" [-i] [-p \"Input\"]", @"Run a Shortcut (-i is silent)"],
+            @[@"trigger <ID>", @"Fire a RemoteCompanion trigger"],
+            @[@"stop trigger <key>", @"Stop a running trigger sequence"],
+            @[@"delay <seconds>", @"Wait before the next action"],
+            @[@"gesture <verb> ...", @"record, play, list, trim, rename, export"],
+            @[@"tap <x> <y>", @"Tap a screen point"],
+            @[@"hold <x> <y> [ms]", @"Hold a screen point"],
+            @[@"swipe <x1> <y1> <x2> <y2>", @"Swipe between two points"],
+            @[@"var <verb> ...", @"list, get, set, add, delete, clear"],
+            @[@"lua <code>", @"Run Lua on the device"],
+            @[@"ha toggle <entity>", @"Home Assistant toggle"],
+            @[@"ha turn_on|turn_off <entity>", @"Home Assistant on or off"],
+            @[@"ha call <domain.service> <entity>", @"Call a Home Assistant service"],
+            @[@"ha raw <domain.service> <json>", @"Raw Home Assistant payload"],
+            @[@"km trigger <name|uuid> [value]", @"Trigger a Keyboard Maestro macro"],
+            @[@"km url <url>", @"Trigger a Keyboard Maestro URL"],
+            @[@"mqtt pub <topic> [payload]", @"Publish an MQTT message"],
+        ]},
+        @{@"title": @"System", @"rows": @[
+            @[@"respring", @"Restart SpringBoard"],
+            @[@"safemode", @"Enter Safe Mode"],
+            @[@"ldrestart", @"Soft reboot"],
+            @[@"userspace-reboot", @"Restart userspace"],
+            @[@"uicache", @"Refresh the icon cache"],
+            @[@"webui [on|off|status|...]", @"Web UI server, access, token, wifi"],
+            @[@"blacklist list|add|remove|reset", @"App exclusion list"],
+            @[@"log", @"Stream the device log (also rc logs)"],
+            @[@"exec <command>", @"Run a shell command"],
+            @[@"root <command>", @"Run a shell command as root"],
+            @[@"testkit ...", @"Automated UI test runs"],
+        ]},
+    ];
+}
+
+// One section's rows, padded into a command column. With a search word, only rows (or the whole
+// section, when its title matches) that contain it are kept.
+static NSString *RCCommandHelpBody(NSDictionary *section, NSString *word) {
+    NSString *title = section[@"title"];
+    BOOL wholeSection = word.length > 0 && [[title lowercaseString] containsString:word];
+    NSMutableString *body = [NSMutableString string];
+    for (NSArray *row in section[@"rows"]) {
+        NSString *command = row[0];
+        NSString *detail = row[1];
+        if (word.length > 0 && !wholeSection &&
+            ![[command lowercaseString] containsString:word] &&
+            ![[detail lowercaseString] containsString:word]) continue;
+        NSString *padding = command.length >= 38 ? @" "
+            : [@" " stringByPaddingToLength:38 - command.length withString:@" " startingAtIndex:0];
+        [body appendFormat:@"  %@%@%@\n", command, padding, detail];
+    }
+    return body;
+}
+
+static NSString *RCCommandHelp(NSString *topic) {
+    NSString *word = [topic stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]].lowercaseString ?: @"";
+    NSMutableString *out = [NSMutableString string];
+    if (word.length == 0) {
+        [out appendString:@"RemoteCompanion CLI\n\n"];
+        [out appendString:@"Usage: rc [-r|--root] <command> [args]\n"];
+        [out appendString:@"       rc help [word]       Show this help, or commands matching a word\n"];
+        [out appendString:@"       echo \"command\" | rc  Send a raw command on stdin\n"];
+    }
+    for (NSDictionary *section in RCCommandHelpSections()) {
+        NSString *body = RCCommandHelpBody(section, word);
+        if (body.length == 0) continue;
+        [out appendFormat:@"\n%@\n%@", section[@"title"], body];
+    }
+    if (out.length == 0) {
+        return [NSString stringWithFormat:@"No commands match \"%@\". Run rc help for the full list.\n", topic];
+    }
+    if (word.length == 0) [out appendString:@"\n"];
+    return out;
+}
+
 static NSString *handle_command(NSString *cmd) {
     if (!cmd || ![cmd isKindOfClass:[NSString class]]) {
         SRLogMin(@"ERROR: handle_command received nil or invalid command string");
@@ -9294,6 +9445,11 @@ static NSString *handle_command(NSString *cmd) {
     }
     NSString *cleanCmd = [cmd stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     if (cleanCmd.length == 0) return @"Error: Empty command\n";
+    if ([cleanCmd isEqualToString:@"help"] || [cleanCmd hasPrefix:@"help "] ||
+        [cleanCmd isEqualToString:@"-h"] || [cleanCmd isEqualToString:@"--help"]) {
+        NSString *topic = [cleanCmd hasPrefix:@"help "] ? [cleanCmd substringFromIndex:5] : @"";
+        return RCCommandHelp(topic);
+    }
     // Resolve app-owned native shortcut payloads afresh; do not log encoded data.
     if ([cleanCmd hasPrefix:@"quickactions "]) return RCQACommand(cleanCmd);
     // The test kit's passcode never reaches the log (see RCTestKit.x)
