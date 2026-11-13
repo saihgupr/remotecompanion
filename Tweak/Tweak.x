@@ -16996,6 +16996,8 @@ static NSTimeInterval g_lastTwoFingerTopSwipeTriggerTime = 0;
 // The system's top-edge swipes (Notification Center, Control Center), kept so a two-finger
 // top swipe can stop one that the first finger already started
 static NSHashTable<UIGestureRecognizer *> *g_rcTopEdgeRecognizers = nil;
+// A Control Center pull that iOS already started (the first finger moved before the second landed)
+static BOOL g_rcCCPullStarted = NO;
 
 // ============ GESTURE SCROLL SUPPRESSION (issue #81) ============
 // While a status-bar swipe or bottom swipe-up is being executed, the
@@ -18563,6 +18565,10 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
             return NO;
         }
     }
+    if (rc_is_two_finger_top_active()) {
+        SRLogMin(@"[RCMultiFinger] Control Center grabber: touch refused during a two-finger top slide");
+        return NO;
+    }
     return %orig;
 }
 
@@ -18573,11 +18579,15 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
             return NO;
         }
     }
+    if (edge == UIRectEdgeTop && rc_is_two_finger_top_active()) {
+        SRLogMin(@"[RCMultiFinger] Control Center grabber: top pull refused during a two-finger top slide");
+        return NO;
+    }
     return %orig;
 }
 
 - (void)grabberTongueBeganPulling:(id)tongue withDistance:(double)dist andVelocity:(double)vel {
-    if (rc_is_bottom_gesture_active()) {
+    if (rc_is_bottom_gesture_active() || rc_is_two_finger_top_active()) {
         SRLog(@"[RCBottom] SBControlCenterController suppressing grabberTongueBeganPulling");
         return;
     }
@@ -18590,12 +18600,22 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
         SRLog(@"[RCBottom] SBControlCenterController suppressing _presentControlCenterGestureBeganWithReason: %@", reason);
         return;
     }
+    if (rc_is_two_finger_top_active()) {
+        SRLogMin(@"[RCMultiFinger] Control Center pull not started during a two-finger top slide");
+        return;
+    }
+    g_rcCCPullStarted = YES;
     %orig;
 }
 
 - (void)_presentControlCenterGestureUpdatedWithGrabberDistance:(double)dist andVelocity:(double)vel {
     if (rc_cc_intentional_open_active()) { %orig; return; }
     if (rc_is_bottom_gesture_active()) {
+        return;
+    }
+    if (rc_is_two_finger_top_active()) {
+        // Hold a pull iOS already started shut; one it never started gets nothing
+        if (g_rcCCPullStarted) %orig(0, 0);
         return;
     }
     %orig;
@@ -18607,12 +18627,21 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
         SRLog(@"[RCBottom] SBControlCenterController suppressing _presentControlCenterGestureEndedWithVelocity");
         return;
     }
+    BOOL started = g_rcCCPullStarted;
+    g_rcCCPullStarted = NO;
+    if (rc_is_two_finger_top_active()) {
+        if (!started) return;
+        // End a pull iOS already started as a flick back up, so Control Center closes
+        SRLogMin(@"[RCMultiFinger] Control Center pull closed for a two-finger top slide");
+        %orig(-2000, comp);
+        return;
+    }
     %orig;
 }
 
 - (void)presentAnimated:(BOOL)animated {
     if (rc_cc_intentional_open_active()) { %orig; return; }
-    if (rc_is_bottom_gesture_active()) {
+    if (rc_is_bottom_gesture_active() || rc_is_two_finger_top_active()) {
         SRLog(@"[RCBottom] Suppressed Control Center presentAnimated within trigger window");
         return;
     }
@@ -18621,7 +18650,7 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
 
 - (void)presentAnimated:(BOOL)animated completion:(id)completion {
     if (rc_cc_intentional_open_active()) { %orig; return; }
-    if (rc_is_bottom_gesture_active()) {
+    if (rc_is_bottom_gesture_active() || rc_is_two_finger_top_active()) {
         SRLog(@"[RCBottom] Suppressed Control Center presentAnimated:completion: within trigger window");
         return;
     }
@@ -18630,7 +18659,7 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
 
 - (BOOL)_canPresent {
     if (rc_cc_intentional_open_active()) return %orig;
-    if (rc_is_bottom_gesture_active()) {
+    if (rc_is_bottom_gesture_active() || (rc_is_two_finger_top_active() && !g_rcCCPullStarted)) {
         return NO;
     }
     return %orig;
