@@ -6,6 +6,7 @@
 #import <dlfcn.h>
 #import "RCGestures.h"
 #import "RCSpawn.h"
+#import "RCScreenSelect.h"
 
 void SRLog(NSString *format, ...);
 
@@ -239,10 +240,12 @@ static NSArray<RCScreenText *> *rc_screen_read_helper(UIImage *shot, double scal
     return items;
 }
 
-// Every line of text on the screen, read at full pixels (`accurate`) or quicker. Never on the main
-// thread (the grab needs it). nil with *error set when it couldn't read.
-static NSArray<RCScreenText *> *rc_screen_read(BOOL accurate, NSString **error) {
+// Reads the text in a picture already taken, at `scale` times its size in points. The box math
+// below divides the picture's pixels by `scale`, so the frames come out in screen points. Never on
+// the main thread. nil with *error set when it couldn't read.
+static NSArray<RCScreenText *> *rc_screen_ocr_image(UIImage *shot, double scale, BOOL accurate, NSString **error) {
     if ([NSThread isMainThread]) { if (error) *error = @"Can't read the screen from the main thread"; return nil; }
+    if (!shot.CGImage) { if (error) *error = @"There's no picture to read"; return nil; }
     if (!rc_vision()) { if (error) *error = @"Vision couldn't load"; return nil; }
     dispatch_semaphore_t busy = rc_vision_busy();
     // Another read finishing first is fine: wait for it a little
@@ -250,10 +253,6 @@ static NSArray<RCScreenText *> *rc_screen_read(BOOL accurate, NSString **error) 
         if (error) *error = @"Busy reading the screen";
         return nil;
     }
-    double scale = [[UIScreen mainScreen] nativeScale];
-    if (!accurate) scale = MIN(scale, 2);
-    UIImage *shot = rc_screen_grab(scale);
-    if (!shot) { dispatch_semaphore_signal(busy); if (error) *error = @"Couldn't capture the screen"; return nil; }
     __block NSArray *found = nil;
     __block NSString *failure = nil;
     NSString *done = rc_vision_run(busy, 15, ^NSString *{
@@ -308,6 +307,100 @@ static NSArray<RCScreenText *> *rc_screen_read(BOOL accurate, NSString **error) 
     if (!done) { if (error) *error = @"Reading the screen took over 15 s"; return nil; }
     if (failure) { if (error) *error = failure; return nil; }
     return found;
+}
+
+// Every line of text on the screen, read at full pixels (`accurate`) or quicker. Never on the main
+// thread (the grab needs it). nil with *error set when it couldn't read.
+static NSArray<RCScreenText *> *rc_screen_read(BOOL accurate, NSString **error) {
+    if ([NSThread isMainThread]) { if (error) *error = @"Can't read the screen from the main thread"; return nil; }
+    double scale = [[UIScreen mainScreen] nativeScale];
+    if (!accurate) scale = MIN(scale, 2);
+    UIImage *shot = rc_screen_grab(scale);
+    if (!shot) { if (error) *error = @"Couldn't capture the screen"; return nil; }
+    return rc_screen_ocr_image(shot, scale, accurate, error);
+}
+
+// The screen as a picture at full pixels, for reading after someone has picked an area. Main thread.
+UIImage *RCScreenGrabImage(void) {
+    return rc_screen_grab([[UIScreen mainScreen] nativeScale]);
+}
+
+// Lines top to bottom, left to right within a row, one per line
+static NSString *rc_screen_join(NSArray<RCScreenText *> *items) {
+    NSArray<RCScreenText *> *sorted = [items sortedArrayUsingComparator:^NSComparisonResult(RCScreenText *a, RCScreenText *b) {
+        double ay = CGRectGetMidY(a.frame), by = CGRectGetMidY(b.frame);
+        // Within a few points of each other is the same row: left to right
+        if (fabs(ay - by) > 6) return ay < by ? NSOrderedAscending : NSOrderedDescending;
+        double ax = CGRectGetMinX(a.frame), bx = CGRectGetMinX(b.frame);
+        if (fabs(ax - bx) < 0.5) return NSOrderedSame;
+        return ax < bx ? NSOrderedAscending : NSOrderedDescending;
+    }];
+    NSMutableArray<NSString *> *lines = [NSMutableArray array];
+    for (RCScreenText *t in sorted) {
+        NSString *line = [t.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (line.length) [lines addObject:line];
+    }
+    return [lines componentsJoinedByString:@"\n"];
+}
+
+NSString *RCScreenAllText(NSString **error) {
+    NSArray<RCScreenText *> *items = rc_screen_read(YES, error);
+    if (!items) return nil;
+    return rc_screen_join(items);
+}
+
+// The area of `shot` in screen points, cut out and made bigger when it's small, so text in a photo
+// that the whole screen was too big to see counts. *zoom says how much bigger it was made.
+static UIImage *rc_screen_crop(UIImage *shot, CGRect rect, double scale, double *zoom) {
+    CGImageRef img = shot.CGImage;
+    if (!img) return nil;
+    CGRect pixels = CGRectMake(rect.origin.x * scale, rect.origin.y * scale, rect.size.width * scale, rect.size.height * scale);
+    pixels = CGRectIntegral(pixels);
+    CGRect bounds = CGRectMake(0, 0, CGImageGetWidth(img), CGImageGetHeight(img));
+    pixels = CGRectIntersection(bounds, pixels);
+    if (CGRectIsNull(pixels) || pixels.size.width < 2 || pixels.size.height < 2) return nil;
+    CGImageRef cut = CGImageCreateWithImageInRect(img, pixels);
+    if (!cut) return nil;
+    // A small area goes to Vision at up to three times its size; a full screen stays as it is
+    double factor = MIN(3.0, MAX(1.0, 900.0 / MAX(pixels.size.width, pixels.size.height)));
+    if (zoom) *zoom = factor;
+    UIImage *piece = [UIImage imageWithCGImage:cut scale:1 orientation:UIImageOrientationUp];
+    CGImageRelease(cut);
+    if (factor <= 1.001) return piece;
+    CGSize size = CGSizeMake(round(pixels.size.width * factor), round(pixels.size.height * factor));
+    UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat defaultFormat];
+    format.scale = 1;
+    return [[[UIGraphicsImageRenderer alloc] initWithSize:size format:format] imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+        CGContextSetInterpolationQuality(UIGraphicsGetCurrentContext(), kCGInterpolationHigh);
+        [piece drawInRect:CGRectMake(0, 0, size.width, size.height)];
+    }];
+}
+
+NSString *RCScreenTextInRect(UIImage *shot, CGRect rect, NSString **error) {
+    rect = CGRectStandardize(rect);
+    if (!shot.CGImage) { if (error) *error = @"There's no picture to read"; return nil; }
+    if (rect.size.width < 1 || rect.size.height < 1) { if (error) *error = @"The area is too small"; return nil; }
+    if ([NSThread isMainThread]) { if (error) *error = @"Can't read the screen from the main thread"; return nil; }
+    double scale = [[UIScreen mainScreen] nativeScale];
+    NSString *failure = nil;
+    NSArray<RCScreenText *> *items = rc_screen_ocr_image(shot, scale, YES, &failure);
+    if (!items) { if (error) *error = failure ?: @"Couldn't read the screen"; return nil; }
+    NSMutableArray<RCScreenText *> *inside = [NSMutableArray array];
+    for (RCScreenText *t in items) {
+        CGRect hit = CGRectIntersection(t.frame, rect);
+        // Any real part of a line counts, so a corner of the area still copies the whole line
+        if (!CGRectIsNull(hit) && hit.size.width >= 4 && hit.size.height >= 4) [inside addObject:t];
+    }
+    NSString *text = rc_screen_join(inside);
+    if (text.length) return text;
+    // No line was picked: read just the area, enlarged, for small text the full read passed over
+    double zoom = 1;
+    UIImage *crop = rc_screen_crop(shot, rect, scale, &zoom);
+    if (!crop) return @"";
+    NSString *cropError = nil;
+    NSArray<RCScreenText *> *found = rc_screen_ocr_image(crop, scale * zoom, YES, &cropError);
+    if (!found) { if (error) *error = cropError ?: @"Couldn't read the area"; return nil; }
+    return rc_screen_join(found);
 }
 
 // Lowercased with runs of spaces made one, for matching
@@ -451,6 +544,36 @@ NSString *RCScreenCommand(NSString *cmd) {
         BOOL settled = RCScreenSettle(max, &waited);
         return [NSString stringWithFormat:settled ? @"Settled after %.0f ms\n" : @"Still changing after %.0f ms\n", waited * 1000];
     }
+    if ([verb isEqualToString:@"copy"]) {
+        // screen copy [rect [SECONDS]]: all text on screen, or draw a selection box first
+        if (words.count > 1) {
+            if (![[words[1] lowercaseString] isEqualToString:@"rect"] || words.count > 3) {
+                return @"Usage: screen copy [rect [SECONDS]]\n";
+            }
+            if (words.count == 3) {
+                double parsed = 0;
+                NSScanner *scanner = [NSScanner scannerWithString:words[2]];
+                if (![scanner scanDouble:&parsed] || !scanner.isAtEnd || !isfinite(parsed) || parsed <= 0) {
+                    return @"Usage: screen copy [rect [SECONDS]]\n";
+                }
+            }
+        }
+        NSString *arg = words.count > 1
+            ? [[words subarrayWithRange:NSMakeRange(1, words.count - 1)] componentsJoinedByString:@" "]
+            : @"";
+        if ([NSThread isMainThread]) {
+            dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                NSString *reply = RCScreenCopyCommand(arg);
+                SRLog(@"[Screen] screen copy%@: %@",
+                      arg.length ? [@" " stringByAppendingString:arg] : @"",
+                      [reply stringByTrimmingCharactersInSet:[NSCharacterSet newlineCharacterSet]]);
+            });
+            return arg.length
+                ? [NSString stringWithFormat:@"Started: screen copy %@\n", arg]
+                : @"Started: screen copy\n";
+        }
+        return RCScreenCopyCommand(arg);
+    }
     if ([@[@"ocr", @"find", @"tap", @"wait"] containsObject:verb]) {
         NSRange space = [rest rangeOfString:@" "];
         NSString *arg = space.location == NSNotFound ? @"" : [rest substringFromIndex:space.location + 1];
@@ -465,7 +588,7 @@ NSString *RCScreenCommand(NSString *cmd) {
         NSString *reply = rc_screen_text_command(verb, arg);
         if (reply) return reply;
     }
-    if (![verb isEqualToString:@"capture"]) return @"Usage: screen capture [PATH] [SCALE] [QUALITY] [grid [SPACING]] | screen settle [MAX] | screen ocr [fast] [--json] | screen find \"Text\" | screen tap \"Text\" | screen wait \"Text\" [SECONDS]\n";
+    if (![verb isEqualToString:@"capture"]) return @"Usage: screen capture [PATH] [SCALE] [QUALITY] [grid [SPACING]] | screen settle [MAX] | screen ocr [fast] [--json] | screen copy [rect [SECONDS]] | screen find \"Text\" | screen tap \"Text\" | screen wait \"Text\" [SECONDS]\n";
     // screen capture [PATH] [SCALE] [QUALITY] [grid [SPACING]]
     double grid = 0;
     NSUInteger gridAt = [words indexOfObject:@"grid"];

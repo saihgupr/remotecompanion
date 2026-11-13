@@ -38,18 +38,51 @@
     return YES;
 }
 
+// Copy variants (no text prompt) share display-name and icon formatting without matching parseCommand:
+static NSString *rc_screen_copy_kind(NSString *command) {
+    if (![command isKindOfClass:[NSString class]]) return nil;
+    NSString *trimmed = [[command stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString];
+    if (![trimmed hasPrefix:@"screen"]) return nil;
+    NSArray<NSString *> *words = [trimmed componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    words = [words filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"length > 0"]];
+    if (words.count < 2 || ![words[0] isEqualToString:@"screen"] || ![words[1] isEqualToString:@"copy"]) return nil;
+    if (words.count == 2) return @"copy";
+    if ([words[2] isEqualToString:@"rect"] && words.count <= 4) return @"copy_rect";
+    return nil;
+}
+
 + (NSString *)nameForCommand:(NSString *)command {
     NSString *verb = nil, *text = nil;
-    if (![self parseCommand:command verb:&verb text:&text seconds:NULL]) return nil;
-    NSDictionary *names = @{ @"tap": @"Tap", @"wait": @"Wait for" };
-    return [NSString stringWithFormat:@"%@ “%@”", names[verb], text];
+    if ([self parseCommand:command verb:&verb text:&text seconds:NULL]) {
+        NSDictionary *names = @{ @"tap": @"Tap", @"wait": @"Wait for" };
+        return [NSString stringWithFormat:@"%@ “%@”", names[verb], text];
+    }
+    NSString *copyKind = rc_screen_copy_kind(command);
+    if ([copyKind isEqualToString:@"copy"]) return @"Copy All Text on Screen";
+    if ([copyKind isEqualToString:@"copy_rect"]) return @"Copy Text on Screen";
+    return nil;
 }
 
 + (NSString *)iconForVerb:(NSString *)verb {
+    if ([verb isEqualToString:@"copy"]) {
+        return [UIImage systemImageNamed:@"doc.on.clipboard"] ? @"doc.on.clipboard" : @"doc.on.doc";
+    }
+    if ([verb isEqualToString:@"copy_rect"]) {
+        return [UIImage systemImageNamed:@"text.viewfinder"] ? @"text.viewfinder" : @"viewfinder";
+    }
     NSDictionary *icons = @{ @"tap": @"hand.tap.fill", @"wait": @"hourglass" };
     NSString *icon = icons[verb];
     if (icon && [UIImage systemImageNamed:icon]) return icon;
     return [UIImage systemImageNamed:@"text.viewfinder"] ? @"text.viewfinder" : @"doc.text.magnifyingglass"; // iOS 15+
+}
+
++ (NSString *)iconForCommand:(NSString *)command {
+    NSString *verb = nil;
+    if ([self parseCommand:command verb:&verb text:NULL seconds:NULL]) {
+        return [self iconForVerb:verb];
+    }
+    NSString *copyKind = rc_screen_copy_kind(command);
+    return copyKind ? [self iconForVerb:copyKind] : nil;
 }
 
 + (void)promptForVerb:(NSString *)verb existing:(NSString *)command from:(UIViewController *)controller

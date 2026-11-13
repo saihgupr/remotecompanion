@@ -295,6 +295,8 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
             @{ @"name": @"Record Gesture", @"command": @"__RECORD_GESTURE__", @"icon": @"record.circle" },
             @{ @"name": @"Tap Text on Screen...", @"command": @"__SCREEN_TAP__", @"icon": [RCScreenActions iconForVerb:@"tap"] },
             @{ @"name": @"Wait for Text...", @"command": @"__SCREEN_WAIT__", @"icon": [RCScreenActions iconForVerb:@"wait"] },
+            @{ @"name": @"Copy Text on Screen", @"command": @"screen copy rect", @"icon": [RCScreenActions iconForVerb:@"copy_rect"], @"keywords": @"ocr vision clipboard select text copy rect" },
+            @{ @"name": @"Copy All Text on Screen", @"command": @"screen copy", @"icon": [RCScreenActions iconForVerb:@"copy"], @"keywords": @"ocr vision clipboard all text copy" },
             @{ @"name": @"Accessibility Shortcut", @"command": @"accessibility shortcut", @"icon": ([UIImage systemImageNamed:@"accessibility"] ? @"accessibility" : @"figure.stand") }
         ],
         // Device Controls

@@ -3890,6 +3890,7 @@ static BOOL rc_action_shows_own_banner(NSString *cmd) {
     for (NSString *prefix in @[@"ha ", @"km ", @"mqtt ", @"audiomix", @"sneakycam", @"playlist ", @"play playlist ", @"shuffle playlist ", @"suffle playlist "]) {
         if ([cmd hasPrefix:prefix]) return YES;
     }
+    if ([cmd isEqualToString:@"screen copy rect"] || [cmd hasPrefix:@"screen copy rect "]) return YES;
     NSSet *exact = [NSSet setWithArray:@[@"queuealbum", @"queue album", @"queueartist", @"queue artist", @"shuffleall", @"shuffle all songs",
                                          @"suffle all songs", @"deletesong", @"delete song", @"delete current song"]];
     return [exact containsObject:cmd];

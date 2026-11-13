@@ -12,10 +12,22 @@
 // Text on the screen, read with Apple's text recognition (Vision, in SpringBoard), so any drawn
 // text counts, in any app. Never on SpringBoard's main thread (from it, these run on their own):
 // screen ocr [fast] [--json]: every line of text with its box in points
+// screen copy: every line of text on the screen to the clipboard (the reply is the text)
+// screen copy rect [SECONDS]: drag a box to copy text inside it (20 s default, 120 max)
 // screen find "Text": where the best match is
 // screen tap "Text": waits for the screen to settle, then taps it
 // screen wait "Text" [SECONDS]: waits until it shows and the screen has settled (default 10 s, at most 120)
 NSString *RCScreenCommand(NSString *cmd);
+
+// The screen as a picture at full pixels, for reading after someone has picked an area. Main thread.
+UIImage *RCScreenGrabImage(void);
+
+// Every line on the screen, one per line; nil with *error set. Never on the main thread.
+NSString *RCScreenAllText(NSString **error);
+
+// The text in `shot` that `rect` touches, whole lines so no word is cut, one per line; nil with
+// *error set. Never on the main thread.
+NSString *RCScreenTextInRect(UIImage *shot, CGRect rect, NSString **error);
 
 // Waits until the screen stops changing, at most `maxSeconds`: YES when it did. Not on the main
 // thread (returns NO at once there). *waited: how long it took.

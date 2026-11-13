@@ -2201,8 +2201,8 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
     if ([cmd hasPrefix:@"kill "]) return [NSString stringWithFormat:@"USER_APP:%@", [cmd substringFromIndex:5]];
     // Touch gesture prefix icons
     if ([cmd hasPrefix:@"gesture play"]) return @"hand.draw.fill";
-    NSString *screenVerb = nil;
-    if ([RCScreenActions parseCommand:cmd verb:&screenVerb text:NULL seconds:NULL]) return [RCScreenActions iconForVerb:screenVerb];
+    NSString *screenIcon = [RCScreenActions iconForCommand:cmd];
+    if (screenIcon) return screenIcon;
     if ([cmd hasPrefix:@"gesture record-toggle"]) return @"record.circle";
     if ([cmd hasPrefix:@"tap "]) return @"hand.tap.fill";
     if ([cmd hasPrefix:@"hold "]) return @"hand.point.up.left.fill";

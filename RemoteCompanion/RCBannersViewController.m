@@ -57,7 +57,7 @@ static BOOL RCHasOwnBanner(NSString *command) {
 
 // The picker's catalog, minus entries that don't run an action of their own
 static NSArray<NSArray<NSDictionary *> *> *RCBannerCatalog(NSArray<NSString *> **titlesOut) {
-    NSSet *skip = [NSSet setWithArray:@[@"__IF_CONDITION__", @"__REPEAT__", @"__REPEAT_WHILE__", @"__EXIT_REPEAT__", @"__WAIT_UNTIL__", @"__SET_VARIABLE__", @"__DELAY__", @"__STOP_TRIGGER__", @"__TOAST__", @"__NOTIFICATION__"]];
+    NSSet *skip = [NSSet setWithArray:@[@"__IF_CONDITION__", @"__REPEAT__", @"__REPEAT_WHILE__", @"__EXIT_REPEAT__", @"__WAIT_UNTIL__", @"__SET_VARIABLE__", @"__DELAY__", @"__STOP_TRIGGER__", @"__TOAST__", @"__NOTIFICATION__", @"screen copy rect"]];
     RCActionPickerViewController *picker = [[RCActionPickerViewController alloc] init];
     NSArray *catalog = [picker catalogSections];
     NSArray *titles = [picker catalogSectionTitles];

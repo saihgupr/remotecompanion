@@ -163,6 +163,8 @@ Matching ignores case: the same text first, then a line starting with it, then o
 | `screen tap "Wi-Fi"` | Waits for the screen to stop moving, then taps the text where it shows (Tap Text on Screen in the app). A home screen app's name is a label on iOS, not part of its button, so use `open_app` or `uiopen` for those |
 | `screen wait "Done" 10` | Waits up to 10 seconds for the text to show, then for the screen to stop moving (Wait for Text) |
 | `screen find "Wi-Fi"` | Where the text is, in points |
+| `screen copy` | Copies every line of text on the screen to the clipboard, one per line, and returns it (Copy All Text on Screen in the app) |
+| `screen copy rect [SECONDS]` | Grabs the screen, lets you drag a box over text with one finger, copies the touched lines to the clipboard, and returns them. Defaults to 20 seconds, at most 120 (Copy Text on Screen) |
 | `screen ocr` | Every line of text with its box in points (`--json` for JSON, `fast` for a quicker, rougher read) |
 
 The **Text on Screen** condition (in If and Wait Until) is true while the text shows.
