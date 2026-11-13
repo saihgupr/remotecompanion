@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **CLI help**: `rc help`, `rc -h` and `rc --help` print the full command reference grouped by area, and `rc help <word>` narrows it to matching commands. Running `rc` with no arguments now points at it instead of the old partial list.
+
 ## [4.4.0] - 2026-11-06
 
 ### Added
