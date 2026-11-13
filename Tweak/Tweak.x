@@ -17268,6 +17268,18 @@ static inline BOOL RC_InTopRegionMulti(CGPoint loc, UIInterfaceOrientation orien
     return (loc.y < threshold);
 }
 
+// The second finger of a two-finger top slide can start lower: hands rarely put both fingers
+// at the same height, and a lower finger would otherwise leave the slide to Control Center
+static inline BOOL RC_InTopRegionMultiLoose(CGPoint loc, UIInterfaceOrientation orientation, CGFloat S, CGFloat L) {
+    (void)S; (void)L;
+    CGFloat threshold = 150.0;
+    if (orientation == UIInterfaceOrientationPortrait) return (loc.y < threshold);
+    if (orientation == UIInterfaceOrientationPortraitUpsideDown) return (loc.y > L - threshold);
+    if (orientation == UIInterfaceOrientationLandscapeLeft) return (loc.x < threshold);
+    if (orientation == UIInterfaceOrientationLandscapeRight) return (loc.x > S - threshold);
+    return (loc.y < threshold);
+}
+
 static inline BOOL RC_InBottomRegionMulti(CGPoint loc, UIInterfaceOrientation orientation, CGFloat S, CGFloat L) {
     (void)S; (void)L;
     CGFloat threshold = 75.0;
@@ -17486,7 +17498,9 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
             BOOL p0Bottom = RC_InBottomRegionMulti(p0, orientation, S, L);
             BOOL p1Bottom = RC_InBottomRegionMulti(p1, orientation, S, L);
 
-            if (p0Top && p1Top && !g_twoFingerTopActive && !g_twoFingerTopTriggered) {
+            BOOL twoFingerTop = (p0Top && RC_InTopRegionMultiLoose(p1, orientation, S, L)) ||
+                                (p1Top && RC_InTopRegionMultiLoose(p0, orientation, S, L));
+            if (twoFingerTop && !g_twoFingerTopActive && !g_twoFingerTopTriggered) {
                 RC_SnapshotGestureOffsets();
                 if (g_statusBarHoldTimer) {
                     [g_statusBarHoldTimer invalidate];
