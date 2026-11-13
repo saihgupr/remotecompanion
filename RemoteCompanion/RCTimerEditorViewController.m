@@ -423,9 +423,10 @@ static void RCTimerInsertVariableText(UITextField *field, NSString *name) {
 
 - (void)saveTapped {
     [self.view endEditing:YES];
+    NSString *lbl = [self supportsTimerLabels] ? self.labelField.text : nil;
     RCTimerCommand *cmd = [[RCTimerCommand alloc] initWithAction:self.selectedAction
                                               durationExpression:(self.selectedAction == RCTimerActionStart ? self.durationField.text : nil)
-                                                           label:self.labelField.text];
+                                                           label:lbl];
     if (self.onSave) self.onSave([cmd string]);
     [self closeEditor];
 }
@@ -469,9 +470,16 @@ static void RCTimerInsertVariableText(UITextField *field, NSString *name) {
     [self updateSaveState];
 }
 
+- (BOOL)supportsTimerLabels {
+    return [[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:(NSOperatingSystemVersion){17, 0, 0}];
+}
+
 #pragma mark - UITableViewDataSource
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
+    if (![self supportsTimerLabels]) {
+        return self.selectedAction == RCTimerActionStart ? 2 : 1;
+    }
     return self.selectedAction == RCTimerActionStart ? 3 : 2;
 }
 
@@ -484,17 +492,22 @@ static void RCTimerInsertVariableText(UITextField *field, NSString *name) {
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     if (section == 0) return @"Action";
     if (self.selectedAction == RCTimerActionStart && section == 1) return @"Duration";
-    return @"Options";
+    if ([self supportsTimerLabels]) return @"Options";
+    return nil;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (self.selectedAction == RCTimerActionStart && section == 1) {
         return @"Tap a preset, spin the wheels, or type a duration (e.g. 20m, 1h30m, 45s, 20:00) or {variable}.";
     }
-    BOOL isLabelSection = (self.selectedAction == RCTimerActionStart && section == 2) ||
-                          (self.selectedAction != RCTimerActionStart && section == 1);
-    if (isLabelSection) {
-        return @"Runs a real Apple Clock timer synced with Lock Screen and Apple Watch. Optional labels name individual timers on iOS 17+.";
+    if ([self supportsTimerLabels]) {
+        BOOL isLabelSection = (self.selectedAction == RCTimerActionStart && section == 2) ||
+                              (self.selectedAction != RCTimerActionStart && section == 1);
+        if (isLabelSection) {
+            return @"Runs a real Apple Clock timer synced with Lock Screen and Apple Watch. Optional labels name individual timers on iOS 17+.";
+        }
+    } else if (self.selectedAction != RCTimerActionStart && section == 0) {
+        return @"Runs a real Apple Clock timer synced with Lock Screen and Apple Watch.";
     }
     return nil;
 }

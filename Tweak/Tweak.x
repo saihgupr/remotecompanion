@@ -14040,7 +14040,9 @@ static void start_web_server() {
                                         @"audiohandoff": @(is_audiohandoff_installed()),
                                         @"audiostream": @(is_audiostream_installed()),
                                         @"audiostream_running": @(is_audiostreamerd_running()),
-                                        @"home_button": @(rc_has_home_button())
+                                        @"home_button": @(rc_has_home_button()),
+                                        @"multi_timer": @([[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:(NSOperatingSystemVersion){17, 0, 0}]),
+                                        @"ios17": @([[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:(NSOperatingSystemVersion){17, 0, 0}])
                                     };
                                     NSData *jsonData = [NSJSONSerialization dataWithJSONObject:caps options:0 error:nil];
                                     NSString *jsonStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];

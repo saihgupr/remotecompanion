@@ -3006,15 +3006,17 @@
         <div class="var-ed-note">Enter a duration like 20m, 1h30m, 45s, 20:00, or a {variable}.</div>
       </div>
 
-      <div class="toast-section-header">Options</div>
-      <div class="var-ed-card">
-        <div class="var-ed-row">
-          <span class="var-ed-label">Label</span>
-          <input class="var-ed-input" id="timer-label-input" type="text" placeholder="Optional (e.g. Nap)" autocomplete="off" autocorrect="off" autocapitalize="words" spellcheck="false" style="text-align:right;">
-          <button type="button" class="var-ed-insert" title="Insert Variable" aria-label="Insert Variable" onclick="timerInsertVariable(event, 'timer-label-input')"><i class="f7-icons">plus_circle</i></button>
+      <div id="timer-options-section">
+        <div class="toast-section-header">Options</div>
+        <div class="var-ed-card">
+          <div class="var-ed-row">
+            <span class="var-ed-label">Label</span>
+            <input class="var-ed-input" id="timer-label-input" type="text" placeholder="Optional (e.g. Nap)" autocomplete="off" autocorrect="off" autocapitalize="words" spellcheck="false" style="text-align:right;">
+            <button type="button" class="var-ed-insert" title="Insert Variable" aria-label="Insert Variable" onclick="timerInsertVariable(event, 'timer-label-input')"><i class="f7-icons">plus_circle</i></button>
+          </div>
         </div>
+        <div class="var-ed-note">Optional labels name individual timers on iOS 17+.</div>
       </div>
-      <div class="var-ed-note">Optional labels create or reuse named timers on iOS 17+.</div>
     </div>
 
     <div class="dialog-btns">
@@ -6482,6 +6484,9 @@ function openTimerDialog(editIdx) {
   document.getElementById('timer-dialog-title').textContent = g_editingTimerIdx !== null ? 'Edit Timer' : 'Timer';
   document.getElementById('timer-duration-input').value = parsed.duration || '15m';
   document.getElementById('timer-label-input').value = parsed.label || '';
+  const hasMultiTimer = !!(serverCapabilities && (serverCapabilities.multi_timer || serverCapabilities.ios17));
+  const optSec = document.getElementById('timer-options-section');
+  if (optSec) optSec.style.display = hasMultiTimer ? '' : 'none';
   const secs = (parsed.duration && !parsed.duration.includes('{')) ? parseTimerDurationSeconds(parsed.duration) : 900;
   syncTimerHmsFromSeconds(secs > 0 ? secs : 900);
   setTimerDialogMode(mode);
@@ -6497,7 +6502,8 @@ function closeTimerDialog() {
 
 function saveTimerDialog() {
   let command = '';
-  const label = document.getElementById('timer-label-input').value.trim();
+  const hasMultiTimer = !!(serverCapabilities && (serverCapabilities.multi_timer || serverCapabilities.ios17));
+  const label = hasMultiTimer ? document.getElementById('timer-label-input').value.trim() : '';
   if (g_timerMode === 'start') {
     let dur = document.getElementById('timer-duration-input').value.trim();
     if (!dur) return;

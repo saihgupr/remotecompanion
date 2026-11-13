@@ -198,10 +198,11 @@ if [[ "$1" == "timer" ]]; then
         echo "Usage:"
         echo "  rc timer <duration> [--label \"Name\"]   (e.g. 20m, 1h30m, 45s, 20:00, 1200)"
         echo "  rc timer start <duration> [--label \"Name\"]"
-        echo "  rc timer pause [--label \"Name\"]"
-        echo "  rc timer resume [--label \"Name\"]"
-        echo "  rc timer stop [--label \"Name\"]"
-        echo "  rc timer status [--label \"Name\"]"
+        echo "  rc timer pause"
+        echo "  rc timer resume"
+        echo "  rc timer stop"
+        echo "  rc timer status"
+        echo "  (Note: --label naming requires iOS 17+)"
     }
 
     if [ "$#" -eq 0 ] || [[ "$1" == "--help" || "$1" == "-h" ]]; then
