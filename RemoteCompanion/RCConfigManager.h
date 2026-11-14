@@ -107,6 +107,20 @@
 - (NSString *)saveAppTriggerWithPrefix:(NSString *)prefix names:(NSArray<NSString *> *)names bundleIds:(NSArray<NSString *> *)bundleIds replacing:(NSString *)oldKey;
 - (void)renameTrigger:(NSString *)triggerKey toName:(NSString *)newName;
 - (NSArray<NSString *> *)nfcTriggerKeys;
+// The passcode Unlock Device and Lock Toggle use is kept in the tweak's Keychain item, not in
+// the config: "unlock saved" and "lock-toggle saved" unlock with it. Completions run on the
+// main queue.
++ (void)saveUnlockPasscode:(NSString *)passcode completion:(void (^)(NSString *error))completion;
++ (void)checkUnlockPasscodeSaved:(void (^)(BOOL saved))completion;
++ (void)forgetUnlockPasscode:(void (^)(NSString *error))completion;
+// Whether a passcode was saved when the app last asked (YES until it has), so "unlock saved"
+// and "lock-toggle saved" can read "(Ask for Passcode)" without one
++ (BOOL)unlockPasscodeSaved;
+// Whether an Unlock Device or Lock Toggle action will enter a passcode (its own, or the saved one)
++ (BOOL)commandUnlocksWithPasscode:(NSString *)command;
+// The passcode an older "unlock 1234" or "lock-toggle 1234" action holds in plain text (nil for
+// "saved", none, or another command), with the command it belongs to ("unlock" or "lock-toggle")
++ (NSString *)plainPasscodeInCommand:(NSString *)command base:(NSString **)base;
 - (NSArray<NSDictionary *> *)notificationTriggers;
 - (void)setNotificationTriggers:(NSArray<NSDictionary *> *)triggers;
 - (void)saveConfig;

@@ -3,6 +3,7 @@
 #import <sys/sysctl.h>
 #import <LocalAuthentication/LocalAuthentication.h>
 #import <notify.h>
+#import "RCServerClient.h"
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
@@ -51,6 +52,145 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
 - (void)handleAppDidBecomeActive:(NSNotification *)note {
     [self loadConfig];
     [[NSNotificationCenter defaultCenter] postNotificationName:RCConfigChangedNotification object:nil];
+}
+
+#pragma mark - Saved unlock passcode
+
+static BOOL g_unlockPasscodeSaved = YES;
+
++ (BOOL)unlockPasscodeSaved {
+    return g_unlockPasscodeSaved;
+}
+
++ (void)saveUnlockPasscode:(NSString *)passcode completion:(void (^)(NSString *error))completion {
+    NSString *command = [@"unlock-passcode set " stringByAppendingString:passcode ?: @""];
+    [[RCServerClient sharedClient] executeCommand:command completion:^(NSString *output, NSError *error) {
+        NSString *reply = [output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if ([reply isEqualToString:@"saved"]) {
+            g_unlockPasscodeSaved = YES;
+            if (completion) completion(nil);
+            return;
+        }
+        NSString *message = error.localizedDescription;
+        if (!message && [reply hasPrefix:@"Error: "]) message = [reply substringFromIndex:7];
+        if (!message.length) message = @"The tweak didn't answer. Is RemoteCompanion installed and SpringBoard resprung?";
+        if (completion) completion(message);
+    }];
+}
+
++ (void)checkUnlockPasscodeSaved:(void (^)(BOOL saved))completion {
+    [[RCServerClient sharedClient] executeCommand:@"unlock-passcode" completion:^(NSString *output, NSError *error) {
+        NSString *reply = [output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        // No answer (tweak not running) leaves what was known
+        if ([reply isEqualToString:@"set"]) g_unlockPasscodeSaved = YES;
+        else if ([reply isEqualToString:@"not set"]) g_unlockPasscodeSaved = NO;
+        if (completion) completion([reply isEqualToString:@"set"]);
+    }];
+}
+
++ (void)forgetUnlockPasscode:(void (^)(NSString *error))completion {
+    [[RCServerClient sharedClient] executeCommand:@"unlock-passcode forget" completion:^(NSString *output, NSError *error) {
+        NSString *reply = [output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if ([reply isEqualToString:@"forgotten"]) {
+            g_unlockPasscodeSaved = NO;
+            if (completion) completion(nil);
+            return;
+        }
+        if (completion) completion(error.localizedDescription ?: @"The tweak didn't answer. Is RemoteCompanion installed and SpringBoard resprung?");
+    }];
+}
+
++ (BOOL)commandUnlocksWithPasscode:(NSString *)command {
+    if ([self plainPasscodeInCommand:command base:NULL]) return YES;
+    NSString *trimmed = [[command stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString];
+    BOOL usesSaved = [trimmed isEqualToString:@"unlock saved"] || [trimmed isEqualToString:@"lock-toggle saved"] || [trimmed isEqualToString:@"lock toggle saved"];
+    return usesSaved && g_unlockPasscodeSaved;
+}
+
++ (NSString *)plainPasscodeInCommand:(NSString *)command base:(NSString **)base {
+    if (![command isKindOfClass:[NSString class]]) return nil;
+    NSString *trimmed = [command stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    NSString *found = nil;
+    NSUInteger length = 0;
+    if ([trimmed hasPrefix:@"lock-toggle "] || [trimmed hasPrefix:@"lock toggle "]) {
+        found = @"lock-toggle";
+        length = 12;
+    } else if ([trimmed hasPrefix:@"unlock "]) {
+        found = @"unlock";
+        length = 7;
+    }
+    if (!found) return nil;
+    NSString *pin = [[trimmed substringFromIndex:length] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (!pin.length || [pin isEqualToString:@"saved"]) return nil;
+    if (base) *base = found;
+    return pin;
+}
+
+// Each plain-text passcode in object (or, given replacePin, object with the actions holding
+// that passcode changed to "unlock saved" / "lock-toggle saved"; *changed set when any were)
+static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *replacePin, BOOL *changed) {
+    if ([object isKindOfClass:[NSString class]]) {
+        NSString *base = nil;
+        NSString *pin = [RCConfigManager plainPasscodeInCommand:object base:&base];
+        if (!pin) return object;
+        [pins addObject:pin];
+        if (!replacePin || ![pin isEqualToString:replacePin]) return object;
+        if (changed) *changed = YES;
+        return [base stringByAppendingString:@" saved"];
+    }
+    if ([object isKindOfClass:[NSDictionary class]]) {
+        NSMutableDictionary *copy = replacePin ? [NSMutableDictionary dictionary] : nil;
+        [(NSDictionary *)object enumerateKeysAndObjectsUsingBlock:^(id key, id value, BOOL *stop) {
+            id walked = RCLockTogglePasscodeWalk(value, pins, replacePin, changed);
+            if (copy) copy[key] = walked;
+        }];
+        return copy ?: object;
+    }
+    if ([object isKindOfClass:[NSArray class]]) {
+        NSMutableArray *copy = replacePin ? [NSMutableArray array] : nil;
+        for (id value in (NSArray *)object) {
+            id walked = RCLockTogglePasscodeWalk(value, pins, replacePin, changed);
+            if (copy) [copy addObject:walked];
+        }
+        return copy ?: object;
+    }
+    return object;
+}
+
+// Older versions kept the passcode in plain text in the action. It's moved to the
+// Keychain once, when there's one passcode (with more, each is left as it is).
+- (void)movePlainPasscodesToKeychain {
+    static BOOL moving;
+    if (moving) return;
+    static dispatch_once_t checked;
+    dispatch_once(&checked, ^{ [RCConfigManager checkUnlockPasscodeSaved:nil]; });
+    NSMutableSet *pins = [NSMutableSet set];
+    RCLockTogglePasscodeWalk(_config, pins, nil, NULL);
+    if (pins.count != 1) {
+        if (pins.count > 1) NSLog(@"[RCConfigManager] Unlock actions hold different passcodes; leaving them in place");
+        return;
+    }
+    moving = YES;
+    NSString *pin = pins.anyObject;
+    [RCConfigManager saveUnlockPasscode:pin completion:^(NSString *error) {
+        moving = NO;
+        if (error) {
+            NSLog(@"[RCConfigManager] Passcode not moved to the Keychain: %@", error);
+            return;
+        }
+        BOOL anyChanged = NO;
+        for (NSString *key in [self->_config allKeys]) {
+            BOOL changed = NO;
+            id walked = RCLockTogglePasscodeWalk(self->_config[key], [NSMutableSet set], pin, &changed);
+            if (changed) {
+                self->_config[key] = walked;
+                anyChanged = YES;
+            }
+        }
+        if (!anyChanged) return;
+        [self saveConfig];
+        NSLog(@"[RCConfigManager] Passcode moved to the Keychain");
+    }];
 }
 
 - (void)loadConfig {
@@ -133,6 +273,7 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
         if (needsSave) {
             [self saveConfig];
         }
+        [self movePlainPasscodesToKeychain];
         
         // Auto-add tcpEnabled if missing
         if (_config[@"tcpEnabled"] == nil) {
@@ -1413,9 +1554,10 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         @"snapper instant": @"Snapper: Instant Snap",
         @"snapper close": @"Snapper: Close All",
         @"lock": @"Lock Device",
-        @"unlock": @"Unlock Device",
-        @"lock toggle": @"Lock Toggle",
-        @"lock-toggle": @"Lock Toggle",
+        @"unlock": @"Unlock Device (Ask for Passcode)",
+        @"lock toggle": @"Lock Toggle (Ask for Passcode)",
+        @"lock-toggle": @"Lock Toggle (Ask for Passcode)",
+        @"unlock-passcode forget": @"Forget Saved Passcode",
         @"lock status": @"Lock Status",
         @"dnd on": @"Do Not Disturb On",
         @"dnd off": @"Do Not Disturb Off",
@@ -1598,9 +1740,9 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         } else if ([cmd hasPrefix:@"delay "]) {
             result = [NSString stringWithFormat:@"Delay %@s", [cmd substringFromIndex:6]];
         } else if ([cmd hasPrefix:@"unlock "]) {
-            result = @"Unlock Device (Passcode)";
+            result = [RCConfigManager commandUnlocksWithPasscode:cmd] ? @"Unlock Device (Saved Passcode)" : @"Unlock Device (Ask for Passcode)";
         } else if ([cmd hasPrefix:@"lock-toggle "] || [cmd hasPrefix:@"lock toggle "]) {
-            result = @"Lock Toggle (Passcode)";
+            result = [RCConfigManager commandUnlocksWithPasscode:cmd] ? @"Lock Toggle (Saved Passcode)" : @"Lock Toggle (Ask for Passcode)";
         } else if ([cmd hasPrefix:@"stop trigger "]) {
             result = [NSString stringWithFormat:@"Stop %@", [self displayNameForTrigger:[cmd substringFromIndex:13]]];
         } else if ([cmd hasPrefix:@"bt connect "] || [cmd hasPrefix:@"bluetooth connect "]) {
@@ -2007,6 +2149,7 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         @"unlock": @"lock.open.fill",
         @"lock toggle": @"lock.circle",
         @"lock-toggle": @"lock.circle",
+        @"unlock-passcode forget": @"lock.slash",
         @"lock status": @"lock.circle",
         @"dnd on": @"moon.fill",
         @"dnd off": @"moon",
