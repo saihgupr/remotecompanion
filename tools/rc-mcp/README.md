@@ -49,9 +49,12 @@ For a client with a JSON config:
 | `rc_state` | wifi, bluetooth, cellular, airplane, location, battery, low power, appearance, DND, focus and more, in one read-only call |
 | `rc_command` | Any RemoteCompanion command |
 | `rc_trigger` | `list`, `get`, `run`, `stop`, `save`, `delete`, `enable` |
-| `rc_config` | `get`, `backup`, `restore` |
+| `rc_config` | `get`, `backup`, `restore`, `set` |
 | `rc_sequence` | `validate`: check a trigger's actions before saving them |
 | `rc_deeplink` | Open a RemoteCompanion screen with `remotecompanion://` |
+| `rc_dev` | `logs`, `runs`, `history`, `file`, `screenshot`: read-only debugging |
+| `rc_testkit` | The app's Test Kit: `info`, `probe`, `run`, `journal`, `mark`, `suites`, `suite`, `report`, `reports`, `snapshot`, `restore` |
+| `rc_addon` | Add-on development: `list`, `validate`, `parse`, `trace`, `reload`, `enable`, `disable`, `settings`, `set` |
 | `status` | Screen on or off, locked, the app in front, the RemoteCompanion version, and the battery |
 | `look` | A screenshot with a grid labelled in screen points (half size by default) |
 | `read_text` | The screen's text once it stops changing, a line each with its position in points |
@@ -100,6 +103,31 @@ when you know the key is right.
 
 `rc_deeplink` opens a RemoteCompanion screen (`settings`, `ha`, `trigger?key=...`). It brings the app
 to the front, so it changes what is on screen.
+
+`rc_config set` changes one top-level key (`key`, `value`). It refuses a key that isn't there already
+unless `create: true`, lists the current keys when it refuses, backs the config up first, and reads it
+back to check the phone kept the value. It never changes a nested field: use `rc_trigger save` for the
+inside of a trigger.
+
+## Debugging and testing
+
+- `rc_dev` reads the phone's log (`logs`: the last 150 lines, with `lines` and a case-insensitive
+  `grep`), the runs going (`runs`), the runs that ended (`history`), a file off the phone (`file`: as
+  text, or its size and a base64 head when it isn't UTF-8), and saves a full-size screenshot on this
+  Mac (`screenshot`). The Test Kit journal is separate: use `rc_testkit journal`.
+- `rc_testkit` is the app's own Test Kit: `info` and `probe` (state), `run` (runs a command now),
+  `journal` (`since`, `type`, `limit`), `mark` (annotates the journal), `suites` and `suite` (a suite
+  can take up to 5 minutes), `report` and `reports` (redacted by default; `redact: false` gives the raw
+  report), `snapshot`, and `restore` (puts the device's state back). `run` and `restore` change the
+  phone.
+- `rc_addon` is the add-on development loop: `list`, `validate` (a local file is copied to
+  `/var/mobile/tmp`, checked, and removed; without a local file the path is read on the phone),
+  `parse` (how a command reads, without running it), `trace` (runs the command and says what each step
+  did or skipped), `reload`, `enable`, `disable`, `settings`, and `set`.
+
+Logs, journal events and reports can hold personal data: messages, app names, text on screen. They go
+to the assistant you connect. `rc_dev screenshot` saves its copy on this Mac at
+`~/.local/share/rc-mcp/screenshots` (mode 0600) unless `path` gives another place.
 
 ## Locked phones
 `wake` turns the screen on and unlocks a phone without a passcode. For one with a passcode, the person holding it can enter the code in Settings › Diagnostics › Test Kit. The phone keeps it for a while and uses it only for requests made on the phone itself, such as this server's over SSH. The code is never sent to the assistant.

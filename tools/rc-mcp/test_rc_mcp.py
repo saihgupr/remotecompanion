@@ -15,7 +15,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SERVER = os.path.join(HERE, "rc_mcp.py")
 TIMEOUT = 20
 
-NEW_TOOLS = ["rc_help", "rc_state", "rc_trigger", "rc_config", "rc_sequence", "rc_deeplink"]
+NEW_TOOLS = ["rc_help", "rc_state", "rc_trigger", "rc_config", "rc_sequence", "rc_deeplink",
+             "rc_dev", "rc_testkit", "rc_addon"]
 
 
 class Server:
@@ -83,6 +84,7 @@ def main():
         # 2. tools/list has the new tools, with the schemas they need
         tools = (server.send("tools/list", {}).get("result") or {}).get("tools") or []
         by_name = {tool["name"]: tool for tool in tools}
+        assert len(tools) == 21, "tools/list should have 21 tools (got %d)" % len(tools)
         missing = [name for name in NEW_TOOLS if name not in by_name]
         assert not missing, "tools/list is missing %s" % ", ".join(missing)
         for name in NEW_TOOLS:
@@ -91,6 +93,8 @@ def main():
         assert "phone" not in by_name["rc_sequence"]["inputSchema"]["properties"], "rc_sequence shouldn't take a phone"
         assert by_name["rc_command"]["inputSchema"]["required"] == ["command"], "rc_command should require command"
         assert "enum" in by_name["rc_trigger"]["inputSchema"]["properties"]["action"], "rc_trigger action needs an enum"
+        assert "set" in by_name["rc_config"]["inputSchema"]["properties"]["action"]["enum"], \
+            "rc_config action should include set"
         checks += 1
 
         # 2b. The six touch tools are one gesture tool, with a kind enum and its points checked first
@@ -105,6 +109,18 @@ def main():
         text, failed = server.tool("gesture", {"kind": "swipe"})
         assert failed, "a gesture with no points should fail:\n%s" % text
         assert text == "kind=swipe needs x1, y1, x2, y2.", "a gesture with no points should name them:\n%s" % text
+        checks += 1
+
+        # 2c. The debugging tools check their arguments before a phone is contacted
+        for name, arguments, expected in (
+                ("rc_dev", {}, "logs, runs, history, file, screenshot"),
+                ("rc_testkit", {"action": "bogus"}, "info, probe"),
+                ("rc_addon", {"action": "validate"}, "validate needs file"),
+                ("rc_config", {"action": "set", "value": "x"}, "set needs key")):
+            text, failed = server.tool(name, arguments)
+            assert failed, "%s%s should fail offline:\n%s" % (name, arguments, text)
+            assert expected in text, "%s should say %r:\n%s" % (name, expected, text)
+            assert "No phones set up" not in text, "%s reached the phone lookup first:\n%s" % (name, text)
         checks += 1
 
         # 3. rc_help with no query: categories and the useful explicit setters, offline

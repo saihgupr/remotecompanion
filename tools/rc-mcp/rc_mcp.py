@@ -15,6 +15,7 @@ Settings (environment variables):
   RC_SSH_PORT  SSH port (default: 22)
 """
 
+import base64
 import difflib
 import json
 import os
@@ -23,7 +24,7 @@ import shlex
 import subprocess
 import sys
 import time
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import quote, urlencode, urlsplit
 
 VERSION = "1.0.0"
 PROTOCOL = "2025-06-18"
@@ -157,6 +158,50 @@ def quoted(text):
     return '"%s"' % str(text).replace("\n", " ")
 
 
+def number_arg(args, name, default, low, high):
+    """A number argument, kept between low and high"""
+    raw = args.get(name)
+    if raw is None:
+        return default
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        raise ToolError("%s must be a number." % name)
+    return min(max(value, low), high)
+
+
+def int_arg(args, name, default, low, high):
+    return int(number_arg(args, name, default, low, high))
+
+
+def flag(args, name, default):
+    """A true/false argument, from true/false, 1/0 or on/off; the default when missing"""
+    value = args.get(name)
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() not in ("", "0", "false", "no", "off")
+
+
+def pretty(value):
+    return json.dumps(value, indent=1, sort_keys=True)
+
+
+def query_path(path, params):
+    """A Web UI path with its query string, spaces as %20: NSURLComponents doesn't read + as one"""
+    pairs = [(key, str(value)) for key, value in params if value is not None]
+    return path + ("?" + urlencode(pairs, quote_via=quote) if pairs else "")
+
+
+def decoded_base64(text):
+    """The bytes in a base64 reply, or ToolError when it isn't base64"""
+    try:
+        return base64.b64decode("".join(text.split()), validate=True)
+    except ValueError:
+        raise ToolError("The phone's reply isn't base64: %s" % text[:120])
+
+
 # ---- the phone's own Web UI ----
 # The request is made on the phone, over SSH, so 127.0.0.1 is local and needs no API token. Nothing
 # here changes the device by itself: the callers decide, and only after backing the config up.
@@ -164,15 +209,15 @@ def quoted(text):
 WEB_UI = "http://127.0.0.1:8080"
 
 
-def web(phone, path, body=None, timeout=40):
-    """GET (body None) or POST `body` to the phone's Web UI; returns the parsed JSON reply. Raises
-    ToolError with the HTTP body when the Web UI refused, so the message says why."""
-    seconds = 10 if body is None else 15
+def web_reply(phone, path, body=None, timeout=40, seconds=None):
+    """The phone's Web UI reply as text and its HTTP status. GET when body is None, else POST."""
+    if seconds is None:
+        seconds = 10 if body is None else 15
     command = "curl -s -m %d -w '\\n%%{http_code}'" % seconds
     if body is not None:
         # The body goes over stdin: a whole config on a command line would be split and logged
         command += " -X POST -H 'Content-Type: application/json' --data-binary @-"
-    command += " " + WEB_UI + path
+    command += " " + shlex.quote(WEB_UI + path)
     if body is None:
         code, out, err = ssh(phone, command, timeout=timeout)
     else:
@@ -192,12 +237,24 @@ def web(phone, path, body=None, timeout=40):
                         "Settings > Web UI.)" % (reply or "no reply"))
     if status >= 400:
         raise ToolError("HTTP %d from %s: %s" % (status, path, reply or "(no body)"))
+    return status, reply
+
+
+def web(phone, path, body=None, timeout=40, seconds=None):
+    """GET (body None) or POST `body` to the phone's Web UI; returns the parsed JSON reply. Raises
+    ToolError with the HTTP body when the Web UI refused, so the message says why."""
+    _, reply = web_reply(phone, path, body, timeout, seconds)
     if not reply:
         return {}
     try:
         return json.loads(reply)
     except ValueError:
         raise ToolError("The phone's Web UI sent something that isn't JSON: %s" % reply[:400])
+
+
+def web_raw(phone, path, timeout=40):
+    """GET a Web UI path as text, without JSON parsing (the log)"""
+    return web_reply(phone, path, timeout=timeout)[1]
 
 
 def web_config(phone):
@@ -1189,6 +1246,15 @@ def trigger_enable(phone, args):
 
 def t_rc_config(args):
     action = str(args.get("action") or "").strip().lower()
+    if action not in ("get", "backup", "restore", "set"):
+        raise ToolError("action must be get, backup, restore or set (got '%s')." % (action or "nothing"))
+    if action == "set":
+        key = str(args.get("key") or "").strip()
+        if not key:
+            raise ToolError("set needs key: the top-level config key to change (action=get lists them).")
+        if "value" not in args:
+            raise ToolError("set needs value: the JSON value to put there (a string, number, true/false, array or object).")
+        return config_set(phone_for(args.get("phone")), args, key)
     phone = phone_for(args.get("phone"))
     if action == "get":
         config = web_config(phone)
@@ -1228,7 +1294,31 @@ def t_rc_config(args):
                             % (len(missing), ", ".join(missing[:5]), backup))
         return ("Restored %d triggers from %s.\nThe config before the restore: %s\nRead back from the phone: the "
                 "triggers are there." % (len(incoming["triggers"]), path, backup))
-    raise ToolError("action must be get, backup or restore (got '%s')." % (action or "nothing"))
+
+
+def config_set(phone, args, key):
+    """One top-level config key, changed after a backup and read back"""
+    config = web_config(phone)
+    existed = key in config
+    if not existed and not args.get("create"):
+        raise ToolError("'%s' isn't a top-level config key, so set would add it. Pass create true to add it. "
+                        "Current keys: %s." % (key, ", ".join(sorted(config))))
+    old = config.get(key)
+    backup = save_backup(config)
+    config[key] = args["value"]
+    web(phone, "/api/config", json.dumps(config))
+    after = web_config(phone)
+    sent = json.dumps(args["value"], sort_keys=True)
+    if not isinstance(after, dict) or key not in after or json.dumps(after.get(key), sort_keys=True) != sent:
+        raise ToolError("The phone's '%s' doesn't match what was sent. The config before the write is at %s."
+                        % (key, backup))
+
+    def short(value):
+        text = json.dumps(value, sort_keys=True)
+        return text if len(text) <= 160 else text[:157] + "..."
+
+    return ("%s: %s -> %s\nBackup of the config before the write: %s\nRead back from the phone: it matches."
+            % (key, short(old) if existed else "(missing)", short(after.get(key)), backup))
 
 
 def t_rc_sequence(args):
@@ -1252,6 +1342,292 @@ def t_rc_sequence(args):
     if warnings:
         lines.append("Warnings:\n" + "\n".join("- " + w for w in warnings))
     return "\n".join(lines)
+
+
+# ---- debugging, the app's Test Kit, and add-ons ----
+
+DEV_ACTIONS = ("logs", "runs", "history", "file", "screenshot")
+TESTKIT_ACTIONS = ("info", "probe", "run", "journal", "mark", "suites", "suite", "report", "reports",
+                   "snapshot", "restore")
+ADDON_ACTIONS = ("list", "validate", "parse", "trace", "reload", "enable", "disable", "settings", "set")
+
+
+def dev_logs(phone, args):
+    """The phone's log, filtered and cut to the last lines"""
+    body = web_raw(phone, "/api/logs")
+    try:
+        parsed = json.loads(body)
+    except ValueError:
+        parsed = None
+    if isinstance(parsed, dict) and isinstance(parsed.get("logs"), str):
+        body = parsed["logs"]  # the Web UI sends {"logs": ...}; a plain body is used as it is
+    lines = body.splitlines()
+    if not lines:
+        return "The phone's log is empty."
+    wanted = str(args.get("grep") or "")
+    if wanted:
+        lines = [line for line in lines if wanted.lower() in line.lower()]
+        if not lines:
+            return "No log lines contain '%s' (the phone keeps its last 150 lines)." % wanted
+    count = int_arg(args, "lines", 80, 1, 150)
+    selected = lines[-count:]
+    header = "Log%s: last %d of %d line%s shown." % (" matching '%s'" % wanted if wanted else "",
+                                                    len(selected), len(lines), "" if len(lines) == 1 else "s")
+    return "\n".join([header] + selected)
+
+
+def dev_file(phone, args):
+    """A file off the phone: its text, or its size and a base64 head when it isn't UTF-8"""
+    path = str(args.get("path") or "").strip()
+    if not path:
+        raise ToolError("file needs path: a file on the phone.")
+    if "\n" in path or "\r" in path:
+        raise ToolError("A path can't contain a newline.")
+    code, out, err = ssh(phone, rc("read file " + path), timeout=40)
+    text = "\n".join(t for t in (out, err) if t).strip()
+    if code != 0 or not text or text.startswith("Error:"):
+        raise ToolError(text or "Couldn't read %s (exit %d)." % (path, code))
+    data = decoded_base64(text)
+    limit = int_arg(args, "max_bytes", 65536, 1, 1048576)
+    total = len(data)
+    truncated = total > limit
+    shown = data[:limit]
+    text = None
+    while True:
+        try:
+            text = shown.decode("utf-8")
+            break
+        except UnicodeDecodeError as e:
+            if truncated and len(shown) > 1 and e.start >= len(shown) - 3:
+                shown = shown[:-1]  # the cut fell in the middle of a character
+                continue
+            break
+    if text is None:
+        return ("%s is %d bytes and isn't UTF-8 text%s. First %d bytes as base64:\n%s"
+                % (path, total, ", so only its head is shown" if truncated else "",
+                   len(shown), base64.b64encode(shown).decode("ascii")))
+    if truncated:
+        text += "\n\n(%d of %d bytes shown: raise max_bytes for more.)" % (len(shown), total)
+    return text
+
+
+def dev_screenshot(phone, args):
+    """A full-size screenshot saved on this Mac"""
+    device = "/var/mobile/tmp/rc-mcp-dev-shot.jpg"
+    scale = number_arg(args, "scale", 1, 0.1, 1)
+    quality = number_arg(args, "quality", 0.9, 0.1, 1)
+    steps = [rc("screen capture %s %g %g" % (device, scale, quality)),
+             "echo __rc_shot__; base64 < " + device]
+    code, out, err = ssh(phone, "; ".join(steps), timeout=60)
+    reply, _, encoded = out.partition("__rc_shot__")
+    reply = reply.strip()
+    encoded = "".join(encoded.split())
+    if code != 0 or reply.startswith("Error") or not encoded:
+        raise ToolError("Couldn't take a screenshot: %s" % (reply or err or "no reply"))
+    jpeg = decoded_base64(encoded)
+    local = str(args.get("path") or "").strip()
+    if local:
+        target = os.path.expanduser(local)
+    else:
+        folder = os.path.expanduser("~/.local/share/rc-mcp/screenshots")
+        stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+        target = os.path.join(folder, "shot-%s.jpg" % stamp)
+        n = 1
+        while os.path.exists(target):
+            n += 1
+            target = os.path.join(folder, "shot-%s-%d.jpg" % (stamp, n))
+    try:
+        folder = os.path.dirname(target)
+        if folder:
+            os.makedirs(folder, mode=0o700, exist_ok=True)
+        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(jpeg)
+        os.chmod(target, 0o600)
+    except OSError as e:
+        raise ToolError("Can't save the screenshot as %s: %s" % (target, e))
+    return "Screenshot saved to %s (%d bytes).\n%s" % (target, len(jpeg), reply)
+
+
+def t_rc_dev(args):
+    action = str(args.get("action") or "").strip().lower()
+    if action not in DEV_ACTIONS:
+        raise ToolError("action must be %s (got '%s')." % (", ".join(DEV_ACTIONS), action or "nothing"))
+    phone = phone_for(args.get("phone"))
+    if action == "logs":
+        return dev_logs(phone, args)
+    if action == "file":
+        return dev_file(phone, args)
+    if action == "screenshot":
+        return dev_screenshot(phone, args)
+    reply = web(phone, "/api/running" if action == "runs" else "/api/history")
+    rows = reply if isinstance(reply, list) else []
+    if action == "runs":
+        return "No runs going." if not rows else "%d run%s going:\n%s" % (
+            len(rows), "" if len(rows) == 1 else "s", pretty(rows))
+    return "No runs in the history." if not rows else "Last %d run%s that ended:\n%s" % (
+        len(rows), "" if len(rows) == 1 else "s", pretty(rows))
+
+
+def t_rc_testkit(args):
+    action = str(args.get("action") or "").strip().lower()
+    if action not in TESTKIT_ACTIONS:
+        raise ToolError("action must be %s (got '%s')." % (", ".join(TESTKIT_ACTIONS), action or "nothing"))
+    phone = phone_for(args.get("phone"))
+    if action in ("info", "probe", "suites", "reports", "snapshot"):
+        return pretty(web(phone, "/api/testkit/" + action))
+    if action == "run":
+        command = str(args.get("command") or "").strip()
+        if not command:
+            raise ToolError("run needs command: the RemoteCompanion command to run on the phone.")
+        reply = web(phone, query_path("/api/testkit/run", [("cmd", command)]), body="")
+        if isinstance(reply, dict) and reply.get("error"):
+            raise ToolError(str(reply["error"]))
+        output = reply.get("output") if isinstance(reply, dict) else None
+        ms = reply.get("ms") if isinstance(reply, dict) else None
+        return ("Ran it on the phone (%s ms). Output:\n%s"
+                % ("%.0f" % ms if isinstance(ms, (int, float)) else "?",
+                   output if output else "(no output)"))
+    if action == "journal":
+        since = int_arg(args, "since", 0, 0, 10 ** 9)
+        params = [("since", since), ("type", args.get("type") or None),
+                  ("limit", int_arg(args, "limit", 80, 1, 1000))]
+        reply = web(phone, query_path("/api/testkit/journal", params))
+        events = reply.get("events") if isinstance(reply, dict) else None
+        if not isinstance(events, list):
+            raise ToolError("The Test Kit sent no journal events.")
+        if not events:
+            return "No new journal events since seq %d." % since
+        lines = ["%d event%s since seq %d (next: %s, session: %s)."
+                 % (len(events), "" if len(events) == 1 else "s", since, reply.get("next"), reply.get("session"))]
+        for event in events:
+            if not isinstance(event, dict):
+                lines.append(json.dumps(event, sort_keys=True))
+                continue
+            rest = dict(event)
+            seq = rest.pop("seq", "?")
+            kind = rest.pop("type", "?")
+            lines.append("%s %s %s" % (seq, kind, json.dumps(rest, sort_keys=True) if rest else ""))
+        return "\n".join(lines)
+    if action == "mark":
+        label = str(args.get("label") or "").strip()
+        if not label:
+            raise ToolError("mark needs label: the note to put in the journal.")
+        reply = web(phone, query_path("/api/testkit/mark", [("label", label)]), body="")
+        return "Marked the journal at seq %s: %s" % (reply.get("seq") if isinstance(reply, dict) else "?",
+                                                    label)
+    if action == "suite":
+        name = str(args.get("name") or "").strip()
+        if not name:
+            raise ToolError("suite needs name: a suite id (action=suites lists them).")
+        wait = 1 if flag(args, "wait", True) else 0
+        try:
+            reply = web(phone, query_path("/api/testkit/suite/run", [("name", name), ("wait", wait)]),
+                        body="", timeout=330, seconds=320)
+        except ToolError as e:
+            if "no answer in" in str(e) or "timed out" in str(e).lower():
+                raise ToolError("The suite didn't answer within 330 s, so this call stopped waiting; it may still be "
+                                "running (action=report shows it).\n%s" % e)
+            raise
+        if not isinstance(reply, dict):
+            raise ToolError("The Test Kit sent no report.")
+        if reply.get("error"):
+            raise ToolError(str(reply["error"]))
+        if reply.get("status") == "running" and "summary" not in reply:
+            return ("Started suite %s (report id %s); it is still running. Check action=report."
+                    % (name, reply.get("id")))
+        summary = reply.get("summary") or {}
+        lines = ["Suite %s: %s passed, %s failed, %s skipped (%s total). Status: %s."
+                 % (reply.get("suite") or name, summary.get("pass", 0), summary.get("fail", 0),
+                    summary.get("skip", 0), summary.get("total", 0), reply.get("status", "?"))]
+        if reply.get("id"):
+            lines.append("Report id: %s" % reply["id"])
+        failures = [test for test in reply.get("tests") or []
+                    if isinstance(test, dict) and test.get("status") == "fail"]
+        for test in failures[:10]:
+            detail = test.get("detail")
+            lines.append("FAILED %s%s" % (test.get("id"), ": " + json.dumps(detail, sort_keys=True) if detail else ""))
+        if len(failures) > 10:
+            lines.append("(%d more failures: action=report %s.)" % (len(failures) - 10, reply.get("id")))
+        return "\n".join(lines)
+    if action == "report":
+        redacted = flag(args, "redact", True)
+        params = [("id", args.get("id") or None), ("redact", 1 if redacted else 0)]
+        reply = web(phone, query_path("/api/testkit/report", params))
+        note = "" if redacted else " (not redacted: it can hold personal text)"
+        return "Report%s:\n%s" % (note, pretty(reply))
+    # restore
+    reply = web(phone, "/api/testkit/restore", body="")
+    return "Put the device state back to the snapshot (this changed the phone).\n%s" % pretty(reply)
+
+
+def t_rc_addon(args):
+    action = str(args.get("action") or "").strip().lower()
+    if action not in ADDON_ACTIONS:
+        raise ToolError("action must be %s (got '%s')." % (", ".join(ADDON_ACTIONS), action or "nothing"))
+    if action == "validate" and not str(args.get("file") or "").strip():
+        raise ToolError("validate needs file: a file on this Mac, or a path on the phone.")
+    if action in ("parse", "trace") and not str(args.get("command") or "").strip():
+        raise ToolError("%s needs command: the add-on command." % action)
+    if action in ("enable", "disable", "settings", "set") and not str(args.get("id") or "").strip():
+        raise ToolError("%s needs id: the add-on's id (action=list shows them)." % action)
+    if action == "set":
+        if not str(args.get("setting") or "").strip():
+            raise ToolError("set needs setting: the setting's id (action=settings shows them).")
+        if "value" not in args:
+            raise ToolError("set needs value: what to set it to.")
+    phone = phone_for(args.get("phone"))
+    if action == "list":
+        reply = web(phone, "/api/addons")
+        lines = []
+        for addon in (reply.get("addons") if isinstance(reply, dict) else None) or []:
+            if not isinstance(addon, dict):
+                continue
+            enabled = addon.get("enabled", addon.get("_enabled", True))
+            line = "%s — %s: %s" % (addon.get("id"), addon.get("name") or "",
+                                    "enabled" if enabled else "disabled")
+            if addon.get("version"):
+                line += ", version %s" % addon["version"]
+            lines.append(line)
+        for problem in (reply.get("problems") if isinstance(reply, dict) else None) or []:
+            lines.append("Problem: %s" % problem)
+        return "\n".join(lines) if lines else "No add-ons installed."
+    if action == "validate":
+        path = str(args.get("file")).strip()
+        local = os.path.expanduser(path)
+        if os.path.isfile(local):
+            name = re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(local)) or "addon.json"
+            remote = "/var/mobile/tmp/rc-addon-" + name
+            try:
+                with open(local, "rb") as f:
+                    data = f.read()
+            except OSError as e:
+                raise ToolError("Can't read %s: %s" % (local, e))
+            code, _, err = ssh_input(phone, "cat > " + remote, data, timeout=60)
+            if code != 0:
+                raise ToolError("Couldn't copy %s to the phone: %s" % (local, err or "exit %d" % code))
+            try:
+                reply = run(phone, "addons validate " + remote)
+            finally:
+                ssh(phone, "rm -f " + remote)
+            return reply + "\n(Checked a copy at %s, since removed.)" % remote
+        return run(phone, "addons validate " + path)
+    if action == "parse":
+        return run(phone, "addons parse " + str(args["command"]).strip())
+    if action == "trace":
+        return "This ran the command on the phone.\n" + run(phone, "addons trace " + str(args["command"]).strip())
+    if action == "reload":
+        return run(phone, "addons reload")
+    if action in ("enable", "disable"):
+        return run(phone, "addons %s %s" % (action, str(args["id"]).strip()))
+    if action == "settings":
+        return run(phone, "addons settings " + str(args["id"]).strip())
+    value = args["value"]
+    if isinstance(value, bool):
+        value = "on" if value else "off"
+    elif not isinstance(value, str):
+        value = json.dumps(value)
+    return run(phone, "addons set %s %s %s" % (str(args["id"]).strip(), str(args["setting"]).strip(), value))
 
 
 NUM = {"type": "number"}
@@ -1349,11 +1725,15 @@ TOOLS = [
     ("rc_config", t_rc_config,
      "The whole RemoteCompanion config. action=get (a compact summary: keys, trigger count, ids; full true for "
      "everything, which is large), backup (save a copy locally, mode 0600, nothing on the phone changes), "
-     "restore (put a backup back; backs up the current config first and reads it back). Writes go through the "
-     "phone's own Web UI, over SSH, so they are local and need no API token.",
-     {"action": {"type": "string", "enum": ["get", "backup", "restore"]},
+     "restore (put a backup back; backs up the current config first and reads it back), set (change one "
+     "top-level key in value, adding it only with create true; backs up first and reads it back). Writes go "
+     "through the phone's own Web UI, over SSH, so they are local and need no API token.",
+     {"action": {"type": "string", "enum": ["get", "backup", "restore", "set"]},
       "full": {"type": "boolean", "description": "get: the whole config JSON (large)."},
-      "path": {"type": "string", "description": "restore: the backup file to put back."}},
+      "path": {"type": "string", "description": "restore: the backup file to put back."},
+      "key": {"type": "string", "description": "set: the top-level key to change (never a nested field)."},
+      "value": {"description": "set: the JSON value (string, number, true/false, array or object)."},
+      "create": {"type": "boolean", "description": "set: add this key; without it the key must already exist."}},
      ["action"]),
     ("rc_sequence", t_rc_sequence,
      "Checks a trigger's actions before you save them: a JSON array (or a JSON string holding one) of command "
@@ -1373,6 +1753,42 @@ TOOLS = [
       "to": {"type": "string", "enum": ["top", "bottom"], "description": "scroll: where to scroll to."},
       "offset": {"type": "number", "description": "scroll: points to scroll to instead of top/bottom."}},
      []),
+    ("rc_dev", t_rc_dev,
+     "Read-only debugging: logs (last 150 lines; lines, grep), runs, history, file (text, else size and "
+     "base64), screenshot (JPEG on this Mac). Journal: rc_testkit. Logs can hold personal data.",
+     {"action": {"type": "string", "enum": list(DEV_ACTIONS)},
+      "lines": {"type": "number", "description": "logs: how many (default 80, max 150)."},
+      "grep": {"type": "string", "description": "logs: only lines containing this, any case."},
+      "path": {"type": "string", "description": "file: phone path. screenshot: save path."},
+      "max_bytes": {"type": "number", "description": "file: bytes to return (default 65536, max 1 MiB)."},
+      "scale": {"type": "number", "description": "screenshot: picture share (default 1)."},
+      "quality": {"type": "number", "description": "screenshot: JPEG quality (default 0.9)."}},
+     ["action"]),
+    ("rc_testkit", t_rc_testkit,
+     "App's Test Kit: info, probe, run (runs a command), journal, mark, suites, suite (up to 5 minutes), "
+     "report, reports, snapshot, restore. run and restore change the phone.",
+     {"action": {"type": "string", "enum": list(TESTKIT_ACTIONS)},
+      "command": {"type": "string", "description": "run: the command to run."},
+      "since": {"type": "number", "description": "journal: start after seq (default 0)."},
+      "type": {"type": "string", "description": "journal: type prefix, e.g. trigger.captured."},
+      "limit": {"type": "number", "description": "journal: max events (default 80)."},
+      "label": {"type": "string", "description": "mark: a note for the journal."},
+      "name": {"type": "string", "description": "suite: an id from suites."},
+      "wait": {"type": "boolean", "description": "suite: wait for it (default true)."},
+      "id": {"type": "string", "description": "report: an id from reports."},
+      "redact": {"type": "boolean", "description": "report: hide personal text (default)."}},
+     ["action"]),
+    ("rc_addon", t_rc_addon,
+     "Add-on development: list, validate (a local file is pushed and checked, else a device path), parse "
+     "(JSON, no run), trace (runs it), reload, enable, disable, settings, set. validate, parse and trace are "
+     "the fast loop.",
+     {"action": {"type": "string", "enum": list(ADDON_ACTIONS)},
+      "id": {"type": "string", "description": "The add-on id."},
+      "file": {"type": "string", "description": "validate: local file or phone path."},
+      "command": {"type": "string", "description": "parse, trace: the command."},
+      "setting": {"type": "string", "description": "set: a setting id."},
+      "value": {"description": "set: the new value (rest of the command)."}},
+     ["action"]),
 ]
 HANDLERS = {name: fn for name, fn, _, _, _ in TOOLS}
 
