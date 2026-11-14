@@ -3633,6 +3633,91 @@ static BOOL rc_is_privileged_command(NSString *cmd) {
     return RCIsPrivilegedCommand(cmd);
 }
 
+// Passcodes in actions ("unlock 1234", "lock-toggle 1234"). Other devices without the token, and
+// run records, get them hidden as "unlock ••••••••"; "saved" and a bare "unlock" stay as they are.
+static NSString *const kRCHiddenPasscode = @"••••••••";
+
+// The command's verb with its trailing space ("unlock ") and passcode, when it holds one
+static BOOL rc_passcode_in_command(NSString *cmd, NSString **outVerb, NSString **outPasscode) {
+    if (![cmd isKindOfClass:[NSString class]]) return NO;
+    NSString *trimmed = [cmd stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    for (NSString *verb in @[@"unlock ", @"lock-toggle ", @"lock toggle "]) {
+        if (![trimmed hasPrefix:verb]) continue;
+        NSString *passcode = [[trimmed substringFromIndex:verb.length] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        if (!passcode.length || [passcode isEqualToString:@"saved"]) return NO;
+        if (outVerb) *outVerb = verb;
+        if (outPasscode) *outPasscode = passcode;
+        return YES;
+    }
+    return NO;
+}
+
+// A copy of a value (an action, a list of them, a whole config) with its passcodes hidden
+static id rc_hide_passcodes(id value) {
+    NSString *verb = nil;
+    if ([value isKindOfClass:[NSString class]]) {
+        return rc_passcode_in_command(value, &verb, NULL) ? [verb stringByAppendingString:kRCHiddenPasscode] : value;
+    }
+    if ([value isKindOfClass:[NSArray class]]) {
+        NSMutableArray *copy = [NSMutableArray arrayWithCapacity:[value count]];
+        for (id item in (NSArray *)value) [copy addObject:rc_hide_passcodes(item)];
+        return copy;
+    }
+    if ([value isKindOfClass:[NSDictionary class]]) {
+        NSMutableDictionary *copy = [NSMutableDictionary dictionaryWithCapacity:[value count]];
+        for (id key in (NSDictionary *)value) copy[key] = rc_hide_passcodes(((NSDictionary *)value)[key]);
+        return copy;
+    }
+    return value;
+}
+
+static void rc_collect_passcode(id value, NSString **found) {
+    if (*found) return;
+    NSString *passcode = nil;
+    if ([value isKindOfClass:[NSString class]]) {
+        if (rc_passcode_in_command(value, NULL, &passcode) && ![passcode isEqualToString:kRCHiddenPasscode]) *found = passcode;
+    } else if ([value isKindOfClass:[NSArray class]] || [value isKindOfClass:[NSDictionary class]]) {
+        for (id item in ([value isKindOfClass:[NSDictionary class]] ? [value allValues] : value)) rc_collect_passcode(item, found);
+    }
+}
+
+// A config saved back from a device that saw it hidden: each "unlock ••••••••" gets the passcode
+// of the action at the same place in the saved config, or else the saved config's passcode (a
+// moved or copied action), or else none (it then only wakes the screen to the passcode).
+static id rc_restore_passcodes_at(id incoming, id current, NSString *fallback) {
+    if ([incoming isKindOfClass:[NSString class]]) {
+        NSString *verb = nil, *passcode = nil;
+        if (!rc_passcode_in_command(incoming, &verb, &passcode) || ![passcode isEqualToString:kRCHiddenPasscode]) return incoming;
+        NSString *oldVerb = nil, *oldPasscode = nil;
+        if (rc_passcode_in_command(current, &oldVerb, &oldPasscode) && ![oldPasscode isEqualToString:kRCHiddenPasscode]) {
+            return [verb stringByAppendingString:oldPasscode];
+        }
+        if (fallback) return [verb stringByAppendingString:fallback];
+        return [verb stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    }
+    if ([incoming isKindOfClass:[NSArray class]]) {
+        NSArray *old = [current isKindOfClass:[NSArray class]] ? current : nil;
+        NSMutableArray *copy = [NSMutableArray arrayWithCapacity:[incoming count]];
+        [(NSArray *)incoming enumerateObjectsUsingBlock:^(id item, NSUInteger i, __unused BOOL *stop) {
+            [copy addObject:rc_restore_passcodes_at(item, i < old.count ? old[i] : nil, fallback)];
+        }];
+        return copy;
+    }
+    if ([incoming isKindOfClass:[NSDictionary class]]) {
+        NSDictionary *old = [current isKindOfClass:[NSDictionary class]] ? current : nil;
+        NSMutableDictionary *copy = [NSMutableDictionary dictionaryWithCapacity:[incoming count]];
+        for (id key in (NSDictionary *)incoming) copy[key] = rc_restore_passcodes_at(((NSDictionary *)incoming)[key], old[key], fallback);
+        return copy;
+    }
+    return incoming;
+}
+
+static NSMutableDictionary *rc_restore_passcodes(NSDictionary *incoming, NSDictionary *current) {
+    NSString *fallback = nil;
+    rc_collect_passcode(current, &fallback);
+    return [rc_restore_passcodes_at(incoming, current, fallback) mutableCopy];
+}
+
 BOOL RCIsApiTokenValid(NSString *providedToken) {
     load_trigger_config();
     NSString *expectedToken = g_triggerConfig[@"webUIApiToken"];
@@ -3846,7 +3931,7 @@ static void rc_run_history_add(NSDictionary *info, BOOL stopped) {
             // trigger is edited; the trigger, for the Running page's list of every trigger's runs;
             // and the step a stopped run was on
             record[@"key"] = key;
-            if ([info[@"actions"] isKindOfClass:[NSArray class]] && [NSJSONSerialization isValidJSONObject:info[@"actions"]]) record[@"actions"] = info[@"actions"];
+            if ([info[@"actions"] isKindOfClass:[NSArray class]] && [NSJSONSerialization isValidJSONObject:info[@"actions"]]) record[@"actions"] = rc_hide_passcodes(info[@"actions"]);
             if (stopped && info[@"index"]) record[@"index"] = info[@"index"];
             NSMutableArray *runs = history[key] ?: [NSMutableArray array];
             [runs insertObject:record atIndex:0];
@@ -3865,7 +3950,7 @@ static void rc_run_history_add(NSDictionary *info, BOOL stopped) {
 // "run history <key>" (JSON, newest first) and "clear run history <key>"
 static NSString *rc_run_history_json(NSString *key) {
     NSArray *runs;
-    @synchronized (rc_run_lock()) { runs = [rc_run_history_locked()[key] copy] ?: @[]; }
+    @synchronized (rc_run_lock()) { runs = rc_hide_passcodes([rc_run_history_locked()[key] copy] ?: @[]); } // records from before passcodes were hidden in them
     NSData *data = [NSJSONSerialization dataWithJSONObject:runs options:0 error:nil];
     return [[NSString alloc] initWithData:data ?: [NSData data] encoding:NSUTF8StringEncoding] ?: @"[]";
 }
@@ -3886,7 +3971,7 @@ static NSString *rc_run_history_all_json(NSInteger limit) {
     }
     [runs sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) { return [b[@"started"] compare:a[@"started"]]; }];
     if (limit > 0 && (NSInteger)runs.count > limit) [runs removeObjectsInRange:NSMakeRange(limit, runs.count - limit)];
-    NSData *data = [NSJSONSerialization dataWithJSONObject:runs options:0 error:nil];
+    NSData *data = [NSJSONSerialization dataWithJSONObject:rc_hide_passcodes(runs) options:0 error:nil];
     return [[NSString alloc] initWithData:data ?: [NSData data] encoding:NSUTF8StringEncoding] ?: @"[]";
 }
 
@@ -3943,7 +4028,7 @@ static void rc_run_note_step(id item, NSInteger index, NSDictionary *loop) {
     NSMutableDictionary *info = [NSThread currentThread].threadDictionary[@"rcRunInfo"];
     if (!info) return;
     @synchronized (rc_run_lock()) {
-        if (item) info[@"step"] = item;
+        if (item) info[@"step"] = rc_hide_passcodes(item);
         info[@"index"] = @(index); // its row in the trigger's actions (the editor highlights it)
         if (loop) info[@"loop"] = loop; else [info removeObjectForKey:@"loop"];
     }
@@ -13108,7 +13193,7 @@ static void start_web_server() {
                                             }
                                             mConfig[@"sshHosts"] = mHosts;
                                         }
-                                        configToReturn = mConfig;
+                                        configToReturn = rc_hide_passcodes(mConfig);
                                     }
                                     NSData *jsonData = [NSJSONSerialization dataWithJSONObject:configToReturn options:0 error:nil];
                                     if (jsonData) {
@@ -13147,7 +13232,9 @@ static void start_web_server() {
                                             NSError *err;
                                             id jsonObj = [NSJSONSerialization JSONObjectWithData:bodyData options:NSJSONReadingMutableContainers error:&err];
                                             if (jsonObj && [jsonObj isKindOfClass:[NSDictionary class]]) {
-                                                NSMutableDictionary *incoming = [jsonObj mutableCopy];
+                                                // Passcodes the device saw hidden go back to the saved ones first, so
+                                                // the checks below see what is really saved
+                                                NSMutableDictionary *incoming = rc_restore_passcodes(jsonObj, g_triggerConfig);
                                                 if ([incoming[@"webUIApiToken"] isEqualToString:@"••••••••"]) {
                                                     incoming[@"webUIApiToken"] = g_triggerConfig[@"webUIApiToken"];
                                                 }
