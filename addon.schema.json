@@ -15,7 +15,8 @@
     "actions": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/action" } },
     "conditions": { "type": "array", "items": { "$ref": "#/definitions/condition" } },
     "events": { "type": "array", "items": { "$ref": "#/definitions/event" } },
-    "settings": { "type": "array", "description": "Controls on the add-on's page in the app, each bound to one preference.", "items": { "$ref": "#/definitions/setting" } }
+    "settings": { "type": "array", "description": "Controls on the add-on's page in the app, each bound to one preference.", "items": { "$ref": "#/definitions/setting" } },
+    "variables": { "type": "array", "description": "The RemoteCompanion variables the add-on keeps: names, or name starts such as \"mytweak_\". The app lists them on the add-on's page, and groups them under its name in the variable pickers.", "items": { "type": "string", "pattern": "^[A-Za-z0-9_]{1,40}$" } }
   },
   "definitions": {
     "word": { "type": "string", "pattern": "^[a-z0-9.-]+$" },

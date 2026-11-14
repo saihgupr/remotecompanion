@@ -549,4 +549,48 @@ static const char *kRCAddOnsChanged = "com.saihgupr.remotecompanion.addons-chang
     return items;
 }
 
+#pragma mark - Kept variables
+
++ (NSDictionary *)addOnKeepingVariable:(NSString *)name {
+    if (![name isKindOfClass:[NSString class]]) return nil;
+    for (NSDictionary *addOn in [[self addOns] arrayByAddingObjectsFromArray:[self disabledAddOns] ?: @[]]) {
+        NSArray *kept = [addOn[@"variables"] isKindOfClass:[NSArray class]] ? addOn[@"variables"] : nil;
+        for (NSString *start in kept) if ([start isKindOfClass:[NSString class]] && start.length && [name hasPrefix:start]) return addOn;
+    }
+    return nil;
+}
+
++ (NSDictionary *)variablesWithoutKept:(NSDictionary *)variables {
+    if (![variables isKindOfClass:[NSDictionary class]]) return variables;
+    NSMutableDictionary *out = [NSMutableDictionary dictionary];
+    [variables enumerateKeysAndObjectsUsingBlock:^(id name, id value, BOOL *stop) {
+        if (![self addOnKeepingVariable:name]) out[name] = value;
+    }];
+    return out;
+}
+
++ (NSArray<UIMenuElement *> *)savedVariableMenus:(NSArray<NSString *> *)names item:(UIMenuElement *(^)(NSString *name))item {
+    NSMutableArray *own = [NSMutableArray array];
+    NSMutableDictionary<NSString *, NSMutableArray *> *kept = [NSMutableDictionary dictionary];
+    NSMutableDictionary<NSString *, NSDictionary *> *addOns = [NSMutableDictionary dictionary];
+    for (NSString *name in names) {
+        NSDictionary *addOn = [self addOnKeepingVariable:name];
+        if (!addOn[@"id"]) { [own addObject:item(name)]; continue; }
+        if (!kept[addOn[@"id"]]) { kept[addOn[@"id"]] = [NSMutableArray array]; addOns[addOn[@"id"]] = addOn; }
+        [kept[addOn[@"id"]] addObject:item(name)];
+    }
+    NSMutableArray *out = [NSMutableArray array];
+    if (own.count) [out addObject:[UIMenu menuWithTitle:@"Saved" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:own]];
+    NSMutableArray *groups = [NSMutableArray array];
+    for (NSString *addOnId in [kept.allKeys sortedArrayUsingComparator:^NSComparisonResult(NSString *a, NSString *b) {
+        return [addOns[a][@"name"] ?: a localizedCaseInsensitiveCompare:addOns[b][@"name"] ?: b];
+    }]) {
+        NSDictionary *addOn = addOns[addOnId];
+        UIImage *icon = [self iconImageForAddOn:addOn] ?: [UIImage systemImageNamed:[self iconForAddOn:addOn]];
+        [groups addObject:[UIMenu menuWithTitle:addOn[@"name"] ?: addOnId image:icon identifier:nil options:0 children:kept[addOnId]]];
+    }
+    if (groups.count) [out addObject:[UIMenu menuWithTitle:@"" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:groups]];
+    return out;
+}
+
 @end

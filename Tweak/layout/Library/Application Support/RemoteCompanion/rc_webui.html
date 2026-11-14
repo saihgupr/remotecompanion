@@ -4527,6 +4527,21 @@ const CONDITION_DEFS = [
 let serverCapabilities = { snapper: false, sneakycam: false, audiostream: false, audiohandoff: false };
 // ── Add-ons (ADDONS.md) ──────────────────────────────────────────────────────
 let addOnCatalog = [];
+// The add-on that keeps a variable for itself (its "variables": names or name starts), else null
+function addOnKeepingVariable(name) {
+  return addOnCatalog.find(p => Array.isArray(p.variables) && p.variables.some(v => typeof v === 'string' && v && name.startsWith(v))) || null;
+}
+// Saved names for a picker: [title, names] groups, the person's own as "Saved", then one per add-on
+function savedVariableGroups(names) {
+  const own = [], byAddOn = new Map();
+  names.forEach(n => {
+    const p = addOnKeepingVariable(n);
+    if (!p) { own.push(n); return; }
+    if (!byAddOn.has(p.name || p.id)) byAddOn.set(p.name || p.id, []);
+    byAddOn.get(p.name || p.id).push(n);
+  });
+  return [['Saved', own], ...[...byAddOn.entries()].sort((a, b) => a[0].localeCompare(b[0]))];
+}
 let addOnConditionDefs = [];   // the If picker's entries for add-on conditions
 
 function symbolId(symbol) { return (symbol || 'puzzlepiece_extension').replace(/\./g, '_'); }
@@ -7831,7 +7846,7 @@ function varEdRenderVariable() {
       }).join('') + '</optgroup>';
     };
     group('This Run', run, true);
-    group('Saved', saved, false);
+    savedVariableGroups(saved).forEach(([title, names]) => group(escHtml(title), names, false));
     html += `<option value="new"${varEd.typingNew ? ' selected' : ''}>${newLabel}</option>`;
     sel.innerHTML = html;
     sel.onchange = () => {
@@ -7869,10 +7884,31 @@ function varEdRenderVariable() {
 function varEdRenderChips(card) {
   const old = card.querySelector('.var-ed-chips');
   if (old) old.remove();
-  const names = [...new Set([...varEd.runNames, ...varEd.savedNames])];
-  if (!names.length) return;
+  const all = [...new Set([...varEd.runNames, ...varEd.savedNames])];
+  if (!all.length) return;
+  // The person's own names as chips; an add-on's kept ones under one chip (its name) with a menu
+  const names = all.filter(n => varEd.runNames.includes(n) || !addOnKeepingVariable(n));
+  const groups = savedVariableGroups(all.filter(n => !names.includes(n))).filter(([, list]) => list.length);
   const chips = document.createElement('div');
   chips.className = 'var-ed-chips';
+  const useName = n => {
+    varEd.nameText = n;
+    const f = document.getElementById('var-ed-name');
+    if (f) f.value = n;
+    if (varEd.runNames.includes(n)) varEd.runOnly = true;
+    else if (varEd.savedNames.includes(n)) varEd.runOnly = false;
+    const sw = document.querySelector('#var-ed-scope input');
+    if (sw) sw.checked = varEd.runOnly;
+    varEdUpdate();
+  };
+  groups.forEach(([title, list]) => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'var-ed-chip';
+    chip.textContent = `${title} ▾`;
+    chip.onclick = e => { e.stopPropagation(); varEdOpenMenu(chip, useName, [title, list]); };
+    chips.appendChild(chip);
+  });
   names.forEach(n => {
     const chip = document.createElement('button');
     chip.type = 'button';
@@ -8239,7 +8275,8 @@ function renderCommandPicker(current) {
 
 // ── The + menu: This Run and saved variables, then the Repeat round ──
 
-function varEdOpenMenu(anchor, onPick) {
+// only: [title, names] shows just that group (an add-on's chip), without Repeat Round
+function varEdOpenMenu(anchor, onPick, only) {
   varEdCloseMenu();
   const menu = document.createElement('div');
   menu.id = 'var-ed-menu';
@@ -8255,9 +8292,12 @@ function varEdOpenMenu(anchor, onPick) {
       menu.appendChild(item);
     });
   };
-  section('This Run', varEd.runNames);
-  section('Saved', varEd.savedNames);
-  const withRound = !(varEd.mode === 'number' && varEd.opts.allowsRound === false); // {round} has a value only inside a Repeat
+  if (only) section(escHtml(only[0]), only[1]);
+  else {
+    section('This Run', varEd.runNames);
+    savedVariableGroups(varEd.savedNames).forEach(([title, names]) => section(escHtml(title), names));
+  }
+  const withRound = !only && !(varEd.mode === 'number' && varEd.opts.allowsRound === false); // {round} has a value only inside a Repeat
   if (withRound) {
     if (menu.childElementCount) menu.insertAdjacentHTML('beforeend', '<div class="var-ed-menu-gap"></div>');
     const round = document.createElement('div');

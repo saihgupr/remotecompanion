@@ -1,4 +1,5 @@
 #import "RCVariableConditionViewController.h"
+#import "RCAddOnCatalog.h"
 #import "RCConfigManager.h"
 #import "RCServerClient.h"
 #import "RCVariableEditorParts.h"
@@ -232,12 +233,11 @@ static NSArray<NSDictionary *> *RCVariableComparisons(void) {
     if (self.pickedName && ![runNames containsObject:self.pickedName] && ![savedNames containsObject:self.pickedName]) {
         [savedNames addObject:self.pickedName];
     }
-    NSMutableArray *runItems = [NSMutableArray array], *savedItems = [NSMutableArray array];
+    NSMutableArray *runItems = [NSMutableArray array];
     for (NSString *name in runNames) [runItems addObject:pick(name)];
-    for (NSString *name in savedNames) [savedItems addObject:pick(name)];
     NSMutableArray *children = [NSMutableArray array];
     if (runItems.count) [children addObject:[UIMenu menuWithTitle:@"This Run" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:runItems]];
-    if (savedItems.count) [children addObject:[UIMenu menuWithTitle:@"Saved" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:savedItems]];
+    [children addObjectsFromArray:[RCAddOnCatalog savedVariableMenus:savedNames item:^UIMenuElement *(NSString *name) { return pick(name); }]];
     UIAction *other = [UIAction actionWithTitle:@"Other Name" image:[UIImage systemImageNamed:@"plus"] identifier:nil handler:^(__unused UIAction *a) {
         [weakSelf startTypingName];
     }];
