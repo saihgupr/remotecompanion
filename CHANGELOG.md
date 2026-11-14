@@ -21,6 +21,9 @@ All notable changes to this project will be documented in this file.
 - **Clear Notifications action and CLI**: replaced **Clear RC Notifications** with **Clear Notifications**, letting you target Any App or specific apps (including RemoteCompanion) and add or paste as many case-insensitive text filters as you want. `rc clear notification` (and `rc notify clear`) now accepts `--all`, `--app`, inline filter strings, and line-by-line `.txt` files.
 - **Tighter bar gesture zones**: the status bar and bottom bar gesture areas now cover 25pt from the edge instead of 50pt, so a touch has to land closer to the bar. Two-finger slides keep their wider 75pt landing zone.
 
+### Fixed
+- **Clear Notifications with a full `.txt` list**: `rc clear notification FILE.txt` sends the command in one write, so a long list like the 66-line `CleanNotifications.txt` is no longer cut at 1 KB and silently ignored.
+
 ## [4.5.0] - 2026-11-11
 
 ### Added

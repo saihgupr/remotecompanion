@@ -87,9 +87,14 @@ fi
 rc_send_command() {
     local command="$1"
     if [[ "$IP" == "127.0.0.1" ]]; then
-        printf '%s' "$command" | rc-client 2>/dev/null || printf '%s' "$command" | nc -U "$SOCKET_PATH" 2>/dev/null
+        # Pass the command as one argument: rc-client then writes it in a single
+        # write(), where piping can split a long JSON payload into 1 KB chunks
+        # that the device reads and parses before the rest arrives.
+        rc-client "$command" 2>/dev/null || printf '%s' "$command" | nc -U "$SOCKET_PATH" 2>/dev/null
     else
-        printf '%s' "$command" | ssh -o ConnectTimeout=3 -o ServerAliveInterval=2 -o ServerAliveCountMax=2 -o StrictHostKeyChecking=no mobile@$IP 'if [ -x /var/jb/usr/bin/rc-client ]; then /var/jb/usr/bin/rc-client; elif [ -x /usr/bin/rc-client ]; then /usr/bin/rc-client; else nc -U '"$SOCKET_PATH"'; fi' 2>/dev/null
+        # Buffer the command on the device and pass it to rc-client as one
+        # argument, for the same single-write reason as the on-device path.
+        printf '%s' "$command" | ssh -o ConnectTimeout=3 -o ServerAliveInterval=2 -o ServerAliveCountMax=2 -o StrictHostKeyChecking=no mobile@$IP 'f=/tmp/rc-cmd.$$; cat > "$f"; if [ -x /var/jb/usr/bin/rc-client ]; then /var/jb/usr/bin/rc-client "$(cat "$f")"; elif [ -x /usr/bin/rc-client ]; then /usr/bin/rc-client "$(cat "$f")"; else nc -U '"$SOCKET_PATH"' < "$f"; fi; rm -f "$f"' 2>/dev/null
     fi
 }
 
