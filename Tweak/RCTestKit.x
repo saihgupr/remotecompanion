@@ -37,8 +37,8 @@
 //   GET  /api/testkit/passcode          whether a passcode is set for unlocking during tests, and for how long
 //   POST /api/testkit/passcode/forget   forget it now
 //        testkit passcode/set code=...  (UNIX socket only - the Test Kit screen; refused over the network).
-//                                       minutes=30|60|120|240|480 picks Keep For (30 when absent)
-//        testkit passcode/renew minutes=N  same - restarts the timer on the passcode already set
+//                                       minutes=30|60|120|240|480|forever picks Keep For (30 when absent)
+//        testkit passcode/renew minutes=N  same - restarts the timer on the passcode already set (or makes it Forever)
 //   POST /api/testkit/unlock            unlock the phone with it (wakes the screen first)
 //   POST /api/testkit/replay            body (or ?seq=): simulated button presses at exact times, e.g.
 //                                       "vU@0 vD@7 ^D@125 ^U@147" (v = down, ^ = up; U / D = Volume Up /
@@ -2543,18 +2543,22 @@ static void RCTKSuiteReplay(NSMutableDictionary *run) {
 //   report, and never returned by any endpoint. It's forgotten once its Keep For time passes -
 //   30 minutes by default, or one of 30 / 60 / 120 / 240 / 480 picked on the phone (the lifetime
 //   lives with the passcode in the Keychain, so a respring keeps it) - and on a restart (it's
-//   tied to this boot).
+//   tied to this boot). Forever has no time limit and isn't tied to the boot, so a respring and a
+//   restart keep it too, until it's forgotten or a shorter Keep For replaces it; it's readable
+//   once the phone has been unlocked since it started (the Keychain is locked before that).
 // - Forgotten the moment an unlock with it doesn't work, so a wrong passcode is tried at
 //   most once - iOS disables the phone (or erases it, if set to) after repeated wrong ones.
-// A minutes= value as minutes; *error set on one not on the list, 0 means "default"
+// A minutes= value as minutes, -1 for Forever (minutes=forever also reads as it); *error set on
+// one not on the list, 0 means "default"
 static BOOL RCTKPasscodeMinutesOK(double m) {
-    return m == 30 || m == 60 || m == 120 || m == 240 || m == 480;
+    return m == 30 || m == 60 || m == 120 || m == 240 || m == 480 || m == -1;
 }
 static double RCTKPasscodeMinutes(NSString *value, NSString **error) {
     if (!value.length) return 0;
+    if ([value caseInsensitiveCompare:@"forever"] == NSOrderedSame) return -1;
     double m = [value doubleValue];
     if (!RCTKPasscodeMinutesOK(m)) {
-        *error = [NSString stringWithFormat:@"Keep For must be one of 30, 60, 120, 240 or 480 minutes (got %@)", value];
+        *error = [NSString stringWithFormat:@"Keep For must be one of 30, 60, 120, 240, 480 or forever (got %@)", value];
         return 0;
     }
     return m;
@@ -2562,6 +2566,7 @@ static double RCTKPasscodeMinutes(NSString *value, NSString **error) {
 static NSString *g_tkPasscode;
 static double g_tkPasscodeExpiresAt;
 static double g_tkPasscodeLifetimeMs = 30 * 60 * 1000;
+static BOOL g_tkPasscodeForever;
 static __thread BOOL g_tkFromNetwork = NO;
 
 // When the phone last started, so a saved passcode is for this boot only
@@ -2583,9 +2588,11 @@ static void RCTKDeleteSavedPasscode(void) {
     SecItemDelete((__bridge CFDictionaryRef)RCTKPasscodeQuery());
 }
 
-static void RCTKSavePasscode(NSString *passcode, double expiresAt, double lifetimeMs) {
+static void RCTKSavePasscode(NSString *passcode, double expiresAt, double lifetimeMs, BOOL forever) {
     RCTKDeleteSavedPasscode();
-    NSDictionary *value = @{ @"code": passcode, @"expires": @(expiresAt), @"boot": RCTKBootID(), @"lifetime": @(lifetimeMs) };
+    // expires / lifetime stay in the value for older builds and readers; forever doesn't use them
+    NSDictionary *value = @{ @"code": passcode, @"expires": @(expiresAt), @"boot": RCTKBootID(), @"lifetime": @(lifetimeMs),
+                             @"forever": @(forever) };
     NSData *data = [NSJSONSerialization dataWithJSONObject:value options:0 error:nil];
     if (!data) return;
     NSMutableDictionary *item = [RCTKPasscodeQuery() mutableCopy];
@@ -2595,25 +2602,40 @@ static void RCTKSavePasscode(NSString *passcode, double expiresAt, double lifeti
     if (status != errSecSuccess) RCTKEvent(@"passcode", @{ @"saved": @NO, @"status": @(status) });
 }
 
-// After a respring: the saved one, if it's for this boot and still in time
+// After a respring: the saved one, if it's for this boot and still in time (forever isn't tied to
+// either, so it comes back after a restart too)
 static void RCTKLoadSavedPasscode(void) {
     static BOOL loaded;
     if (loaded) return;
-    loaded = YES;
     NSMutableDictionary *query = [RCTKPasscodeQuery() mutableCopy];
     query[(__bridge id)kSecReturnData] = @YES;
     query[(__bridge id)kSecMatchLimit] = (__bridge id)kSecMatchLimitOne;
     CFTypeRef result = NULL;
-    if (SecItemCopyMatching((__bridge CFDictionaryRef)query, &result) != errSecSuccess || !result) return;
+    OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, &result);
+    if (status == errSecItemNotFound) {
+        loaded = YES; // nothing saved
+        return;
+    }
+    // Before the first unlock after a restart the Keychain can't be read yet: don't latch, so a
+    // later call (once it's unlocked) picks a forever passcode up
+    if (status != errSecSuccess || !result) return;
+    loaded = YES;
     NSData *data = (__bridge_transfer NSData *)result;
     NSDictionary *value = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
     NSString *code = [value isKindOfClass:[NSDictionary class]] ? value[@"code"] : nil;
+    BOOL forever = [value isKindOfClass:[NSDictionary class]] ? [value[@"forever"] boolValue] : NO;
     double expires = [value[@"expires"] doubleValue];
-    if (![code isKindOfClass:[NSString class]] || ![value[@"boot"] isEqual:RCTKBootID()] || RCTKNowMs() > expires) {
+    if (![code isKindOfClass:[NSString class]] || (!forever && (![value[@"boot"] isEqual:RCTKBootID()] || RCTKNowMs() > expires))) {
         RCTKDeleteSavedPasscode();
         return;
     }
     g_tkPasscode = [code copy];
+    g_tkPasscodeForever = forever;
+    if (forever) {
+        g_tkPasscodeExpiresAt = 0;
+        g_tkPasscodeLifetimeMs = 0;
+        return;
+    }
     g_tkPasscodeExpiresAt = expires;
     double lifetime = [value[@"lifetime"] doubleValue]; // written with it; absent = 30 minutes
     g_tkPasscodeLifetimeMs = lifetime > 0 ? lifetime : 30 * 60 * 1000;
@@ -2622,8 +2644,9 @@ static void RCTKLoadSavedPasscode(void) {
 static NSString *RCTKCurrentPasscode(void) {
     @synchronized (RCTKLock()) {
         RCTKLoadSavedPasscode();
-        if (g_tkPasscode && RCTKNowMs() > g_tkPasscodeExpiresAt) {
+        if (g_tkPasscode && !g_tkPasscodeForever && RCTKNowMs() > g_tkPasscodeExpiresAt) {
             g_tkPasscode = nil;
+            g_tkPasscodeForever = NO;
             RCTKDeleteSavedPasscode();
         }
         return g_tkPasscode;
@@ -2635,14 +2658,19 @@ static void RCTKForgetPasscode(void) {
         g_tkPasscode = nil;
         g_tkPasscodeExpiresAt = 0;
         g_tkPasscodeLifetimeMs = 30 * 60 * 1000;
+        g_tkPasscodeForever = NO;
         RCTKDeleteSavedPasscode();
     }
 }
 
 static NSDictionary *RCTKPasscodeStatus(void) {
     NSString *passcode = RCTKCurrentPasscode();
-    return @{ @"set": @(passcode != nil), @"expiresInSeconds": @(passcode ? round((g_tkPasscodeExpiresAt - RCTKNowMs()) / 1000) : 0),
-              @"lifetimeSeconds": @(g_tkPasscodeLifetimeMs / 1000) };
+    BOOL forever = passcode != nil && g_tkPasscodeForever;
+    NSMutableDictionary *status = [@{ @"set": @(passcode != nil),
+                                      @"expiresInSeconds": @(passcode && !forever ? round((g_tkPasscodeExpiresAt - RCTKNowMs()) / 1000) : 0),
+                                      @"lifetimeSeconds": @(forever ? 0 : g_tkPasscodeLifetimeMs / 1000) } mutableCopy];
+    if (forever) status[@"forever"] = @YES;
+    return status;
 }
 
 static NSDictionary *RCTKSetPasscode(NSString *passcode, NSString *minutesParam) {
@@ -2656,15 +2684,17 @@ static NSDictionary *RCTKSetPasscode(NSString *passcode, NSString *minutesParam)
     }
     @synchronized (RCTKLock()) {
         g_tkPasscode = [passcode copy];
-        g_tkPasscodeLifetimeMs = (minutes ?: 30) * 60 * 1000;
-        g_tkPasscodeExpiresAt = RCTKNowMs() + g_tkPasscodeLifetimeMs;
-        RCTKSavePasscode(g_tkPasscode, g_tkPasscodeExpiresAt, g_tkPasscodeLifetimeMs);
+        g_tkPasscodeForever = minutes < 0;
+        g_tkPasscodeLifetimeMs = g_tkPasscodeForever ? 0 : (minutes ?: 30) * 60 * 1000;
+        g_tkPasscodeExpiresAt = g_tkPasscodeForever ? 0 : RCTKNowMs() + g_tkPasscodeLifetimeMs;
+        RCTKSavePasscode(g_tkPasscode, g_tkPasscodeExpiresAt, g_tkPasscodeLifetimeMs, g_tkPasscodeForever);
     }
     RCTKEvent(@"passcode", @{ @"set": @YES }); // that it was set - not what it is
     return RCTKPasscodeStatus();
 }
 
-// Restarts the timer on the passcode already set, with a new Keep For
+// Restarts the timer on the passcode already set, with a new Keep For (-1 = Forever), in either
+// direction: a finite passcode can become forever and a forever one can get a time limit
 static NSDictionary *RCTKRenewPasscode(NSString *minutesParam) {
     if (g_tkFromNetwork) return @{ @"error": @"the passcode can only be set on the phone (Test Kit screen), not over the network" };
     NSString *minutesError = nil;
@@ -2672,9 +2702,10 @@ static NSDictionary *RCTKRenewPasscode(NSString *minutesParam) {
     if (minutesError) return @{ @"error": minutesError };
     @synchronized (RCTKLock()) {
         if (!RCTKCurrentPasscode()) return @{ @"error": @"no passcode set - enter it in Test Kit on the phone" };
-        g_tkPasscodeLifetimeMs = (minutes ?: 30) * 60 * 1000;
-        g_tkPasscodeExpiresAt = RCTKNowMs() + g_tkPasscodeLifetimeMs;
-        RCTKSavePasscode(g_tkPasscode, g_tkPasscodeExpiresAt, g_tkPasscodeLifetimeMs);
+        g_tkPasscodeForever = minutes < 0;
+        g_tkPasscodeLifetimeMs = g_tkPasscodeForever ? 0 : (minutes ?: 30) * 60 * 1000;
+        g_tkPasscodeExpiresAt = g_tkPasscodeForever ? 0 : RCTKNowMs() + g_tkPasscodeLifetimeMs;
+        RCTKSavePasscode(g_tkPasscode, g_tkPasscodeExpiresAt, g_tkPasscodeLifetimeMs, g_tkPasscodeForever);
     }
     RCTKEvent(@"passcode", @{ @"renewed": @YES });
     return RCTKPasscodeStatus();

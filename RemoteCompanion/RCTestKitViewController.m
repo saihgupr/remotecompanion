@@ -45,9 +45,11 @@ typedef NS_ENUM(NSInteger, RCTestKitSection) {
 @property (nonatomic, strong) NSDictionary *currentRun;          // the run in progress, or nil
 @property (nonatomic, strong) NSTimer *pollTimer;
 @property (nonatomic, assign) BOOL polling;
-@property (nonatomic, strong) NSDictionary *passcodeStatus;      // set, expiresInSeconds, lifetimeSeconds
-@property (nonatomic, strong) NSDate *passcodeExpiry;            // when the tweak forgets it, or nil
+@property (nonatomic, strong) NSDictionary *passcodeStatus;      // set, expiresInSeconds, lifetimeSeconds (+ forever)
+@property (nonatomic, strong) NSDate *passcodeExpiry;            // when the tweak forgets it, or nil (unset or forever)
 @property (nonatomic, assign) BOOL stopping;                     // Stop tapped, the run not ended yet
+
++ (NSString *)keepForTitle:(NSInteger)m;
 @end
 
 @implementation RCTestKitViewController
@@ -267,6 +269,7 @@ static NSString *RCSuiteIcon(NSString *suite) {
 #pragma mark - Passcode for tests
 
 - (NSString *)passcodeDetail {
+    if ([self.passcodeStatus[@"forever"] boolValue]) return @"Kept until forgotten";
     if (!self.passcodeExpiry) return @"Not set";
     NSInteger minutes = MAX(1, (NSInteger)ceil(self.passcodeExpiry.timeIntervalSinceNow / 60.0));
     if (minutes >= 60) {
@@ -276,23 +279,28 @@ static NSString *RCSuiteIcon(NSString *suite) {
     return minutes == 1 ? @"Forgotten in 1 minute" : [NSString stringWithFormat:@"Forgotten in %ld minutes", (long)minutes];
 }
 
-// The Keep For choice, kept here so the next passcode (or a renew) uses it (30 when unset)
+// The Keep For choice, kept here so the next passcode (or a renew) uses it (30 when unset, -1 for Forever)
 - (NSInteger)keepForMinutes {
     NSInteger m = [[NSUserDefaults standardUserDefaults] integerForKey:@"RCTestKitPasscodeMinutes"];
+    if (m < 0) return -1;
     return m > 0 ? m : 30;
 }
 
-- (NSString *)keepForDetail {
-    NSInteger m = [self keepForMinutes];
++ (NSString *)keepForTitle:(NSInteger)m {
+    if (m < 0) return @"Forever";
     return m < 60 ? [NSString stringWithFormat:@"%ld Minutes", (long)m] : [NSString stringWithFormat:@"%ld Hour%@", (long)(m / 60), m / 60 == 1 ? @"" : @"s"];
+}
+
+- (NSString *)keepForDetail {
+    return [RCTestKitViewController keepForTitle:[self keepForMinutes]];
 }
 
 // Pick a Keep For; with a passcode set it also renews it to that lifetime
 - (void)keepForRowTapped {
     UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Keep For" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
-    for (NSNumber *choice in @[@30, @60, @120, @240, @480]) {
+    for (NSNumber *choice in @[@30, @60, @120, @240, @480, @(-1)]) {
         NSInteger m = choice.integerValue;
-        NSString *title = m < 60 ? [NSString stringWithFormat:@"%ld Minutes", (long)m] : [NSString stringWithFormat:@"%ld Hour%@", (long)(m / 60), m / 60 == 1 ? @"" : @"s"];
+        NSString *title = [RCTestKitViewController keepForTitle:m];
         if (m == [self keepForMinutes]) title = [@"✓ " stringByAppendingString:title];
         [sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
             [[NSUserDefaults standardUserDefaults] setInteger:m forKey:@"RCTestKitPasscodeMinutes"];
@@ -312,8 +320,9 @@ static NSString *RCSuiteIcon(NSString *suite) {
 }
 
 - (CGFloat)passcodeFraction {
+    if (!self.passcodeExpiry) return 0; // not set, or Forever: nothing to drain
     double lifetime = [self.passcodeStatus[@"lifetimeSeconds"] doubleValue] ?: 1800;
-    return self.passcodeExpiry ? self.passcodeExpiry.timeIntervalSinceNow / lifetime : 0;
+    return self.passcodeExpiry.timeIntervalSinceNow / lifetime;
 }
 
 // Every second: the time left and the fill, on the cell as it is (no reload, no flicker)
@@ -330,8 +339,10 @@ static NSString *RCSuiteIcon(NSString *suite) {
 
 - (void)refreshPasscodeStatus {
     [RCTestKitViewController sendRequest:@"passcode" completion:^(NSDictionary *json, NSError *error) {
+        BOOL set = [json[@"set"] boolValue];
         self.passcodeStatus = json;
-        self.passcodeExpiry = [json[@"set"] boolValue] ? [NSDate dateWithTimeIntervalSinceNow:[json[@"expiresInSeconds"] doubleValue]] : nil;
+        // Forever has no countdown to run, so it has no expiry to watch
+        self.passcodeExpiry = set && ![json[@"forever"] boolValue] ? [NSDate dateWithTimeIntervalSinceNow:[json[@"expiresInSeconds"] doubleValue]] : nil;
         [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:RCTestKitSectionUnlock] withRowAnimation:UITableViewRowAnimationNone];
     }];
 }
@@ -340,7 +351,7 @@ static NSString *RCSuiteIcon(NSString *suite) {
 // (see RCTestKit.x); the app doesn't keep it either
 - (void)askForPasscode {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Passcode for Tests"
-        message:@"Lets test runs unlock the phone between steps. It stays on this phone only (in its Keychain, never in a backup), and is forgotten after its Keep For time (the row below), a restart, or if it doesn't unlock the phone."
+        message:@"Lets test runs unlock the phone between steps. It stays on this phone only, in its Keychain, never in a backup. With Keep For set to Forever it stays until you forget it or pick another choice: it survives a respring and a restart, and is available once the phone has been unlocked after a reboot (the Keychain can't be read before that first unlock). Until removed, it can unlock the phone, so the shorter choices are safer for one-off tests. A passcode that doesn't unlock the phone is forgotten after one try."
         preferredStyle:UIAlertControllerStyleAlert];
     [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
         field.secureTextEntry = YES;
@@ -428,7 +439,7 @@ static NSString *RCSuiteIcon(NSString *suite) {
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == RCTestKitSectionSuites) return @"Your settings are put back when a test ends.";
-    if (section == RCTestKitSectionUnlock) return @"Optional. Tests that lock the phone can unlock it again with this. Kept on this phone only, until it restarts or its Keep For time passes; a passcode that doesn't work is forgotten after one try.";
+    if (section == RCTestKitSectionUnlock) return @"Optional. Tests that lock the phone can unlock it again with this. Kept on this phone only, never in a backup. Forever keeps it across resprings and restarts until you forget it or pick another Keep For; the other choices end when their time passes or the phone restarts. A passcode that doesn't work is forgotten after one try.";
     if (section == RCTestKitSectionReports && !self.reports.count) return @"Reports of finished tests appear here.";
     return nil;
 }
@@ -502,6 +513,12 @@ static NSString *RCSuiteIcon(NSString *suite) {
             RCDrainingBackground *background = [[RCDrainingBackground alloc] initWithColor:cell.backgroundColor
                                                                                  fillColor:[[UIColor systemOrangeColor] colorWithAlphaComponent:0.65]];
             background.fraction = [self passcodeFraction];
+            cell.backgroundView = background;
+        } else if ([self.passcodeStatus[@"forever"] boolValue]) {
+            // Forever has no countdown: a still, full background instead of a draining one
+            RCDrainingBackground *background = [[RCDrainingBackground alloc] initWithColor:cell.backgroundColor
+                                                                                 fillColor:[[UIColor systemOrangeColor] colorWithAlphaComponent:0.65]];
+            background.fraction = 1;
             cell.backgroundView = background;
         }
         cell.imageView.image = [UIImage systemImageNamed:@"lock.open"];
