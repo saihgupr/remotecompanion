@@ -15754,10 +15754,43 @@ static void RC_CheckAndFirePower() {
     }];
 }
 
+extern CFArrayRef IOHIDEventGetChildren(IOHIDEventRef event);
+extern double IOHIDEventGetFloatValue(IOHIDEventRef event, int field);
+
+// Real fingers on the touchscreen, from the HID stream (0..1, device portrait). Unlike SpringBoard's
+// own touches, this includes a finger iOS hands to the app in front.
+static os_unfair_lock g_hidFingerLock = OS_UNFAIR_LOCK_INIT;
+static uint32_t g_hidFingerMask = 0;
+static double g_hidFingerX[32], g_hidFingerY[32];
+
+static void rc_track_hid_fingers(IOHIDEventRef event) {
+    CFArrayRef children = IOHIDEventGetChildren(event);
+    if (!children) return;
+    os_unfair_lock_lock(&g_hidFingerLock);
+    BOOL anyTouching = NO;
+    for (CFIndex i = 0; i < CFArrayGetCount(children); i++) {
+        IOHIDEventRef child = (IOHIDEventRef)CFArrayGetValueAtIndex(children, i);
+        if (IOHIDEventGetType(child) != 11) continue;
+        if (fabs(IOHIDEventGetFloatValue(child, 0xB0014) - 0.04) < 1e-4) continue; // RC's own injected finger
+        uint32_t slot = (uint32_t)IOHIDEventGetIntegerValue(child, 0xB0005) & 31;
+        if (IOHIDEventGetIntegerValue(child, 0xB0009) != 0) {
+            anyTouching = YES;
+            g_hidFingerMask |= (1u << slot);
+            g_hidFingerX[slot] = IOHIDEventGetFloatValue(child, 0xB0000);
+            g_hidFingerY[slot] = IOHIDEventGetFloatValue(child, 0xB0001);
+        } else {
+            g_hidFingerMask &= ~(1u << slot);
+        }
+    }
+    if (!anyTouching) g_hidFingerMask = 0; // every finger is up
+    os_unfair_lock_unlock(&g_hidFingerLock);
+}
+
 static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientRef service, IOHIDEventRef event) {
     // Before the exclusion check: a touch is a touch whatever app is in front
     if (IOHIDEventGetType(event) == 11) g_lastTouchAt = CFAbsoluteTimeGetCurrent(); // kIOHIDEventTypeDigitizer
     if (IOHIDEventGetType(event) == 11) RCGestureHIDEvent(event); // gestures: recording, and the touchscreen's sender ID
+    if (IOHIDEventGetType(event) == 11) rc_track_hid_fingers(event); // fingers SpringBoard may not get
     if (RC_IsForegroundAppExcluded()) return;
     int type = IOHIDEventGetType(event);
     
@@ -16992,6 +17025,14 @@ static BOOL g_twoFingerBottomTriggered = NO;
 static CGFloat g_twoFingerBottomStartX = 0;
 static CGFloat g_twoFingerBottomStartY = 0;
 static NSTimeInterval g_lastTwoFingerBottomSwipeTriggerTime = 0;
+static NSTimeInterval g_lastTwoFingerTopSwipeTriggerTime = 0;
+// The system's top-edge swipes (Notification Center, Control Center), kept so a two-finger
+// top swipe can stop one that the first finger already started
+static NSHashTable<UIGestureRecognizer *> *g_rcTopEdgeRecognizers = nil;
+// The system's bottom-edge swipes (Home, App Switcher), for the same reason at the bottom
+static NSHashTable<UIGestureRecognizer *> *g_rcBottomEdgeRecognizers = nil;
+// A Control Center pull that iOS already started (the first finger moved before the second landed)
+static BOOL g_rcCCPullStarted = NO;
 
 // ============ GESTURE SCROLL SUPPRESSION (issue #81) ============
 // While a status-bar swipe or bottom swipe-up is being executed, the
@@ -17262,6 +17303,41 @@ static inline BOOL RC_InTopRegionMulti(CGPoint loc, UIInterfaceOrientation orien
     return (loc.y < threshold);
 }
 
+// The second finger of a two-finger top slide can start lower: hands rarely put both fingers
+// at the same height, and a lower finger would otherwise leave the slide to Control Center
+static inline BOOL RC_InTopRegionMultiLoose(CGPoint loc, UIInterfaceOrientation orientation, CGFloat S, CGFloat L) {
+    (void)S; (void)L;
+    CGFloat threshold = 150.0;
+    if (orientation == UIInterfaceOrientationPortrait) return (loc.y < threshold);
+    if (orientation == UIInterfaceOrientationPortraitUpsideDown) return (loc.y > L - threshold);
+    if (orientation == UIInterfaceOrientationLandscapeLeft) return (loc.x < threshold);
+    if (orientation == UIInterfaceOrientationLandscapeRight) return (loc.x > S - threshold);
+    return (loc.y < threshold);
+}
+
+// Is another real finger down in the top area, besides SpringBoard's touch at loc? iOS gives a
+// finger that lands below the status bar to the app, so only the touchscreen sees it.
+static BOOL rc_hid_second_top_finger(CGPoint loc, UIInterfaceOrientation orientation, CGFloat S, CGFloat L, CGPoint *other) {
+    os_unfair_lock_lock(&g_hidFingerLock);
+    uint32_t mask = g_hidFingerMask;
+    double xs[32], ys[32];
+    memcpy(xs, g_hidFingerX, sizeof(xs));
+    memcpy(ys, g_hidFingerY, sizeof(ys));
+    os_unfair_lock_unlock(&g_hidFingerLock);
+    int count = 0;
+    BOOL found = NO;
+    for (int slot = 0; slot < 32; slot++) {
+        if (!(mask & (1u << slot))) continue;
+        count++;
+        CGPoint p = CGPointMake(xs[slot] * S, ys[slot] * L);
+        if (hypot(p.x - loc.x, p.y - loc.y) > 40 && RC_InTopRegionMultiLoose(p, orientation, S, L)) {
+            found = YES;
+            if (other) *other = p;
+        }
+    }
+    return count >= 2 && found;
+}
+
 static inline BOOL RC_InBottomRegionMulti(CGPoint loc, UIInterfaceOrientation orientation, CGFloat S, CGFloat L) {
     (void)S; (void)L;
     CGFloat threshold = 75.0;
@@ -17270,6 +17346,33 @@ static inline BOOL RC_InBottomRegionMulti(CGPoint loc, UIInterfaceOrientation or
     if (orientation == UIInterfaceOrientationLandscapeLeft) return (loc.x > S - threshold);
     if (orientation == UIInterfaceOrientationLandscapeRight) return (loc.x < threshold);
     return (loc.y > L - threshold);
+}
+
+static inline BOOL RC_InBottomRegionMultiLoose(CGPoint loc, UIInterfaceOrientation orientation, CGFloat S, CGFloat L) {
+    (void)S; (void)L;
+    CGFloat threshold = 150.0;
+    if (orientation == UIInterfaceOrientationPortrait) return (loc.y > L - threshold);
+    if (orientation == UIInterfaceOrientationPortraitUpsideDown) return (loc.y < threshold);
+    if (orientation == UIInterfaceOrientationLandscapeLeft) return (loc.x > S - threshold);
+    if (orientation == UIInterfaceOrientationLandscapeRight) return (loc.x < threshold);
+    return (loc.y > L - threshold);
+}
+
+// Two real fingers near the bottom, from the touchscreen: a one-finger swipe there is iOS's
+// Home gesture and is left alone
+static BOOL rc_hid_two_bottom_fingers(UIInterfaceOrientation orientation, CGFloat S, CGFloat L) {
+    os_unfair_lock_lock(&g_hidFingerLock);
+    uint32_t mask = g_hidFingerMask;
+    double xs[32], ys[32];
+    memcpy(xs, g_hidFingerX, sizeof(xs));
+    memcpy(ys, g_hidFingerY, sizeof(ys));
+    os_unfair_lock_unlock(&g_hidFingerLock);
+    int near = 0;
+    for (int slot = 0; slot < 32; slot++) {
+        if (!(mask & (1u << slot))) continue;
+        if (RC_InBottomRegionMultiLoose(CGPointMake(xs[slot] * S, ys[slot] * L), orientation, S, L)) near++;
+    }
+    return near >= 2;
 }
 
 // Progress 0..1 along the UI-top / UI-bottom edge, left-to-right as the user sees it.
@@ -17389,6 +17492,33 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
             [triggers[@"trigger_bottom_two_finger_swipe_up"][@"enabled"] boolValue]);
 }
 
+static BOOL rc_recognizer_is_top_edge(UIGestureRecognizer *recognizer) {
+    if (![recognizer respondsToSelector:@selector(edges)]) return NO;
+    return ([(UIScreenEdgePanGestureRecognizer *)recognizer edges] & UIRectEdgeTop) != 0;
+}
+
+// A two-finger top swipe owns the top edge while it is down and shortly after it fires
+static inline BOOL rc_is_two_finger_top_active(void) {
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    return (g_twoFingerTopActive || g_twoFingerTopTriggered || (now - g_lastTwoFingerTopSwipeTriggerTime < 0.8)) &&
+           RC_TriggerIsActionable(@"trigger_statusbar_two_finger_swipe_down");
+}
+
+// Stop a top-edge swipe the first finger started before the second one landed. Turning a
+// recognizer off and on cancels it, and the panel it was pulling slides back.
+static void rc_cancel_edge_recognizers(NSHashTable<UIGestureRecognizer *> *table) {
+    for (UIGestureRecognizer *recognizer in [table allObjects]) {
+        if (!recognizer.enabled) continue;
+        UIGestureRecognizerState state = recognizer.state;
+        if (state != UIGestureRecognizerStateBegan && state != UIGestureRecognizerStateChanged) continue;
+        SRLog(@"[RCMultiFinger] Cancelling edge recognizer %@", recognizer);
+        recognizer.enabled = NO;
+        recognizer.enabled = YES;
+    }
+}
+
+static void rc_cancel_top_edge_recognizers(void) { rc_cancel_edge_recognizers(g_rcTopEdgeRecognizers); }
+
 static inline BOOL rc_is_bottom_gesture_active(void) {
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
     // The touch counts only when its own zone will do something. Using "any bottom trigger
@@ -17414,7 +17544,8 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
     
     CGFloat S = 0, L = 0;
     RC_ScreenSL(&S, &L);
-    if (RC_InBottomRegionMulti(loc, orientation, S, L) && RC_TriggerIsActionable(@"trigger_bottom_two_finger_swipe_up")) {
+    if (RC_InBottomRegionMulti(loc, orientation, S, L) && RC_TriggerIsActionable(@"trigger_bottom_two_finger_swipe_up") &&
+        rc_hid_two_bottom_fingers(orientation, S, L)) {
         return YES;
     }
     
@@ -17445,6 +17576,35 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
         CGFloat S = 0, L = 0;
         RC_ScreenSL(&S, &L);
 
+        // SpringBoard sees one touch at the top while the touchscreen sees a second finger the app got
+        if (allTouches.count == 1 && !g_twoFingerTopActive && !g_twoFingerTopTriggered &&
+            RC_TriggerIsActionable(@"trigger_statusbar_two_finger_swipe_down")) {
+            CGPoint loc = [touch locationInView:nil];
+            BOOL startedTop = (touch.phase == UITouchPhaseBegan && RC_InTopRegionMulti(loc, orientation, S, L)) ||
+                              (touch.phase == UITouchPhaseMoved && g_statusBarTouchActive && !g_statusBarSwipeTriggered && !g_statusBarHoldTriggered);
+            CGPoint other = CGPointZero;
+            if (startedTop && rc_hid_second_top_finger(loc, orientation, S, L, &other)) {
+                RC_SnapshotGestureOffsets();
+                if (g_statusBarHoldTimer) {
+                    [g_statusBarHoldTimer invalidate];
+                    g_statusBarHoldTimer = nil;
+                }
+                g_pendingStatusBarTrigger = nil;
+                g_statusBarTouchActive = NO;
+                g_statusBarSwipeTriggered = NO;
+                g_statusBarHoldTriggered = NO;
+                g_twoFingerTopActive = YES;
+                g_twoFingerTopTriggered = NO;
+                g_twoFingerTopStartX = loc.x; // only this finger's moves reach SpringBoard
+                g_twoFingerTopStartY = loc.y;
+                g_rcLatchedTouchOrientation = orientation;
+                g_rcLatchedTouchOrientationValid = YES;
+                SRLogMin(@"[RCMultiFinger] Two-finger top slide (second finger from the touchscreen): (%.0f, %.0f) and (%.0f, %.0f)", loc.x, loc.y, other.x, other.y);
+                rc_cancel_top_edge_recognizers();
+                if (touch.phase == UITouchPhaseBegan) { %orig; return; }
+            }
+        }
+
         // Check for multi-finger (2-finger) activation
         if (allTouches.count >= 2) {
             NSArray<UITouch *> *touchArr = [allTouches allObjects];
@@ -17455,7 +17615,13 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
             BOOL p0Bottom = RC_InBottomRegionMulti(p0, orientation, S, L);
             BOOL p1Bottom = RC_InBottomRegionMulti(p1, orientation, S, L);
 
-            if (p0Top && p1Top && !g_twoFingerTopActive && !g_twoFingerTopTriggered) {
+            BOOL twoFingerTop = (p0Top && RC_InTopRegionMultiLoose(p1, orientation, S, L)) ||
+                                (p1Top && RC_InTopRegionMultiLoose(p0, orientation, S, L));
+            if ((p0Top || p1Top) && !twoFingerTop && !g_twoFingerTopActive && !g_twoFingerTopTriggered &&
+                RC_TriggerIsActionable(@"trigger_statusbar_two_finger_swipe_down")) {
+                SRLogMin(@"[RCMultiFinger] Two fingers down, not a top slide: (%.0f, %.0f) and (%.0f, %.0f)", p0.x, p0.y, p1.x, p1.y);
+            }
+            if (twoFingerTop && !g_twoFingerTopActive && !g_twoFingerTopTriggered) {
                 RC_SnapshotGestureOffsets();
                 if (g_statusBarHoldTimer) {
                     [g_statusBarHoldTimer invalidate];
@@ -17471,7 +17637,8 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                 g_twoFingerTopStartY = (p0.y + p1.y) / 2.0;
                 g_rcLatchedTouchOrientation = orientation;
                 g_rcLatchedTouchOrientationValid = YES;
-                SRLog(@"[RCMultiFinger] Two Finger Top Active at (%.0f, %.0f)", g_twoFingerTopStartX, g_twoFingerTopStartY);
+                SRLogMin(@"[RCMultiFinger] Two-finger top slide: (%.0f, %.0f) and (%.0f, %.0f)", p0.x, p0.y, p1.x, p1.y);
+                if (RC_TriggerIsActionable(@"trigger_statusbar_two_finger_swipe_down")) rc_cancel_top_edge_recognizers();
             } else if (p0Bottom && p1Bottom && !g_twoFingerBottomActive && !g_twoFingerBottomTriggered) {
                 RC_SnapshotGestureOffsets();
                 g_bottomBarTouchActive = NO;
@@ -17484,6 +17651,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                 g_rcLatchedTouchOrientation = orientation;
                 g_rcLatchedTouchOrientationValid = YES;
                 SRLog(@"[RCMultiFinger] Two Finger Bottom Active at (%.0f, %.0f)", g_twoFingerBottomStartX, g_twoFingerBottomStartY);
+                if (RC_TriggerIsActionable(@"trigger_bottom_two_finger_swipe_up")) rc_cancel_edge_recognizers(g_rcBottomEdgeRecognizers);
             }
         }
 
@@ -17652,6 +17820,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                                        [g_triggerConfig[@"triggers"][@"trigger_statusbar_two_finger_swipe_down"][@"enabled"] boolValue];
                         if (enabled) {
                             g_twoFingerTopTriggered = YES;
+                            g_lastTwoFingerTopSwipeTriggerTime = [[NSDate date] timeIntervalSince1970];
                             trigger_haptic();
                             if (RC_TriggerIsActionable(@"trigger_statusbar_two_finger_swipe_down")) RC_FreezeGestureScrolling();
                             RCExecuteTrigger(@"trigger_statusbar_two_finger_swipe_down");
@@ -17979,6 +18148,15 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
     RC_UserDeltaForOrientation(loc.x - self.startPoint.x, loc.y - self.startPoint.y,
                               orientation, &dx, &dy);
     CGFloat ax = fabs(dx), ay = fabs(dy);
+    // Kept only for a possible two-finger slide: once moving with one finger, it's iOS's Home swipe
+    if ([self.zoneTriggerKey isEqualToString:@"trigger_bottom_two_finger_swipe_up"] && (ax > 8 || ay > 8)) {
+        CGFloat S = 0, L = 0;
+        RC_ScreenSL(&S, &L);
+        if (!rc_hid_two_bottom_fingers(orientation, S, L)) {
+            self.state = UIGestureRecognizerStateFailed;
+            return;
+        }
+    }
     // Contradicting motion (sideways or downward beyond slop): not ours.
     // Failing releases any competing recognizers immediately.
     if ((ax > 25 && ax > ay * 1.5) || dy > 18) {
@@ -18532,6 +18710,10 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
             return NO;
         }
     }
+    if (rc_is_two_finger_top_active()) {
+        SRLogMin(@"[RCMultiFinger] Control Center grabber: touch refused during a two-finger top slide");
+        return NO;
+    }
     return %orig;
 }
 
@@ -18542,11 +18724,15 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
             return NO;
         }
     }
+    if (edge == UIRectEdgeTop && rc_is_two_finger_top_active()) {
+        SRLogMin(@"[RCMultiFinger] Control Center grabber: top pull refused during a two-finger top slide");
+        return NO;
+    }
     return %orig;
 }
 
 - (void)grabberTongueBeganPulling:(id)tongue withDistance:(double)dist andVelocity:(double)vel {
-    if (rc_is_bottom_gesture_active()) {
+    if (rc_is_bottom_gesture_active() || rc_is_two_finger_top_active()) {
         SRLog(@"[RCBottom] SBControlCenterController suppressing grabberTongueBeganPulling");
         return;
     }
@@ -18559,12 +18745,22 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
         SRLog(@"[RCBottom] SBControlCenterController suppressing _presentControlCenterGestureBeganWithReason: %@", reason);
         return;
     }
+    if (rc_is_two_finger_top_active()) {
+        SRLogMin(@"[RCMultiFinger] Control Center pull not started during a two-finger top slide");
+        return;
+    }
+    g_rcCCPullStarted = YES;
     %orig;
 }
 
 - (void)_presentControlCenterGestureUpdatedWithGrabberDistance:(double)dist andVelocity:(double)vel {
     if (rc_cc_intentional_open_active()) { %orig; return; }
     if (rc_is_bottom_gesture_active()) {
+        return;
+    }
+    if (rc_is_two_finger_top_active()) {
+        // Hold a pull iOS already started shut; one it never started gets nothing
+        if (g_rcCCPullStarted) %orig(0, 0);
         return;
     }
     %orig;
@@ -18576,12 +18772,21 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
         SRLog(@"[RCBottom] SBControlCenterController suppressing _presentControlCenterGestureEndedWithVelocity");
         return;
     }
+    BOOL started = g_rcCCPullStarted;
+    g_rcCCPullStarted = NO;
+    if (rc_is_two_finger_top_active()) {
+        if (!started) return;
+        // End a pull iOS already started as a flick back up, so Control Center closes
+        SRLogMin(@"[RCMultiFinger] Control Center pull closed for a two-finger top slide");
+        %orig(-2000, comp);
+        return;
+    }
     %orig;
 }
 
 - (void)presentAnimated:(BOOL)animated {
     if (rc_cc_intentional_open_active()) { %orig; return; }
-    if (rc_is_bottom_gesture_active()) {
+    if (rc_is_bottom_gesture_active() || rc_is_two_finger_top_active()) {
         SRLog(@"[RCBottom] Suppressed Control Center presentAnimated within trigger window");
         return;
     }
@@ -18590,7 +18795,7 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
 
 - (void)presentAnimated:(BOOL)animated completion:(id)completion {
     if (rc_cc_intentional_open_active()) { %orig; return; }
-    if (rc_is_bottom_gesture_active()) {
+    if (rc_is_bottom_gesture_active() || rc_is_two_finger_top_active()) {
         SRLog(@"[RCBottom] Suppressed Control Center presentAnimated:completion: within trigger window");
         return;
     }
@@ -18599,7 +18804,7 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
 
 - (BOOL)_canPresent {
     if (rc_cc_intentional_open_active()) return %orig;
-    if (rc_is_bottom_gesture_active()) {
+    if (rc_is_bottom_gesture_active() || (rc_is_two_finger_top_active() && !g_rcCCPullStarted)) {
         return NO;
     }
     return %orig;
@@ -18649,9 +18854,23 @@ static BOOL RC_ShouldKeepBottomBarSideSwipe(void) {
 
 - (void)addGestureRecognizer:(UIGestureRecognizer *)recognizer withType:(NSUInteger)type {
     %orig;
+    if (recognizer && rc_recognizer_is_top_edge(recognizer)) {
+        if (!g_rcTopEdgeRecognizers) g_rcTopEdgeRecognizers = [NSHashTable weakObjectsHashTable];
+        [g_rcTopEdgeRecognizers addObject:recognizer];
+        SRLog(@"[RCMultiFinger] Top-edge system gesture type %lu: %@", (unsigned long)type, recognizer);
+    }
+    if (recognizer && [recognizer respondsToSelector:@selector(edges)] &&
+        ([(UIScreenEdgePanGestureRecognizer *)recognizer edges] & UIRectEdgeBottom)) {
+        if (!g_rcBottomEdgeRecognizers) g_rcBottomEdgeRecognizers = [NSHashTable weakObjectsHashTable];
+        [g_rcBottomEdgeRecognizers addObject:recognizer];
+    }
 }
 
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)recognizer shouldReceiveTouch:(UITouch *)touch {
+    if (rc_is_two_finger_top_active() && rc_recognizer_is_top_edge(recognizer)) {
+        SRLog(@"[RCMultiFinger] SBSystemGestureManager shouldReceiveTouch: NO for top-edge recognizer %@", recognizer);
+        return NO;
+    }
     if (touch && [touch isKindOfClass:[UITouch class]]) {
         CGPoint loc = [touch locationInView:nil];
         UIInterfaceOrientation orientation = get_current_interface_orientation();
@@ -18669,6 +18888,10 @@ static BOOL RC_ShouldKeepBottomBarSideSwipe(void) {
 }
 
 - (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)recognizer {
+    if (rc_is_two_finger_top_active() && rc_recognizer_is_top_edge(recognizer)) {
+        SRLog(@"[RCMultiFinger] SBSystemGestureManager gestureRecognizerShouldBegin: NO for top-edge recognizer %@", recognizer);
+        return NO;
+    }
     if (recognizer && [recognizer respondsToSelector:@selector(edges)]) {
         UIRectEdge edges = [(UIScreenEdgePanGestureRecognizer *)recognizer edges];
         if ((edges & UIRectEdgeBottom) || edges == 0) {
