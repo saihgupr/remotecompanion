@@ -14,6 +14,7 @@
 @property (nonatomic, assign) double minimum;          // default 0
 @property (nonatomic, assign) double maximum;          // default 1,000,000
 @property (nonatomic, assign) BOOL allowsDecimals;
+@property (nonatomic, assign) BOOL stepperStyle;           // a big readout with -/+ half steps (Delay)
 @property (nonatomic, copy) NSArray<NSString *> *choices;  // shown as a segmented control when set
 @property (nonatomic, assign) NSInteger selectedChoice;
 @property (nonatomic, copy) NSString *saveTitle;       // default Save

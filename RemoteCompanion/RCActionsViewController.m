@@ -3227,6 +3227,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     editor.note = @"How long to wait before the next action, up to a day.";
     editor.allowsRound = [self roundAvailableAtIndex:editing ? index : NSNotFound];
     editor.saveTitle = editing ? @"Save" : @"Add";
+    editor.stepperStyle = YES;
     __weak typeof(self) weakSelf = self;
     editor.onSave = ^(id seconds, __unused NSInteger choice) {
         __strong typeof(weakSelf) strongSelf = weakSelf;

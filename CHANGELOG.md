@@ -20,6 +20,7 @@ All notable changes to this project will be documented in this file.
 ### Changed
 - **Clear Notifications action and CLI**: replaced **Clear RC Notifications** with **Clear Notifications**, letting you target Any App or specific apps (including RemoteCompanion) and add or paste as many case-insensitive text filters as you want. `rc clear notification` (and `rc notify clear`) now accepts `--all`, `--app`, inline filter strings, and line-by-line `.txt` files.
 - **Tighter bar gesture zones**: the status bar and bottom bar gesture areas now cover 25pt from the edge instead of 50pt, so a touch has to land closer to the bar. Two-finger slides keep their wider 75pt landing zone.
+- **Stepper Delay editor**: the Delay action now opens a big readout with half-second minus and plus buttons and an Exact row for typing a time or inserting a variable, instead of the plain field row. Repeat, time limit and level settings keep the plain number panel.
 
 ## [4.5.0] - 2026-11-11
 
