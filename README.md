@@ -4,7 +4,7 @@ RemoteCompanion provides fast, scriptable system control for modern rootless jai
 
 > [!IMPORTANT]
 > **What’s New in v4.5.0**
-> - **Full Backup**: Export Configuration writes one file with everything on this device, including settings, integrations, triggers, add-ons, gestures, notification filters and variables. Import it on a new device to put it all back, and `rc backup` / `rc restore` do the same from a terminal.
+> - **Full Configuration Export & IAmLazy Tweak Backups**: Export Configuration writes one file with everything on this device, including settings, integrations, triggers, add-ons, gestures, notification filters and variables (`rc export` / `rc import`), while `rc backup` runs an IAmLazy tweak backup on the device and moves the `.tar.gz` archive to your Mac.
 > - **Triggers only when added**: the Triggers screen starts empty and every built-in trigger lives in the + menu, so the list holds only what you use. Removing a trigger puts it back in the menu.
 > - **Remote RC actions**: add another device under Settings > Integrations > Remote RC Clients, then run any RC command on it over its Web UI, with the same pickers and editors as local actions.
 > - **Duplicate actions**: the long-press action menu can duplicate a row in place, whole If and Repeat blocks included, and the Web UI's right-click menu has the same.
@@ -244,18 +244,30 @@ Combine status queries with actions for smart automation:
 </details>
 
 <details>
-<summary><b>Backup CLI Commands</b></summary>
+<summary><b>Backup & Export CLI Commands</b></summary>
 
-### Backup
-- `rc backup [path]` - Save everything on the device in one JSON file: settings, integrations, triggers, add-ons, gestures, notification filters, variables and the app blacklist. Import it from Settings > Backup > Import Configuration, or with `rc restore`.
+### Configuration Export & Import
+- `rc export [path]` - Save everything on the device in one JSON file: settings, integrations, triggers, add-ons, gestures, notification filters, variables and the app blacklist. Import it from Settings > Backup > Import Configuration, or with `rc import`.
   ```bash
-  rc backup                    # ./rc_backup_20261111_0930.json
-  rc backup ~/Desktop          # ~/Desktop/rc_backup_20261111_0930.json
-  rc backup ~/Desktop/rc.json  # ~/Desktop/rc.json, overwrites if it exists
+  rc export                    # ./rc_export_20261114_1500.json
+  rc export ~/Desktop          # ~/Desktop/rc_export_20261114_1500.json
+  rc export ~/Desktop/rc.json  # ~/Desktop/rc.json, overwrites if it exists
   ```
-- `rc restore <path>` - Put a backup file back on the device exactly as it was.
+- `rc import <path>` (or `rc restore <path>`) - Put an exported configuration file back on the device exactly as it was.
 
-The file is plain text and holds your passwords and tokens. Keep it private.
+The exported JSON file is plain text and holds your passwords and tokens. Keep it private.
+
+### IAmLazy Tweak Backups
+Requires `me.lightmann.iamlazy-cli` (`/var/jb/usr/local/bin/ial`) on the device.
+- `rc backup [path]` - Run an IAmLazy standard tweak backup on the device, verify the archive size after copying it to your Mac, and delete the `.tar.gz` from the device.
+  ```bash
+  rc backup                    # ./IAL-20261114_1.tar.gz
+  rc backup /Volumes/Backups   # /Volumes/Backups/IAL-20261114_1.tar.gz
+  rc backup ~/Desktop/my.tar.gz
+  ```
+- `rc pull-backup [dir]` - Move the newest existing IAmLazy `.tar.gz` archive from the device to `<dir>` (default: `~/Desktop/RC-Backups/iamlazy`), deleting it from the device once verified.
+- `rc ialazy backup` - Start an on-device IAmLazy backup in the background (leaving the `.tar.gz` on the device).
+- `rc ialazy list` - List `.tar.gz` archives currently in the device's IAmLazy backup folder.
 
 </details>
 

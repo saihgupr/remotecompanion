@@ -10257,6 +10257,127 @@ static NSString *rc_handle_http_request(NSString *action) {
     return [NSString stringWithFormat:@"REST %@ %@\n", method, urlString];
 }
 
+// ---- IAmLazy ---------------------------------------------------------------
+// IAmLazy's CLI asks two questions (backup type, then a storage confirmation)
+// and reads the answers with availableData, so it only behaves with a terminal
+// in front of it. The backup runs detached from a small script; the app and rc
+// start it and then look at the folder, since a full backup outlives a reply.
+
+#define kRCIAmLazyBin @"/var/jb/usr/local/bin/ial"
+#define kRCIAmLazyScript @"/var/mobile/Documents/rc_iamlazy.sh"
+#define kRCIAmLazyLog @"/var/mobile/Documents/rc_iamlazy.log"
+
+static NSString *rc_iamlazy_dir(void) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    for (NSString *path in @[@"/var/jb/var/mobile/Documents/me.lightmann.iamlazy",
+                             @"/var/mobile/Documents/me.lightmann.iamlazy"]) {
+        BOOL isDir = NO;
+        if ([fm fileExistsAtPath:path isDirectory:&isDir] && isDir) return path;
+    }
+    return nil;
+}
+
+static NSArray<NSDictionary *> *rc_iamlazy_backups(void) {
+    NSString *dir = rc_iamlazy_dir();
+    if (!dir) return @[];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray *names = [fm contentsOfDirectoryAtPath:dir error:NULL] ?: @[];
+    NSMutableArray *out = [NSMutableArray array];
+    for (NSString *name in names) {
+        if (![name.pathExtension isEqualToString:@"gz"]) continue;
+        NSString *path = [dir stringByAppendingPathComponent:name];
+        NSDictionary *attrs = [fm attributesOfItemAtPath:path error:NULL];
+        if (!attrs) continue;
+        [out addObject:@{
+            @"name": name,
+            @"path": path,
+            @"size": attrs[NSFileSize] ?: @0,
+            @"date": attrs[NSFileModificationDate] ?: [NSDate date]
+        }];
+    }
+    [out sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+        return [b[@"date"] compare:a[@"date"]];
+    }];
+    return out;
+}
+
+static NSString *rc_iamlazy_list(void) {
+    if (!rc_iamlazy_dir()) return @"Error: The IAmLazy backup folder is missing\n";
+    NSArray<NSDictionary *> *backups = rc_iamlazy_backups();
+    if (!backups.count) return @"none\n";
+    NSMutableString *out = [NSMutableString string];
+    for (NSDictionary *backup in backups) {
+        [out appendFormat:@"%@\t%llu\t%.0f\t%@\n", backup[@"name"],
+            [backup[@"size"] unsignedLongLongValue], [backup[@"date"] timeIntervalSince1970], backup[@"path"]];
+    }
+    return out;
+}
+
+static NSString *rc_iamlazy_backup(void) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if (![fm fileExistsAtPath:kRCIAmLazyBin]) return @"Error: The IAmLazy CLI is not installed\n";
+    if (!rc_iamlazy_dir()) return @"Error: The IAmLazy backup folder is missing\n";
+
+    // Keep stdin open via a FIFO only while IAmLazy runs: availableData reads
+    // each answer as it arrives and loops if EOF is reached between prompts.
+    NSString *script =
+        @"#!/bin/sh\n"
+         "LOG=/var/mobile/Documents/rc_iamlazy.log\n"
+         "FIFO=/tmp/rc_iamlazy_$$.fifo\n"
+         "rm -f \"$FIFO\"\n"
+         "mkfifo \"$FIFO\"\n"
+         "echo \"start $(date)\" > \"$LOG\"\n"
+         "mkdir -p /var/jb/var/mobile/Documents/me.lightmann.iamlazy\n"
+         "chown -R mobile:mobile /var/jb/var/mobile/Documents/me.lightmann.iamlazy 2>/dev/null || true\n"
+         "DYLD_INSERT_LIBRARIES=/var/jb/Library/MobileSubstrate/DynamicLibraries/RCIAmLazyFix.dylib /var/jb/usr/local/bin/ial -b < \"$FIFO\" >> \"$LOG\" 2>&1 &\n"
+         "IAL_PID=$!\n"
+         "{\n"
+         "    sleep 1\n"
+         "    printf '0\\n'\n"
+         "    sleep 1\n"
+         "    printf '1\\n'\n"
+         "    i=0\n"
+         "    while kill -0 \"$IAL_PID\" 2>/dev/null; do\n"
+         "        i=$((i + 1))\n"
+         "        if [ \"$i\" -ge 900 ]; then\n"
+         "            kill -9 \"$IAL_PID\" 2>/dev/null || true\n"
+         "            break\n"
+         "        fi\n"
+         "        sleep 1\n"
+         "    done\n"
+         "} > \"$FIFO\" 2>/dev/null &\n"
+         "FEED_PID=$!\n"
+         "wait \"$IAL_PID\"\n"
+         "STATUS=$?\n"
+         "kill \"$FEED_PID\" 2>/dev/null || true\n"
+         "rm -f \"$FIFO\"\n"
+         "chown -R mobile:mobile /var/jb/var/mobile/Documents/me.lightmann.iamlazy 2>/dev/null || true\n"
+         "echo \"exit=$STATUS $(date)\" >> \"$LOG\"\n"
+         "exit \"$STATUS\"\n";
+    NSError *writeError = nil;
+    if (![script writeToFile:kRCIAmLazyScript atomically:YES encoding:NSUTF8StringEncoding error:&writeError]) {
+        return [NSString stringWithFormat:@"Error: Could not write the backup script: %@\n",
+            writeError.localizedDescription ?: @"unknown"];
+    }
+    [fm setAttributes:@{NSFilePosixPermissions: @0755} ofItemAtPath:kRCIAmLazyScript error:NULL];
+    [fm removeItemAtPath:kRCIAmLazyLog error:NULL];
+
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        const char *rootPath = "/var/jb/usr/bin/rc-root";
+        NSString *command = [NSString stringWithFormat:@"sh %@", kRCIAmLazyScript];
+        char *args[] = {(char *)rootPath, (char *)[command UTF8String], NULL};
+        extern char **environ;
+        pid_t pid;
+        if (rc_posix_spawn(&pid, rootPath, NULL, NULL, args, environ) == 0) {
+            int status;
+            waitpid(pid, &status, 0);
+        } else {
+            SRLogMin(@"[IAmLazy] Could not start the backup script");
+        }
+    });
+    return @"Backing up the tweaks\n";
+}
+
 #import "RCGestures.h"
 
 static NSString *handle_command(NSString *cmd) {
@@ -12625,6 +12746,12 @@ static NSString *handle_command(NSString *cmd) {
             if (!rc_run_wait(seconds)) return @"Delay cut short: the run was stopped\n";
         }
         return [NSString stringWithFormat:@"Delayed for %.2f seconds\n", seconds];
+    } else if ([cleanCmd isEqualToString:@"ialazy backup"]) {
+        return rc_iamlazy_backup();
+    } else if ([cleanCmd isEqualToString:@"ialazy list"]) {
+        return rc_iamlazy_list();
+    } else if ([cleanCmd isEqualToString:@"ialazy"]) {
+        return @"Usage: ialazy backup | ialazy list\n";
     } else if ([cleanCmd hasPrefix:@"root "] || [cleanCmd hasPrefix:@"sudo "]) {
         // Execute command as root via setuid helper
         NSString *shellCmd = [cleanCmd hasPrefix:@"root "]

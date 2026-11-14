@@ -19,7 +19,7 @@ THEOS_PACKAGE_SCHEME ?= rootless
 
 include $(THEOS)/makefiles/common.mk
 
-TWEAK_NAME = RemoteCommand RCShortcutsHelper RCNFCReader RCWatchPing RCFindMyPing
+TWEAK_NAME = RemoteCommand RCShortcutsHelper RCNFCReader RCWatchPing RCFindMyPing RCIAmLazyFix
 
 # Lua source files
 LUA_FILES = $(wildcard lua/*.c)
@@ -59,6 +59,10 @@ RCWatchPing_CFLAGS = -fobjc-arc
 # (Find My Sound trigger, see RCFindMyPing.m)
 RCFindMyPing_FILES = RCFindMyPing.m
 RCFindMyPing_CFLAGS = -fobjc-arc
+
+# Loaded into ial (IAmLazy CLI) to avoid its mainQueue NSNotificationCenter deadlock
+RCIAmLazyFix_FILES = RCIAmLazyFix.m
+RCIAmLazyFix_CFLAGS = -fobjc-arc
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 
