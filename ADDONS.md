@@ -424,6 +424,9 @@ as commands: `addons settings <id>` gives the current values as JSON, and
 `addons set <id> <setting> <value>` changes one. A switch takes `on` or `off`, and a choice takes
 its value or its label.
 
+A tweak or app can open its add-on's page with the link `remotecompanion://addon?id=<id>`, and
+open one of its settings there with `&setting=<setting id>` (as tapping its row does).
+
 ## Running an action
 
 When an action runs, this is what happens, in order:
