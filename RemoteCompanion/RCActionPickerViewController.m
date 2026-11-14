@@ -433,6 +433,9 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
                 [integrations addObject:@{ @"name": @"AudioHandoff: Automatic Switching", @"command": @"audiohandoff enabled toggle", @"icon": @"headphones" }];
             }
             [integrations addObject:@{ @"name": @"AudioMix: Toggle", @"command": @"audiomix toggle", @"icon": @"music.note" }];
+            if ([fm fileExistsAtPath:@"/var/jb/usr/local/bin/ial"] || [fm fileExistsAtPath:@"/usr/local/bin/ial"]) {
+                [integrations addObject:@{ @"name": @"IAmLazy: Back Up Tweaks", @"command": @"ialazy backup", @"icon": @"archivebox.fill", @"keywords": @"iamlazy backup tweaks packages" }];
+            }
             integrations;
         }),
         // Scripting & Logic

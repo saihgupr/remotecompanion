@@ -10,12 +10,22 @@ if [[ "$IP" == "iphone.local" && -f "/var/mobile/Documents/rc_triggers.plist" ]]
     IP="127.0.0.1"
 fi
 
+# Fall back to the iPhone static address when the mDNS name does not resolve
+if [[ "$IP" == "iphone.local" ]] && ! ping -c 1 -W 300 iphone.local >/dev/null 2>&1; then
+    IP="192.168.1.2"
+fi
+
 # Parse global options (must come before command)
 ROOT_CMD=0
+HELP_CMD=0
 while [[ "$1" =~ ^- ]]; do
     case "$1" in
         -r|--root)
             ROOT_CMD=1
+            shift
+            ;;
+        -h|--help)
+            HELP_CMD=1
             shift
             ;;
         *)
@@ -24,7 +34,11 @@ while [[ "$1" =~ ^- ]]; do
     esac
 done
 
-if [ -z "$1" ]; then
+if [[ "$1" == "help" || "$1" == "-h" || "$1" == "--help" ]]; then
+    HELP_CMD=1
+fi
+
+if [ "$HELP_CMD" -eq 1 ] || [ -z "$1" ]; then
     echo "Usage: rc [-r] <command> [arg]"
     echo ""
     echo "Implemented Commands:"
@@ -76,11 +90,15 @@ if [ -z "$1" ]; then
     echo "  http-request <json|url> - Call a REST API with method, headers and body"
     echo "  blacklist <list|add|remove|reset> - Manage app exclusion"
     echo "  nav <panel>       - Navigate companion app (triggers, settings, ha, km, mqtt, add)"
-    echo "  backup [path]     - Save everything for an exact restore (default: current directory; a directory or file)"
-    echo "  restore <path>    - Restore a backup file on the device"
+    echo "  export [path]     - Save everything for an exact restore (default: current directory; a directory or file)"
+    echo "  import <path>     - Restore an exported file on the device"
+    echo "  backup [path]     - Back up the tweaks with IAmLazy and move the archive (default: current directory; a directory or file)"
+    echo "  pull-backup [dir] - Move the newest IAmLazy backup to the Mac, printing its path"
+    echo "  ialazy <backup|list> - Start an on-device IAmLazy backup or list archives on the device"
+    echo "  -h, --help        - Show this help message"
     echo "  log               - Stream device logs"
     echo ""
-    exit 1
+    [ "$HELP_CMD" -eq 1 ] && exit 0 || exit 1
 fi
 
 # Send one command and print the reply, using the same delivery paths as below
@@ -98,34 +116,103 @@ rc_send_command() {
     fi
 }
 
-# Full backup: everything Export Configuration writes, one JSON file.
-if [[ "$1" == "backup" || "$1" == "backup-config" ]]; then
-    BACKUP_ARG="${2:-}"
-    DEFAULT_NAME="rc_backup_$(date +%Y%m%d_%H%M).json"
+rc_expand_path() {
+    local p="$1"
+    case "$p" in
+        "~") printf '%s' "$HOME" ;;
+        "~/"*) printf '%s' "$HOME/${p#\~/}" ;;
+        *) printf '%s' "$p" ;;
+    esac
+}
 
-    if [ -z "$BACKUP_ARG" ]; then
-        TARGET="$PWD/$DEFAULT_NAME"
-    else
-        case "$BACKUP_ARG" in
-            "~") BACKUP_ARG="$HOME" ;;
-            "~/"*) BACKUP_ARG="$HOME/${BACKUP_ARG#\~/}" ;;
-        esac
-        if [ -d "$BACKUP_ARG" ]; then
-            TARGET="${BACKUP_ARG%/}/$DEFAULT_NAME"
-        elif [[ "$BACKUP_ARG" == */ ]]; then
-            echo "Error: No such directory: $BACKUP_ARG" >&2
-            exit 1
+# Refuse writes to an unmounted /Volumes/<name> path so the boot disk isn't filled
+rc_check_volume_mount() {
+    case "$1" in
+        /Volumes/*)
+            local vol="/Volumes/$(printf '%s' "$1" | cut -d/ -f3)"
+            if ! mount | grep -q " on ${vol} "; then
+                echo "Error: ${vol} is not mounted" >&2
+                return 1
+            fi
+            ;;
+    esac
+    return 0
+}
+
+rc_resolve_dest() {
+    local raw="$1"
+    DEST_DIR=""
+    DEST_FILE=""
+
+    if [ -n "$raw" ]; then
+        raw="$(rc_expand_path "$raw")"
+        rc_check_volume_mount "$raw" || return 1
+        if [ -d "$raw" ]; then
+            DEST_DIR="${raw%/}"
+            [ -n "$DEST_DIR" ] || DEST_DIR="/"
+        elif [[ "$raw" == */ ]]; then
+            echo "Error: No such directory: $raw" >&2
+            return 1
         else
-            TARGET="$BACKUP_ARG"
+            DEST_DIR="$(dirname "$raw")"
+            if [ ! -d "$DEST_DIR" ]; then
+                echo "Error: No such directory: $DEST_DIR" >&2
+                return 1
+            fi
+            DEST_FILE="$(basename "$raw")"
         fi
+    else
+        DEST_DIR="$PWD"
+        rc_check_volume_mount "$DEST_DIR" || return 1
     fi
 
-    TARGET_DIR="$(dirname "$TARGET")"
-    if [ ! -d "$TARGET_DIR" ]; then
-        echo "Error: No such directory: $TARGET_DIR" >&2
-        exit 1
+    DEST_DIR="$(cd "$DEST_DIR" && pwd)" || return 1
+    if [ -n "$DEST_FILE" ]; then
+        DEST_FILE="$DEST_DIR/$DEST_FILE"
     fi
-    TARGET="$(cd "$TARGET_DIR" && pwd)/$(basename "$TARGET")"
+    return 0
+}
+
+rc_move_device_file() {
+    local remote_path="$1"
+    local target="$2"
+    local remote_size="$3"
+
+    if [[ "$IP" == "127.0.0.1" ]]; then
+        if [ "$remote_path" != "$target" ] && ! mv "$remote_path" "$target"; then
+            echo "Error: Could not move $remote_path to $target" >&2
+            return 1
+        fi
+        return 0
+    fi
+
+    if ! scp -q -o ConnectTimeout=10 -o StrictHostKeyChecking=no "mobile@$IP:$remote_path" "$target"; then
+        echo "Error: Could not copy $remote_path from $IP" >&2
+        return 1
+    fi
+    local local_size
+    local_size=$(stat -f %z "$target" 2>/dev/null || wc -c < "$target" 2>/dev/null | tr -d ' ')
+    if [ -z "$local_size" ] || [ "$local_size" -le 0 ] 2>/dev/null || [ "$local_size" != "$remote_size" ]; then
+        echo "Error: Size mismatch copying $(basename "$remote_path") (local=${local_size:-0}, remote=$remote_size)" >&2
+        rm -f "$target"
+        return 1
+    fi
+    if ! ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no mobile@$IP "rm -f '$remote_path'"; then
+        echo "Error: Copied to $target, but could not remove $remote_path from $IP" >&2
+        return 1
+    fi
+    return 0
+}
+
+# Export: everything Export Configuration writes, one JSON file.
+if [[ "$1" == "export" || "$1" == "backup-config" ]]; then
+    rc_resolve_dest "${2:-}" || exit 1
+    DEFAULT_NAME="rc_export_$(date +%Y%m%d_%H%M).json"
+    if [ -n "$DEST_FILE" ]; then
+        TARGET="$DEST_FILE"
+    else
+        TARGET="$DEST_DIR/$DEFAULT_NAME"
+    fi
 
     RESPONSE="$(rc_send_command "backup config")"
     if [ $? -ne 0 ] || [ -z "$RESPONSE" ]; then
@@ -142,28 +229,31 @@ if [[ "$1" == "backup" || "$1" == "backup-config" ]]; then
         exit 1
     fi
     chmod 600 "$TARGET" 2>/dev/null || true
-    echo "Backed up everything to $TARGET"
+    echo "Exported everything to $TARGET"
     exit 0
 fi
 
-# Restore: copy the file to the device, then apply it there.
-if [[ "$1" == "restore" || "$1" == "restore-backup" ]]; then
-    RESTORE_FILE="${2:-}"
-    if [ -z "$RESTORE_FILE" ] || [ ! -f "$RESTORE_FILE" ]; then
-        echo "Error: Give a backup file: rc restore <path>" >&2
+# Import: copy the file to the device, then apply it there.
+if [[ "$1" == "import" || "$1" == "restore" || "$1" == "restore-backup" ]]; then
+    IMPORT_FILE="${2:-}"
+    if [ -n "$IMPORT_FILE" ]; then
+        IMPORT_FILE="$(rc_expand_path "$IMPORT_FILE")"
+    fi
+    if [ -z "$IMPORT_FILE" ] || [ ! -f "$IMPORT_FILE" ]; then
+        echo "Error: Give a file to import: rc import <path>" >&2
         exit 1
     fi
 
     REMOTE_RESTORE="/var/mobile/Documents/rc_restore.json"
     if [[ "$IP" == "127.0.0.1" ]]; then
-        if ! cp "$RESTORE_FILE" "$REMOTE_RESTORE"; then
+        if ! cp "$IMPORT_FILE" "$REMOTE_RESTORE"; then
             echo "Error: Could not write $REMOTE_RESTORE" >&2
             exit 1
         fi
         chmod 600 "$REMOTE_RESTORE" 2>/dev/null || true
     else
-        if ! ssh -o ConnectTimeout=3 -o StrictHostKeyChecking=no mobile@$IP "umask 077; cat > $REMOTE_RESTORE" < "$RESTORE_FILE"; then
-            echo "Error: Could not copy the backup to $IP" >&2
+        if ! ssh -o ConnectTimeout=3 -o StrictHostKeyChecking=no mobile@$IP "umask 077; cat > $REMOTE_RESTORE" < "$IMPORT_FILE"; then
+            echo "Error: Could not copy the file to $IP" >&2
             exit 1
         fi
     fi
@@ -177,6 +267,137 @@ if [[ "$1" == "restore" || "$1" == "restore-backup" ]]; then
     case "$RESPONSE" in
         Error*) exit 1 ;;
     esac
+    exit 0
+fi
+
+# Backup: run IAmLazy on the device and move the new archive here. The path works
+# the same way as export: nothing means the current directory, a directory keeps
+# IAmLazy's name for the file, and anything else is the file to write.
+if [[ "$1" == "backup" ]]; then
+    rc_resolve_dest "${2:-}" || exit 1
+
+    BEFORE="$(rc_send_command "ialazy list" | head -n1 | cut -f1)"
+    if [[ "$BEFORE" == Error:* ]]; then
+        echo "$BEFORE" >&2
+        exit 1
+    fi
+    if [ -z "$BEFORE" ]; then
+        echo "Error: Cannot connect to iPhone at $IP via SSH/Socket." >&2
+        exit 1
+    fi
+
+    STARTED="$(rc_send_command "ialazy backup")"
+    if [ -z "$STARTED" ]; then
+        echo "Error: Cannot connect to iPhone at $IP via SSH/Socket." >&2
+        exit 1
+    fi
+    case "$STARTED" in
+        Error*) echo "$STARTED" >&2; exit 1 ;;
+    esac
+
+    LINE=""
+    STABLE=0
+    LAST_SIZE=""
+    for _ in $(seq 1 200); do
+        sleep 3
+        CUR_LINE="$(rc_send_command "ialazy list" | head -n1)"
+        CUR_NAME="$(printf '%s' "$CUR_LINE" | cut -f1)"
+        CUR_SIZE="$(printf '%s' "$CUR_LINE" | cut -f2)"
+
+        HAS_EXIT=0
+        if [[ "$IP" == "127.0.0.1" ]]; then
+            grep -q '^exit=' /var/mobile/Documents/rc_iamlazy.log 2>/dev/null && HAS_EXIT=1
+        else
+            ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no mobile@$IP "grep -q '^exit=' /var/mobile/Documents/rc_iamlazy.log 2>/dev/null" && HAS_EXIT=1
+        fi
+
+        if [ "$HAS_EXIT" -eq 1 ]; then
+            LINE="$(rc_send_command "ialazy list" | head -n1)"
+            break
+        fi
+
+        if [ -n "$CUR_NAME" ] && [ "$CUR_NAME" != "none" ] && [ "$CUR_NAME" != "$BEFORE" ] && [[ "$CUR_NAME" != Error:* ]]; then
+            if [ -n "$CUR_SIZE" ] && [ "$CUR_SIZE" = "$LAST_SIZE" ] && [ "$CUR_SIZE" -gt 0 ] 2>/dev/null; then
+                STABLE=$((STABLE + 1))
+                if [ "$STABLE" -ge 3 ]; then
+                    LINE="$CUR_LINE"
+                    break
+                fi
+            else
+                STABLE=1
+                LAST_SIZE="$CUR_SIZE"
+            fi
+        fi
+    done
+
+    NAME="$(printf '%s' "$LINE" | cut -f1)"
+    if [ -z "$NAME" ] || [ "$NAME" = "none" ] || [ "$NAME" = "$BEFORE" ] || [[ "$NAME" == Error:* ]]; then
+        echo "Error: The backup did not finish (no new archive created)" >&2
+        if [[ "$IP" == "127.0.0.1" ]]; then
+            tail -n 20 /var/mobile/Documents/rc_iamlazy.log 2>/dev/null >&2 || true
+        else
+            ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no mobile@$IP "tail -n 20 /var/mobile/Documents/rc_iamlazy.log 2>/dev/null" >&2 || true
+        fi
+        exit 1
+    fi
+
+    REMOTE_SIZE="$(printf '%s' "$LINE" | cut -f2)"
+    REMOTE_PATH="$(printf '%s' "$LINE" | cut -f4)"
+    if [ -z "$REMOTE_PATH" ] || [ -z "$REMOTE_SIZE" ]; then
+        echo "Error: The backup folder could not be read on $IP" >&2
+        exit 1
+    fi
+
+    if [ -n "$DEST_FILE" ]; then
+        TARGET="$DEST_FILE"
+    else
+        TARGET="$DEST_DIR/$NAME"
+    fi
+
+    rc_move_device_file "$REMOTE_PATH" "$TARGET" "$REMOTE_SIZE" || exit 1
+    chmod 600 "$TARGET" 2>/dev/null || true
+    echo "$TARGET"
+    exit 0
+fi
+
+# Move the newest IAmLazy archive to the Mac and print its path.
+if [[ "$1" == "pull-backup" ]]; then
+    DEST="$(rc_expand_path "${2:-$HOME/Desktop/RC-Backups/iamlazy}")"
+    rc_check_volume_mount "$DEST" || exit 1
+    mkdir -p "$DEST" || { echo "Error: Could not create $DEST" >&2; exit 1; }
+    DEST="$(cd "$DEST" && pwd)" || exit 1
+
+    REMOTE_DIR=""
+    for d in /var/jb/var/mobile/Documents/me.lightmann.iamlazy /var/mobile/Documents/me.lightmann.iamlazy; do
+        if [[ "$IP" == "127.0.0.1" ]]; then
+            [ -d "$d" ] && REMOTE_DIR="$d" && break
+        else
+            ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no mobile@$IP "test -d '$d'" 2>/dev/null && REMOTE_DIR="$d" && break
+        fi
+    done
+    if [ -z "$REMOTE_DIR" ]; then
+        echo "Error: No IAmLazy backup folder on $IP" >&2
+        exit 1
+    fi
+
+    if [[ "$IP" == "127.0.0.1" ]]; then
+        NEWEST=$(ls -t "$REMOTE_DIR"/*.tar.gz 2>/dev/null | head -n1)
+        REMOTE_SIZE=$(wc -c < "$NEWEST" 2>/dev/null | tr -d ' ')
+    else
+        NEWEST=$(ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no mobile@$IP "ls -t '$REMOTE_DIR'/*.tar.gz 2>/dev/null | head -n1")
+        if [ -n "$NEWEST" ]; then
+            REMOTE_SIZE=$(ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no mobile@$IP "wc -c < '$NEWEST'" 2>/dev/null | tr -d ' ')
+        fi
+    fi
+    if [ -z "$NEWEST" ]; then
+        echo "Error: No backup in $REMOTE_DIR yet" >&2
+        exit 1
+    fi
+
+    TARGET="$DEST/$(basename "$NEWEST")"
+    rc_move_device_file "$NEWEST" "$TARGET" "$REMOTE_SIZE" || exit 1
+    chmod 600 "$TARGET" 2>/dev/null || true
+    echo "$TARGET"
     exit 0
 fi
 
