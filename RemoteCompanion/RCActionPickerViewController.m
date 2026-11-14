@@ -202,6 +202,7 @@
             @{ @"name": @"Lock Device", @"command": @"lock", @"icon": @"lock.fill" },
             @{ @"name": @"Unlock Device...", @"command": @"__UNLOCK_DEVICE__", @"icon": @"lock.open.fill" },
             @{ @"name": @"Lock Toggle...", @"command": @"__LOCK_TOGGLE__", @"icon": @"lock.circle" },
+            @{ @"name": @"Forget Saved Passcode", @"command": @"unlock-passcode forget", @"icon": @"lock.slash", @"keywords": @"forget delete clear keychain saved unlock" },
             @{ @"name": @"Do Not Disturb", @"command": @"dnd toggle", @"icon": @"moon.circle.fill" },
             @{ @"name": @"Set Focus...", @"command": @"__FOCUS__", @"icon": @"moon.circle" },
             @{ @"name": @"Low Power Mode", @"command": @"low power toggle", @"icon": @"battery.25" },
@@ -857,79 +858,37 @@ static BOOL RCPickerActionOpensMore(NSString *command) {
 }
 
 - (void)handleUnlockDevice {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Unlock Device"
-                                                                   message:@"Enter a passcode to unlock automatically, or choose 'Wake Screen Only' to present the passcode screen.\n\nNote: Configured passcodes are stored in plain text in trigger settings (rc_triggers.plist)."
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    
-    [alert addTextFieldWithConfigurationHandler:^(UITextField * _Nonnull textField) {
-        textField.placeholder = @"Passcode (optional)";
-        textField.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
-        textField.secureTextEntry = YES;
-    }];
-    
-    __weak typeof(self) weakSelf = self;
-    
-    UIAlertAction *saveWithPasscode = [UIAlertAction actionWithTitle:@"Set Passcode" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
-        __strong typeof(weakSelf) strongSelf = weakSelf;
-        if (!strongSelf) return;
-        UITextField *tf = alert.textFields.firstObject;
-        NSString *pin = [tf.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        NSString *finalCmd = pin.length > 0 ? [NSString stringWithFormat:@"unlock %@", pin] : @"unlock";
-        if (strongSelf.onActionSelected) strongSelf.onActionSelected(finalCmd);
-        if (strongSelf.searchController.isActive) {
-            [strongSelf.searchController dismissViewControllerAnimated:NO completion:^{
-                [strongSelf dismissViewControllerAnimated:YES completion:nil];
-            }];
-        } else {
-            [strongSelf dismissViewControllerAnimated:YES completion:nil];
-        }
-    }];
-    
-    UIAlertAction *wakeOnly = [UIAlertAction actionWithTitle:@"Wake Screen Only" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
-        __strong typeof(weakSelf) strongSelf = weakSelf;
-        if (!strongSelf) return;
-        if (strongSelf.onActionSelected) strongSelf.onActionSelected(@"unlock");
-        if (strongSelf.searchController.isActive) {
-            [strongSelf.searchController dismissViewControllerAnimated:NO completion:^{
-                [strongSelf dismissViewControllerAnimated:YES completion:nil];
-            }];
-        } else {
-            [strongSelf dismissViewControllerAnimated:YES completion:nil];
-        }
-    }];
-    
-    UIAlertAction *cancel = [UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(UIAlertAction * _Nonnull action) {
-        [self deselectTiles];
-    }];
-    
-    [alert addAction:wakeOnly];
-    [alert addAction:saveWithPasscode];
-    [alert addAction:cancel];
-    alert.preferredAction = saveWithPasscode;
-    
-    [self presentViewController:alert animated:YES completion:nil];
+    [self presentPasscodeActionAlertWithTitle:@"Unlock Device" base:@"unlock" noPasscodeTitle:@"Ask for Passcode"];
 }
 
 - (void)handleLockToggle {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Lock Toggle"
-                                                                   message:@"Enter a passcode to unlock automatically when locked, or choose 'Toggle Without Passcode' to toggle without passcode entry.\n\nNote: Configured passcodes are stored in plain text in trigger settings (rc_triggers.plist)."
+    [self presentPasscodeActionAlertWithTitle:@"Lock Toggle" base:@"lock-toggle" noPasscodeTitle:@"Ask for Passcode"];
+}
+
+- (void)presentPasscodeActionAlertWithTitle:(NSString *)title base:(NSString *)base noPasscodeTitle:(NSString *)noPasscodeTitle {
+    // Whether a passcode is saved decides the field's hint, so ask the tweak first
+    [RCConfigManager checkUnlockPasscodeSaved:^(BOOL saved) {
+        [self presentPasscodeActionAlertWithTitle:title base:base noPasscodeTitle:noPasscodeTitle passcodeSaved:saved];
+    }];
+}
+
+- (void)presentPasscodeActionAlertWithTitle:(NSString *)title base:(NSString *)base noPasscodeTitle:(NSString *)noPasscodeTitle passcodeSaved:(BOOL)saved {
+    NSString *savedCommand = [base stringByAppendingString:@" saved"];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
+                                                                   message:@"Unlocks automatically with the device passcode, kept in the Keychain on this iPhone only."
                                                             preferredStyle:UIAlertControllerStyleAlert];
     
     [alert addTextFieldWithConfigurationHandler:^(UITextField * _Nonnull textField) {
-        textField.placeholder = @"Passcode (optional)";
+        textField.placeholder = saved ? @"Saved (leave blank to keep)" : @"Passcode";
         textField.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
         textField.secureTextEntry = YES;
     }];
     
     __weak typeof(self) weakSelf = self;
-    
-    UIAlertAction *saveWithPasscode = [UIAlertAction actionWithTitle:@"Set Passcode" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+    void (^choose)(NSString *) = ^(NSString *command) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf) return;
-        UITextField *tf = alert.textFields.firstObject;
-        NSString *pin = [tf.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        NSString *finalCmd = pin.length > 0 ? [NSString stringWithFormat:@"lock-toggle %@", pin] : @"lock-toggle";
-        if (strongSelf.onActionSelected) strongSelf.onActionSelected(finalCmd);
+        if (strongSelf.onActionSelected) strongSelf.onActionSelected(command);
         if (strongSelf.searchController.isActive) {
             [strongSelf.searchController dismissViewControllerAnimated:NO completion:^{
                 [strongSelf dismissViewControllerAnimated:YES completion:nil];
@@ -937,27 +896,48 @@ static BOOL RCPickerActionOpensMore(NSString *command) {
         } else {
             [strongSelf dismissViewControllerAnimated:YES completion:nil];
         }
+    };
+    void (^fail)(NSString *) = ^(NSString *message) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        [strongSelf deselectTiles];
+        UIAlertController *error = [UIAlertController alertControllerWithTitle:@"Passcode Not Changed" message:message preferredStyle:UIAlertControllerStyleAlert];
+        [error addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+        [strongSelf presentViewController:error animated:YES completion:nil];
+    };
+    
+    UIAlertAction *saveWithPasscode = [UIAlertAction actionWithTitle:@"Use Saved Passcode" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+        NSString *pin = [alert.textFields.firstObject.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (!pin.length) {
+            if (saved) choose(savedCommand);
+            else fail(@"Enter the device passcode.");
+            return;
+        }
+        [RCConfigManager saveUnlockPasscode:pin completion:^(NSString *error) {
+            if (error) fail(error);
+            else choose(savedCommand);
+        }];
     }];
     
-    UIAlertAction *noPasscode = [UIAlertAction actionWithTitle:@"Toggle Without Passcode" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
-        __strong typeof(weakSelf) strongSelf = weakSelf;
-        if (!strongSelf) return;
-        if (strongSelf.onActionSelected) strongSelf.onActionSelected(@"lock-toggle");
-        if (strongSelf.searchController.isActive) {
-            [strongSelf.searchController dismissViewControllerAnimated:NO completion:^{
-                [strongSelf dismissViewControllerAnimated:YES completion:nil];
-            }];
-        } else {
-            [strongSelf dismissViewControllerAnimated:YES completion:nil];
-        }
+    UIAlertAction *noPasscode = [UIAlertAction actionWithTitle:noPasscodeTitle style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+        choose(base);
+    }];
+    
+    // Deletes it from the Keychain for every action; this one then goes without
+    UIAlertAction *removePasscode = [UIAlertAction actionWithTitle:@"Forget Saved Passcode" style:UIAlertActionStyleDestructive handler:^(UIAlertAction * _Nonnull action) {
+        [RCConfigManager forgetUnlockPasscode:^(NSString *error) {
+            if (error) fail(error);
+            else choose(base);
+        }];
     }];
     
     UIAlertAction *cancel = [UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(UIAlertAction * _Nonnull action) {
-        [self deselectTiles];
+        [weakSelf deselectTiles];
     }];
     
     [alert addAction:noPasscode];
     [alert addAction:saveWithPasscode];
+    if (saved) [alert addAction:removePasscode];
     [alert addAction:cancel];
     alert.preferredAction = saveWithPasscode;
     

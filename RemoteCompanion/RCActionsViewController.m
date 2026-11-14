@@ -814,12 +814,14 @@ static id g_actionClipboard = nil;
             }
         }
         paramText = firstArg;
-    } else if ([lower hasPrefix:@"unlock "]) {
+    } else if ([lower isEqualToString:@"unlock"] || [lower hasPrefix:@"unlock "]) {
+        // Without a passcode (or with "saved" and none saved) it wakes the screen to the passcode screen
         baseText = @"Unlock Device ";
-        paramText = @"(Passcode)";
-    } else if ([lower hasPrefix:@"lock-toggle "] || [lower hasPrefix:@"lock toggle "]) {
+        paramText = [RCConfigManager commandUnlocksWithPasscode:cmd] ? @"(Saved Passcode)" : @"(Ask for Passcode)";
+    } else if ([lower isEqualToString:@"lock-toggle"] || [lower isEqualToString:@"lock toggle"] ||
+               [lower hasPrefix:@"lock-toggle "] || [lower hasPrefix:@"lock toggle "]) {
         baseText = @"Lock Toggle ";
-        paramText = @"(Passcode)";
+        paramText = [RCConfigManager commandUnlocksWithPasscode:cmd] ? @"(Saved Passcode)" : @"(Ask for Passcode)";
     }
     
     if (baseText && paramText) {
@@ -1037,6 +1039,12 @@ static void RCSetRunWatching(BOOL watching) {
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     [self startRunWatch];
+    // Labels for actions using the saved passcode depend on whether one is saved
+    BOOL wasSaved = [RCConfigManager unlockPasscodeSaved];
+    __weak typeof(self) weakSelf = self;
+    [RCConfigManager checkUnlockPasscodeSaved:^(BOOL saved) {
+        if (saved != wasSaved) [weakSelf.tableView reloadData];
+    }];
 }
 
 - (void)viewWillDisappear:(BOOL)animated {
@@ -3784,105 +3792,44 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 }
 
 - (void)promptEditUnlockActionAtIndex:(NSInteger)index {
-    if (index < 0 || index >= self.actions.count) return;
-    id item = self.actions[index];
-    NSString *cmdStr = [item isKindOfClass:[NSDictionary class]] ? ((NSDictionary *)item)[@"command"] : item;
-    BOOL hasPasscode = [cmdStr hasPrefix:@"unlock "] && cmdStr.length > 7;
-    
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Edit Unlock Action"
-                                                                   message:@"Enter a passcode to unlock automatically, or choose 'Wake Screen Only' to present the passcode screen.\n\nNote: Configured passcodes are stored in plain text in trigger settings (rc_triggers.plist)."
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    
-    [alert addTextFieldWithConfigurationHandler:^(UITextField * _Nonnull textField) {
-        textField.placeholder = hasPasscode ? @"New Passcode (or leave blank to keep)" : @"Passcode (optional)";
-        textField.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
-        textField.secureTextEntry = YES;
-    }];
-    
-    __weak typeof(self) weakSelf = self;
-    
-    UIAlertAction *saveAction = [UIAlertAction actionWithTitle:@"Save Passcode" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
-        __strong typeof(weakSelf) strongSelf = weakSelf;
-        if (!strongSelf) return;
-        UITextField *tf = alert.textFields.firstObject;
-        NSString *pin = [tf.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        NSString *finalCmd;
-        if (pin.length > 0) {
-            finalCmd = [NSString stringWithFormat:@"unlock %@", pin];
-        } else if (hasPasscode) {
-            finalCmd = cmdStr;
-        } else {
-            finalCmd = @"unlock";
-        }
-        
-        if ([strongSelf.actions[index] isKindOfClass:[NSDictionary class]]) {
-            NSMutableDictionary *d = [strongSelf.actions[index] mutableCopy];
-            d[@"command"] = finalCmd;
-            strongSelf.actions[index] = d;
-        } else {
-            strongSelf.actions[index] = finalCmd;
-        }
-        [strongSelf saveActions];
-        [strongSelf.tableView reloadData];
-    }];
-    
-    UIAlertAction *wakeOnly = [UIAlertAction actionWithTitle:@"Wake Screen Only" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
-        __strong typeof(weakSelf) strongSelf = weakSelf;
-        if (!strongSelf) return;
-        NSString *finalCmd = @"unlock";
-        if ([strongSelf.actions[index] isKindOfClass:[NSDictionary class]]) {
-            NSMutableDictionary *d = [strongSelf.actions[index] mutableCopy];
-            d[@"command"] = finalCmd;
-            strongSelf.actions[index] = d;
-        } else {
-            strongSelf.actions[index] = finalCmd;
-        }
-        [strongSelf saveActions];
-        [strongSelf.tableView reloadData];
-    }];
-    
-    UIAlertAction *cancel = [UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil];
-    
-    [alert addAction:wakeOnly];
-    [alert addAction:saveAction];
-    [alert addAction:cancel];
-    alert.preferredAction = saveAction;
-    
-    [self presentViewController:alert animated:YES completion:nil];
+    [self promptEditPasscodeActionAtIndex:index title:@"Edit Unlock Action" base:@"unlock" noPasscodeTitle:@"Ask for Passcode"];
 }
 
 - (void)promptEditLockToggleActionAtIndex:(NSInteger)index {
+    [self promptEditPasscodeActionAtIndex:index title:@"Edit Lock Toggle Action" base:@"lock-toggle" noPasscodeTitle:@"Ask for Passcode"];
+}
+
+- (void)promptEditPasscodeActionAtIndex:(NSInteger)index title:(NSString *)title base:(NSString *)base noPasscodeTitle:(NSString *)noPasscodeTitle {
+    if (index < 0 || index >= self.actions.count) return;
+    // Whether a passcode is saved decides the field's hint, so ask the tweak first
+    [RCConfigManager checkUnlockPasscodeSaved:^(BOOL saved) {
+        [self presentEditPasscodeAlertAtIndex:index title:title base:base noPasscodeTitle:noPasscodeTitle passcodeSaved:saved];
+    }];
+}
+
+- (void)presentEditPasscodeAlertAtIndex:(NSInteger)index title:(NSString *)title base:(NSString *)base noPasscodeTitle:(NSString *)noPasscodeTitle passcodeSaved:(BOOL)saved {
     if (index < 0 || index >= self.actions.count) return;
     id item = self.actions[index];
     NSString *cmdStr = [item isKindOfClass:[NSDictionary class]] ? ((NSDictionary *)item)[@"command"] : item;
-    BOOL hasPasscode = ([cmdStr hasPrefix:@"lock-toggle "] && cmdStr.length > 12) || ([cmdStr hasPrefix:@"lock toggle "] && cmdStr.length > 12);
+    // An older action may still hold its passcode in plain text; saving moves it to the Keychain
+    NSString *plainPin = [RCConfigManager plainPasscodeInCommand:cmdStr base:NULL];
+    NSString *savedCommand = [base stringByAppendingString:@" saved"];
+    BOOL hasPasscode = plainPin.length > 0 || saved;
     
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Edit Lock Toggle Action"
-                                                                   message:@"Enter a passcode to unlock automatically when locked, or choose 'No Passcode' to toggle without passcode entry.\n\nNote: Configured passcodes are stored in plain text in trigger settings (rc_triggers.plist)."
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
+                                                                   message:@"Unlocks automatically with the device passcode, kept in the Keychain on this iPhone only."
                                                             preferredStyle:UIAlertControllerStyleAlert];
     
     [alert addTextFieldWithConfigurationHandler:^(UITextField * _Nonnull textField) {
-        textField.placeholder = hasPasscode ? @"New Passcode (or leave blank to keep)" : @"Passcode (optional)";
+        textField.placeholder = hasPasscode ? @"Saved (leave blank to keep)" : @"Passcode";
         textField.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
         textField.secureTextEntry = YES;
     }];
     
     __weak typeof(self) weakSelf = self;
-    
-    UIAlertAction *saveAction = [UIAlertAction actionWithTitle:@"Save Passcode" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+    void (^apply)(NSString *) = ^(NSString *finalCmd) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
-        if (!strongSelf) return;
-        UITextField *tf = alert.textFields.firstObject;
-        NSString *pin = [tf.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        NSString *finalCmd;
-        if (pin.length > 0) {
-            finalCmd = [NSString stringWithFormat:@"lock-toggle %@", pin];
-        } else if (hasPasscode) {
-            finalCmd = cmdStr;
-        } else {
-            finalCmd = @"lock-toggle";
-        }
-        
+        if (!strongSelf || index >= strongSelf.actions.count) return;
         if ([strongSelf.actions[index] isKindOfClass:[NSDictionary class]]) {
             NSMutableDictionary *d = [strongSelf.actions[index] mutableCopy];
             d[@"command"] = finalCmd;
@@ -3892,27 +3839,44 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         }
         [strongSelf saveActions];
         [strongSelf.tableView reloadData];
+    };
+    void (^fail)(NSString *) = ^(NSString *message) {
+        UIAlertController *error = [UIAlertController alertControllerWithTitle:@"Passcode Not Changed" message:message preferredStyle:UIAlertControllerStyleAlert];
+        [error addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+        [weakSelf presentViewController:error animated:YES completion:nil];
+    };
+    
+    UIAlertAction *saveAction = [UIAlertAction actionWithTitle:@"Use Saved Passcode" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+        NSString *pin = [alert.textFields.firstObject.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (!pin.length) pin = plainPin;
+        if (!pin.length) {
+            if (saved) apply(savedCommand);
+            else fail(@"Enter the device passcode.");
+            return;
+        }
+        [RCConfigManager saveUnlockPasscode:pin completion:^(NSString *error) {
+            if (error) fail(error);
+            else apply(savedCommand);
+        }];
     }];
     
-    UIAlertAction *noPasscode = [UIAlertAction actionWithTitle:@"No Passcode" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
-        __strong typeof(weakSelf) strongSelf = weakSelf;
-        if (!strongSelf) return;
-        NSString *finalCmd = @"lock-toggle";
-        if ([strongSelf.actions[index] isKindOfClass:[NSDictionary class]]) {
-            NSMutableDictionary *d = [strongSelf.actions[index] mutableCopy];
-            d[@"command"] = finalCmd;
-            strongSelf.actions[index] = d;
-        } else {
-            strongSelf.actions[index] = finalCmd;
-        }
-        [strongSelf saveActions];
-        [strongSelf.tableView reloadData];
+    UIAlertAction *noPasscode = [UIAlertAction actionWithTitle:noPasscodeTitle style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+        apply(base);
+    }];
+    
+    // Deletes it from the Keychain for every action; this one then goes without
+    UIAlertAction *removePasscode = [UIAlertAction actionWithTitle:@"Forget Saved Passcode" style:UIAlertActionStyleDestructive handler:^(UIAlertAction * _Nonnull action) {
+        [RCConfigManager forgetUnlockPasscode:^(NSString *error) {
+            if (error) fail(error);
+            else apply(base);
+        }];
     }];
     
     UIAlertAction *cancel = [UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil];
     
     [alert addAction:noPasscode];
     [alert addAction:saveAction];
+    if (saved) [alert addAction:removePasscode];
     [alert addAction:cancel];
     alert.preferredAction = saveAction;
     
