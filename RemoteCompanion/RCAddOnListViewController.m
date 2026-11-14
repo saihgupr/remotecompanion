@@ -206,9 +206,14 @@ static void rcal_alert(UIViewController *vc, NSString *title, NSString *message)
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     NSString *text = indexPath.section == 0 ? self.typed : self.shown[(NSUInteger)indexPath.row];
     void (^completion)(NSString *) = self.completion;
-    self.search.active = NO;
-    [self.navigationController popViewControllerAnimated:YES];
-    if (completion) completion(text);
+    UINavigationController *nav = self.navigationController;
+    void (^back)(void) = ^{
+        [nav popViewControllerAnimated:YES];
+        if (completion) completion(text);
+    };
+    // A search in progress is closed first, or the pop is ignored
+    if (self.search.isActive) [self.search dismissViewControllerAnimated:NO completion:back];
+    else back();
 }
 
 @end
