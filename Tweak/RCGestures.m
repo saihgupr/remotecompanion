@@ -1315,10 +1315,19 @@ NSString *RCGestureCommand(NSString *cmd) {
         // gesture export PATH ["Name" ...]: the named gestures (all without names) as a JSON file,
         // into a temporary folder (the app and rc-mcp pass files that way)
         if (!arg.length) return @"Error: File path needed\n";
-        NSString *target = arg.stringByStandardizingPath;
-        if (!([target hasPrefix:@"/tmp/"] || [target hasPrefix:@"/private/tmp/"] || [target hasPrefix:@"/var/mobile/tmp/"]) || [target containsString:@"/../"]) {
+        // The folder with its links followed (/tmp is one), so a link inside /tmp can't point the
+        // file somewhere else; the file is written to that folder. The atomic write replaces a link
+        // in the file's own place instead of writing through it.
+        NSString *folder = [arg.stringByStandardizingPath.stringByDeletingLastPathComponent stringByResolvingSymlinksInPath];
+        NSString *fileName = arg.lastPathComponent;
+        BOOL allowed = NO;
+        for (NSString *root in @[@"/tmp", @"/private/tmp", @"/var/tmp", @"/private/var/tmp", @"/var/mobile/tmp", @"/private/var/mobile/tmp"]) {
+            if ([folder isEqualToString:root] || [folder hasPrefix:[root stringByAppendingString:@"/"]]) allowed = YES;
+        }
+        if (!allowed || !fileName.length || [fileName isEqualToString:@".."] || [fileName isEqualToString:@"."]) {
             return @"Error: Use a path in /tmp or /var/mobile/tmp\n";
         }
+        NSString *target = [folder stringByAppendingPathComponent:fileName];
         NSArray *list = rc_gestures_load();
         NSMutableArray *chosen = [NSMutableArray array];
         if (words.count > 3) {
@@ -1344,7 +1353,7 @@ NSString *RCGestureCommand(NSString *cmd) {
         }
         NSDictionary *file = @{ @"type": @"RemoteCompanion Gestures", @"version": @1, @"gestures": out };
         NSData *json = [NSJSONSerialization dataWithJSONObject:file options:NSJSONWritingPrettyPrinted error:NULL];
-        if (![json writeToFile:arg atomically:YES]) return @"Error: The file couldn't be written\n";
+        if (![json writeToFile:target atomically:YES]) return @"Error: The file couldn't be written\n";
         return [NSString stringWithFormat:@"Exported %lu\n", (unsigned long)out.count];
     }
     if ([verb isEqualToString:@"import"]) {
