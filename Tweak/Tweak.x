@@ -2991,9 +2991,64 @@ static BOOL rc_variable_delete(NSString *name) {
 // How a value goes into text: as it is, single-quoted for a shell, or only {round} filled
 typedef NS_ENUM(NSInteger, RCFillMode) { RCFillPlain, RCFillShell, RCFillRoundOnly, RCFillQuoted };
 
-// One shell word whatever the value holds: 'it'\''s' for it's
-static NSString *rc_shell_quoted(NSString *value) {
-    return [NSString stringWithFormat:@"'%@'", [value stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"]];
+static NSString *rc_sh_quote(NSString *val);
+
+// Where a position in a shell command is: outside quotes, inside '...' or inside "...". A $(...) or
+// `...` starts a command of its own, unquoted again, even inside "...".
+typedef NS_ENUM(NSInteger, RCShellQuote) { RCShellUnquoted, RCShellSingle, RCShellDouble };
+
+static RCShellQuote rc_shell_quote_at(NSString *text, NSUInteger position) {
+    RCShellQuote state = RCShellUnquoted;
+    RCShellQuote outer[16]; // the state around each $(...) or `...` we're in
+    unichar closer[16];
+    int parens[16]; // ( ... ) inside a $(...), so its ) isn't taken for the end
+    int depth = 0;
+    for (NSUInteger i = 0; i < position && i < text.length; i++) {
+        unichar c = [text characterAtIndex:i];
+        unichar next = i + 1 < text.length ? [text characterAtIndex:i + 1] : 0;
+        if (state == RCShellSingle) {
+            if (c == '\'') state = RCShellUnquoted;
+        } else if (c == '\\') {
+            i++; // the next character is taken as it is (in "..." too, for the ones that matter)
+        } else if (depth > 0 && state == RCShellUnquoted && closer[depth - 1] == ')' && c == '(') {
+            parens[depth - 1]++;
+        } else if (depth > 0 && state == RCShellUnquoted && c == ')' && closer[depth - 1] == ')' && parens[depth - 1] > 0) {
+            parens[depth - 1]--;
+        } else if (depth > 0 && c == closer[depth - 1] && state == RCShellUnquoted) {
+            depth--;
+            state = outer[depth];
+        } else if ((c == '$' && next == '(') || c == '`') {
+            if (depth == 16) return RCShellUnquoted; // too deep to follow: quote as a word of its own
+            outer[depth] = state;
+            closer[depth] = c == '`' ? '`' : ')';
+            parens[depth] = 0;
+            depth++;
+            state = RCShellUnquoted;
+            if (c == '$') i++;
+        } else if (c == '\'' && state == RCShellUnquoted) {
+            state = RCShellSingle;
+        } else if (c == '"') {
+            state = state == RCShellDouble ? RCShellUnquoted : RCShellDouble;
+        }
+    }
+    return state;
+}
+
+// A value as literal text at that place in a shell command, whatever it holds. Outside quotes it
+// becomes one quoted word ('it'\''s'); inside '...' a ' in it closes and reopens the quotes; inside
+// "..." the characters the shell still reads there ($ ` " \) are escaped, so $(...) can't run.
+static NSString *rc_shell_literal(NSString *value, RCShellQuote quote) {
+    if (quote == RCShellSingle) return [value stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"];
+    if (quote == RCShellDouble) {
+        NSMutableString *escaped = [NSMutableString stringWithCapacity:value.length];
+        for (NSUInteger i = 0; i < value.length; i++) {
+            unichar c = [value characterAtIndex:i];
+            if (c == '$' || c == '`' || c == '"' || c == '\\') [escaped appendString:@"\\"];
+            [escaped appendFormat:@"%C", c];
+        }
+        return escaped;
+    }
+    return rc_sh_quote(value);
 }
 
 static NSString *rc_fill_placeholders_mode(NSString *text, RCFillMode mode);
@@ -3005,7 +3060,7 @@ static NSString *rc_fill_placeholders(NSString *text) {
 }
 
 // An action's command with its placeholders filled. In a Terminal command (exec, root, sudo) each
-// value is single-quoted, so text in it can't run as a command of its own. In Lua, whose tables
+// value is quoted for where it sits, so text in it can't run as a command of its own. In Lua, whose tables
 // use braces too, only {round} is filled, as before variables.
 static NSString *rc_fill_action(NSString *text) {
     if (![text isKindOfClass:[NSString class]]) return text;
@@ -3040,7 +3095,7 @@ static NSString *rc_fill_placeholders_mode(NSString *text, RCFillMode mode) {
             value = rc_variable_get(name);
         }
         if (!value) return;
-        if (mode == RCFillShell) value = rc_shell_quoted(value);
+        if (mode == RCFillShell) value = rc_shell_literal(value, rc_shell_quote_at(text, match.range.location));
         else if (mode == RCFillQuoted) value = [value stringByReplacingOccurrencesOfString:@"\"" withString:@"'"];
         [filled appendString:[text substringWithRange:NSMakeRange(last, match.range.location - last)]];
         [filled appendString:value];
@@ -3552,7 +3607,9 @@ static BOOL rc_command_needs_token(NSString *cmd, int depth) {
            // Unlocking with a passcode (or the saved one) opens the iPhone; "unlock" and
            // "lock-toggle" alone only wake it to the passcode screen and stay open.
            [trimmed hasPrefix:@"unlock "] || [trimmed hasPrefix:@"lock-toggle "] || [trimmed hasPrefix:@"lock toggle "] ||
-           [trimmed hasPrefix:@"unlock-passcode"];
+           [trimmed hasPrefix:@"unlock-passcode"] ||
+           // Variables go into Terminal commands, and can hold anything (names, codes, output)
+           [trimmed isEqualToString:@"var"] || [trimmed hasPrefix:@"var "];
 }
 
 // Whether a value holds, anywhere inside it, a command that needs the API token: an action, a
