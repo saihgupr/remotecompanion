@@ -1325,7 +1325,7 @@ NSString *RCGestureCommand(NSString *cmd) {
             if ([folder isEqualToString:root] || [folder hasPrefix:[root stringByAppendingString:@"/"]]) allowed = YES;
         }
         if (!allowed || !fileName.length || [fileName isEqualToString:@".."] || [fileName isEqualToString:@"."]) {
-            return @"Error: Use a path in /tmp or /var/mobile/tmp\n";
+            return @"Error: Use a path in /tmp, /var/tmp or /var/mobile/tmp\n";
         }
         NSString *target = [folder stringByAppendingPathComponent:fileName];
         NSArray *list = rc_gestures_load();

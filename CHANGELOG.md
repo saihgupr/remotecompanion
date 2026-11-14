@@ -10,7 +10,7 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 - **Web UI switched off**: the variable names and status answers the Web UI's editors read are no longer served once the Web UI is off, like the rest of its pages. Another device without the API token gets only the variable names, not their values.
 - **Else without End If**: a true If whose Else had lost its End If ran the Else's actions too. The run now stops there, as a false If without an End If already did.
-- **Gesture export**: `gesture export` writes only into /tmp or /var/mobile/tmp, following links in the path before checking it, so a link placed there can't send the file elsewhere.
+- **Gesture export**: `gesture export` writes only into /tmp, /var/tmp or /var/mobile/tmp, following links in the path before checking it, so a link placed there can't send the file elsewhere.
 - **Web UI escaping**: the Web UI uses one HTML escaping function everywhere; the second one did not escape quotes and showed 0 as nothing.
 
 ## [4.4.0] - 2026-11-06

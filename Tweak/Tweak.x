@@ -13018,7 +13018,7 @@ static void start_web_server() {
                                     write(new_socket, [assetData bytes], [assetData length]);
                                     responseString = nil; // Skip default write
                                 }
-                            } else if ([path isEqualToString:@"/api/answers"] && [method isEqualToString:@"GET"] && ![g_triggerConfig[@"webUIEnabled"] boolValue]) {
+                            } else if ([path isEqualToString:@"/api/answers"] && [method isEqualToString:@"GET"] && (load_trigger_config(), ![g_triggerConfig[@"webUIEnabled"] boolValue])) {
                                 responseString = [NSString stringWithFormat:@"HTTP/1.1 403 Forbidden\r\n%@Content-Length: 17\r\n\r\nWeb UI is disabled", cors];
                             } else if ([path isEqualToString:@"/api/answers"] && [method isEqualToString:@"GET"]) {
                                 // The answers of the status commands Set Variable's command list offers, for
@@ -13036,7 +13036,7 @@ static void start_web_server() {
                                 NSData *jsonData = [NSJSONSerialization dataWithJSONObject:answers options:0 error:nil];
                                 NSString *jsonString = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
                                 responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)jsonData.length, jsonString];
-                            } else if ([path isEqualToString:@"/api/variables"] && [method isEqualToString:@"GET"] && ![g_triggerConfig[@"webUIEnabled"] boolValue]) {
+                            } else if ([path isEqualToString:@"/api/variables"] && [method isEqualToString:@"GET"] && (load_trigger_config(), ![g_triggerConfig[@"webUIEnabled"] boolValue])) {
                                 responseString = [NSString stringWithFormat:@"HTTP/1.1 403 Forbidden\r\n%@Content-Length: 17\r\n\r\nWeb UI is disabled", cors];
                             } else if ([path isEqualToString:@"/api/variables"] && [method isEqualToString:@"GET"]) {
                                 // The saved variables, for the editors' variable menus. The menus need only the
