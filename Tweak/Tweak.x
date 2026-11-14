@@ -2991,9 +2991,64 @@ static BOOL rc_variable_delete(NSString *name) {
 // How a value goes into text: as it is, single-quoted for a shell, or only {round} filled
 typedef NS_ENUM(NSInteger, RCFillMode) { RCFillPlain, RCFillShell, RCFillRoundOnly, RCFillQuoted };
 
-// One shell word whatever the value holds: 'it'\''s' for it's
-static NSString *rc_shell_quoted(NSString *value) {
-    return [NSString stringWithFormat:@"'%@'", [value stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"]];
+static NSString *rc_sh_quote(NSString *val);
+
+// Where a position in a shell command is: outside quotes, inside '...' or inside "...". A $(...) or
+// `...` starts a command of its own, unquoted again, even inside "...".
+typedef NS_ENUM(NSInteger, RCShellQuote) { RCShellUnquoted, RCShellSingle, RCShellDouble };
+
+static RCShellQuote rc_shell_quote_at(NSString *text, NSUInteger position) {
+    RCShellQuote state = RCShellUnquoted;
+    RCShellQuote outer[16]; // the state around each $(...) or `...` we're in
+    unichar closer[16];
+    int parens[16]; // ( ... ) inside a $(...), so its ) isn't taken for the end
+    int depth = 0;
+    for (NSUInteger i = 0; i < position && i < text.length; i++) {
+        unichar c = [text characterAtIndex:i];
+        unichar next = i + 1 < text.length ? [text characterAtIndex:i + 1] : 0;
+        if (state == RCShellSingle) {
+            if (c == '\'') state = RCShellUnquoted;
+        } else if (c == '\\') {
+            i++; // the next character is taken as it is (in "..." too, for the ones that matter)
+        } else if (depth > 0 && state == RCShellUnquoted && closer[depth - 1] == ')' && c == '(') {
+            parens[depth - 1]++;
+        } else if (depth > 0 && state == RCShellUnquoted && c == ')' && closer[depth - 1] == ')' && parens[depth - 1] > 0) {
+            parens[depth - 1]--;
+        } else if (depth > 0 && c == closer[depth - 1] && state == RCShellUnquoted) {
+            depth--;
+            state = outer[depth];
+        } else if ((c == '$' && next == '(') || c == '`') {
+            if (depth == 16) return RCShellUnquoted; // too deep to follow: quote as a word of its own
+            outer[depth] = state;
+            closer[depth] = c == '`' ? '`' : ')';
+            parens[depth] = 0;
+            depth++;
+            state = RCShellUnquoted;
+            if (c == '$') i++;
+        } else if (c == '\'' && state == RCShellUnquoted) {
+            state = RCShellSingle;
+        } else if (c == '"') {
+            state = state == RCShellDouble ? RCShellUnquoted : RCShellDouble;
+        }
+    }
+    return state;
+}
+
+// A value as literal text at that place in a shell command, whatever it holds. Outside quotes it
+// becomes one quoted word ('it'\''s'); inside '...' a ' in it closes and reopens the quotes; inside
+// "..." the characters the shell still reads there ($ ` " \) are escaped, so $(...) can't run.
+static NSString *rc_shell_literal(NSString *value, RCShellQuote quote) {
+    if (quote == RCShellSingle) return [value stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"];
+    if (quote == RCShellDouble) {
+        NSMutableString *escaped = [NSMutableString stringWithCapacity:value.length];
+        for (NSUInteger i = 0; i < value.length; i++) {
+            unichar c = [value characterAtIndex:i];
+            if (c == '$' || c == '`' || c == '"' || c == '\\') [escaped appendString:@"\\"];
+            [escaped appendFormat:@"%C", c];
+        }
+        return escaped;
+    }
+    return rc_sh_quote(value);
 }
 
 static NSString *rc_fill_placeholders_mode(NSString *text, RCFillMode mode);
@@ -3005,7 +3060,7 @@ static NSString *rc_fill_placeholders(NSString *text) {
 }
 
 // An action's command with its placeholders filled. In a Terminal command (exec, root, sudo) each
-// value is single-quoted, so text in it can't run as a command of its own. In Lua, whose tables
+// value is quoted for where it sits, so text in it can't run as a command of its own. In Lua, whose tables
 // use braces too, only {round} is filled, as before variables.
 static NSString *rc_fill_action(NSString *text) {
     if (![text isKindOfClass:[NSString class]]) return text;
@@ -3040,7 +3095,7 @@ static NSString *rc_fill_placeholders_mode(NSString *text, RCFillMode mode) {
             value = rc_variable_get(name);
         }
         if (!value) return;
-        if (mode == RCFillShell) value = rc_shell_quoted(value);
+        if (mode == RCFillShell) value = rc_shell_literal(value, rc_shell_quote_at(text, match.range.location));
         else if (mode == RCFillQuoted) value = [value stringByReplacingOccurrencesOfString:@"\"" withString:@"'"];
         [filled appendString:[text substringWithRange:NSMakeRange(last, match.range.location - last)]];
         [filled appendString:value];
@@ -3525,20 +3580,142 @@ static BOOL rc_web_client_allowed(const struct sockaddr_storage *addr) {
     return wifi && [networks isKindOfClass:[NSArray class]] && [networks containsObject:wifi];
 }
 
-BOOL RCIsPrivilegedCommand(NSString *cmd) {
+static BOOL rc_value_needs_token(id value, int depth);
+
+// How many triggers deep "trigger NAME" is followed. A longer chain, or triggers that run each
+// other in a loop, counts as needing the token.
+#define RC_TRIGGER_CHAIN_LIMIT 8
+
+static BOOL rc_command_needs_token(NSString *cmd, int depth) {
     if (!cmd || ![cmd isKindOfClass:[NSString class]]) return NO;
     NSString *trimmed = [cmd stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    // "trigger NAME" runs that trigger's actions, so it needs the token when they do
+    if ([trimmed hasPrefix:@"trigger "]) {
+        if (depth >= RC_TRIGGER_CHAIN_LIMIT) return YES;
+        NSString *key = [[trimmed substringFromIndex:8] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        id triggers = g_triggerConfig[@"triggers"];
+        id trigger = [triggers isKindOfClass:[NSDictionary class]] ? ((NSDictionary *)triggers)[key] : nil;
+        return [trigger isKindOfClass:[NSDictionary class]] && rc_value_needs_token(((NSDictionary *)trigger)[@"actions"], depth + 1);
+    }
     return [trimmed hasPrefix:@"root "] || [trimmed isEqualToString:@"root"] ||
            [trimmed hasPrefix:@"sudo "] || [trimmed isEqualToString:@"sudo"] ||
            [trimmed hasPrefix:@"exec "] || [trimmed isEqualToString:@"exec"] ||
            [trimmed hasPrefix:@"lua "] || [trimmed hasPrefix:@"lua_eval "] || [trimmed hasPrefix:@"Lua "] ||
            [trimmed hasPrefix:@"ssh-run "] ||
            [trimmed hasPrefix:@"tap "] || [trimmed hasPrefix:@"hold "] || [trimmed hasPrefix:@"swipe "] ||
-           [trimmed hasPrefix:@"gesture "];
+           [trimmed hasPrefix:@"gesture "] ||
+           // Unlocking with a passcode (or the saved one) opens the iPhone; "unlock" and
+           // "lock-toggle" alone only wake it to the passcode screen and stay open.
+           [trimmed hasPrefix:@"unlock "] || [trimmed hasPrefix:@"lock-toggle "] || [trimmed hasPrefix:@"lock toggle "] ||
+           [trimmed hasPrefix:@"unlock-passcode"] ||
+           // Variables go into Terminal commands, and can hold anything (names, codes, output)
+           [trimmed isEqualToString:@"var"] || [trimmed hasPrefix:@"var "];
+}
+
+// Whether a value holds, anywhere inside it, a command that needs the API token: an action, a
+// Set Variable or If command, a block nested in another, a trigger run by "trigger NAME".
+static BOOL rc_value_needs_token(id value, int depth) {
+    if ([value isKindOfClass:[NSString class]]) return rc_command_needs_token(value, depth);
+    if ([value isKindOfClass:[NSDictionary class]]) value = [(NSDictionary *)value allValues];
+    if ([value isKindOfClass:[NSArray class]]) {
+        for (id item in (NSArray *)value) {
+            if (rc_value_needs_token(item, depth)) return YES;
+        }
+    }
+    return NO;
+}
+
+BOOL RCIsPrivilegedCommand(NSString *cmd) {
+    return rc_command_needs_token(cmd, 0);
 }
 
 static BOOL rc_is_privileged_command(NSString *cmd) {
     return RCIsPrivilegedCommand(cmd);
+}
+
+// Passcodes in actions ("unlock 1234", "lock-toggle 1234"). Other devices without the token, and
+// run records, get them hidden as "unlock ••••••••"; "saved" and a bare "unlock" stay as they are.
+static NSString *const kRCHiddenPasscode = @"••••••••";
+
+// The command's verb with its trailing space ("unlock ") and passcode, when it holds one
+static BOOL rc_passcode_in_command(NSString *cmd, NSString **outVerb, NSString **outPasscode) {
+    if (![cmd isKindOfClass:[NSString class]]) return NO;
+    NSString *trimmed = [cmd stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    for (NSString *verb in @[@"unlock ", @"lock-toggle ", @"lock toggle "]) {
+        if (![trimmed hasPrefix:verb]) continue;
+        NSString *passcode = [[trimmed substringFromIndex:verb.length] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        if (!passcode.length || [passcode isEqualToString:@"saved"]) return NO;
+        if (outVerb) *outVerb = verb;
+        if (outPasscode) *outPasscode = passcode;
+        return YES;
+    }
+    return NO;
+}
+
+// A copy of a value (an action, a list of them, a whole config) with its passcodes hidden
+static id rc_hide_passcodes(id value) {
+    NSString *verb = nil;
+    if ([value isKindOfClass:[NSString class]]) {
+        return rc_passcode_in_command(value, &verb, NULL) ? [verb stringByAppendingString:kRCHiddenPasscode] : value;
+    }
+    if ([value isKindOfClass:[NSArray class]]) {
+        NSMutableArray *copy = [NSMutableArray arrayWithCapacity:[value count]];
+        for (id item in (NSArray *)value) [copy addObject:rc_hide_passcodes(item)];
+        return copy;
+    }
+    if ([value isKindOfClass:[NSDictionary class]]) {
+        NSMutableDictionary *copy = [NSMutableDictionary dictionaryWithCapacity:[value count]];
+        for (id key in (NSDictionary *)value) copy[key] = rc_hide_passcodes(((NSDictionary *)value)[key]);
+        return copy;
+    }
+    return value;
+}
+
+static void rc_collect_passcode(id value, NSString **found) {
+    if (*found) return;
+    NSString *passcode = nil;
+    if ([value isKindOfClass:[NSString class]]) {
+        if (rc_passcode_in_command(value, NULL, &passcode) && ![passcode isEqualToString:kRCHiddenPasscode]) *found = passcode;
+    } else if ([value isKindOfClass:[NSArray class]] || [value isKindOfClass:[NSDictionary class]]) {
+        for (id item in ([value isKindOfClass:[NSDictionary class]] ? [value allValues] : value)) rc_collect_passcode(item, found);
+    }
+}
+
+// A config saved back from a device that saw it hidden: each "unlock ••••••••" gets the passcode
+// of the action at the same place in the saved config, or else the saved config's passcode (a
+// moved or copied action), or else none (it then only wakes the screen to the passcode).
+static id rc_restore_passcodes_at(id incoming, id current, NSString *fallback) {
+    if ([incoming isKindOfClass:[NSString class]]) {
+        NSString *verb = nil, *passcode = nil;
+        if (!rc_passcode_in_command(incoming, &verb, &passcode) || ![passcode isEqualToString:kRCHiddenPasscode]) return incoming;
+        NSString *oldVerb = nil, *oldPasscode = nil;
+        if (rc_passcode_in_command(current, &oldVerb, &oldPasscode) && ![oldPasscode isEqualToString:kRCHiddenPasscode]) {
+            return [verb stringByAppendingString:oldPasscode];
+        }
+        if (fallback) return [verb stringByAppendingString:fallback];
+        return [verb stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    }
+    if ([incoming isKindOfClass:[NSArray class]]) {
+        NSArray *old = [current isKindOfClass:[NSArray class]] ? current : nil;
+        NSMutableArray *copy = [NSMutableArray arrayWithCapacity:[incoming count]];
+        [(NSArray *)incoming enumerateObjectsUsingBlock:^(id item, NSUInteger i, __unused BOOL *stop) {
+            [copy addObject:rc_restore_passcodes_at(item, i < old.count ? old[i] : nil, fallback)];
+        }];
+        return copy;
+    }
+    if ([incoming isKindOfClass:[NSDictionary class]]) {
+        NSDictionary *old = [current isKindOfClass:[NSDictionary class]] ? current : nil;
+        NSMutableDictionary *copy = [NSMutableDictionary dictionaryWithCapacity:[incoming count]];
+        for (id key in (NSDictionary *)incoming) copy[key] = rc_restore_passcodes_at(((NSDictionary *)incoming)[key], old[key], fallback);
+        return copy;
+    }
+    return incoming;
+}
+
+static NSMutableDictionary *rc_restore_passcodes(NSDictionary *incoming, NSDictionary *current) {
+    NSString *fallback = nil;
+    rc_collect_passcode(current, &fallback);
+    return [rc_restore_passcodes_at(incoming, current, fallback) mutableCopy];
 }
 
 BOOL RCIsApiTokenValid(NSString *providedToken) {
@@ -3613,6 +3790,35 @@ static BOOL rc_config_changes_protected_settings(NSDictionary *incoming, NSDicti
         if (newValue == oldValue) continue;
         if (!newValue || !oldValue) return YES;
         if (![newValue isEqual:oldValue]) return YES;
+    }
+    return NO;
+}
+
+static BOOL rc_value_has_privileged_command(id value) {
+    return rc_value_needs_token(value, 0);
+}
+
+// Whether a save adds or changes something that runs a command needing the API token. Without
+// this, a trigger saved with a "root" or "exec" action ran it on its own (a schedule, a button)
+// for anyone who could reach the Web UI. Triggers are compared one by one, so editing any other
+// trigger still saves without the token; other settings are compared whole.
+static BOOL rc_config_changes_privileged_actions(NSDictionary *incoming, NSDictionary *current) {
+    NSArray *protectedKeys = rc_protected_config_keys();
+    for (NSString *key in incoming) {
+        if ([protectedKeys containsObject:key]) continue;
+        id newValue = incoming[key];
+        id oldValue = current[key];
+        if ([key isEqualToString:@"triggers"] && [newValue isKindOfClass:[NSDictionary class]]) {
+            NSDictionary *oldTriggers = [oldValue isKindOfClass:[NSDictionary class]] ? oldValue : @{};
+            for (NSString *triggerKey in (NSDictionary *)newValue) {
+                id trigger = ((NSDictionary *)newValue)[triggerKey];
+                if ([trigger isEqual:oldTriggers[triggerKey]]) continue;
+                if (rc_value_has_privileged_command(trigger)) return YES;
+            }
+            continue;
+        }
+        if ([newValue isEqual:oldValue]) continue;
+        if (rc_value_has_privileged_command(newValue)) return YES;
     }
     return NO;
 }
@@ -3725,7 +3931,7 @@ static void rc_run_history_add(NSDictionary *info, BOOL stopped) {
             // trigger is edited; the trigger, for the Running page's list of every trigger's runs;
             // and the step a stopped run was on
             record[@"key"] = key;
-            if ([info[@"actions"] isKindOfClass:[NSArray class]] && [NSJSONSerialization isValidJSONObject:info[@"actions"]]) record[@"actions"] = info[@"actions"];
+            if ([info[@"actions"] isKindOfClass:[NSArray class]] && [NSJSONSerialization isValidJSONObject:info[@"actions"]]) record[@"actions"] = rc_hide_passcodes(info[@"actions"]);
             if (stopped && info[@"index"]) record[@"index"] = info[@"index"];
             NSMutableArray *runs = history[key] ?: [NSMutableArray array];
             [runs insertObject:record atIndex:0];
@@ -3744,7 +3950,7 @@ static void rc_run_history_add(NSDictionary *info, BOOL stopped) {
 // "run history <key>" (JSON, newest first) and "clear run history <key>"
 static NSString *rc_run_history_json(NSString *key) {
     NSArray *runs;
-    @synchronized (rc_run_lock()) { runs = [rc_run_history_locked()[key] copy] ?: @[]; }
+    @synchronized (rc_run_lock()) { runs = rc_hide_passcodes([rc_run_history_locked()[key] copy] ?: @[]); } // records from before passcodes were hidden in them
     NSData *data = [NSJSONSerialization dataWithJSONObject:runs options:0 error:nil];
     return [[NSString alloc] initWithData:data ?: [NSData data] encoding:NSUTF8StringEncoding] ?: @"[]";
 }
@@ -3765,7 +3971,7 @@ static NSString *rc_run_history_all_json(NSInteger limit) {
     }
     [runs sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) { return [b[@"started"] compare:a[@"started"]]; }];
     if (limit > 0 && (NSInteger)runs.count > limit) [runs removeObjectsInRange:NSMakeRange(limit, runs.count - limit)];
-    NSData *data = [NSJSONSerialization dataWithJSONObject:runs options:0 error:nil];
+    NSData *data = [NSJSONSerialization dataWithJSONObject:rc_hide_passcodes(runs) options:0 error:nil];
     return [[NSString alloc] initWithData:data ?: [NSData data] encoding:NSUTF8StringEncoding] ?: @"[]";
 }
 
@@ -3822,7 +4028,7 @@ static void rc_run_note_step(id item, NSInteger index, NSDictionary *loop) {
     NSMutableDictionary *info = [NSThread currentThread].threadDictionary[@"rcRunInfo"];
     if (!info) return;
     @synchronized (rc_run_lock()) {
-        if (item) info[@"step"] = item;
+        if (item) info[@"step"] = rc_hide_passcodes(item);
         info[@"index"] = @(index); // its row in the trigger's actions (the editor highlights it)
         if (loop) info[@"loop"] = loop; else [info removeObjectForKey:@"loop"];
     }
@@ -12987,7 +13193,7 @@ static void start_web_server() {
                                             }
                                             mConfig[@"sshHosts"] = mHosts;
                                         }
-                                        configToReturn = mConfig;
+                                        configToReturn = rc_hide_passcodes(mConfig);
                                     }
                                     NSData *jsonData = [NSJSONSerialization dataWithJSONObject:configToReturn options:0 error:nil];
                                     if (jsonData) {
@@ -13026,7 +13232,9 @@ static void start_web_server() {
                                             NSError *err;
                                             id jsonObj = [NSJSONSerialization JSONObjectWithData:bodyData options:NSJSONReadingMutableContainers error:&err];
                                             if (jsonObj && [jsonObj isKindOfClass:[NSDictionary class]]) {
-                                                NSMutableDictionary *incoming = [jsonObj mutableCopy];
+                                                // Passcodes the device saw hidden go back to the saved ones first, so
+                                                // the checks below see what is really saved
+                                                NSMutableDictionary *incoming = rc_restore_passcodes(jsonObj, g_triggerConfig);
                                                 if ([incoming[@"webUIApiToken"] isEqualToString:@"••••••••"]) {
                                                     incoming[@"webUIApiToken"] = g_triggerConfig[@"webUIApiToken"];
                                                 }
@@ -13057,9 +13265,23 @@ static void start_web_server() {
                                                     }
                                                     incoming[@"sshHosts"] = updatedHosts;
                                                 }
-                                                BOOL protectedChange = !isLocal && hasConfiguredToken && !isTokenValid &&
+                                                // From another device, protected settings and actions that need
+                                                // the token change only with it. With no token set yet, nobody can
+                                                // send one: it is set in the app or this iPhone's own Web UI, so
+                                                // nobody on the network can set one of their own.
+                                                BOOL protectedChange = !isLocal && !isTokenValid &&
                                                     rc_config_changes_protected_settings(incoming, g_triggerConfig);
-                                                if (protectedChange) {
+                                                BOOL privilegedChange = !isLocal && !isTokenValid && !protectedChange &&
+                                                    rc_config_changes_privileged_actions(incoming, g_triggerConfig);
+                                                if ((protectedChange || privilegedChange) && !hasConfiguredToken) {
+                                                    NSString *errJson = @"{\"ok\":false,\"error\":\"Set an API Token in the RemoteCompanion app first. Without one, this change can only be made on the iPhone.\"}";
+                                                    NSData *errData = [errJson dataUsingEncoding:NSUTF8StringEncoding];
+                                                    responseString = [NSString stringWithFormat:@"HTTP/1.1 403 Forbidden\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)errData.length, errJson];
+                                                } else if (privilegedChange) {
+                                                    NSString *errJson = @"{\"ok\":false,\"error\":\"Changing these actions requires valid API token\"}";
+                                                    NSData *errData = [errJson dataUsingEncoding:NSUTF8StringEncoding];
+                                                    responseString = [NSString stringWithFormat:@"HTTP/1.1 403 Forbidden\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)errData.length, errJson];
+                                                } else if (protectedChange) {
                                                     NSString *errJson = @"{\"ok\":false,\"error\":\"Changing protected settings requires valid API token\"}";
                                                     NSData *errData = [errJson dataUsingEncoding:NSUTF8StringEncoding];
                                                     responseString = [NSString stringWithFormat:@"HTTP/1.1 403 Forbidden\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)errData.length, errJson];
@@ -13827,30 +14049,9 @@ static void start_web_server() {
                                         }
                                     }
                                     
-                                    BOOL hasPrivilegedAction = NO;
+                                    // Any command that needs the token, nested blocks and Set Variable included
                                     NSDictionary *trig = g_triggerConfig[@"triggers"][triggerKey];
-                                    if ([trig isKindOfClass:[NSDictionary class]]) {
-                                        NSArray *actions = trig[@"actions"];
-                                        if ([actions isKindOfClass:[NSArray class]]) {
-                                            for (id act in actions) {
-                                                if ([act isKindOfClass:[NSString class]] && rc_is_privileged_command(act)) {
-                                                    hasPrivilegedAction = YES;
-                                                    break;
-                                                } else if ([act isKindOfClass:[NSDictionary class]]) {
-                                                    NSString *type = act[@"type"];
-                                                    if ([type isEqualToString:@"set_variable"]) {
-                                                        NSString *op = act[@"op"];
-                                                        if ([op isEqualToString:@"command"] || [op isEqualToString:@"command_number"]) {
-                                                            if (rc_is_privileged_command(act[@"value"])) {
-                                                                hasPrivilegedAction = YES;
-                                                                break;
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
+                                    BOOL hasPrivilegedAction = [trig isKindOfClass:[NSDictionary class]] && rc_value_has_privileged_command(trig[@"actions"]);
                                     
                                     BOOL isLocal = rc_web_client_is_local(&client_addr) || RCCommandFromLocalSocket();
                                     if (!isLocal && hasPrivilegedAction && !rc_is_api_token_valid(clientToken)) {
