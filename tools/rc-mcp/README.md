@@ -7,6 +7,7 @@ The assistant looks at screenshots with a grid labelled in screen points, reads 
 ## Needs
 - RemoteCompanion 4.6 for `look`, `read_text`, `tap_text` and `wait_text`. The touch, app and `rc_command` tools also work on 4.5.
 - SSH to the phone as `mobile`, with a key (no password prompt).
+- RemoteCompanion's Web UI server, which runs on the phone, for the trigger and config tools. `rc_state` falls back to `rc-client` status commands when the Web UI cannot answer.
 - Python 3.8 or later and `ssh` on your computer. No other packages.
 
 ## Set up
@@ -44,19 +45,50 @@ For a client with a JSON config:
 
 | Tool | What it does |
 |---|---|
+| `rc_help` | Every RemoteCompanion command, offline: categories, the 15 most useful, or a search |
+| `rc_state` | wifi, bluetooth, cellular, airplane, location, battery, low power, appearance, DND, focus and more, in one read-only call |
+| `rc_command` | Any RemoteCompanion command |
+| `rc_trigger` | `list`, `get`, `run`, `stop`, `save`, `delete`, `enable` |
+| `rc_config` | `get`, `backup`, `restore` |
+| `rc_sequence` | `validate`: check a trigger's actions before saving them |
+| `rc_deeplink` | Open a RemoteCompanion screen with `remotecompanion://` |
+| `status` | Screen on or off, locked, the app in front, the RemoteCompanion version, and the battery |
 | `look` | A screenshot with a grid labelled in screen points (half size by default) |
 | `read_text` | The screen's text once it stops changing, a line each with its position in points |
 | `tap`, `hold`, `swipe`, `drag`, `two_finger_swipe`, `pinch` | Touches at points |
 | `tap_text`, `wait_text` | Tap text on the screen, or wait until it shows |
 | `type` | Types into the field being edited |
 | `open_app`, `home`, `wake` | Open an app, go home, wake and unlock |
-| `status` | Screen on or off, locked, the app in front, the RemoteCompanion version, and the battery |
-| `rc_command` | Any RemoteCompanion command |
 | `list_phones` | The phones it can reach |
 
 Each action returns a fresh screenshot once the screen stops changing, so one call both acts and shows the result. Pass `look: false` to skip it.
 
 `tap_text` taps the text itself. A home screen app's name is a label on iOS, not part of its button, so tapping it does nothing. Use `open_app` for apps.
+
+## Commands first, screen second
+
+Almost everything the phone can do has a command, and a command is faster, steadier and cheaper than
+screenshots and taps: no waiting for the screen to settle, no position to get wrong.
+
+1. `rc_state` (or `status`): what is actually on or off.
+2. `rc_help` when the spelling is uncertain. It reads `rc_commands.json` next to the server, so it
+   works with no phone at all.
+3. `rc_command`: prefer the explicit setters (`wifi on`, `bt off`, `dnd on`, `appearance dark`,
+   `rotate lock`) over toggles, so the phone ends in the state you meant.
+4. Touches, `look` and `read_text` are for what has no command, or to verify that a command did what
+   it said.
+
+Triggers and the config are read and written through the phone's own Web UI (`127.0.0.1:8080`), by
+`curl` on the phone, so the requests are local and need no API token. `rc_trigger save` and `delete`
+back the config up to `~/.local/share/rc-mcp/backups` (mode 0600, `~/.cache/rc-mcp/backups` if that
+is not writable) before writing, and read it back to check the phone kept what was sent.
+
+`rc_trigger save` refuses a key that nothing produces: a built-in trigger family (`sched_`,
+`app_launch_`, `addon_`, `trigger_*` and the rest) or an installed add-on. Pass `force: true` only
+when you know the key is right.
+
+`rc_deeplink` opens a RemoteCompanion screen (`settings`, `ha`, `trigger?key=...`). It brings the app
+to the front, so it changes what is on screen.
 
 ## Locked phones
 `wake` turns the screen on and unlocks a phone without a passcode. For one with a passcode, the person holding it can enter the code in Settings › Diagnostics › Test Kit. The phone keeps it for a while and uses it only for requests made on the phone itself, such as this server's over SSH. The code is never sent to the assistant.
