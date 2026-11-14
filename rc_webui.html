@@ -4803,14 +4803,18 @@ async function saveConfig() {
         let detail = errorText.trim();
         try { detail = JSON.parse(errorText).error || detail; } catch(e) {}
         showToast('⚠ ' + (detail || 'Could not save'));
+        loadData(); // show what is really saved
       }
-      return;
+      return false;
     }
     if (!res.ok) {
         showToast('⚠ Failed to save settings');
+        return false;
     }
+    return true;
   } catch(e) {
     showToast('⚠ Offline - unable to save');
+    return false;
   }
 }
 
@@ -8883,7 +8887,7 @@ function copyWebUIToken() {
   }
 }
 
-function generateWebUIApiToken() {
+async function generateWebUIApiToken() {
   const bytes = new Uint8Array(16);
   crypto.getRandomValues(bytes);
   const token = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
@@ -8897,7 +8901,10 @@ function generateWebUIApiToken() {
     if (eyeIcon) eyeIcon.textContent = 'eye';
   }
   config.webUIApiToken = token;
-  saveConfig();
+  if (!(await saveConfig())) {
+    localStorage.removeItem('rc_api_token');
+    return;
+  }
   
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(token).catch(() => {});
