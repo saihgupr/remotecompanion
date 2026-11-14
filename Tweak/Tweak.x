@@ -31,6 +31,7 @@
 #import "RCToastPill.h"
 #import "RCTriggerAppExclusions.h"
 #import <CoreFoundation/CoreFoundation.h>
+#import <Security/Security.h>
 #import <CoreLocation/CoreLocation.h>
 #import <objc/message.h>
 #import "RCQuickActions.h"
@@ -9438,6 +9439,79 @@ static NSString *RCCommandHelp(NSString *topic) {
     return out;
 }
 
+#pragma mark - Saved unlock passcode
+
+// The passcode "unlock saved" (and so "lock-toggle saved") unlocks with, kept like the test
+// kit's (see RCTestKit.x):
+// - Set only over the UNIX socket - from this phone (the app) - never over the network.
+// - Kept in the Keychain (this device only, so never in a backup; readable once the phone has
+//   been unlocked since it started): never in the config, the log, or any reply.
+// - Forgotten the moment an unlock with it doesn't work, so a wrong passcode is tried at most
+//   once - iOS disables the phone (or erases it, if set to) after repeated wrong ones.
+// Unlike the test kit's it doesn't expire: it's what triggers unlock with from now on.
+static NSDictionary *rc_unlock_passcode_query(void) {
+    return @{ (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
+              (__bridge id)kSecAttrService: @"com.goldenappleguy.rc.unlock",
+              (__bridge id)kSecAttrAccount: @"passcode" };
+}
+
+static NSString *rc_saved_unlock_passcode(void) {
+    NSMutableDictionary *query = [rc_unlock_passcode_query() mutableCopy];
+    query[(__bridge id)kSecReturnData] = @YES;
+    query[(__bridge id)kSecMatchLimit] = (__bridge id)kSecMatchLimitOne;
+    CFTypeRef result = NULL;
+    if (SecItemCopyMatching((__bridge CFDictionaryRef)query, &result) != errSecSuccess || !result) return nil;
+    NSData *data = (__bridge_transfer NSData *)result;
+    NSString *code = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    return code.length ? code : nil;
+}
+
+static void rc_forget_unlock_passcode(void) {
+    SecItemDelete((__bridge CFDictionaryRef)rc_unlock_passcode_query());
+}
+
+static OSStatus rc_save_unlock_passcode(NSString *code) {
+    rc_forget_unlock_passcode();
+    NSMutableDictionary *item = [rc_unlock_passcode_query() mutableCopy];
+    item[(__bridge id)kSecValueData] = [code dataUsingEncoding:NSUTF8StringEncoding];
+    item[(__bridge id)kSecAttrAccessible] = (__bridge id)kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly;
+    return SecItemAdd((__bridge CFDictionaryRef)item, NULL);
+}
+
+// unlock-passcode            "set" or "not set" (never the passcode)
+// unlock-passcode set CODE   saves it (from this phone only)
+// unlock-passcode forget     removes it
+static NSString *rc_handle_unlock_passcode_command(NSString *cmd) {
+    NSString *args = [[cmd substringFromIndex:@"unlock-passcode".length]
+                      stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (args.length == 0 || [args isEqualToString:@"status"]) {
+        SRLog(@"Received command: unlock-passcode");
+        return rc_saved_unlock_passcode() ? @"set\n" : @"not set\n";
+    }
+    if ([args isEqualToString:@"forget"]) {
+        SRLog(@"Received command: unlock-passcode forget");
+        rc_forget_unlock_passcode();
+        return @"forgotten\n";
+    }
+    if ([args hasPrefix:@"set "] || [args isEqualToString:@"set"]) {
+        SRLog(@"Received command: unlock-passcode set (redacted)");
+        if (!RCCommandFromLocalSocket()) return @"Error: the passcode can only be set on the phone, not over the network\n";
+        NSString *code = [[args substringFromIndex:3] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (code.length < 4 || code.length > 64 || [code rangeOfCharacterFromSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]].location != NSNotFound) {
+            return @"Error: not a passcode (4-64 characters, no spaces)\n";
+        }
+        OSStatus status = rc_save_unlock_passcode(code);
+        if (status != errSecSuccess) {
+            SRLogMin(@"[SmartUnlock] Could not save the passcode to the Keychain (%d)", (int)status);
+            return [NSString stringWithFormat:@"Error: could not save the passcode (%d)\n", (int)status];
+        }
+        SRLogMin(@"[SmartUnlock] Passcode saved to the Keychain");
+        return @"saved\n";
+    }
+    SRLog(@"Received command: unlock-passcode (unknown)");
+    return @"Error: usage: unlock-passcode [set CODE | forget]\n";
+}
+
 static NSString *handle_command(NSString *cmd) {
     if (!cmd || ![cmd isKindOfClass:[NSString class]]) {
         SRLogMin(@"ERROR: handle_command received nil or invalid command string");
@@ -9456,6 +9530,10 @@ static NSString *handle_command(NSString *cmd) {
     if ([cleanCmd hasPrefix:@"testkit passcode/set"]) {
         SRLog(@"Received command: testkit passcode/set (redacted)");
         return RCTKHandleCommand([cleanCmd substringFromIndex:7]);
+    }
+    // Nor does the saved unlock passcode
+    if ([cleanCmd isEqualToString:@"unlock-passcode"] || [cleanCmd hasPrefix:@"unlock-passcode "]) {
+        return rc_handle_unlock_passcode_command(cleanCmd);
     }
     if ([cleanCmd hasPrefix:@"unlock "]) {
         SRLog(@"Received command: unlock ****");
@@ -9481,7 +9559,7 @@ static NSString *handle_command(NSString *cmd) {
     }
     
     // Debug hex dump of command
-    if ([cleanCmd hasPrefix:@"unlock "] || [cleanCmd hasPrefix:@"lock-toggle "] || [cleanCmd hasPrefix:@"lock toggle "]) {
+    if ([cleanCmd hasPrefix:@"unlock "] || [cleanCmd hasPrefix:@"unlock-passcode"] || [cleanCmd hasPrefix:@"lock-toggle "] || [cleanCmd hasPrefix:@"lock toggle "]) {
         SRLog(@"Command HEX: (redacted)");
     } else {
         NSMutableString *hex = [NSMutableString string];
@@ -10262,6 +10340,13 @@ static NSString *handle_command(NSString *cmd) {
             pin = [[cleanCmd substringFromIndex:7] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
             if (pin.length == 0) pin = nil;
         }
+        // "unlock saved": the passcode kept in the Keychain (see rc_saved_unlock_passcode)
+        BOOL usingSavedPasscode = NO;
+        if ([pin isEqualToString:@"saved"]) {
+            pin = rc_saved_unlock_passcode();
+            usingSavedPasscode = pin != nil;
+            if (!pin) SRLogMin(@"[SmartUnlock] No passcode saved; waking the screen only");
+        }
         
         if (pin) {
             SRLog(@"[SmartUnlock] Unlock command received (with passcode)");
@@ -10355,6 +10440,16 @@ static NSString *handle_command(NSString *cmd) {
                         success = [manager attemptUnlockWithPasscode:pin];
                     }
                     SRLog(@"[SmartUnlock] Passcode unlock attempt returned: %d", success);
+                    if (!success && usingSavedPasscode) {
+                        // Still locked a moment later: the saved passcode is wrong (or iOS won't
+                        // take one right now), so it's forgotten rather than tried again
+                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                            if (!rc_device_locked(manager)) return;
+                            rc_forget_unlock_passcode();
+                            SRLogMin(@"[SmartUnlock] The saved passcode did not unlock the phone, so it was forgotten");
+                            RCShowPrompt(@"Saved Passcode Forgotten", @"Unlock failed. Set it again in the app.", @"lock.slash", 3.0);
+                        });
+                    }
                     if (!success && [manager respondsToSelector:@selector(unlockUIFromSource:withOptions:)]) {
                         [manager unlockUIFromSource:0 withOptions:nil];
                     }
@@ -13101,7 +13196,9 @@ static void start_web_server() {
                                         @"audiohandoff": @(is_audiohandoff_installed()),
                                         @"audiostream": @(is_audiostream_installed()),
                                         @"audiostream_running": @(is_audiostreamerd_running()),
-                                        @"home_button": @(rc_has_home_button())
+                                        @"home_button": @(rc_has_home_button()),
+                                        // Whether one is saved - never the passcode itself
+                                        @"unlock_passcode_saved": rc_saved_unlock_passcode() ? @YES : @NO
                                     };
                                     NSData *jsonData = [NSJSONSerialization dataWithJSONObject:caps options:0 error:nil];
                                     NSString *jsonStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
@@ -13629,6 +13726,9 @@ static void start_web_server() {
                                     @{@"command": @"lock", @"desc": @"System: Lock the device screen"},
                                     @{@"command": @"unlock [passcode]", @"desc": @"Security: Unlock device with optional passcode, or wake and show lockscreen"},
                                     @{@"command": @"lock-toggle [passcode]", @"desc": @"System: Toggle device lock/unlock with optional passcode"},
+                                    @{@"command": @"unlock saved", @"desc": @"Security: Unlock device with the passcode saved in the Keychain"},
+                                    @{@"command": @"lock-toggle saved", @"desc": @"System: Toggle device lock/unlock with the passcode saved in the Keychain"},
+                                    @{@"command": @"unlock-passcode [set CODE | forget]", @"desc": @"Security: Save (from the phone only) or remove the passcode \"unlock saved\" uses"},
                                     @{@"command": @"home", @"desc": @"System: Simulate a Home Button press"},
                                     @{@"command": @"screenshot", @"desc": @"System: Take a screenshot"},
                                     @{@"command": @"stop trigger <key>", @"desc": @"Automation: Stop a trigger's actions that are still running (in a wait)"},
@@ -13787,6 +13887,8 @@ static void start_web_server() {
                                                 safeCommand = @"lock-toggle ****";
                                             } else if ([command hasPrefix:@"testkit passcode/set"]) {
                                                 safeCommand = @"testkit passcode/set (redacted)";
+                                            } else if ([command hasPrefix:@"unlock-passcode set"]) {
+                                                safeCommand = @"unlock-passcode set (redacted)";
                                             }
                                             NSDictionary *resp = @{@"ok": @YES, @"command": safeCommand, @"status": @"Acknowledged"};
                                             NSData *respData = [NSJSONSerialization dataWithJSONObject:resp options:0 error:nil];

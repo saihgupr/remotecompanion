@@ -1242,7 +1242,14 @@
       outline: none;
     }
     .dialog-btns button:active { background-color: var(--rc-fill); }
+    /* Three buttons: one per row, Cancel last, like iOS */
+    .dialog-btns.stacked { flex-direction: column; }
+    .dialog-btns.stacked button { flex: none; border-top: 0.5px solid var(--rc-border-heavy); }
+    .dialog-btns.stacked button:first-child { order: 3; }
+    .dialog-btns.stacked #dialog-ok { order: 1; border-top: none; font-weight: 600; }
+    .dialog-btns.stacked #dialog-alt { order: 2; }
     .dialog-btns button:not(:last-child) { border-right: 0.5px solid var(--rc-border-heavy); }
+    .dialog-btns.stacked button:not(:last-child) { border-right: none; }
     .dialog-btns button:last-child { font-weight: 600; }
     #dialog-record { color: var(--rc-orange); font-weight: 400; }
     .dialog-box.wide {
@@ -2592,6 +2599,7 @@
     <div class="dialog-btns">
       <button onclick="closeDialog()">Cancel</button>
       <button id="dialog-record" style="display:none;" onclick="dialogRecord()">Record</button>
+      <button id="dialog-alt" onclick="dialogAlt()" style="display:none"></button>
       <button id="dialog-ok" onclick="dialogOk()">OK</button>
     </div>
   </div>
@@ -3293,6 +3301,7 @@ let config = { masterEnabled: true, nfcEnabled: true, webUIEnabled: false, fixed
 let hasLoadedData = false;
 let currentKey = null;
 let dialogCallback = null;
+let dialogAltCallback = null;
 let editMode = false;
 let g_selectedCategoryId = null; // null = All (mirrors iOS RCCategoryBar selectedIndex -1)
 try {
@@ -3671,7 +3680,7 @@ const CMD_NAMES = {
   'camera shutter':'Camera Shutter / Snap','camera snap':'Camera Shutter / Snap',
   'camera record':'Camera Record Toggle','camera record toggle':'Camera Record Toggle',
   'sneakycam photo':'SneakyCam Photo','sneakycam takephoto':'SneakyCam Photo','sneakycam video':'SneakyCam Video','sneakycam startstopvideo':'SneakyCam Video','sneakycam record':'SneakyCam Video',
-  'lock':'Lock Device','unlock':'Unlock Device','lock-toggle':'Lock Toggle','lock toggle':'Lock Toggle',
+  'lock':'Lock Device','unlock':'Unlock Device (Ask for Passcode)','lock-toggle':'Lock Toggle (Ask for Passcode)','lock toggle':'Lock Toggle (Ask for Passcode)','unlock-passcode forget':'Forget Saved Passcode',
   'dnd on':'Do Not Disturb On','dnd off':'Do Not Disturb Off','dnd toggle':'Do Not Disturb Toggle',
   'focus off':'Focus Off',
   'audiomix on':'AudioMix On','audiomix off':'AudioMix Off','audiomix toggle':'AudioMix Toggle',
@@ -3999,9 +4008,12 @@ function nameForCmd(cmd) {
   if (lowCmd.startsWith('focus on '))     return `Turn On ${cmd.slice(9)}`;
   if (lowCmd.startsWith('focus toggle ')) return `Toggle ${cmd.slice(13)}`;
   if (lowCmd.startsWith('airplay connect ')) return `AirPlay Connect ${cmd.slice(16)}`;
-  if (lowCmd.startsWith('unlock '))       return 'Unlock Device (Passcode)';
-  if (lowCmd.startsWith('lock-toggle ') || lowCmd.startsWith('lock toggle ')) return 'Lock Toggle (Passcode)';
-  if (lowCmd === 'lock-toggle' || lowCmd === 'lock toggle') return 'Lock Toggle';
+  // "... saved" without a saved passcode only wakes the screen to the passcode screen
+  const unlockKind = /^(unlock|lock[- ]toggle) saved$/.test(lowCmd) && 'unlock_passcode_saved' in serverCapabilities && !serverCapabilities.unlock_passcode_saved ? '(Ask for Passcode)' : '(Saved Passcode)';
+  if (lowCmd.startsWith('unlock '))       return `Unlock Device ${unlockKind}`;
+  if (lowCmd.startsWith('lock-toggle ') || lowCmd.startsWith('lock toggle ')) return `Lock Toggle ${unlockKind}`;
+  if (lowCmd === 'lock-toggle' || lowCmd === 'lock toggle') return 'Lock Toggle (Ask for Passcode)';
+  if (lowCmd === 'unlock')         return 'Unlock Device (Ask for Passcode)';
   if (lowCmd.startsWith('set-vol '))      return `Set Volume ${cmd.slice(8)}%`;
   if (lowCmd.startsWith('ringer volume ')) return `Set Ringer Volume ${cmd.slice(14)}%`;
   if (lowCmd.startsWith('brightness '))   return `Set Brightness ${cmd.slice(11)}%`;
@@ -4157,7 +4169,7 @@ function iconForCmd(cmd) {
     'wifi on':'wifi','wifi off':'wifi_slash','wifi toggle':'wifi',
     'bluetooth on':'bolt_horizontal_fill','bluetooth off':'bolt_horizontal','bluetooth toggle':'bolt_horizontal_fill',
     'airplane on':'airplane','airplane off':'airplane','airplane toggle':'airplane',
-    'lock':'lock_fill','unlock':'lock_open_fill','lock-toggle':'lock_fill','lock toggle':'lock_fill',
+    'lock':'lock_fill','unlock':'lock_open_fill','lock-toggle':'lock_fill','lock toggle':'lock_fill','unlock-passcode forget':'lock_fill',
     'dnd on':'moon_fill','dnd off':'moon','dnd toggle':'moon_circle_fill',
     'audiomix on':'equalizer','audiomix off':'equalizer','audiomix toggle':'equalizer',
     'audiohandoff enabled on':'headphones','audiohandoff enabled off':'headphones','audiohandoff enabled toggle':'headphones','audiohandoff auto on':'headphones','audiohandoff auto off':'headphones','audiohandoff auto toggle':'headphones',
@@ -4277,6 +4289,7 @@ const ACTION_SECTIONS = [
     { name:'Lock Device',       cmd:'lock',          icon:'lock_fill' },
     { name:'Unlock Device',     cmd:'unlock',        icon:'lock_open_fill' },
     { name:'Lock Toggle',       cmd:'lock-toggle',   icon:'lock_fill', is_toggle:true },
+    { name:'Forget Saved Passcode', cmd:'unlock-passcode forget', icon:'lock_fill' },
     { name:'Do Not Disturb',    cmd:'dnd toggle',    icon:'moon_circle_fill', is_toggle:true },
     { name:'Set Focus…',        cmd:'__FOCUS__',     icon:'moon_circle_fill', needs_input:true },
     { name:'Low Power Mode',    cmd:'low power toggle',icon:'battery_25', is_toggle:true },
@@ -6361,15 +6374,13 @@ function editAction(idx) {
     } else if (isLevelCommand(low, 'brightness ')) {
       promptLevelAction('brightness ', idx);
     } else if (low === 'unlock' || low.startsWith('unlock ')) {
-      const currentPin = low.startsWith('unlock ') ? act.slice(7).trim() : '';
-      promptUnlockDialog(currentPin, val => {
+      promptUnlockDialog(val => {
         actions[idx] = val;
         saveConfig();
         renderActionList();
       });
     } else if (low === 'lock-toggle' || low === 'lock toggle' || low.startsWith('lock-toggle ') || low.startsWith('lock toggle ')) {
-      const currentPin = (low.startsWith('lock-toggle ') || low.startsWith('lock toggle ')) ? act.slice(12).trim() : '';
-      promptLockToggleDialog(currentPin, val => {
+      promptLockToggleDialog(val => {
         actions[idx] = val;
         saveConfig();
         renderActionList();
@@ -6704,11 +6715,11 @@ function selectPickerAction(act) {
   } else if (c === '__MQTT_PUBLISH__') {
     promptMQTTActionPicker();
   } else if (c === 'unlock') {
-    promptUnlockDialog('', val => {
+    promptUnlockDialog(val => {
       addActionToCurrent(val);
     });
   } else if (c === 'lock-toggle') {
-    promptLockToggleDialog('', val => {
+    promptLockToggleDialog(val => {
       addActionToCurrent(val);
     });
   } else {
@@ -9968,7 +9979,7 @@ function closeSheet() {
 // ── Generic Dialog System ──────────────────────────────────────────────────────
 // Confirm dialog without a text field. Reuses #dialog-backdrop; Cancel dismisses,
 // OK runs onOk. Restores the input row next time showDialog is used.
-function showConfirm(title, msg, onOk, okLabel) {
+function showConfirm(title, msg, onOk, okLabel, altLabel, onAlt) {
   document.getElementById('dialog-title').textContent = title;
   document.getElementById('dialog-msg').textContent = msg;
   document.getElementById('dialog-input').style.display = 'none';
@@ -9976,6 +9987,12 @@ function showConfirm(title, msg, onOk, okLabel) {
   document.getElementById('dialog-record').style.display = 'none';
   document.getElementById('dialog-ok').textContent = okLabel || 'OK';
   dialogCallback = () => { if (onOk) onOk(); };
+  // An optional third button, between Cancel and OK
+  const alt = document.getElementById('dialog-alt');
+  alt.textContent = altLabel || '';
+  alt.style.display = altLabel ? '' : 'none';
+  alt.parentElement.classList.toggle('stacked', !!altLabel);
+  dialogAltCallback = onAlt || null;
   const box = document.querySelector('#dialog-backdrop .dialog-box');
   if (box) box.classList.remove('wide');
   document.getElementById('dialog-backdrop').classList.add('visible');
@@ -10019,8 +10036,18 @@ function showDialog(title, msg, defaultVal, okLabel, callback, isNumber = false,
   setupDialogAutocomplete(title, input, auto);
 }
 
+
+function dialogAlt() {
+  const cb = dialogAltCallback;
+  closeDialog();
+  if (cb) cb();
+}
+
 function closeDialog() {
   document.getElementById('dialog-backdrop').classList.remove('visible');
+  document.getElementById('dialog-alt').style.display = 'none';
+  document.getElementById('dialog-alt').parentElement.classList.remove('stacked');
+  dialogAltCallback = null;
   const input = document.getElementById('dialog-input');
   if (input) {
     input.type = 'text';
@@ -10029,35 +10056,26 @@ function closeDialog() {
   dialogCallback = null;
 }
 
-function promptUnlockDialog(initialPasscode = '', callback) {
-  showDialog(
+// The passcode itself is kept in the phone's Keychain and can only be set in the app there
+function promptUnlockDialog(callback) {
+  showConfirm(
     'Unlock Device',
-    'Enter your device passcode to automatically unlock, or leave empty to wake screen only:',
-    initialPasscode,
-    'Save',
-    val => {
-      const pin = (val || '').trim();
-      callback(pin ? `unlock ${pin}` : 'unlock');
-    },
-    false,
-    false,
-    true
+    'Unlocks automatically with the device passcode saved in the app on the phone.',
+    () => callback('unlock saved'),
+    'Use Saved Passcode',
+    'Ask for Passcode',
+    () => callback('unlock')
   );
 }
 
-function promptLockToggleDialog(initialPasscode = '', callback) {
-  showDialog(
+function promptLockToggleDialog(callback) {
+  showConfirm(
     'Lock Toggle',
-    'Enter your device passcode to automatically unlock when locked, or leave empty to toggle without passcode:',
-    initialPasscode,
-    'Save',
-    val => {
-      const pin = (val || '').trim();
-      callback(pin ? `lock-toggle ${pin}` : 'lock-toggle');
-    },
-    false,
-    false,
-    true
+    'Unlocks automatically with the device passcode saved in the app on the phone.',
+    () => callback('lock-toggle saved'),
+    'Use Saved Passcode',
+    'Ask for Passcode',
+    () => callback('lock-toggle')
   );
 }
 
