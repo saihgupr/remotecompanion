@@ -256,6 +256,14 @@ static BOOL rcao_is_text(id value) {
         sheet.popoverPresentationController.sourceView = cell;
         sheet.popoverPresentationController.sourceRect = cell.bounds;
         [self presentViewController:sheet animated:YES completion:nil];
+    } else if ([type isEqualToString:@"text"] && [RCAddOnSettingText suggestionsForControl:setting].count) {
+        // Names to pick from (or type)
+        __weak typeof(self) ws = self;
+        id current = self.settingValues[setting[@"id"]];
+        RCAddOnSuggestionsViewController *pick = [[RCAddOnSuggestionsViewController alloc] initWithTitle:setting[@"title"]
+            suggestions:[RCAddOnSettingText suggestionsForControl:setting] current:current ? [current description] : nil
+            completion:^(NSString *text) { [ws setSetting:setting to:text]; }];
+        [self.navigationController pushViewController:pick animated:YES];
     } else if ([type isEqualToString:@"text"]) {
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:setting[@"title"] message:rcao_is_text(setting[@"note"]) ? setting[@"note"] : nil preferredStyle:UIAlertControllerStyleAlert];
         [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {

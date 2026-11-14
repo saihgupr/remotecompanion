@@ -82,12 +82,133 @@ static void rcal_alert(UIViewController *vc, NSString *title, NSString *message)
     return [names componentsJoinedByString:@", "];
 }
 
++ (NSArray<NSString *> *)suggestionsForControl:(NSDictionary *)control {
+    if (![control[@"type"] isEqualToString:@"text"]) return @[];
+    NSMutableArray *all = [NSMutableArray array];
+    if (rcal_is_text(control[@"suggestionsFile"])) {
+        NSData *data = [NSData dataWithContentsOfFile:control[@"suggestionsFile"]];
+        id list = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+        if ([list isKindOfClass:[NSArray class]]) [all addObjectsFromArray:list];
+    }
+    if ([control[@"suggestions"] isKindOfClass:[NSArray class]]) [all addObjectsFromArray:control[@"suggestions"]];
+    NSMutableArray *out = [NSMutableArray array];
+    NSMutableSet *seen = [NSMutableSet set];
+    for (id name in all) {
+        if (!rcal_is_text(name)) continue;
+        NSString *key = [name lowercaseString];
+        if ([seen containsObject:key]) continue;
+        [seen addObject:key];
+        [out addObject:name];
+    }
+    return out;
+}
+
 + (NSString *)numberForTyped:(NSString *)typed {
     NSString *text = [[typed stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]] stringByReplacingOccurrencesOfString:@"," withString:@"."];
     NSScanner *scanner = [NSScanner scannerWithString:text];
     double number = 0;
     if (!text.length || ![scanner scanDouble:&number] || !scanner.isAtEnd || !isfinite(number)) return nil;
     return [NSString stringWithFormat:@"%.10g", number];
+}
+
+@end
+
+#pragma mark - Suggestions
+
+@interface RCAddOnSuggestionsViewController ()
+@property (nonatomic, copy) NSArray<NSString *> *suggestions, *shown;
+@property (nonatomic, copy) NSString *current, *typed;
+@property (nonatomic, copy) void (^completion)(NSString *text);
+@property (nonatomic, strong) UITableView *tableView;
+@property (nonatomic, strong) UISearchController *search;
+@end
+
+@implementation RCAddOnSuggestionsViewController
+
+- (instancetype)initWithTitle:(NSString *)title suggestions:(NSArray<NSString *> *)suggestions current:(NSString *)current completion:(void (^)(NSString *))completion {
+    if ((self = [super initWithNibName:nil bundle:nil])) {
+        self.title = title;
+        _suggestions = [suggestions copy];
+        _shown = [suggestions copy];
+        _current = [current copy];
+        _typed = @"";
+        _completion = [completion copy];
+    }
+    return self;
+}
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
+    self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
+    self.tableView.delegate = self;
+    self.tableView.dataSource = self;
+    self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
+    rcal_style_table(self, self.tableView);
+    self.search = [[UISearchController alloc] initWithSearchResultsController:nil];
+    self.search.searchResultsUpdater = self;
+    self.search.obscuresBackgroundDuringPresentation = NO;
+    self.search.searchBar.placeholder = @"Search or Type a Name";
+    self.search.searchBar.autocapitalizationType = UITextAutocapitalizationTypeWords;
+    self.navigationItem.searchController = self.search;
+    self.navigationItem.hidesSearchBarWhenScrolling = NO;
+    self.definesPresentationContext = YES;
+}
+
+- (void)updateSearchResultsForSearchController:(UISearchController *)controller {
+    self.typed = [controller.searchBar.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]] ?: @"";
+    if (!self.typed.length) self.shown = self.suggestions;
+    else {
+        NSString *t = self.typed;
+        self.shown = [self.suggestions filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSString *s, id b) {
+            return [s rangeOfString:t options:NSCaseInsensitiveSearch | NSDiacriticInsensitiveSearch].location != NSNotFound;
+        }]];
+    }
+    [self.tableView reloadData];
+}
+
+// "Use '...'" only for typed text that isn't exactly one of the names
+- (BOOL)offersTyped {
+    if (!self.typed.length) return NO;
+    for (NSString *s in self.suggestions) if ([s caseInsensitiveCompare:self.typed] == NSOrderedSame) return NO;
+    return YES;
+}
+
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
+    return 2;
+}
+
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    return section == 0 ? ([self offersTyped] ? 1 : 0) : (NSInteger)self.shown.count;
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+    if (section == 1 && !self.shown.count) return self.typed.length ? nil : @"Type a name in the search field.";
+    return nil;
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = rcal_cell(UITableViewCellStyleDefault);
+    if (indexPath.section == 0) {
+        cell.textLabel.text = [NSString stringWithFormat:@"Use \u201C%@\u201D", self.typed];
+        cell.textLabel.textColor = self.view.tintColor;
+        cell.imageView.image = [UIImage systemImageNamed:@"plus.circle.fill"];
+        cell.imageView.tintColor = [UIColor systemGreenColor];
+        return cell;
+    }
+    NSString *name = self.shown[(NSUInteger)indexPath.row];
+    cell.textLabel.text = name;
+    cell.accessoryType = [name caseInsensitiveCompare:self.current ?: @""] == NSOrderedSame ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+    return cell;
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    NSString *text = indexPath.section == 0 ? self.typed : self.shown[(NSUInteger)indexPath.row];
+    void (^completion)(NSString *) = self.completion;
+    self.search.active = NO;
+    [self.navigationController popViewControllerAnimated:YES];
+    if (completion) completion(text);
 }
 
 @end
@@ -102,6 +223,7 @@ static void rcal_alert(UIViewController *vc, NSString *title, NSString *message)
 @property (nonatomic, assign) BOOL adding;
 @property (nonatomic, copy) void (^completion)(NSDictionary *item);
 @property (nonatomic, strong) UITableView *tableView;
+@property (nonatomic, assign) BOOL pickedFirst;   // a new item opened its first field's list once
 @end
 
 @implementation RCAddOnItemViewController
@@ -154,10 +276,15 @@ static id rcal_default_for_field(NSDictionary *field) {
 
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
-    // A new item starts typing in its first text field
-    if (!self.adding) return;
+    // A new item starts with its first text field: its list to pick from, or typing
+    if (!self.adding || self.pickedFirst) return;
+    self.pickedFirst = YES;
     for (NSUInteger i = 0; i < self.fields.count; i++) {
         if (![self.fields[i][@"type"] isEqualToString:@"text"]) continue;
+        if ([RCAddOnSettingText suggestionsForControl:self.fields[i]].count) {
+            [self pickForField:self.fields[i] row:(NSInteger)i];
+            return;
+        }
         UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:(NSInteger)i inSection:0]];
         UITextField *field = [cell.accessoryView isKindOfClass:[UITextField class]] ? (UITextField *)cell.accessoryView : nil;
         [field becomeFirstResponder];
@@ -167,6 +294,20 @@ static id rcal_default_for_field(NSDictionary *field) {
 
 - (void)cancel {
     [self dismissViewControllerAnimated:YES completion:nil];
+}
+
+// A text field with suggestions: its list to pick from
+- (void)pickForField:(NSDictionary *)field row:(NSInteger)row {
+    [self.view endEditing:YES];
+    __weak typeof(self) ws = self;
+    RCAddOnSuggestionsViewController *pick = [[RCAddOnSuggestionsViewController alloc] initWithTitle:field[@"title"]
+        suggestions:[RCAddOnSettingText suggestionsForControl:field] current:[self.values[field[@"id"]] description]
+        completion:^(NSString *text) {
+            ws.values[field[@"id"]] = text ?: @"";
+            [ws updateSaveButton];
+            [ws.tableView reloadRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:row inSection:0]] withRowAnimation:UITableViewRowAnimationNone];
+        }];
+    [self.navigationController pushViewController:pick animated:YES];
 }
 
 - (void)save {
@@ -330,6 +471,11 @@ static id rcal_default_for_field(NSDictionary *field) {
         cell.detailTextLabel.text = [RCAddOnSettingText textForValue:value control:field];
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+    } else if ([RCAddOnSettingText suggestionsForControl:field].count) {
+        NSString *now = [value description];
+        cell.detailTextLabel.text = now.length ? now : @"None";
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        cell.selectionStyle = UITableViewCellSelectionStyleDefault;
     } else {
         UITextField *text = [[UITextField alloc] initWithFrame:CGRectMake(0, 0, MIN(240, tableView.bounds.size.width * 0.55), 32)];
         text.text = [value description];
@@ -352,6 +498,7 @@ static id rcal_default_for_field(NSDictionary *field) {
     NSDictionary *field = self.fields[(NSUInteger)indexPath.row];
     UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
     if ([field[@"type"] isEqualToString:@"choice"]) [self chooseForField:field fromCell:cell];
+    else if ([field[@"type"] isEqualToString:@"text"] && [RCAddOnSettingText suggestionsForControl:field].count) [self pickForField:field row:indexPath.row];
     else if ([cell.accessoryView isKindOfClass:[UITextField class]]) [cell.accessoryView becomeFirstResponder];
     else [[cell.accessoryView viewWithTag:indexPath.row + 1000] becomeFirstResponder];
 }

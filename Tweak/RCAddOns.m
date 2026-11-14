@@ -372,8 +372,13 @@ static NSString *rcao_check_control(NSDictionary *setting, NSString *where, BOOL
     if (field && ![@[@"switch", @"choice", @"number", @"text"] containsObject:type ?: @""]) return [NSString stringWithFormat:@"%@: type must be switch, choice, number or text", sid];
     if (!field && ![@[@"switch", @"choice", @"number", @"text", @"list"] containsObject:type ?: @""]) return [NSString stringWithFormat:@"%@: type must be switch, choice, number, text or list", sid];
     if (!field && (!rcao_is_string(setting[@"domain"]) || !rcao_is_string(setting[@"key"]))) return [NSString stringWithFormat:@"%@ needs domain and key", sid];
-    for (NSString *key in @[@"note", @"notify", @"unit"]) {
+    for (NSString *key in @[@"note", @"notify", @"unit", @"suggestionsFile"]) {
         if (setting[key] && !rcao_is_string(setting[key])) return [NSString stringWithFormat:@"%@: %@ must be text", sid, key];
+    }
+    if (setting[@"suggestions"]) {
+        BOOL ok = [setting[@"suggestions"] isKindOfClass:[NSArray class]];
+        for (id item in ok ? setting[@"suggestions"] : @[]) if (!rcao_is_string(item)) ok = NO;
+        if (!ok) return [NSString stringWithFormat:@"%@: suggestions must be a list of text", sid];
     }
     for (NSString *key in @[@"min", @"max", @"step"]) {
         if (setting[key] && ![setting[key] isKindOfClass:[NSNumber class]]) return [NSString stringWithFormat:@"%@: %@ must be a number", sid, key];
@@ -581,11 +586,11 @@ static NSArray<NSString *> *rcao_warnings(NSDictionary *addOn, NSString *folder)
     check(addOn, @[@"$schema", @"api", @"id", @"name", @"icon", @"requires", @"actions", @"conditions", @"events", @"settings"], @"add-on");
     for (NSDictionary *setting in [addOn[@"settings"] isKindOfClass:[NSArray class]] ? addOn[@"settings"] : @[]) {
         NSString *where = [NSString stringWithFormat:@"setting '%@'", setting[@"id"]];
-        check(setting, @[@"id", @"title", @"type", @"domain", @"key", @"default", @"note", @"notify", @"choices", @"min", @"max", @"step", @"unit", @"fields"], where);
+        check(setting, @[@"id", @"title", @"type", @"domain", @"key", @"default", @"note", @"notify", @"choices", @"min", @"max", @"step", @"unit", @"fields", @"suggestions", @"suggestionsFile"], where);
         for (NSDictionary *choice in [setting[@"choices"] isKindOfClass:[NSArray class]] ? setting[@"choices"] : @[]) check(choice, @[@"value", @"label"], [where stringByAppendingString:@" choice"]);
         for (NSDictionary *field in [setting[@"fields"] isKindOfClass:[NSArray class]] ? setting[@"fields"] : @[]) {
             NSString *fieldWhere = [NSString stringWithFormat:@"%@ field '%@'", where, field[@"id"]];
-            check(field, @[@"id", @"title", @"type", @"default", @"note", @"choices", @"min", @"max", @"step", @"unit"], fieldWhere);
+            check(field, @[@"id", @"title", @"type", @"default", @"note", @"choices", @"min", @"max", @"step", @"unit", @"suggestions", @"suggestionsFile"], fieldWhere);
             for (NSDictionary *choice in [field[@"choices"] isKindOfClass:[NSArray class]] ? field[@"choices"] : @[]) check(choice, @[@"value", @"label"], [fieldWhere stringByAppendingString:@" choice"]);
         }
     }
