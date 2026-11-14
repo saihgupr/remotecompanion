@@ -2,18 +2,6 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
-
-### Added
-- **CLI help**: `rc help`, `rc -h` and `rc --help` print the full command reference grouped by area, and `rc help <word>` narrows it to matching commands. Running `rc` with no arguments now points at it instead of the old partial list.
-
-### Fixed
-- **Web UI access from other devices**: unlocking with a passcode or the saved passcode (`unlock`, `lock-toggle` with a passcode, `unlock-passcode`) now needs the API token from another device, like `root` and `exec`. A Web UI save from another device can no longer add or change a trigger holding such a command without the token, so a trigger cannot run one later on its own. With no token set, protected settings and those actions change only on the iPhone, so nobody on the network can set a token of their own. The same goes for `trigger NAME` when that trigger, or one it runs, holds such a command. Firing a trigger through the API also finds these commands inside If and Repeat blocks and in the triggers it runs. Passcodes in Unlock Device and Lock Toggle actions are hidden from other devices without the token and from run records (the Running page and run history), and come back unchanged when the Web UI saves the config. `var` commands also need the token from another device, and a variable in a Terminal command is quoted for where it sits, so a value inside "..." or $(...) can no longer run as a command.
-- **Web UI switched off**: the variable names and status answers the Web UI's editors read are no longer served once the Web UI is off, like the rest of its pages. Another device without the API token gets only the variable names, not their values.
-- **Else without End If**: a true If whose Else had lost its End If ran the Else's actions too. The run now stops there, as a false If without an End If already did.
-- **Gesture export**: `gesture export` writes only into /tmp, /var/tmp or /var/mobile/tmp, following links in the path before checking it, so a link placed there can't send the file elsewhere.
-- **Web UI escaping**: the Web UI uses one HTML escaping function everywhere; the second one did not escape quotes and showed 0 as nothing.
-
 ## [4.4.0] - 2026-11-06
 
 ### Added
@@ -43,6 +31,8 @@ All notable changes to this project will be documented in this file.
 - **Per-trigger toast toggle**: the trigger options menu (`...`) has a Toast Notifications toggle in both the iOS app and the Web UI, on by default. Unchecked, all HUD toasts, action banners and integration notifications from that trigger's actions are suppressed.
 - **Per-trigger haptics toggle**: the trigger actions menu (`...`) has a Haptic Feedback toggle in both the iOS app and the Web UI, with sensible defaults (tactile buttons, screen gestures and NFC tags enabled; background event and app triggers disabled) and opt-in vibration on event triggers.
 - **Auto-Lock (Display Sleep)**: renamed Auto-Lock to "Auto-Lock (Display Sleep)" with search keywords (`display`, `sleep`, `timeout`, `time off`, `screen`), added "Never (Off)" to the duration selector, and added `rc display sleep [duration]` and `rc display time off`.
+- **Saved passcode in the Keychain**: Unlock Device and Lock Toggle can keep their passcode in the device-only Keychain instead of the action itself, so it no longer sits in the config file, backups or exports. The action just says `unlock saved`, one passcode serves both, and the editor offers Use Saved Passcode, Ask for Passcode and Forget. A passcode saved in an old config is moved over on the next app launch when every action shares it; different passcodes are left alone. A wrong saved passcode is forgotten after one try, and the passcode never appears in the log or any reply.
+- **CLI help**: `rc help`, `rc -h` and `rc --help` print the full command reference grouped by area, and `rc help <word>` narrows it to matching commands. Running `rc` with no arguments now points at it instead of the old partial list.
 
 ### Changed
 - **Stop Trigger picks from a list**: adding or editing a Stop Trigger action now opens a list styled like the Triggers screen, with each trigger's icon, the same sections and order, a search field, and the current trigger ticked, instead of one long action sheet (#106).
@@ -54,11 +44,18 @@ All notable changes to this project will be documented in this file.
 - **`rc-root` caller check**: the setuid helper now runs shell commands and touch injection only when its parent process is SpringBoard (where RemoteCommand spawns it). Other apps, tweaks, or scripts running as `mobile` that call `rc-root <command>` directly are refused instead of getting root. Root actions, `rc -r`, and touch injection (`rc-root iohid …`) work as before. Settings > Advanced Settings > Security > Allow Direct Root Helper Calls switches the check off for scripts, terminals and other tools; it is off by default. Note: the toggle lives in the shared config file, so treat it as convenience, not a boundary against other local mobile processes.
 - **Test Kit unlocks only from the phone**: `POST /api/testkit/unlock` now refuses requests from the network, so someone on the same Wi-Fi can no longer unlock the phone while a Test Kit passcode is set; `rc-client "testkit unlock"` on the phone still works. The passcode also survives a respring (still forgotten after 30 minutes, a failed unlock, or a restart) and is kept in the device-only Keychain (#124).
 - **Privileged trigger gating**: triggers containing privileged actions (`root`, `sudo`, `exec`, or TestKit actions) invoked via `/api/trigger/<key>` now require an API token when called from the network, preventing unauthenticated remote execution of sensitive actions via pre-configured triggers.
+- **Web UI access from other devices**: unlocking with a passcode or the saved passcode (`unlock`, `lock-toggle` with a passcode, `unlock-passcode`) now needs the API token from another device, like `root` and `exec`. A Web UI save from another device can no longer add or change a trigger holding such a command without the token, so a trigger cannot run one later on its own. With no token set, protected settings and those actions change only on the iPhone, so nobody on the network can set a token of their own. The same goes for `trigger NAME` when that trigger, or one it runs, holds such a command, including commands inside If and Repeat blocks. Passcodes in Unlock Device and Lock Toggle actions are hidden from other devices without the token and from run records, and come back unchanged when the Web UI saves the config. `var` commands also need the token from another device, and a variable in a Terminal command is quoted for where it sits, so a value inside "..." or $(...) can no longer run as a command.
 - **Secret masking in config API**: `GET /api/config` masks `webUIApiToken`, `haToken`, `mqttPassword`, and SSH host passwords as `••••••••` for unauthenticated remote callers. `POST /api/config` requires a valid API token when configured, and preserves masked credentials so existing secrets are not overwritten on save.
 - **Origin-based CORS validation**: cross-origin requests from public websites to the Web UI API are rejected with 403 Forbidden. Permitted origins are restricted to localhost, loopback addresses (`127.0.0.1`, `::1`), `.local` mDNS domains, and RFC 1918 private IPv4 subnets (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`).
 - **Configuration file permissions**: `save_trigger_config()` now creates and updates `/var/mobile/Documents/rc_triggers.plist` with `0600` permissions (read/write by owner only), preventing unprivileged local mobile processes from inspecting stored tokens and secrets.
 
 ### Fixed
+- **Two-finger slides kept pulling the panels**: with Two-Finger Top Slide Down set up, the slide also opened Notification Center or Control Center and a pull that had already started stayed half open; both now stay shut, a pull in progress closes again, and the fingers may start at different heights. With Two-Finger Bottom Slide Up set up, the one-finger swipe up to go home or open the App Switcher works again and only two fingers are held back.
+- **Long trigger names cut off in compact tiles**: compact tiles now use up to three lines for the name and shrink slightly less, so long trigger and action names show in full.
+- **Web UI switched off**: the variable names and status answers the Web UI's editors read are no longer served once the Web UI is off, like the rest of its pages. Another device without the API token gets only the variable names, not their values.
+- **Else without End If**: a true If whose Else had lost its End If ran the Else's actions too. The run now stops there, as a false If without an End If already did.
+- **Gesture export**: `gesture export` writes only into /tmp, /var/tmp or /var/mobile/tmp, following links in the path before checking it, so a link placed there can't send the file elsewhere.
+- **Web UI escaping**: the Web UI uses one HTML escaping function everywhere; the second one did not escape quotes and showed 0 as nothing.
 - **Web UI asked for the token on every edit**: creating a trigger or adding an action no longer asks for the API token on every save. The token is still required when a save changes protected settings such as the token itself, Web UI access and trusted networks, the root helper, or saved credentials.
 - **Control Center on iOS 18**: later iOS 18 releases dropped the single Control Center controller RC used, so the action and `rc control-center` did nothing. They now open it through `SBControlCenterCoordinator` (#148).
 - **App Switcher on iOS 18 and 26**: the old toggle method is gone on iOS 18, so the action and `rc switcher` failed. They now use the main screen's switcher controller, and iOS 17 keeps the old call (#149).
@@ -79,6 +76,7 @@ All notable changes to this project will be documented in this file.
 ### Upgrade Notes
 - Root commands from scripts and terminals now need **Settings > Advanced Settings > Security > Allow Direct Root Helper Calls** turned on. Everything else works as before.
 - SSH actions now send commands exactly as typed, and passwords no longer show up in the process list.
+- Network clients that unlock with a passcode, set variables, or save triggers holding a privileged command now need the API token. Set one in Settings > Web UI > Access (`rc webui token`) and add it to those callers. Without a token, those changes can still be made on the iPhone itself.
 
 ## [4.1.0] - 2026-10-31
 

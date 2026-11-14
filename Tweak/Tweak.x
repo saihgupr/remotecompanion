@@ -3672,13 +3672,12 @@ static id rc_hide_passcodes(id value) {
     return value;
 }
 
-static void rc_collect_passcode(id value, NSString **found) {
-    if (*found) return;
+static void rc_collect_passcodes(id value, NSMutableSet *found) {
     NSString *passcode = nil;
     if ([value isKindOfClass:[NSString class]]) {
-        if (rc_passcode_in_command(value, NULL, &passcode) && ![passcode isEqualToString:kRCHiddenPasscode]) *found = passcode;
+        if (rc_passcode_in_command(value, NULL, &passcode) && ![passcode isEqualToString:kRCHiddenPasscode]) [found addObject:passcode];
     } else if ([value isKindOfClass:[NSArray class]] || [value isKindOfClass:[NSDictionary class]]) {
-        for (id item in ([value isKindOfClass:[NSDictionary class]] ? [value allValues] : value)) rc_collect_passcode(item, found);
+        for (id item in ([value isKindOfClass:[NSDictionary class]] ? [value allValues] : value)) rc_collect_passcodes(item, found);
     }
 }
 
@@ -3714,8 +3713,12 @@ static id rc_restore_passcodes_at(id incoming, id current, NSString *fallback) {
 }
 
 static NSMutableDictionary *rc_restore_passcodes(NSDictionary *incoming, NSDictionary *current) {
-    NSString *fallback = nil;
-    rc_collect_passcode(current, &fallback);
+    // Only fill a moved or copied hidden action when every action in the old config agrees on one
+    // passcode. With several different passcodes to choose from, guessing could give an action
+    // someone else's passcode, so it falls back to waking the screen and asking.
+    NSMutableSet *passcodes = [NSMutableSet set];
+    rc_collect_passcodes(current, passcodes);
+    NSString *fallback = passcodes.count == 1 ? passcodes.anyObject : nil;
     return [rc_restore_passcodes_at(incoming, current, fallback) mutableCopy];
 }
 
