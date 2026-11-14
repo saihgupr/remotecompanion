@@ -7,6 +7,9 @@ All notable changes to this project will be documented in this file.
 ### Added
 - **CLI help**: `rc help`, `rc -h` and `rc --help` print the full command reference grouped by area, and `rc help <word>` narrows it to matching commands. Running `rc` with no arguments now points at it instead of the old partial list.
 
+### Fixed
+- **Web UI access from other devices**: unlocking with a passcode or the saved passcode (`unlock`, `lock-toggle` with a passcode, `unlock-passcode`) now needs the API token from another device, like `root` and `exec`. A Web UI save from another device can no longer add or change a trigger holding such a command without the token, so a trigger cannot run one later on its own. With no token set, protected settings and those actions change only on the iPhone, so nobody on the network can set a token of their own. Firing a trigger through the API also finds these commands inside If and Repeat blocks.
+
 ## [4.4.0] - 2026-11-06
 
 ### Added

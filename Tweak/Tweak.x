@@ -3534,7 +3534,11 @@ BOOL RCIsPrivilegedCommand(NSString *cmd) {
            [trimmed hasPrefix:@"lua "] || [trimmed hasPrefix:@"lua_eval "] || [trimmed hasPrefix:@"Lua "] ||
            [trimmed hasPrefix:@"ssh-run "] ||
            [trimmed hasPrefix:@"tap "] || [trimmed hasPrefix:@"hold "] || [trimmed hasPrefix:@"swipe "] ||
-           [trimmed hasPrefix:@"gesture "];
+           [trimmed hasPrefix:@"gesture "] ||
+           // Unlocking with a passcode (or the saved one) opens the iPhone; "unlock" and
+           // "lock-toggle" alone only wake it to the passcode screen and stay open.
+           [trimmed hasPrefix:@"unlock "] || [trimmed hasPrefix:@"lock-toggle "] || [trimmed hasPrefix:@"lock toggle "] ||
+           [trimmed hasPrefix:@"unlock-passcode"];
 }
 
 static BOOL rc_is_privileged_command(NSString *cmd) {
@@ -3613,6 +3617,44 @@ static BOOL rc_config_changes_protected_settings(NSDictionary *incoming, NSDicti
         if (newValue == oldValue) continue;
         if (!newValue || !oldValue) return YES;
         if (![newValue isEqual:oldValue]) return YES;
+    }
+    return NO;
+}
+
+// Whether a value holds, anywhere inside it, a command that needs the API token: an action, a
+// Set Variable or If command, a block nested in another.
+static BOOL rc_value_has_privileged_command(id value) {
+    if ([value isKindOfClass:[NSString class]]) return rc_is_privileged_command(value);
+    if ([value isKindOfClass:[NSDictionary class]]) value = [(NSDictionary *)value allValues];
+    if ([value isKindOfClass:[NSArray class]]) {
+        for (id item in (NSArray *)value) {
+            if (rc_value_has_privileged_command(item)) return YES;
+        }
+    }
+    return NO;
+}
+
+// Whether a save adds or changes something that runs a command needing the API token. Without
+// this, a trigger saved with a "root" or "exec" action ran it on its own (a schedule, a button)
+// for anyone who could reach the Web UI. Triggers are compared one by one, so editing any other
+// trigger still saves without the token; other settings are compared whole.
+static BOOL rc_config_changes_privileged_actions(NSDictionary *incoming, NSDictionary *current) {
+    NSArray *protectedKeys = rc_protected_config_keys();
+    for (NSString *key in incoming) {
+        if ([protectedKeys containsObject:key]) continue;
+        id newValue = incoming[key];
+        id oldValue = current[key];
+        if ([key isEqualToString:@"triggers"] && [newValue isKindOfClass:[NSDictionary class]]) {
+            NSDictionary *oldTriggers = [oldValue isKindOfClass:[NSDictionary class]] ? oldValue : @{};
+            for (NSString *triggerKey in (NSDictionary *)newValue) {
+                id trigger = ((NSDictionary *)newValue)[triggerKey];
+                if ([trigger isEqual:oldTriggers[triggerKey]]) continue;
+                if (rc_value_has_privileged_command(trigger)) return YES;
+            }
+            continue;
+        }
+        if ([newValue isEqual:oldValue]) continue;
+        if (rc_value_has_privileged_command(newValue)) return YES;
     }
     return NO;
 }
@@ -13057,9 +13099,23 @@ static void start_web_server() {
                                                     }
                                                     incoming[@"sshHosts"] = updatedHosts;
                                                 }
-                                                BOOL protectedChange = !isLocal && hasConfiguredToken && !isTokenValid &&
+                                                // From another device, protected settings and actions that need
+                                                // the token change only with it. With no token set yet, nobody can
+                                                // send one: it is set in the app or this iPhone's own Web UI, so
+                                                // nobody on the network can set one of their own.
+                                                BOOL protectedChange = !isLocal && !isTokenValid &&
                                                     rc_config_changes_protected_settings(incoming, g_triggerConfig);
-                                                if (protectedChange) {
+                                                BOOL privilegedChange = !isLocal && !isTokenValid && !protectedChange &&
+                                                    rc_config_changes_privileged_actions(incoming, g_triggerConfig);
+                                                if ((protectedChange || privilegedChange) && !hasConfiguredToken) {
+                                                    NSString *errJson = @"{\"ok\":false,\"error\":\"Set an API Token in the RemoteCompanion app first. Without one, this change can only be made on the iPhone.\"}";
+                                                    NSData *errData = [errJson dataUsingEncoding:NSUTF8StringEncoding];
+                                                    responseString = [NSString stringWithFormat:@"HTTP/1.1 403 Forbidden\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)errData.length, errJson];
+                                                } else if (privilegedChange) {
+                                                    NSString *errJson = @"{\"ok\":false,\"error\":\"Changing these actions requires valid API token\"}";
+                                                    NSData *errData = [errJson dataUsingEncoding:NSUTF8StringEncoding];
+                                                    responseString = [NSString stringWithFormat:@"HTTP/1.1 403 Forbidden\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)errData.length, errJson];
+                                                } else if (protectedChange) {
                                                     NSString *errJson = @"{\"ok\":false,\"error\":\"Changing protected settings requires valid API token\"}";
                                                     NSData *errData = [errJson dataUsingEncoding:NSUTF8StringEncoding];
                                                     responseString = [NSString stringWithFormat:@"HTTP/1.1 403 Forbidden\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)errData.length, errJson];
@@ -13827,30 +13883,9 @@ static void start_web_server() {
                                         }
                                     }
                                     
-                                    BOOL hasPrivilegedAction = NO;
+                                    // Any command that needs the token, nested blocks and Set Variable included
                                     NSDictionary *trig = g_triggerConfig[@"triggers"][triggerKey];
-                                    if ([trig isKindOfClass:[NSDictionary class]]) {
-                                        NSArray *actions = trig[@"actions"];
-                                        if ([actions isKindOfClass:[NSArray class]]) {
-                                            for (id act in actions) {
-                                                if ([act isKindOfClass:[NSString class]] && rc_is_privileged_command(act)) {
-                                                    hasPrivilegedAction = YES;
-                                                    break;
-                                                } else if ([act isKindOfClass:[NSDictionary class]]) {
-                                                    NSString *type = act[@"type"];
-                                                    if ([type isEqualToString:@"set_variable"]) {
-                                                        NSString *op = act[@"op"];
-                                                        if ([op isEqualToString:@"command"] || [op isEqualToString:@"command_number"]) {
-                                                            if (rc_is_privileged_command(act[@"value"])) {
-                                                                hasPrivilegedAction = YES;
-                                                                break;
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
+                                    BOOL hasPrivilegedAction = [trig isKindOfClass:[NSDictionary class]] && rc_value_has_privileged_command(trig[@"actions"]);
                                     
                                     BOOL isLocal = rc_web_client_is_local(&client_addr) || RCCommandFromLocalSocket();
                                     if (!isLocal && hasPrivilegedAction && !rc_is_api_token_valid(clientToken)) {
