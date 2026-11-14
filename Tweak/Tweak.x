@@ -4077,6 +4077,7 @@ static void rc_execute_action_sequence_body(NSArray *actions, NSString *triggerK
             // If we reached an 'else' or 'else_if' directly, it means we were executing the TRUE branch of a preceding conditional.
             // Now we must skip the remaining branches (until the matching end_if).
             NSInteger depth = 1;
+            BOOL foundEnd = NO;
             for (NSInteger skipIdx = idx + 1; skipIdx < (NSInteger)actions.count; skipIdx++) {
                 id item = actions[skipIdx];
                 if (rc_is_if_action_item(item)) {
@@ -4085,9 +4086,16 @@ static void rc_execute_action_sequence_body(NSArray *actions, NSString *triggerK
                     depth--;
                     if (depth == 0) {
                         idx = skipIdx;
+                        foundEnd = YES;
                         break;
                     }
                 }
+            }
+            // Without its End If the Else's actions would run after the true branch: stop, as a
+            // false If without one does
+            if (!foundEnd) {
+                SRLog(@"[%@] Missing End If marker; stopping action execution.", triggerKey);
+                break;
             }
         } else if ([type isEqualToString:@"end_if"] || [type isEqualToString:@"end"]) {
             continue;
@@ -12915,6 +12923,8 @@ static void start_web_server() {
                                     write(new_socket, [assetData bytes], [assetData length]);
                                     responseString = nil; // Skip default write
                                 }
+                            } else if ([path isEqualToString:@"/api/answers"] && [method isEqualToString:@"GET"] && ![g_triggerConfig[@"webUIEnabled"] boolValue]) {
+                                responseString = [NSString stringWithFormat:@"HTTP/1.1 403 Forbidden\r\n%@Content-Length: 17\r\n\r\nWeb UI is disabled", cors];
                             } else if ([path isEqualToString:@"/api/answers"] && [method isEqualToString:@"GET"]) {
                                 // The answers of the status commands Set Variable's command list offers, for
                                 // the Web UI to show next to them. Only these: they report, they change nothing.
@@ -12931,10 +12941,18 @@ static void start_web_server() {
                                 NSData *jsonData = [NSJSONSerialization dataWithJSONObject:answers options:0 error:nil];
                                 NSString *jsonString = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
                                 responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)jsonData.length, jsonString];
+                            } else if ([path isEqualToString:@"/api/variables"] && [method isEqualToString:@"GET"] && ![g_triggerConfig[@"webUIEnabled"] boolValue]) {
+                                responseString = [NSString stringWithFormat:@"HTTP/1.1 403 Forbidden\r\n%@Content-Length: 17\r\n\r\nWeb UI is disabled", cors];
                             } else if ([path isEqualToString:@"/api/variables"] && [method isEqualToString:@"GET"]) {
-                                // The saved variables, for the editors' variable menus
+                                // The saved variables, for the editors' variable menus. The menus need only the
+                                // names, so another device without the token gets those with empty values.
                                 NSDictionary *all;
                                 @synchronized (rc_variables_lock()) { all = [rc_variables_locked() copy]; }
+                                if (!rc_web_client_is_local(&client_addr) && !rc_is_api_token_valid(rc_extract_token_from_headers(requestString))) {
+                                    NSMutableDictionary *names = [NSMutableDictionary dictionaryWithCapacity:all.count];
+                                    for (NSString *name in all) names[name] = @"";
+                                    all = names;
+                                }
                                 NSData *jsonData = [NSJSONSerialization dataWithJSONObject:all ?: @{} options:NSJSONWritingSortedKeys error:nil];
                                 NSString *jsonString = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
                                 responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)jsonData.length, jsonString];
