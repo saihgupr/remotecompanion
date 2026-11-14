@@ -398,6 +398,76 @@ def check_addon(a):
     return check_settings(a.get("settings"), "settings" in a)
 
 
+def check_control(setting, sid, field):
+    """rcao_check_control: sid names it ("setting 'x'", "setting 'x' field 'y'")"""
+    if not is_string(setting.get("title")):
+        return "%s has no title" % sid
+    kind = setting.get("type")
+    if field and kind not in ("switch", "choice", "number", "text"):
+        return "%s: type must be switch, choice, number or text" % sid
+    if not field and kind not in ("switch", "choice", "number", "text", "list"):
+        return "%s: type must be switch, choice, number, text or list" % sid
+    if not field and (not is_string(setting.get("domain")) or not is_string(setting.get("key"))):
+        return "%s needs domain and key" % sid
+    for key in ("note", "notify", "unit", "suggestionsFile"):
+        if key in setting and not is_string(setting[key]):
+            return "%s: %s must be text" % (sid, key)
+    if "suggestions" in setting and not (is_list(setting["suggestions"]) and all(is_string(x) for x in setting["suggestions"])):
+        return "%s: suggestions must be a list of text" % sid
+    for key in ("min", "max", "step"):
+        if key in setting and not is_number(setting[key]):
+            return "%s: %s must be a number" % (sid, key)
+    has_default = "default" in setting
+    given_default = setting.get("default")
+    if kind == "switch" and has_default and not isinstance(given_default, bool):
+        return "%s: a switch's default must be true or false" % sid
+    if kind == "text" and has_default and not isinstance(given_default, str):
+        return "%s: a text's default must be text" % sid
+    if kind == "number":
+        if has_default and not is_number(given_default):
+            return "%s: a number's default must be a number" % sid
+        if "min" in setting and "max" in setting and setting["min"] > setting["max"]:
+            return "%s: min is above max" % sid
+        if "step" in setting and setting["step"] <= 0:
+            return "%s: step must be above 0" % sid
+    if kind == "choice":
+        choices = setting.get("choices")
+        if not is_list(choices) or len(choices) == 0:
+            return "%s: a choice needs choices" % sid
+        values = set()
+        found = not has_default
+        for choice in choices:
+            if not is_dict(choice) or not is_string(choice.get("label")) or not (isinstance(choice.get("value"), str) or is_number(choice.get("value"))):
+                return "%s: each choice needs a value (text or number) and a label" % sid
+            value = fmt(choice["value"])
+            if value in values:
+                return "%s: two choices have the value '%s'" % (sid, value)
+            values.add(value)
+            if has_default and value == fmt(given_default):
+                found = True
+        if not found:
+            return "%s: the default isn't one of the choices' values" % sid
+    if kind == "list":
+        fields = setting.get("fields")
+        if not is_list(fields) or len(fields) == 0:
+            return "%s: a list needs fields" % sid
+        ids = set()
+        for f in fields:
+            if not is_dict(f):
+                return "%s: a field isn't an object" % sid
+            if not is_option_id(f.get("id")):
+                return "%s: field id '%s' must be lowercase letters, digits and _, starting with a letter" % (sid, fmt(f.get("id")))
+            if f["id"] in ids:
+                return "%s: two fields are '%s'" % (sid, f["id"])
+            ids.add(f["id"])
+            problem = check_control(f, "%s field '%s'" % (sid, f["id"]), True)
+            if problem:
+                return problem
+        if has_default and not (is_list(given_default) and all(is_dict(x) for x in given_default)):
+            return "%s: a list's default must be a list of objects" % sid
+    return None
+
+
 def check_settings(settings, given):
     """rcao_check_settings"""
     if not given:
@@ -414,49 +484,9 @@ def check_settings(settings, given):
         if sid in ids:
             return "two settings are '%s'" % sid
         ids.add(sid)
-        if not is_string(setting.get("title")):
-            return "setting '%s' has no title" % sid
-        kind = setting.get("type")
-        if kind not in ("switch", "choice", "number", "text"):
-            return "setting '%s': type must be switch, choice, number or text" % sid
-        if not is_string(setting.get("domain")) or not is_string(setting.get("key")):
-            return "setting '%s' needs domain and key" % sid
-        for key in ("note", "notify", "unit"):
-            if key in setting and not is_string(setting[key]):
-                return "setting '%s': %s must be text" % (sid, key)
-        for key in ("min", "max", "step"):
-            if key in setting and not is_number(setting[key]):
-                return "setting '%s': %s must be a number" % (sid, key)
-        has_default = "default" in setting
-        given_default = setting.get("default")
-        if kind == "switch" and has_default and not isinstance(given_default, bool):
-            return "setting '%s': a switch's default must be true or false" % sid
-        if kind == "text" and has_default and not isinstance(given_default, str):
-            return "setting '%s': a text's default must be text" % sid
-        if kind == "number":
-            if has_default and not is_number(given_default):
-                return "setting '%s': a number's default must be a number" % sid
-            if "min" in setting and "max" in setting and setting["min"] > setting["max"]:
-                return "setting '%s': min is above max" % sid
-            if "step" in setting and setting["step"] <= 0:
-                return "setting '%s': step must be above 0" % sid
-        if kind == "choice":
-            choices = setting.get("choices")
-            if not is_list(choices) or len(choices) == 0:
-                return "setting '%s': a choice needs choices" % sid
-            values = set()
-            found = not has_default
-            for choice in choices:
-                if not is_dict(choice) or not is_string(choice.get("label")) or not (isinstance(choice.get("value"), str) or is_number(choice.get("value"))):
-                    return "setting '%s': each choice needs a value (text or number) and a label" % sid
-                value = fmt(choice["value"])
-                if value in values:
-                    return "setting '%s': two choices have the value '%s'" % (sid, value)
-                values.add(value)
-                if has_default and value == fmt(given_default):
-                    found = True
-            if not found:
-                return "setting '%s': the default isn't one of the choices' values" % sid
+        problem = check_control(setting, "setting '%s'" % sid, False)
+        if problem:
+            return problem
     return None
 
 
@@ -485,9 +515,14 @@ def warnings_for(a, folder):
     check(a, ["$schema", "api", "id", "name", "icon", "requires", "actions", "conditions", "events", "settings"], "add-on")
     for setting in a.get("settings") or []:
         where = "setting '%s'" % setting["id"]
-        check(setting, ["id", "title", "type", "domain", "key", "default", "note", "notify", "choices", "min", "max", "step", "unit"], where)
+        check(setting, ["id", "title", "type", "domain", "key", "default", "note", "notify", "choices", "min", "max", "step", "unit", "fields", "suggestions", "suggestionsFile"], where)
         for choice in setting.get("choices") or []:
             check(choice, ["value", "label"], where + " choice")
+        for field in setting.get("fields") or []:
+            field_where = "%s field '%s'" % (where, field["id"])
+            check(field, ["id", "title", "type", "default", "note", "choices", "min", "max", "step", "unit", "suggestions", "suggestionsFile"], field_where)
+            for choice in field.get("choices") or []:
+                check(choice, ["value", "label"], field_where + " choice")
     for action in a["actions"]:
         where = "action '%s'" % action["command"]
         check(action, ["command", "name", "icon", "options", "input", "run", "banner"], where)

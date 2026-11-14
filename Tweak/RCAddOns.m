@@ -363,9 +363,76 @@ static NSString *rcao_builtin_taking(NSString *addOnId, NSString *command, BOOL 
     return nil;
 }
 
+// Why a setting's control (or a list field's) is invalid, or nil. where names it in messages
+// ("setting 'x'", "setting 'x' field 'y'"). A field has no domain or key, and can't be a list.
+static NSString *rcao_check_control(NSDictionary *setting, NSString *where, BOOL field) {
+    NSString *sid = where;
+    if (!rcao_is_string(setting[@"title"])) return [NSString stringWithFormat:@"%@ has no title", sid];
+    NSString *type = setting[@"type"];
+    if (field && ![@[@"switch", @"choice", @"number", @"text"] containsObject:type ?: @""]) return [NSString stringWithFormat:@"%@: type must be switch, choice, number or text", sid];
+    if (!field && ![@[@"switch", @"choice", @"number", @"text", @"list"] containsObject:type ?: @""]) return [NSString stringWithFormat:@"%@: type must be switch, choice, number, text or list", sid];
+    if (!field && (!rcao_is_string(setting[@"domain"]) || !rcao_is_string(setting[@"key"]))) return [NSString stringWithFormat:@"%@ needs domain and key", sid];
+    for (NSString *key in @[@"note", @"notify", @"unit", @"suggestionsFile"]) {
+        if (setting[key] && !rcao_is_string(setting[key])) return [NSString stringWithFormat:@"%@: %@ must be text", sid, key];
+    }
+    if (setting[@"suggestions"]) {
+        BOOL ok = [setting[@"suggestions"] isKindOfClass:[NSArray class]];
+        for (id item in ok ? setting[@"suggestions"] : @[]) if (!rcao_is_string(item)) ok = NO;
+        if (!ok) return [NSString stringWithFormat:@"%@: suggestions must be a list of text", sid];
+    }
+    for (NSString *key in @[@"min", @"max", @"step"]) {
+        if (setting[key] && ![setting[key] isKindOfClass:[NSNumber class]]) return [NSString stringWithFormat:@"%@: %@ must be a number", sid, key];
+    }
+    id given = setting[@"default"];
+    if ([type isEqualToString:@"switch"] && given && CFGetTypeID((__bridge CFTypeRef)given) != CFBooleanGetTypeID()) return [NSString stringWithFormat:@"%@: a switch's default must be true or false", sid];
+    if ([type isEqualToString:@"text"] && given && ![given isKindOfClass:[NSString class]]) return [NSString stringWithFormat:@"%@: a text's default must be text", sid];
+    if ([type isEqualToString:@"number"]) {
+        if (given && ![given isKindOfClass:[NSNumber class]]) return [NSString stringWithFormat:@"%@: a number's default must be a number", sid];
+        if (setting[@"min"] && setting[@"max"] && [setting[@"min"] doubleValue] > [setting[@"max"] doubleValue]) return [NSString stringWithFormat:@"%@: min is above max", sid];
+        if (setting[@"step"] && [setting[@"step"] doubleValue] <= 0) return [NSString stringWithFormat:@"%@: step must be above 0", sid];
+    }
+    if ([type isEqualToString:@"choice"]) {
+        NSArray *choices = setting[@"choices"];
+        if (![choices isKindOfClass:[NSArray class]] || choices.count == 0) return [NSString stringWithFormat:@"%@: a choice needs choices", sid];
+        NSMutableSet *values = [NSMutableSet set];
+        BOOL defaultFound = given == nil;
+        for (NSDictionary *choice in choices) {
+            if (![choice isKindOfClass:[NSDictionary class]] || !rcao_is_string(choice[@"label"]) ||
+                !([choice[@"value"] isKindOfClass:[NSString class]] || [choice[@"value"] isKindOfClass:[NSNumber class]])) {
+                return [NSString stringWithFormat:@"%@: each choice needs a value (text or number) and a label", sid];
+            }
+            NSString *value = [choice[@"value"] description];
+            if ([values containsObject:value]) return [NSString stringWithFormat:@"%@: two choices have the value '%@'", sid, value];
+            [values addObject:value];
+            if ([value isEqualToString:[given description]]) defaultFound = YES;
+        }
+        if (!defaultFound) return [NSString stringWithFormat:@"%@: the default isn't one of the choices' values", sid];
+    }
+    if ([type isEqualToString:@"list"]) {
+        NSArray *fields = setting[@"fields"];
+        if (![fields isKindOfClass:[NSArray class]] || fields.count == 0) return [NSString stringWithFormat:@"%@: a list needs fields", sid];
+        NSMutableSet *fieldIds = [NSMutableSet set];
+        for (NSDictionary *f in fields) {
+            if (![f isKindOfClass:[NSDictionary class]]) return [NSString stringWithFormat:@"%@: a field isn't an object", sid];
+            if (!rcao_is_option_id(f[@"id"])) return [NSString stringWithFormat:@"%@: field id '%@' must be lowercase letters, digits and _, starting with a letter", sid, f[@"id"]];
+            if ([fieldIds containsObject:f[@"id"]]) return [NSString stringWithFormat:@"%@: two fields are '%@'", sid, f[@"id"]];
+            [fieldIds addObject:f[@"id"]];
+            NSString *problem = rcao_check_control(f, [NSString stringWithFormat:@"%@ field '%@'", sid, f[@"id"]], YES);
+            if (problem) return problem;
+        }
+        if (given) {
+            BOOL ok = [given isKindOfClass:[NSArray class]];
+            for (id item in ok ? given : @[]) if (![item isKindOfClass:[NSDictionary class]]) ok = NO;
+            if (!ok) return [NSString stringWithFormat:@"%@: a list's default must be a list of objects", sid];
+        }
+    }
+    return nil;
+}
+
 // Why an add-on's settings are invalid, or nil. A setting is a control on the add-on's page in the
-// app, bound to one preference: { id, title, type: switch|choice|number|text, domain, key, default,
-// note, notify, choices (choice: [{ value, label }]), min, max, step, unit (number) }.
+// app, bound to one preference: { id, title, type: switch|choice|number|text|list, domain, key,
+// default, note, notify, choices (choice: [{ value, label }]), min, max, step, unit (number),
+// fields (list: the controls of each item, [{ id, title, type, default, ... }]) }.
 static NSString *rcao_check_settings(id settings) {
     if (!settings) return nil;
     if (![settings isKindOfClass:[NSArray class]]) return @"settings must be a list";
@@ -376,41 +443,8 @@ static NSString *rcao_check_settings(id settings) {
         NSString *sid = setting[@"id"];
         if ([ids containsObject:sid]) return [NSString stringWithFormat:@"two settings are '%@'", sid];
         [ids addObject:sid];
-        if (!rcao_is_string(setting[@"title"])) return [NSString stringWithFormat:@"setting '%@' has no title", sid];
-        NSString *type = setting[@"type"];
-        if (![@[@"switch", @"choice", @"number", @"text"] containsObject:type ?: @""]) return [NSString stringWithFormat:@"setting '%@': type must be switch, choice, number or text", sid];
-        if (!rcao_is_string(setting[@"domain"]) || !rcao_is_string(setting[@"key"])) return [NSString stringWithFormat:@"setting '%@' needs domain and key", sid];
-        for (NSString *key in @[@"note", @"notify", @"unit"]) {
-            if (setting[key] && !rcao_is_string(setting[key])) return [NSString stringWithFormat:@"setting '%@': %@ must be text", sid, key];
-        }
-        for (NSString *key in @[@"min", @"max", @"step"]) {
-            if (setting[key] && ![setting[key] isKindOfClass:[NSNumber class]]) return [NSString stringWithFormat:@"setting '%@': %@ must be a number", sid, key];
-        }
-        id given = setting[@"default"];
-        if ([type isEqualToString:@"switch"] && given && CFGetTypeID((__bridge CFTypeRef)given) != CFBooleanGetTypeID()) return [NSString stringWithFormat:@"setting '%@': a switch's default must be true or false", sid];
-        if ([type isEqualToString:@"text"] && given && ![given isKindOfClass:[NSString class]]) return [NSString stringWithFormat:@"setting '%@': a text's default must be text", sid];
-        if ([type isEqualToString:@"number"]) {
-            if (given && ![given isKindOfClass:[NSNumber class]]) return [NSString stringWithFormat:@"setting '%@': a number's default must be a number", sid];
-            if (setting[@"min"] && setting[@"max"] && [setting[@"min"] doubleValue] > [setting[@"max"] doubleValue]) return [NSString stringWithFormat:@"setting '%@': min is above max", sid];
-            if (setting[@"step"] && [setting[@"step"] doubleValue] <= 0) return [NSString stringWithFormat:@"setting '%@': step must be above 0", sid];
-        }
-        if ([type isEqualToString:@"choice"]) {
-            NSArray *choices = setting[@"choices"];
-            if (![choices isKindOfClass:[NSArray class]] || choices.count == 0) return [NSString stringWithFormat:@"setting '%@': a choice needs choices", sid];
-            NSMutableSet *values = [NSMutableSet set];
-            BOOL defaultFound = given == nil;
-            for (NSDictionary *choice in choices) {
-                if (![choice isKindOfClass:[NSDictionary class]] || !rcao_is_string(choice[@"label"]) ||
-                    !([choice[@"value"] isKindOfClass:[NSString class]] || [choice[@"value"] isKindOfClass:[NSNumber class]])) {
-                    return [NSString stringWithFormat:@"setting '%@': each choice needs a value (text or number) and a label", sid];
-                }
-                NSString *value = [choice[@"value"] description];
-                if ([values containsObject:value]) return [NSString stringWithFormat:@"setting '%@': two choices have the value '%@'", sid, value];
-                [values addObject:value];
-                if ([value isEqualToString:[given description]]) defaultFound = YES;
-            }
-            if (!defaultFound) return [NSString stringWithFormat:@"setting '%@': the default isn't one of the choices' values", sid];
-        }
+        NSString *problem = rcao_check_control(setting, [NSString stringWithFormat:@"setting '%@'", sid], NO);
+        if (problem) return problem;
     }
     return nil;
 }
@@ -552,8 +586,13 @@ static NSArray<NSString *> *rcao_warnings(NSDictionary *addOn, NSString *folder)
     check(addOn, @[@"$schema", @"api", @"id", @"name", @"icon", @"requires", @"actions", @"conditions", @"events", @"settings"], @"add-on");
     for (NSDictionary *setting in [addOn[@"settings"] isKindOfClass:[NSArray class]] ? addOn[@"settings"] : @[]) {
         NSString *where = [NSString stringWithFormat:@"setting '%@'", setting[@"id"]];
-        check(setting, @[@"id", @"title", @"type", @"domain", @"key", @"default", @"note", @"notify", @"choices", @"min", @"max", @"step", @"unit"], where);
+        check(setting, @[@"id", @"title", @"type", @"domain", @"key", @"default", @"note", @"notify", @"choices", @"min", @"max", @"step", @"unit", @"fields", @"suggestions", @"suggestionsFile"], where);
         for (NSDictionary *choice in [setting[@"choices"] isKindOfClass:[NSArray class]] ? setting[@"choices"] : @[]) check(choice, @[@"value", @"label"], [where stringByAppendingString:@" choice"]);
+        for (NSDictionary *field in [setting[@"fields"] isKindOfClass:[NSArray class]] ? setting[@"fields"] : @[]) {
+            NSString *fieldWhere = [NSString stringWithFormat:@"%@ field '%@'", where, field[@"id"]];
+            check(field, @[@"id", @"title", @"type", @"default", @"note", @"choices", @"min", @"max", @"step", @"unit", @"suggestions", @"suggestionsFile"], fieldWhere);
+            for (NSDictionary *choice in [field[@"choices"] isKindOfClass:[NSArray class]] ? field[@"choices"] : @[]) check(choice, @[@"value", @"label"], [fieldWhere stringByAppendingString:@" choice"]);
+        }
     }
     for (NSDictionary *action in addOn[@"actions"]) {
         NSString *where = [NSString stringWithFormat:@"action '%@'", action[@"command"]];
@@ -951,10 +990,10 @@ static void rcao_pref_write(NSString *domain, NSString *key, id value) {
     CFPreferencesAppSynchronize((__bridge CFStringRef)domain);
 }
 
-// A setting's current value, as JSON can carry it: a boolean, number or text (the default, or the
-// first choice / min / false / "", when the preference isn't set)
-static id rcao_setting_value(NSDictionary *setting) {
-    id value = rcao_pref_read(setting[@"domain"], setting[@"key"]);
+// A control's value from what's stored (value, or nil when unset), as JSON can carry it: a boolean,
+// number or text (the default, or the first choice / min / false / "" when unset or unusable). A
+// list is a list of items, each { field id: value } with every field filled in.
+static id rcao_control_value(NSDictionary *setting, id value) {
     NSString *type = setting[@"type"];
     if ([type isEqualToString:@"switch"]) {
         if (!value) value = setting[@"default"] ?: @NO;
@@ -972,33 +1011,88 @@ static id rcao_setting_value(NSDictionary *setting) {
         for (NSDictionary *choice in choices) if (value && [[choice[@"value"] description] isEqualToString:[value description]]) return choice[@"value"];
         return setting[@"default"] ?: [choices.firstObject objectForKey:@"value"];
     }
+    if ([type isEqualToString:@"list"]) {
+        if (![value isKindOfClass:[NSArray class]]) value = [setting[@"default"] isKindOfClass:[NSArray class]] ? setting[@"default"] : @[];
+        NSMutableArray *items = [NSMutableArray array];
+        for (NSDictionary *item in value) {
+            if (![item isKindOfClass:[NSDictionary class]]) continue;
+            NSMutableDictionary *out = [NSMutableDictionary dictionary];
+            for (NSDictionary *field in setting[@"fields"]) out[field[@"id"]] = rcao_control_value(field, item[field[@"id"]]);
+            [items addObject:out];
+        }
+        return items;
+    }
     return [value isKindOfClass:[NSString class]] ? value : (value ? [value description] : setting[@"default"] ?: @"");
+}
+
+static id rcao_setting_value(NSDictionary *setting) {
+    return rcao_control_value(setting, rcao_pref_read(setting[@"domain"], setting[@"key"]));
+}
+
+// The value to store for a control from text (what a command carries); nil with *problem set when
+// it can't. A list takes JSON: a list of objects, { field id: value }; a missing field gets its default.
+static id rcao_control_parse(NSDictionary *setting, NSString *text, NSString **problem) {
+    NSString *type = setting[@"type"];
+    if ([type isEqualToString:@"switch"]) {
+        NSString *v = text.lowercaseString;
+        if ([@[@"1", @"true", @"yes", @"on"] containsObject:v]) return @YES;
+        if ([@[@"0", @"false", @"no", @"off"] containsObject:v]) return @NO;
+        *problem = @"a switch takes on or off";
+        return nil;
+    }
+    if ([type isEqualToString:@"number"]) {
+        double number = 0;
+        if (!rcao_number(text, &number)) { *problem = @"that isn't a number"; return nil; }
+        if (setting[@"min"] && number < [setting[@"min"] doubleValue]) { *problem = [NSString stringWithFormat:@"the lowest is %@", setting[@"min"]]; return nil; }
+        if (setting[@"max"] && number > [setting[@"max"] doubleValue]) { *problem = [NSString stringWithFormat:@"the highest is %@", setting[@"max"]]; return nil; }
+        // Whole numbers are written as whole numbers (what a tweak's integerForKey: expects)
+        return number == floor(number) && fabs(number) < 1e15 ? @((long long)number) : @(number);
+    }
+    if ([type isEqualToString:@"choice"]) {
+        id value = nil;
+        for (NSDictionary *choice in setting[@"choices"]) {
+            if ([[choice[@"value"] description] isEqualToString:text] || [[choice[@"label"] lowercaseString] isEqualToString:text.lowercaseString]) value = choice[@"value"];
+        }
+        if (!value) *problem = @"that isn't one of its choices";
+        return value;
+    }
+    if ([type isEqualToString:@"list"]) {
+        NSData *data = [(text.length ? text : @"[]") dataUsingEncoding:NSUTF8StringEncoding];
+        id list = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+        if (![list isKindOfClass:[NSArray class]]) { *problem = @"a list takes JSON: [{\"field\": value}, ...]"; return nil; }
+        NSMutableArray *items = [NSMutableArray array];
+        NSUInteger n = 0;
+        for (NSDictionary *item in list) {
+            n++;
+            if (![item isKindOfClass:[NSDictionary class]]) { *problem = [NSString stringWithFormat:@"item %lu isn't an object", (unsigned long)n]; return nil; }
+            NSMutableDictionary *out = [NSMutableDictionary dictionary];
+            for (NSString *key in item) {
+                NSDictionary *field = nil;
+                for (NSDictionary *f in setting[@"fields"]) if ([f[@"id"] isEqual:key]) field = f;
+                if (!field) { *problem = [NSString stringWithFormat:@"item %lu: there's no field '%@'", (unsigned long)n, key]; return nil; }
+                id raw = item[key];
+                if ([raw isKindOfClass:[NSArray class]] || [raw isKindOfClass:[NSDictionary class]] || raw == [NSNull null]) {
+                    *problem = [NSString stringWithFormat:@"item %lu: %@ takes a single value", (unsigned long)n, field[@"title"]];
+                    return nil;
+                }
+                NSString *fieldProblem = nil;
+                id value = rcao_control_parse(field, [raw description], &fieldProblem);
+                if (!value) { *problem = [NSString stringWithFormat:@"item %lu: %@: %@", (unsigned long)n, field[@"title"], fieldProblem]; return nil; }
+                out[key] = value;
+            }
+            for (NSDictionary *f in setting[@"fields"]) if (!out[f[@"id"]]) out[f[@"id"]] = rcao_control_value(f, nil);
+            [items addObject:out];
+        }
+        return items;
+    }
+    return text;
 }
 
 // Writes a setting from text (what a command carries); nil, or why it can't
 static NSString *rcao_setting_write(NSDictionary *setting, NSString *text) {
-    NSString *type = setting[@"type"];
-    id value = nil;
-    if ([type isEqualToString:@"switch"]) {
-        NSString *v = text.lowercaseString;
-        if ([@[@"1", @"true", @"yes", @"on"] containsObject:v]) value = @YES;
-        else if ([@[@"0", @"false", @"no", @"off"] containsObject:v]) value = @NO;
-        else return @"a switch takes on or off";
-    } else if ([type isEqualToString:@"number"]) {
-        double number = 0;
-        if (!rcao_number(text, &number)) return @"that isn't a number";
-        if (setting[@"min"] && number < [setting[@"min"] doubleValue]) return [NSString stringWithFormat:@"the lowest is %@", setting[@"min"]];
-        if (setting[@"max"] && number > [setting[@"max"] doubleValue]) return [NSString stringWithFormat:@"the highest is %@", setting[@"max"]];
-        // Whole numbers are written as whole numbers (what a tweak's integerForKey: expects)
-        value = number == floor(number) && fabs(number) < 1e15 ? @((long long)number) : @(number);
-    } else if ([type isEqualToString:@"choice"]) {
-        for (NSDictionary *choice in setting[@"choices"]) {
-            if ([[choice[@"value"] description] isEqualToString:text] || [[choice[@"label"] lowercaseString] isEqualToString:text.lowercaseString]) value = choice[@"value"];
-        }
-        if (!value) return @"that isn't one of its choices";
-    } else {
-        value = text;
-    }
+    NSString *problem = nil;
+    id value = rcao_control_parse(setting, text, &problem);
+    if (!value) return problem ?: @"that can't be saved";
     rcao_pref_write(setting[@"domain"], setting[@"key"], value);
     if (rcao_is_string(setting[@"notify"])) notify_post([setting[@"notify"] UTF8String]);
     return nil;
@@ -1544,6 +1638,7 @@ NSString *RCAddOnsHandleCommand(NSString *cmd) {
                 if ([setting[@"type"] isEqualToString:@"switch"]) shown = [now boolValue] ? @"On" : @"Off";
                 if ([setting[@"type"] isEqualToString:@"choice"]) for (NSDictionary *c in setting[@"choices"]) if ([[c[@"value"] description] isEqualToString:shown]) shown = c[@"label"];
                 if ([setting[@"type"] isEqualToString:@"number"] && rcao_is_string(setting[@"unit"])) shown = [NSString stringWithFormat:@"%@ %@", shown, setting[@"unit"]];
+                if ([setting[@"type"] isEqualToString:@"list"]) shown = [NSString stringWithFormat:@"%lu item%@", (unsigned long)[now count], [now count] == 1 ? @"" : @"s"];
                 return [NSString stringWithFormat:@"%@: %@ is %@\n", addOn[@"name"], setting[@"title"], shown];
             }
             NSMutableDictionary *values = [NSMutableDictionary dictionary];
