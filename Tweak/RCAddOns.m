@@ -538,6 +538,14 @@ static NSString *rcao_check_addOn(NSDictionary *addOn) {
         if (!hasBanner && !trigger) return @"an event needs a banner or a trigger";
         if (event[@"action"] && (!rcao_is_string(event[@"action"]) || ![commands containsObject:event[@"action"]])) return [NSString stringWithFormat:@"event '%@': action '%@' isn't one of the actions", event[@"notify"], event[@"action"]];
     }
+    // variables: the names (or name starts) of the RemoteCompanion variables the add-on keeps
+    id variables = addOn[@"variables"];
+    if (variables) {
+        BOOL ok = [variables isKindOfClass:[NSArray class]];
+        NSCharacterSet *bad = [[NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"] invertedSet];
+        for (id v in ok ? variables : @[]) if (!rcao_is_string(v) || [v length] > 40 || [v rangeOfCharacterFromSet:bad].location != NSNotFound) ok = NO;
+        if (!ok) return @"variables must be a list of variable names or name starts (letters, digits and _)";
+    }
     return rcao_check_settings(addOn[@"settings"]);
 }
 
@@ -549,7 +557,7 @@ static NSArray<NSString *> *rcao_warnings(NSDictionary *addOn, NSString *folder)
         if (![object isKindOfClass:[NSDictionary class]]) return;
         for (NSString *key in object) if (![known containsObject:key]) [warnings addObject:[NSString stringWithFormat:@"%@: unknown key '%@' is ignored", where, key]];
     };
-    check(addOn, @[@"$schema", @"api", @"id", @"name", @"icon", @"requires", @"actions", @"conditions", @"events", @"settings"], @"add-on");
+    check(addOn, @[@"$schema", @"api", @"id", @"name", @"icon", @"requires", @"actions", @"conditions", @"events", @"settings", @"variables"], @"add-on");
     for (NSDictionary *setting in [addOn[@"settings"] isKindOfClass:[NSArray class]] ? addOn[@"settings"] : @[]) {
         NSString *where = [NSString stringWithFormat:@"setting '%@'", setting[@"id"]];
         check(setting, @[@"id", @"title", @"type", @"domain", @"key", @"default", @"note", @"notify", @"choices", @"min", @"max", @"step", @"unit"], where);

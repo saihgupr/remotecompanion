@@ -19,7 +19,7 @@ and RemoteCompanion talk to each other, and has recipes for the usual patterns.
 - [Rules that apply everywhere](#rules-that-apply-everywhere)
 - [Add-on](#add-on) · [Actions](#actions) · [Options](#options) · [Input](#input) · [Steps](#steps)
 - [Variables](#variables-and-templates) · [Banners](#banners) · [Conditions](#conditions)
-- [Events and triggers](#events-and-triggers) · [Settings](#settings)
+- [Events and triggers](#events-and-triggers) · [Settings](#settings) · [Kept variables](#kept-variables)
 - [Running an action](#running-an-action) · [Commands](#commands) · [Limits](#limits)
 - [Validation](#validation) · [Versioning](#versioning) · [Security](#security)
 
@@ -145,6 +145,7 @@ These are the keys at the top of the file.
 | `conditions` | | list | See [Conditions](#conditions). |
 | `events` | | list | See [Events and triggers](#events-and-triggers). |
 | `settings` | | list | See [Settings](#settings). |
+| `variables` | | list | The variables the add-on keeps, as names or name starts (`"mytweak_"`). See [Kept variables](#kept-variables). |
 
 ## Actions
 
@@ -423,6 +424,22 @@ reads them, and listens for `notify` if it wants to know about changes. Settings
 as commands: `addons settings <id>` gives the current values as JSON, and
 `addons set <id> <setting> <value>` changes one. A switch takes `on` or `off`, and a choice takes
 its value or its label.
+
+## Kept variables
+
+A tweak that keeps its state in RemoteCompanion variables (through `var set`, or the HTTP API) can
+list them, so they don't crowd the person's own:
+
+```json
+"variables": [ "mytweak_" ]
+```
+
+Each entry is a variable name, or the start of names (`mytweak_` covers `mytweak_token`,
+`mytweak_state`...). Letters, digits and `_`. Settings > Variables leaves these out and shows a
+row for the add-on instead, which opens its page; the add-on's page lists them with their values.
+In the variable pickers (the action editors, the Web UI) they're grouped under the add-on's name,
+after the person's own. They work everywhere as usual (`{mytweak_token}`, `var get`,
+`/api/variables`).
 
 ## Running an action
 

@@ -13,6 +13,8 @@
 @property (nonatomic, copy) NSArray<NSDictionary *> *sections;   // { title, footer, rows: [{ kind, ... }] }
 @property (nonatomic, assign) int changeToken;
 @property (nonatomic, copy) NSDictionary *settingValues;   // setting id -> value, from "addons settings <id>"
+@property (nonatomic, copy) NSDictionary *keptValues;      // the variables it keeps (its "variables"), from "var list"
+@property (nonatomic, assign) BOOL readingKept;
 @end
 
 static BOOL rcao_is_text(id value) {
@@ -119,6 +121,15 @@ static BOOL rcao_is_text(id value) {
 
     if (bannerRows.count) [sections addObject:@{ @"title": @"Banners", @"footer": @"A banner shows after its action runs.", @"rows": bannerRows }];
 
+    // The variables it keeps (Settings > Variables lists them here instead)
+    if ([addOn[@"variables"] isKindOfClass:[NSArray class]] && [addOn[@"variables"] count]) {
+        NSMutableArray *rows = [NSMutableArray array];
+        for (NSString *name in [self.keptValues.allKeys sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)]) [rows addObject:@{ @"kind": @"variable", @"name": name }];
+        if (!rows.count) [rows addObject:@{ @"kind": @"info", @"title": self.keptValues ? @"None yet" : @"Loading…", @"value": @"" }];
+        [sections addObject:@{ @"title": @"Variables", @"footer": @"What it keeps in RemoteCompanion variables.", @"rows": rows }];
+        if (!self.keptValues) [self readKept];
+    }
+
     NSMutableArray *infoRows = [NSMutableArray array];
     [infoRows addObject:@{ @"kind": @"info", @"title": @"Command", @"value": addOn[@"id"] ?: @"" }];
     if ([addOn[@"_file"] isKindOfClass:[NSString class]]) [infoRows addObject:@{ @"kind": @"info", @"title": @"File", @"value": addOn[@"_file"] }];
@@ -127,6 +138,36 @@ static BOOL rcao_is_text(id value) {
 
     self.sections = sections;
     [self.tableView reloadData];
+}
+
+#pragma mark - Kept variables
+
+- (void)readKept {
+    if (self.readingKept) return;
+    self.readingKept = YES;
+    [[RCServerClient sharedClient] executeCommand:@"var list" completion:^(NSString *output, NSError *error) {
+        NSData *data = [output dataUsingEncoding:NSUTF8StringEncoding];
+        NSDictionary *all = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.readingKept = NO;
+            if (![all isKindOfClass:[NSDictionary class]]) return;
+            NSMutableDictionary *mine = [NSMutableDictionary dictionary];
+            [all enumerateKeysAndObjectsUsingBlock:^(NSString *name, id value, BOOL *stop) {
+                if ([[RCAddOnCatalog addOnKeepingVariable:name][@"id"] isEqual:self.addOnId]) mine[name] = [value description] ?: @"";
+            }];
+            self.keptValues = mine;
+            [self readCatalog];
+        });
+    }];
+}
+
+- (void)showVariable:(NSString *)name {
+    NSString *value = self.keptValues[name] ?: @"";
+    NSString *shown = value.length > 1500 ? [[value substringToIndex:1500] stringByAppendingString:@"…"] : value;
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:name message:shown.length ? shown : @"No value" preferredStyle:UIAlertControllerStyleAlert];
+    if (value.length) [alert addAction:[UIAlertAction actionWithTitle:@"Copy" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) { UIPasteboard.generalPasteboard.string = value; }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 
 #pragma mark - Settings
@@ -238,6 +279,7 @@ static BOOL rcao_is_text(id value) {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     NSDictionary *row = self.sections[indexPath.section][@"rows"][indexPath.row];
     if ([row[@"kind"] isEqualToString:@"setting"]) [self editSetting:row[@"item"] fromCell:[tableView cellForRowAtIndexPath:indexPath]];
+    if ([row[@"kind"] isEqualToString:@"variable"]) [self showVariable:row[@"name"]];
 }
 
 - (NSString *)bannerIdForAction:(NSDictionary *)action {
@@ -423,6 +465,14 @@ static BOOL rcao_is_text(id value) {
             cell.selectionStyle = UITableViewCellSelectionStyleDefault;
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         }
+    } else if ([kind isEqualToString:@"variable"]) {
+        NSString *value = self.keptValues[row[@"name"]] ?: @"";
+        cell.textLabel.text = row[@"name"];
+        cell.textLabel.font = [UIFont monospacedSystemFontOfSize:15 weight:UIFontWeightRegular];
+        cell.detailTextLabel.text = value.length ? value : @"No value";
+        cell.detailTextLabel.numberOfLines = 2;
+        cell.detailTextLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+        cell.selectionStyle = UITableViewCellSelectionStyleDefault;
     } else if ([kind isEqualToString:@"info"]) {
         cell.textLabel.text = row[@"title"];
         cell.detailTextLabel.text = row[@"value"];

@@ -89,6 +89,7 @@
     { "notify": "com.example.cookbook/state",
       "trigger": { "id": "state", "name": "State Changed", "states": { "1": "Ready", "2": "Busy" } } }
   ],
+  "variables": [ "cookbook_" ],
   "settings": [
     { "id": "enabled", "title": "Enabled", "type": "switch",
       "domain": "com.example.cookbook", "key": "enabled", "default": false,

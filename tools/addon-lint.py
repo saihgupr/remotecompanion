@@ -395,6 +395,10 @@ def check_addon(a):
             return "an event needs a banner or a trigger"
         if "action" in e and (not is_string(e["action"]) or e["action"] not in commands):
             return "event '%s': action '%s' isn't one of the actions" % (e["notify"], fmt(e["action"]))
+    if "variables" in a:
+        v = a["variables"]
+        if not is_list(v) or not all(is_string(x) and len(x) <= 40 and re.fullmatch(r"[A-Za-z0-9_]+", x) for x in v):
+            return "variables must be a list of variable names or name starts (letters, digits and _)"
     return check_settings(a.get("settings"), "settings" in a)
 
 
@@ -482,7 +486,7 @@ def warnings_for(a, folder):
             if key not in known:
                 warnings.append("%s: unknown key '%s' is ignored" % (where, key))
 
-    check(a, ["$schema", "api", "id", "name", "icon", "requires", "actions", "conditions", "events", "settings"], "add-on")
+    check(a, ["$schema", "api", "id", "name", "icon", "requires", "actions", "conditions", "events", "settings", "variables"], "add-on")
     for setting in a.get("settings") or []:
         where = "setting '%s'" % setting["id"]
         check(setting, ["id", "title", "type", "domain", "key", "default", "note", "notify", "choices", "min", "max", "step", "unit"], where)
