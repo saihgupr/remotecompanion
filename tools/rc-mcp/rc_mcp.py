@@ -706,37 +706,33 @@ def t_read_text(args):
     return note + "\n" + text if note else text
 
 
-def gesture(args, words, seconds_default):
+# kind -> (the phone's gesture word, the points it needs, default seconds; None means the word takes none)
+GESTURES = {
+    "tap": ("tap", ("x", "y"), None),
+    "hold": ("hold", ("x", "y"), 1),
+    "swipe": ("swipe", ("x1", "y1", "x2", "y2"), 0.3),
+    "drag": ("drag", ("x1", "y1", "x2", "y2"), 0.62),
+    "two_finger_swipe": ("swipe2", ("x1", "y1", "x2", "y2"), 0.4),
+    "pinch": ("pinch", ("x", "y", "scale"), 0.6),
+}
+GESTURE_KINDS = list(GESTURES)
+
+
+def t_gesture(args):
+    """One touch or gesture. Its kind picks the points it needs, all checked before the phone is
+    touched, so a wrong call costs nothing."""
+    kind = args.get("kind")
+    if kind not in GESTURES:
+        raise ToolError("kind must be one of: %s." % ", ".join(GESTURE_KINDS))
+    word, needs, seconds_default = GESTURES[kind]
+    if any(not isinstance(args.get(name), (int, float)) or isinstance(args.get(name), bool) for name in needs):
+        raise ToolError("kind=%s needs %s." % (kind, ", ".join(needs)))
+    words = [word] + ["%g" % args[name] for name in needs]
+    if seconds_default is not None:
+        words.append("%g" % float(args.get("seconds", seconds_default)))
     phone = phone_for(args.get("phone"))
     require_awake(phone)
-    seconds = float(args.get("seconds", seconds_default))
-    return after(phone, run(phone, "gesture " + " ".join(str(w) for w in words) + " %g" % seconds), args)
-
-
-def t_tap(args):
-    phone = phone_for(args.get("phone"))
-    require_awake(phone)
-    return after(phone, run(phone, "gesture tap %g %g" % (args["x"], args["y"])), args)
-
-
-def t_hold(args):
-    return gesture(args, ["hold", "%g" % args["x"], "%g" % args["y"]], 1)
-
-
-def t_swipe(args):
-    return gesture(args, ["swipe"] + ["%g" % args[k] for k in ("x1", "y1", "x2", "y2")], 0.3)
-
-
-def t_drag(args):
-    return gesture(args, ["drag"] + ["%g" % args[k] for k in ("x1", "y1", "x2", "y2")], 0.62)
-
-
-def t_two_finger_swipe(args):
-    return gesture(args, ["swipe2"] + ["%g" % args[k] for k in ("x1", "y1", "x2", "y2")], 0.4)
-
-
-def t_pinch(args):
-    return gesture(args, ["pinch", "%g" % args["x"], "%g" % args["y"], "%g" % args["scale"]], 0.6)
+    return after(phone, run(phone, "gesture " + " ".join(words)), args)
 
 
 def t_tap_text(args):
@@ -1262,8 +1258,6 @@ NUM = {"type": "number"}
 PHONE = {"type": "string", "description": "Which phone (a name from list_phones). Default: the first."}
 LOOK = {"type": "boolean", "description": "Return a screenshot once the screen has settled (default true)."}
 GRID = {"type": ["number", "boolean"], "description": "Grid line spacing in points on the screenshot (default 100; 0 for none; true is 100)."}
-SECS = lambda d: {"type": "number", "description": "Duration in seconds (default %g)." % d}
-LINE = {"x1": NUM, "y1": NUM, "x2": NUM, "y2": NUM}
 
 TOOLS = [
     ("list_phones", t_list_phones, "The phones this server can reach.", {}, []),
@@ -1281,19 +1275,22 @@ TOOLS = [
      "touch lands. Cheaper than look when the words are what you need; it can't see icons or pictures.",
      {"fast": {"type": "boolean", "description": "A quicker, rougher read."},
       "settle": {"type": "boolean", "description": "Wait for the screen to stop changing before reading (default true)."}}, []),
-    ("tap", t_tap, "A tap at x, y in screen points.", {"x": NUM, "y": NUM, "look": LOOK, "grid": GRID}, ["x", "y"]),
-    ("hold", t_hold, "A long press at x, y.", {"x": NUM, "y": NUM, "seconds": SECS(1), "look": LOOK, "grid": GRID}, ["x", "y"]),
-    ("swipe", t_swipe,
-     "A swipe from x1,y1 to x2,y2. Scroll down by swiping up. Starting exactly on a screen edge makes it an edge "
-     "swipe: from the bottom edge up goes home, from the left edge goes back. Faster swipes fling further.",
-     dict(LINE, seconds=SECS(0.3), look=LOOK, grid=GRID), ["x1", "y1", "x2", "y2"]),
-    ("drag", t_drag,
-     "A drag from x1,y1 to x2,y2 that lets go slowly, so the content stops where it's put: sliders, moving items, "
-     "scrolling an exact distance.", dict(LINE, seconds=SECS(0.62), look=LOOK, grid=GRID), ["x1", "y1", "x2", "y2"]),
-    ("two_finger_swipe", t_two_finger_swipe, "A two-finger swipe from x1,y1 to x2,y2 (e.g. to pan a map).",
-     dict(LINE, seconds=SECS(0.4), look=LOOK, grid=GRID), ["x1", "y1", "x2", "y2"]),
-    ("pinch", t_pinch, "Two fingers around x, y: scale above 1 zooms in (e.g. 2), below 1 zooms out (e.g. 0.5).",
-     {"x": NUM, "y": NUM, "scale": NUM, "seconds": SECS(0.6), "look": LOOK, "grid": GRID}, ["x", "y", "scale"]),
+    ("gesture", t_gesture,
+     "One touch or gesture, in screen points. kind picks it: tap at x,y; hold at x,y for seconds (default 1); "
+     "swipe from x1,y1 to x2,y2 (scroll down by swiping up; starting exactly on a screen edge makes it an edge "
+     "swipe: from the bottom edge up goes home, from the left edge goes back; faster swipes fling further); "
+     "drag from x1,y1 to x2,y2, letting go slowly so the content stops where it is put (sliders, moving items, "
+     "scrolling an exact distance); two_finger_swipe from x1,y1 to x2,y2 (e.g. to pan a map); pinch with two "
+     "fingers around x,y, where scale above 1 zooms in (e.g. 2) and below 1 zooms out (e.g. 0.5). Returns a "
+     "screenshot once the screen settles, unless look is false.",
+     {"kind": {"type": "string", "enum": GESTURE_KINDS,
+               "description": "tap, hold, swipe, drag, two_finger_swipe or pinch."},
+      "x": NUM, "y": NUM, "x1": NUM, "y1": NUM, "x2": NUM, "y2": NUM,
+      "scale": {"type": "number", "description": "pinch: above 1 zooms in, below 1 zooms out."},
+      "seconds": {"type": "number",
+                  "description": "hold, swipe, drag, two_finger_swipe and pinch: duration in seconds (defaults: "
+                                 "hold 1, swipe 0.3, drag 0.62, two_finger_swipe 0.4, pinch 0.6)."},
+      "look": LOOK, "grid": GRID}, ["kind"]),
     ("tap_text", t_tap_text,
      "Taps text on the screen (a button, row or link with this text), found with text recognition; case doesn't "
      "matter. More precise than a point. Home screen icon labels can't be tapped: use open_app.",

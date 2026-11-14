@@ -55,13 +55,24 @@ For a client with a JSON config:
 | `status` | Screen on or off, locked, the app in front, the RemoteCompanion version, and the battery |
 | `look` | A screenshot with a grid labelled in screen points (half size by default) |
 | `read_text` | The screen's text once it stops changing, a line each with its position in points |
-| `tap`, `hold`, `swipe`, `drag`, `two_finger_swipe`, `pinch` | Touches at points |
+| `gesture` | One touch or gesture: `kind` is `tap`, `hold`, `swipe`, `drag`, `two_finger_swipe` or `pinch` |
 | `tap_text`, `wait_text` | Tap text on the screen, or wait until it shows |
 | `type` | Types into the field being edited |
 | `open_app`, `home`, `wake` | Open an app, go home, wake and unlock |
 | `list_phones` | The phones it can reach |
 
 Each action returns a fresh screenshot once the screen stops changing, so one call both acts and shows the result. Pass `look: false` to skip it.
+
+`gesture` kinds, and the points each one needs:
+
+- `tap`: x, y.
+- `hold`: x, y, and seconds (default 1).
+- `swipe`: x1, y1, x2, y2, and seconds (default 0.3). Scroll down by swiping up. Starting exactly on a screen edge makes it an edge swipe: from the bottom edge up goes home, from the left edge goes back. Faster swipes fling further.
+- `drag`: x1, y1, x2, y2, and seconds (default 0.62). Lets go slowly, so the content stops where it is put: sliders, moving items, scrolling an exact distance.
+- `two_finger_swipe`: x1, y1, x2, y2, and seconds (default 0.4). Pans, e.g. a map.
+- `pinch`: x, y, scale, and seconds (default 0.6). Scale above 1 zooms in, below 1 zooms out.
+
+A missing or wrong argument comes back as an error naming what that kind needs, before anything is sent to the phone.
 
 `tap_text` taps the text itself. A home screen app's name is a label on iOS, not part of its button, so tapping it does nothing. Use `open_app` for apps.
 

@@ -93,6 +93,20 @@ def main():
         assert "enum" in by_name["rc_trigger"]["inputSchema"]["properties"]["action"], "rc_trigger action needs an enum"
         checks += 1
 
+        # 2b. The six touch tools are one gesture tool, with a kind enum and its points checked first
+        assert "gesture" in by_name, "tools/list is missing gesture"
+        assert by_name["gesture"].get("description"), "gesture has no description"
+        old = [name for name in ("tap", "hold", "swipe", "drag", "two_finger_swipe", "pinch") if name in by_name]
+        assert not old, "the touch tools should be merged into gesture, but %s are still there" % ", ".join(old)
+        kinds = by_name["gesture"]["inputSchema"]["properties"]["kind"].get("enum") or []
+        assert sorted(kinds) == sorted(["tap", "hold", "swipe", "drag", "two_finger_swipe", "pinch"]), \
+            "gesture kind enum is %s" % kinds
+        assert by_name["gesture"]["inputSchema"]["required"] == ["kind"], "gesture should require kind"
+        text, failed = server.tool("gesture", {"kind": "swipe"})
+        assert failed, "a gesture with no points should fail:\n%s" % text
+        assert text == "kind=swipe needs x1, y1, x2, y2.", "a gesture with no points should name them:\n%s" % text
+        checks += 1
+
         # 3. rc_help with no query: categories and the useful explicit setters, offline
         text, failed = server.tool("rc_help")
         assert not failed, "rc_help failed: %s" % text
