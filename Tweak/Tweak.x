@@ -3525,9 +3525,23 @@ static BOOL rc_web_client_allowed(const struct sockaddr_storage *addr) {
     return wifi && [networks isKindOfClass:[NSArray class]] && [networks containsObject:wifi];
 }
 
-BOOL RCIsPrivilegedCommand(NSString *cmd) {
+static BOOL rc_value_needs_token(id value, int depth);
+
+// How many triggers deep "trigger NAME" is followed. A longer chain, or triggers that run each
+// other in a loop, counts as needing the token.
+#define RC_TRIGGER_CHAIN_LIMIT 8
+
+static BOOL rc_command_needs_token(NSString *cmd, int depth) {
     if (!cmd || ![cmd isKindOfClass:[NSString class]]) return NO;
     NSString *trimmed = [cmd stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    // "trigger NAME" runs that trigger's actions, so it needs the token when they do
+    if ([trimmed hasPrefix:@"trigger "]) {
+        if (depth >= RC_TRIGGER_CHAIN_LIMIT) return YES;
+        NSString *key = [[trimmed substringFromIndex:8] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        id triggers = g_triggerConfig[@"triggers"];
+        id trigger = [triggers isKindOfClass:[NSDictionary class]] ? ((NSDictionary *)triggers)[key] : nil;
+        return [trigger isKindOfClass:[NSDictionary class]] && rc_value_needs_token(((NSDictionary *)trigger)[@"actions"], depth + 1);
+    }
     return [trimmed hasPrefix:@"root "] || [trimmed isEqualToString:@"root"] ||
            [trimmed hasPrefix:@"sudo "] || [trimmed isEqualToString:@"sudo"] ||
            [trimmed hasPrefix:@"exec "] || [trimmed isEqualToString:@"exec"] ||
@@ -3539,6 +3553,23 @@ BOOL RCIsPrivilegedCommand(NSString *cmd) {
            // "lock-toggle" alone only wake it to the passcode screen and stay open.
            [trimmed hasPrefix:@"unlock "] || [trimmed hasPrefix:@"lock-toggle "] || [trimmed hasPrefix:@"lock toggle "] ||
            [trimmed hasPrefix:@"unlock-passcode"];
+}
+
+// Whether a value holds, anywhere inside it, a command that needs the API token: an action, a
+// Set Variable or If command, a block nested in another, a trigger run by "trigger NAME".
+static BOOL rc_value_needs_token(id value, int depth) {
+    if ([value isKindOfClass:[NSString class]]) return rc_command_needs_token(value, depth);
+    if ([value isKindOfClass:[NSDictionary class]]) value = [(NSDictionary *)value allValues];
+    if ([value isKindOfClass:[NSArray class]]) {
+        for (id item in (NSArray *)value) {
+            if (rc_value_needs_token(item, depth)) return YES;
+        }
+    }
+    return NO;
+}
+
+BOOL RCIsPrivilegedCommand(NSString *cmd) {
+    return rc_command_needs_token(cmd, 0);
 }
 
 static BOOL rc_is_privileged_command(NSString *cmd) {
@@ -3621,17 +3652,8 @@ static BOOL rc_config_changes_protected_settings(NSDictionary *incoming, NSDicti
     return NO;
 }
 
-// Whether a value holds, anywhere inside it, a command that needs the API token: an action, a
-// Set Variable or If command, a block nested in another.
 static BOOL rc_value_has_privileged_command(id value) {
-    if ([value isKindOfClass:[NSString class]]) return rc_is_privileged_command(value);
-    if ([value isKindOfClass:[NSDictionary class]]) value = [(NSDictionary *)value allValues];
-    if ([value isKindOfClass:[NSArray class]]) {
-        for (id item in (NSArray *)value) {
-            if (rc_value_has_privileged_command(item)) return YES;
-        }
-    }
-    return NO;
+    return rc_value_needs_token(value, 0);
 }
 
 // Whether a save adds or changes something that runs a command needing the API token. Without
