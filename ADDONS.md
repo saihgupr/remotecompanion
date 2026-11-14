@@ -402,7 +402,11 @@ to a preference, so people can set the tweak up without leaving RemoteCompanion.
     "domain": "com.example.mytweak", "key": "limit", "default": 80 },
   { "id": "mode", "title": "Mode", "type": "choice", "default": "auto",
     "choices": [ { "value": "auto", "label": "Automatic" }, { "value": "manual", "label": "Manual" } ],
-    "domain": "com.example.mytweak", "key": "mode" }
+    "domain": "com.example.mytweak", "key": "mode" },
+  { "id": "rooms", "title": "Rooms", "type": "list",
+    "fields": [ { "id": "name", "title": "Name", "type": "text" },
+                { "id": "level", "title": "Level", "type": "number", "min": 0, "max": 100, "unit": "%", "default": 50 } ],
+    "domain": "com.example.mytweak", "key": "rooms" }
 ]
 ```
 
@@ -410,13 +414,20 @@ to a preference, so people can set the tweak up without leaving RemoteCompanion.
 |---|---|---|
 | `id` | required | Lowercase letters, digits and `_`, starting with a letter; unique in the add-on. |
 | `title` | required | The row's name. |
-| `type` | required | `switch` (a boolean), `choice` (one of `choices`), `number` (a stepper) or `text` (one line). |
+| `type` | required | `switch` (a boolean), `choice` (one of `choices`), `number` (a stepper, or typed with the number pad), `text` (one line) or `list` (items with the controls in `fields`). |
 | `domain`, `key` | required | The preference. `com.apple.springboard` is SpringBoard's own preferences; any other domain is written through the preferences system as mobile, the same way a `defaults` step writes it. |
-| `default` | | What shows while the preference isn't set: `true` or `false`, a choice's `value`, a number or text. It isn't written until someone changes the setting. |
+| `default` | | What shows while the preference isn't set: `true` or `false`, a choice's `value`, a number, text, or for a list, a list of items. It isn't written until someone changes the setting. |
 | `note` | | A line shown under the title. |
 | `notify` | | Posted after every change, so the tweak knows to reread its settings. |
 | `choices` | required for `choice` | `[ { "value", "label" } ]`. `value` (text or a number) is what's written, and `label` is what's shown. Values must be unique. |
 | `min`, `max`, `step`, `unit` | | For `number`: the allowed range (a value outside it is refused), the stepper's step (default 1), and a unit shown after the value. Whole numbers are written as whole numbers. |
+| `fields` | required for `list` | The controls of each item: `[ { "id", "title", "type", ... } ]`, each a `switch`, `choice`, `number` or `text` with the same keys as a setting except `domain`, `key` and `notify`. A field's `default` fills a new item. |
+
+A list setting opens its own page: one row per item (named by its first field), Add, swipe to
+delete, and Edit to reorder. Each item opens an editor with a control per field. The preference
+holds a list of dictionaries, `[ { "<field id>": value } ]`, every field filled in. On the
+command line a list is set as JSON: `addons set mytweak rooms [{"name": "Kitchen", "level": 80}]`
+(a missing field gets its default).
 
 RemoteCompanion reads and writes these preferences itself, in SpringBoard. The add-on's tweak only
 reads them, and listens for `notify` if it wants to know about changes. Settings are also available
