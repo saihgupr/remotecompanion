@@ -140,8 +140,27 @@ static BOOL rcao_is_text(id value) {
         dispatch_async(dispatch_get_main_queue(), ^{
             if ([values isKindOfClass:[NSDictionary class]]) self.settingValues = values;
             [self.tableView reloadData];
+            [self openRequestedSetting];
         });
     }];
+}
+
+// The setting a link asked for, once (after the values are read, which its editor shows)
+- (void)openRequestedSetting {
+    NSString *wanted = self.openSettingId.lowercaseString;
+    if (!wanted.length || !self.settingValues) return;
+    self.openSettingId = nil;
+    for (NSInteger section = 0; section < (NSInteger)self.sections.count; section++) {
+        NSArray *rows = self.sections[(NSUInteger)section][@"rows"];
+        for (NSInteger row = 0; row < (NSInteger)rows.count; row++) {
+            NSDictionary *item = rows[(NSUInteger)row][@"item"];
+            if (![rows[(NSUInteger)row][@"kind"] isEqualToString:@"setting"] || ![[item[@"id"] lowercaseString] isEqualToString:wanted]) continue;
+            NSIndexPath *ip = [NSIndexPath indexPathForRow:row inSection:section];
+            [self.tableView scrollToRowAtIndexPath:ip atScrollPosition:UITableViewScrollPositionMiddle animated:NO];
+            [self editSetting:item fromCell:[self.tableView cellForRowAtIndexPath:ip]];
+            return;
+        }
+    }
 }
 
 - (void)setSetting:(NSDictionary *)setting to:(NSString *)text {

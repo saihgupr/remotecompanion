@@ -7,4 +7,8 @@
 
 - (instancetype)initWithAddOnId:(NSString *)identifier;
 
+// A setting to open (as tapping its row does) once the page has read the values: for a
+// remotecompanion://addon?id=<add-on>&setting=<setting> link
+@property (nonatomic, copy) NSString *openSettingId;
+
 @end

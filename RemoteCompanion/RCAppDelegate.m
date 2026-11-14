@@ -10,6 +10,8 @@
 #import "RCTestKitViewController.h"
 #import "RCWebUIAccessViewController.h"
 #import "RCActionsViewController.h"
+#import "RCAddOnsViewController.h"
+#import "RCAddOnDetailViewController.h"
 
 #define RCLog(...) do { \
     NSString *msg__ = [NSString stringWithFormat:__VA_ARGS__]; \
@@ -157,6 +159,23 @@
         return;
     }
     
+    // remotecompanion://addons (Settings > Add-ons), remotecompanion://addon?id=<add-on> (its page),
+    // and &setting=<setting> to open one of its settings too
+    if ([destination isEqualToString:@"addons"] || [destination isEqualToString:@"addon"]) {
+        NSString *addOnId = [queryParams[@"id"] lowercaseString];
+        [rootNav presentViewController:settingsNav animated:NO completion:^{
+            RCAddOnsViewController *list = [[RCAddOnsViewController alloc] initShowing:RCAddOnsListAll];
+            if (!addOnId.length) {
+                [settingsNav setViewControllers:@[settingsVC, list] animated:NO];
+                return;
+            }
+            RCAddOnDetailViewController *page = [[RCAddOnDetailViewController alloc] initWithAddOnId:addOnId];
+            page.openSettingId = queryParams[@"setting"];
+            [settingsNav setViewControllers:@[settingsVC, list, page] animated:NO];
+        }];
+        return;
+    }
+
     if ([destination isEqualToString:@"advanced"]) {
         [rootNav presentViewController:settingsNav animated:NO completion:^{
             [settingsNav pushViewController:[[RCAdvancedSettingsViewController alloc] init] animated:NO];
