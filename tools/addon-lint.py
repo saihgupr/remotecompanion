@@ -409,9 +409,11 @@ def check_control(setting, sid, field):
         return "%s: type must be switch, choice, number, text or list" % sid
     if not field and (not is_string(setting.get("domain")) or not is_string(setting.get("key"))):
         return "%s needs domain and key" % sid
-    for key in ("note", "notify", "unit"):
+    for key in ("note", "notify", "unit", "suggestionsFile"):
         if key in setting and not is_string(setting[key]):
             return "%s: %s must be text" % (sid, key)
+    if "suggestions" in setting and not (is_list(setting["suggestions"]) and all(is_string(x) for x in setting["suggestions"])):
+        return "%s: suggestions must be a list of text" % sid
     for key in ("min", "max", "step"):
         if key in setting and not is_number(setting[key]):
             return "%s: %s must be a number" % (sid, key)
@@ -513,12 +515,12 @@ def warnings_for(a, folder):
     check(a, ["$schema", "api", "id", "name", "icon", "requires", "actions", "conditions", "events", "settings"], "add-on")
     for setting in a.get("settings") or []:
         where = "setting '%s'" % setting["id"]
-        check(setting, ["id", "title", "type", "domain", "key", "default", "note", "notify", "choices", "min", "max", "step", "unit", "fields"], where)
+        check(setting, ["id", "title", "type", "domain", "key", "default", "note", "notify", "choices", "min", "max", "step", "unit", "fields", "suggestions", "suggestionsFile"], where)
         for choice in setting.get("choices") or []:
             check(choice, ["value", "label"], where + " choice")
         for field in setting.get("fields") or []:
             field_where = "%s field '%s'" % (where, field["id"])
-            check(field, ["id", "title", "type", "default", "note", "choices", "min", "max", "step", "unit"], field_where)
+            check(field, ["id", "title", "type", "default", "note", "choices", "min", "max", "step", "unit", "suggestions", "suggestionsFile"], field_where)
             for choice in field.get("choices") or []:
                 check(choice, ["value", "label"], field_where + " choice")
     for action in a["actions"]:

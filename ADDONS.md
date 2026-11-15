@@ -422,6 +422,7 @@ to a preference, so people can set the tweak up without leaving RemoteCompanion.
 | `choices` | required for `choice` | `[ { "value", "label" } ]`. `value` (text or a number) is what's written, and `label` is what's shown. Values must be unique. |
 | `min`, `max`, `step`, `unit` | | For `number`: the allowed range (a value outside it is refused), the stepper's step (default 1), and a unit shown after the value. Whole numbers are written as whole numbers. |
 | `fields` | required for `list` | The controls of each item: `[ { "id", "title", "type", ... } ]`, each a `switch`, `choice`, `number` or `text` with the same keys as a setting except `domain`, `key` and `notify`. A field's `default` fills a new item. |
+| `suggestions`, `suggestionsFile` | | For `text` (a setting or a list's field): names to pick from instead of typing. `suggestions` is a list in the file; `suggestionsFile` is the path of a JSON file holding a list of names, which the tweak keeps up to date (read each time the list opens). With either, the row opens a list with a search field, and anything not in it can still be used as typed. |
 
 A list setting opens its own page: one row per item (named by its first field), Add, swipe to
 delete, and Edit to reorder. Each item opens an editor with a control per field. The preference

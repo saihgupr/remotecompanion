@@ -174,6 +174,9 @@ CASES = {
     "setting_list_default": lambda d: d["settings"][4].update(default={"name": "x"}),
     "setting_list_default_item": lambda d: d["settings"][4].update(default=["x"]),
     "warn_setting_field_key": lambda d: d["settings"][4]["fields"][0].update(domain="x"),
+    "setting_suggestions_text": lambda d: d["settings"][4]["fields"][0].update(suggestions="Kitchen"),
+    "setting_suggestions_empty_item": lambda d: d["settings"][4]["fields"][0].update(suggestions=["Kitchen", ""]),
+    "setting_suggestions_file_num": lambda d: d["settings"][3].update(suggestionsFile=5),
     # warnings
     "warn_unknown_key": lambda d: d.update(colour="red"),
     "warn_jb_path": lambda d: step(d, "whoami").update(exec=["/var/jb/usr/bin/id", "-un"]),

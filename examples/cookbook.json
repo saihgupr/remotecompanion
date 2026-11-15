@@ -102,7 +102,7 @@
     { "id": "greeting", "title": "Greeting", "type": "text",
       "domain": "com.example.cookbook", "key": "greeting", "default": "Hello" },
     { "id": "rooms", "title": "Rooms", "type": "list", "note": "Each room's name and light level.",
-      "fields": [ { "id": "name", "title": "Name", "type": "text" },
+      "fields": [ { "id": "name", "title": "Name", "type": "text", "suggestions": [ "Kitchen", "Living Room", "Bedroom" ] },
                   { "id": "level", "title": "Level", "type": "number", "min": 0, "max": 100, "step": 10, "unit": "%", "default": 50 },
                   { "id": "lamp", "title": "Lamp", "type": "switch", "default": true } ],
       "domain": "com.example.cookbook", "key": "rooms", "default": [ { "name": "Kitchen", "level": 80, "lamp": true } ],
