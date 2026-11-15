@@ -515,7 +515,14 @@ Send command strings via `GET` or `POST`:
 - **Example (GET)**: `http://[device_ip]:8080/api/command?cmd=play`
 - **Example (POST)**: `curl -X POST "http://[device_ip]:8080/api/command" -d "haptic"`
 
-If an API token is set in Settings > Web UI > Access, privileged commands (`root`, `sudo`, `exec`), triggers containing privileged actions, and TestKit execution require it as `Authorization: Bearer <TOKEN>`, `X-API-Key: <TOKEN>`, `?token=` or `?key=`.
+If an API token is set in Settings > Web UI > Access, privileged calls from another device require it as `Authorization: Bearer <TOKEN>`, `X-API-Key: <TOKEN>`, `?token=` or `?key=`. That covers `root`, `sudo`, `exec`, `var`, unlocks with a passcode (`unlock <pin>`, `lock-toggle <pin>`, `unlock-passcode`), triggers holding any of those, TestKit execution, and config saves that change protected settings.
+
+```bash
+curl -H "Authorization: Bearer <TOKEN>" \
+  "http://[device_ip]:8080/api/command?cmd=unlock%201234"
+```
+
+Everyday commands (`lock`, plain `unlock` with no passcode, `volume`, `media`, `play`, and the rest) work without a token. Calls made on the iPhone itself, over the local socket or from the `rc` CLI, never need one.
 
 **3. Fire an Automation Trigger:**
 Execution URLs for your specific triggers:
