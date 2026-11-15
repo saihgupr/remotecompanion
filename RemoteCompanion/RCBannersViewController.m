@@ -270,19 +270,28 @@ static NSString *const RCBannersNote = @"Checked actions show a banner whenever 
     [self.collectionView reloadData];
 }
 
+// An add-on's banner under its own add-on's heading shows the action's name alone, without the
+// add-on's name in front; the Enabled section mixes add-ons, so it keeps the full name
+- (NSString *)nameForItem:(NSDictionary *)item inSection:(NSInteger)section {
+    BOOL mixed = section < (NSInteger)self.displayTitles.count && [self.displayTitles[section] isEqualToString:@"Enabled"];
+    NSString *shortName = item[@"shortName"];
+    return !mixed && [shortName isKindOfClass:[NSString class]] && shortName.length ? shortName : item[@"name"];
+}
+
 - (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView cellForItemAtIndexPath:(NSIndexPath *)indexPath {
     NSDictionary *item = self.displaySections[indexPath.section][indexPath.item];
+    NSString *name = [self nameForItem:item inSection:indexPath.section];
     if (![self compact]) {
         // List: a row with a checkmark, in a rounded card per section
         RCActionRowCell *row = [collectionView dequeueReusableCellWithReuseIdentifier:@"Row" forIndexPath:indexPath];
         UIImage *rowImage = [item[@"image"] isKindOfClass:[UIImage class]] ? item[@"image"] : nil;
-        [row setName:item[@"name"] icon:item[@"icon"] image:rowImage];
+        [row setName:name icon:item[@"icon"] image:rowImage];
         row.checked = [self isChecked:item[@"command"]];
         [row setFirst:indexPath.item == 0 last:indexPath.item == (NSInteger)self.displaySections[indexPath.section].count - 1];
         return row;
     }
     RCActionTileCell *cell = [collectionView dequeueReusableCellWithReuseIdentifier:@"Tile" forIndexPath:indexPath];
-    [cell setName:item[@"name"] icon:item[@"icon"]];
+    [cell setName:name icon:item[@"icon"]];
     cell.checked = [self isChecked:item[@"command"]];
     return cell;
 }
