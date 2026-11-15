@@ -209,6 +209,19 @@ static id RCTKHomeScreenTarget(id icons, NSString *selector) {
     return [home respondsToSelector:NSSelectorFromString(selector)] ? home : icons;
 }
 
+// Control Center is SBControlCenterCoordinator on later iOS 18 releases and
+// SBControlCenterController before that. Try both classes and both singleton
+// accessors, so the probe agrees with whichever object the tweak opened.
+static id RCTKControlCenter(void) {
+    id coordinator = RCTKShared(@"SBControlCenterCoordinator", @"sharedInstanceIfExists")
+                  ?: RCTKShared(@"SBControlCenterCoordinator", @"sharedInstance");
+    id controller = RCTKShared(@"SBControlCenterController", @"sharedInstanceIfExists")
+                 ?: RCTKShared(@"SBControlCenterController", @"sharedInstance");
+    if (coordinator && [coordinator respondsToSelector:@selector(isVisible)]) return coordinator;
+    if (controller && [controller respondsToSelector:@selector(isVisible)]) return controller;
+    return coordinator ?: controller;
+}
+
 static NSString *RCTKStatus(NSString *command) {
     NSString *output = RCHandleCommand(command);
     return [output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] ?: @"";
@@ -283,7 +296,7 @@ static NSDictionary *RCTKProbeWith(BOOL light) {
         id frontApp = RCTKSend(sb, @"_accessibilityFrontMostApplication");
         ui[@"frontApp"] = RCTKSend(frontApp, @"bundleIdentifier") ?: @"com.apple.springboard";
         ui[@"siriVisible"] = RCTKSendBool(NSClassFromString(@"SBAssistantController"), @"isVisible") ?: [NSNull null];
-        ui[@"controlCenterVisible"] = RCTKSendBool((RCTKShared(@"SBControlCenterCoordinator", @"sharedInstanceIfExists") ?: RCTKShared(@"SBControlCenterController", @"sharedInstanceIfExists")), @"isVisible") ?: @NO;
+        ui[@"controlCenterVisible"] = RCTKSendBool(RCTKControlCenter(), @"isVisible") ?: @NO;
         // Spotlight (a swipe down on the home screen), and the Today view / App Library
         id iconController = RCTKShared(@"SBIconController", @"sharedInstance");
         ui[@"spotlightVisible"] = RCTKSendBool(RCTKHomeScreenTarget(iconController, @"isAnySearchVisibleOrTransitioning"), @"isAnySearchVisibleOrTransitioning") ?: @NO;
@@ -1004,7 +1017,7 @@ static NSString *RCTKReturnHome(void) {
         dispatch_sync(dispatch_get_main_queue(), ^{
             id icons = RCTKShared(@"SBIconController", @"sharedInstance");
             if ([covering isEqualToString:@"controlCenter"]) {
-                id controlCenter = (RCTKShared(@"SBControlCenterCoordinator", @"sharedInstanceIfExists") ?: RCTKShared(@"SBControlCenterController", @"sharedInstanceIfExists"));
+                id controlCenter = RCTKControlCenter();
                 if ([controlCenter respondsToSelector:@selector(dismissAnimated:)]) ((void (*)(id, SEL, BOOL))objc_msgSend)(controlCenter, @selector(dismissAnimated:), YES);
             } else if ([covering isEqualToString:@"switcher"]) {
                 // iOS 15+ / iOS 14

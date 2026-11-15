@@ -89,6 +89,7 @@
     { "notify": "com.example.cookbook/state",
       "trigger": { "id": "state", "name": "State Changed", "states": { "1": "Ready", "2": "Busy" } } }
   ],
+  "variables": [ "cookbook_" ],
   "settings": [
     { "id": "enabled", "title": "Enabled", "type": "switch",
       "domain": "com.example.cookbook", "key": "enabled", "default": false,
@@ -100,6 +101,12 @@
       "domain": "com.example.cookbook", "key": "level", "default": 50,
       "notify": "com.example.cookbook/changed" },
     { "id": "greeting", "title": "Greeting", "type": "text",
-      "domain": "com.example.cookbook", "key": "greeting", "default": "Hello" }
+      "domain": "com.example.cookbook", "key": "greeting", "default": "Hello" },
+    { "id": "rooms", "title": "Rooms", "type": "list", "note": "Each room's name and light level.",
+      "fields": [ { "id": "name", "title": "Name", "type": "text", "suggestions": [ "Kitchen", "Living Room", "Bedroom" ] },
+                  { "id": "level", "title": "Level", "type": "number", "min": 0, "max": 100, "step": 10, "unit": "%", "default": 50 },
+                  { "id": "lamp", "title": "Lamp", "type": "switch", "default": true } ],
+      "domain": "com.example.cookbook", "key": "rooms", "default": [ { "name": "Kitchen", "level": 80, "lamp": true } ],
+      "notify": "com.example.cookbook/changed" }
   ]
 }

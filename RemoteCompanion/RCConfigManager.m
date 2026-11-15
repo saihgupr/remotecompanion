@@ -1642,6 +1642,24 @@ static NSString *RCActionCommand(id item) {
     return NO;
 }
 
+#pragma mark - Switched-off integrations
+
+// Only MQTT has triggers of its own; Home Assistant and Keyboard Maestro are actions.
+- (NSString *)offIntegrationNameForTrigger:(NSString *)triggerKey {
+    if (![triggerKey isKindOfClass:[NSString class]]) return nil;
+    if (([triggerKey hasPrefix:@"mqtt_"] || [triggerKey hasPrefix:@"mqtt_sub_"]) && !self.mqttEnabled) return @"MQTT";
+    return nil;
+}
+
+- (NSString *)offIntegrationNameForAction:(id)actionItem {
+    NSString *cmd = [actionItem isKindOfClass:[NSDictionary class]] ? ((NSDictionary *)actionItem)[@"command"] : actionItem;
+    if (![cmd isKindOfClass:[NSString class]]) return nil;
+    if (([cmd hasPrefix:@"mqtt "] || [cmd isEqualToString:@"mqtt"]) && !self.mqttEnabled) return @"MQTT";
+    if (([cmd hasPrefix:@"ha "] || [cmd isEqualToString:@"ha"]) && !self.haEnabled) return @"Home Assistant";
+    if (([cmd hasPrefix:@"km "] || [cmd isEqualToString:@"km"]) && !self.kmEnabled) return @"Keyboard Maestro";
+    return nil;
+}
+
 - (id)toggleActionDisabled:(id)actionItem {
     if ([actionItem isKindOfClass:[NSDictionary class]]) {
         NSMutableDictionary *dict = [((NSDictionary *)actionItem) mutableCopy];

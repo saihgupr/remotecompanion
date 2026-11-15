@@ -1,5 +1,6 @@
 #import "RCAddOnDetailViewController.h"
 #import "RCAddOnCatalog.h"
+#import "RCAddOnListViewController.h"
 #import "RCConfigManager.h"
 #import "RCServerClient.h"
 #import <notify.h>
@@ -13,6 +14,8 @@
 @property (nonatomic, copy) NSArray<NSDictionary *> *sections;   // { title, footer, rows: [{ kind, ... }] }
 @property (nonatomic, assign) int changeToken;
 @property (nonatomic, copy) NSDictionary *settingValues;   // setting id -> value, from "addons settings <id>"
+@property (nonatomic, copy) NSDictionary *keptValues;      // the variables it keeps (its "variables"), from "var list"
+@property (nonatomic, assign) BOOL readingKept;
 @end
 
 static BOOL rcao_is_text(id value) {
@@ -63,6 +66,12 @@ static BOOL rcao_is_text(id value) {
         [weakSelf readCatalog];
     }) == NOTIFY_STATUS_OK) self.changeToken = token;
     [self readCatalog];
+}
+
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    // Back from a list setting's page: its items may have changed
+    if (self.settingValues) [self readSettings];
 }
 
 #pragma mark - Contents
@@ -119,6 +128,15 @@ static BOOL rcao_is_text(id value) {
 
     if (bannerRows.count) [sections addObject:@{ @"title": @"Banners", @"footer": @"A banner shows after its action runs.", @"rows": bannerRows }];
 
+    // The variables it keeps (Settings > Variables lists them here instead)
+    if ([addOn[@"variables"] isKindOfClass:[NSArray class]] && [addOn[@"variables"] count]) {
+        NSMutableArray *rows = [NSMutableArray array];
+        for (NSString *name in [self.keptValues.allKeys sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)]) [rows addObject:@{ @"kind": @"variable", @"name": name }];
+        if (!rows.count) [rows addObject:@{ @"kind": @"info", @"title": self.keptValues ? @"None yet" : @"Loading…", @"value": @"" }];
+        [sections addObject:@{ @"title": @"Variables", @"footer": @"What it keeps in RemoteCompanion variables.", @"rows": rows }];
+        if (!self.keptValues) [self readKept];
+    }
+
     NSMutableArray *infoRows = [NSMutableArray array];
     [infoRows addObject:@{ @"kind": @"info", @"title": @"Command", @"value": addOn[@"id"] ?: @"" }];
     if ([addOn[@"_file"] isKindOfClass:[NSString class]]) [infoRows addObject:@{ @"kind": @"info", @"title": @"File", @"value": addOn[@"_file"] }];
@@ -127,6 +145,36 @@ static BOOL rcao_is_text(id value) {
 
     self.sections = sections;
     [self.tableView reloadData];
+}
+
+#pragma mark - Kept variables
+
+- (void)readKept {
+    if (self.readingKept) return;
+    self.readingKept = YES;
+    [[RCServerClient sharedClient] executeCommand:@"var list" completion:^(NSString *output, NSError *error) {
+        NSData *data = [output dataUsingEncoding:NSUTF8StringEncoding];
+        NSDictionary *all = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.readingKept = NO;
+            if (![all isKindOfClass:[NSDictionary class]]) return;
+            NSMutableDictionary *mine = [NSMutableDictionary dictionary];
+            [all enumerateKeysAndObjectsUsingBlock:^(NSString *name, id value, BOOL *stop) {
+                if ([[RCAddOnCatalog addOnKeepingVariable:name][@"id"] isEqual:self.addOnId]) mine[name] = [value description] ?: @"";
+            }];
+            self.keptValues = mine;
+            [self readCatalog];
+        });
+    }];
+}
+
+- (void)showVariable:(NSString *)name {
+    NSString *value = self.keptValues[name] ?: @"";
+    NSString *shown = value.length > 1500 ? [[value substringToIndex:1500] stringByAppendingString:@"…"] : value;
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:name message:shown.length ? shown : @"No value" preferredStyle:UIAlertControllerStyleAlert];
+    if (value.length) [alert addAction:[UIAlertAction actionWithTitle:@"Copy" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) { UIPasteboard.generalPasteboard.string = value; }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 
 #pragma mark - Settings
@@ -140,8 +188,27 @@ static BOOL rcao_is_text(id value) {
         dispatch_async(dispatch_get_main_queue(), ^{
             if ([values isKindOfClass:[NSDictionary class]]) self.settingValues = values;
             [self.tableView reloadData];
+            [self openRequestedSetting];
         });
     }];
+}
+
+// The setting a link asked for, once (after the values are read, which its editor shows)
+- (void)openRequestedSetting {
+    NSString *wanted = self.openSettingId.lowercaseString;
+    if (!wanted.length || !self.settingValues) return;
+    self.openSettingId = nil;
+    for (NSInteger section = 0; section < (NSInteger)self.sections.count; section++) {
+        NSArray *rows = self.sections[(NSUInteger)section][@"rows"];
+        for (NSInteger row = 0; row < (NSInteger)rows.count; row++) {
+            NSDictionary *item = rows[(NSUInteger)row][@"item"];
+            if (![rows[(NSUInteger)row][@"kind"] isEqualToString:@"setting"] || ![[item[@"id"] lowercaseString] isEqualToString:wanted]) continue;
+            NSIndexPath *ip = [NSIndexPath indexPathForRow:row inSection:section];
+            [self.tableView scrollToRowAtIndexPath:ip atScrollPosition:UITableViewScrollPositionMiddle animated:NO];
+            [self editSetting:item fromCell:[self.tableView cellForRowAtIndexPath:ip]];
+            return;
+        }
+    }
 }
 
 - (void)setSetting:(NSDictionary *)setting to:(NSString *)text {
@@ -161,8 +228,7 @@ static BOOL rcao_is_text(id value) {
 
 // A number as written ("80", "0.5"), with its unit
 - (NSString *)textForNumber:(id)value setting:(NSDictionary *)setting {
-    NSString *number = [value isKindOfClass:[NSNumber class]] ? [NSNumberFormatter localizedStringFromNumber:value numberStyle:NSNumberFormatterDecimalStyle] : [value description];
-    return rcao_is_text(setting[@"unit"]) ? [NSString stringWithFormat:@"%@ %@", number, setting[@"unit"]] : number;
+    return [RCAddOnSettingText textForNumber:value control:setting];
 }
 
 // What a setting row shows under its title: its value (not for a switch), then its note
@@ -176,6 +242,7 @@ static BOOL rcao_is_text(id value) {
         for (NSDictionary *choice in setting[@"choices"]) if ([[choice[@"value"] description] isEqualToString:[value description]]) shown = choice[@"label"];
         shown = shown ?: [value description];
     } else if ([type isEqualToString:@"text"]) shown = [value description].length ? [value description] : @"None";
+    else if ([type isEqualToString:@"list"]) shown = [RCAddOnSettingText summaryForItems:value setting:setting];
     NSString *note = rcao_is_text(setting[@"note"]) ? setting[@"note"] : nil;
     if (shown && note) return [NSString stringWithFormat:@"%@\n%@", shown, note];
     return shown ?: note;
@@ -199,10 +266,41 @@ static BOOL rcao_is_text(id value) {
     return self.sections[control.tag >> 16][@"rows"][control.tag & 0xFFFF][@"item"];
 }
 
-// Choice: a sheet of its choices. Text: a field.
+// Choice: a sheet of its choices. Text: a field. Number: a field with the number pad. List: its page.
 - (void)editSetting:(NSDictionary *)setting fromCell:(UITableViewCell *)cell {
     NSString *type = setting[@"type"];
-    if ([type isEqualToString:@"choice"]) {
+    if ([type isEqualToString:@"list"]) {
+        if (!self.settingValues) return;
+        RCAddOnListViewController *list = [[RCAddOnListViewController alloc] initWithAddOnId:self.addOnId setting:setting items:self.settingValues[setting[@"id"]]];
+        [self.navigationController pushViewController:list animated:YES];
+    } else if ([type isEqualToString:@"number"]) {
+        if (!self.settingValues) return;
+        NSMutableArray *range = [NSMutableArray array];
+        if (setting[@"min"]) [range addObject:[NSString stringWithFormat:@"Lowest %@", [self textForNumber:setting[@"min"] setting:setting]]];
+        if (setting[@"max"]) [range addObject:[NSString stringWithFormat:@"highest %@", [self textForNumber:setting[@"max"] setting:setting]]];
+        NSString *message = range.count ? [[range componentsJoinedByString:@", "] stringByAppendingString:@"."] : nil;
+        if (message && !setting[@"min"]) message = [[[message substringToIndex:1] uppercaseString] stringByAppendingString:[message substringFromIndex:1]];
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:setting[@"title"] message:message preferredStyle:UIAlertControllerStyleAlert];
+        [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
+            id current = self.settingValues[setting[@"id"]];
+            field.text = [current isKindOfClass:[NSNumber class]] ? [NSString stringWithFormat:@"%.10g", [current doubleValue]] : [current description];
+            field.keyboardType = UIKeyboardTypeDecimalPad;
+            field.clearButtonMode = UITextFieldViewModeWhileEditing;
+            field.placeholder = rcao_is_text(setting[@"unit"]) ? setting[@"unit"] : nil;
+        }];
+        [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+        [alert addAction:[UIAlertAction actionWithTitle:@"Save" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+            NSString *number = [RCAddOnSettingText numberForTyped:alert.textFields.firstObject.text];
+            if (!number) {
+                UIAlertController *bad = [UIAlertController alertControllerWithTitle:@"Couldn't Change" message:@"That isn't a number." preferredStyle:UIAlertControllerStyleAlert];
+                [bad addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+                [self presentViewController:bad animated:YES completion:nil];
+                return;
+            }
+            [self setSetting:setting to:number];
+        }]];
+        [self presentViewController:alert animated:YES completion:nil];
+    } else if ([type isEqualToString:@"choice"]) {
         // The current choice is named in the message
         NSString *now = [self detailForSetting:setting];
         NSString *currentLabel = [now componentsSeparatedByString:@"\n"].firstObject;
@@ -218,6 +316,14 @@ static BOOL rcao_is_text(id value) {
         sheet.popoverPresentationController.sourceView = cell;
         sheet.popoverPresentationController.sourceRect = cell.bounds;
         [self presentViewController:sheet animated:YES completion:nil];
+    } else if ([type isEqualToString:@"text"] && [RCAddOnSettingText suggestionsForControl:setting].count) {
+        // Names to pick from (or type)
+        __weak typeof(self) ws = self;
+        id current = self.settingValues[setting[@"id"]];
+        RCAddOnSuggestionsViewController *pick = [[RCAddOnSuggestionsViewController alloc] initWithTitle:setting[@"title"]
+            suggestions:[RCAddOnSettingText suggestionsForControl:setting] current:current ? [current description] : nil
+            completion:^(NSString *text) { [ws setSetting:setting to:text]; }];
+        [self.navigationController pushViewController:pick animated:YES];
     } else if ([type isEqualToString:@"text"]) {
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:setting[@"title"] message:rcao_is_text(setting[@"note"]) ? setting[@"note"] : nil preferredStyle:UIAlertControllerStyleAlert];
         [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
@@ -238,6 +344,7 @@ static BOOL rcao_is_text(id value) {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     NSDictionary *row = self.sections[indexPath.section][@"rows"][indexPath.row];
     if ([row[@"kind"] isEqualToString:@"setting"]) [self editSetting:row[@"item"] fromCell:[tableView cellForRowAtIndexPath:indexPath]];
+    if ([row[@"kind"] isEqualToString:@"variable"]) [self showVariable:row[@"name"]];
 }
 
 - (NSString *)bannerIdForAction:(NSDictionary *)action {
@@ -355,7 +462,7 @@ static BOOL rcao_is_text(id value) {
     NSDictionary *item = row[@"item"];
 
     if ([kind isEqualToString:@"enabled"]) {
-        cell.textLabel.text = @"Enabled";
+        cell.textLabel.text = @"Add-On Enabled";
         cell.imageView.image = [RCAddOnCatalog iconImageForAddOn:self.addOn] ?: [UIImage systemImageNamed:[RCAddOnCatalog iconForAddOn:self.addOn]];
         cell.imageView.tintColor = self.on ? [UIColor systemOrangeColor] : [UIColor secondaryLabelColor];
         UISwitch *toggle = [[UISwitch alloc] init];
@@ -419,10 +526,19 @@ static BOOL rcao_is_text(id value) {
             stepper.tag = tag;
             [stepper addTarget:self action:@selector(settingStepped:) forControlEvents:UIControlEventValueChanged];
             cell.accessoryView = stepper;
+            cell.selectionStyle = UITableViewCellSelectionStyleDefault;   // tap to type it
         } else {
             cell.selectionStyle = UITableViewCellSelectionStyleDefault;
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         }
+    } else if ([kind isEqualToString:@"variable"]) {
+        NSString *value = self.keptValues[row[@"name"]] ?: @"";
+        cell.textLabel.text = row[@"name"];
+        cell.textLabel.font = [UIFont monospacedSystemFontOfSize:15 weight:UIFontWeightRegular];
+        cell.detailTextLabel.text = value.length ? value : @"No value";
+        cell.detailTextLabel.numberOfLines = 2;
+        cell.detailTextLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+        cell.selectionStyle = UITableViewCellSelectionStyleDefault;
     } else if ([kind isEqualToString:@"info"]) {
         cell.textLabel.text = row[@"title"];
         cell.detailTextLabel.text = row[@"value"];

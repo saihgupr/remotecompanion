@@ -35,6 +35,14 @@
 // show no names or options
 + (BOOL)commandsScriptLoaded;
 
+// Kept variables: the add-on (on or off) whose "variables" covers this variable name, else nil
++ (NSDictionary *)addOnKeepingVariable:(NSString *)name;
+// A "var list" answer without the variables add-ons keep (Settings > Variables)
++ (NSDictionary *)variablesWithoutKept:(NSDictionary *)variables;
+// Saved variable names as menu entries for a picker: the person's own under "Saved", then a
+// submenu per add-on (its name and icon) with the variables it keeps
++ (NSArray<UIMenuElement *> *)savedVariableMenus:(NSArray<NSString *> *)names item:(UIMenuElement *(^)(NSString *name))item;
+
 // Files with a problem, each "file.json: reason"
 + (NSArray<NSString *> *)problems;
 

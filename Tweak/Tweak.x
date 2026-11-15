@@ -1657,11 +1657,41 @@ static void inject_consumer_key(int usage) {
 }
 
 
+static BOOL rc_has_home_button(void);
+
+// The Home Button action. On a device with a Home button, a real press ends in
+// -[SBHomeHardwareButtonActions performSinglePressUpActions], and that method is what starts
+// the transition: calling it moves to the Home Screen at once. An injected Home press reaches
+// it only through SpringBoard's button pipeline, which on iPadOS 15 sits on it for about a
+// third of a second first (measured at 390 ms). Phones without a Home button have no such
+// handler to run, so they keep the injected press.
+// The live actions object is cached by the hook on the method (g_homeActionsTarget's sibling,
+// below); a bare one is enough for this call.
+static id g_rcHomeActions = nil;
+
 static void simulate_home_press() {
     dispatch_async(dispatch_get_main_queue(), ^{
         SRLog(@"Executing Home simulation...");
+
+        // 1. Direct: what a real Home press runs
+        if (rc_has_home_button()) {
+            id actions = g_rcHomeActions;
+            if (!actions) {
+                Class actionsClass = objc_getClass("SBHomeHardwareButtonActions");
+                if (actionsClass) {
+                    actions = [[actionsClass alloc] init];
+                    g_rcHomeActions = actions;
+                }
+            }
+            SEL singlePress = NSSelectorFromString(@"performSinglePressUpActions");
+            if (actions && [actions respondsToSelector:singlePress]) {
+                ((void (*)(id, SEL))objc_msgSend)(actions, singlePress);
+                SRLog(@"Triggered performSinglePressUpActions");
+                return;
+            }
+        }
         
-        // 1. Try SBUIController (Modern Home Tap)
+        // 2. Try SBUIController (Modern Home Tap)
         id uiCtrl = [objc_getClass("SBUIController") sharedInstance];
         if ([uiCtrl respondsToSelector:@selector(handleHomeButtonTap)]) {
             [uiCtrl handleHomeButtonTap];
@@ -1674,7 +1704,7 @@ static void simulate_home_press() {
             SRLog(@"Triggered clickedMenuButton");
         }
         
-        // 2. Fallback: SpringBoard simulation
+        // 3. Fallback: SpringBoard simulation
         SpringBoard *sb = (SpringBoard *)[UIApplication sharedApplication];
         if ([sb respondsToSelector:@selector(_simulateHomeButtonPress)]) {
             [sb _simulateHomeButtonPress];
@@ -1685,7 +1715,7 @@ static void simulate_home_press() {
             SRLog(@"Triggered _menuButtonDown/Up");
         }
         
-        // 3. HID Event (Last resort)
+        // 4. HID Event (Last resort)
         inject_hid_event(kHIDPage_Consumer, kHIDUsage_Csmr_Menu, 50000000, 0);
     });
 }
@@ -2131,8 +2161,20 @@ static id rc_shared_instance(const char *className) {
     return instance;
 }
 
+static BOOL rc_can_present_control_center(id object) {
+    return [object respondsToSelector:@selector(presentAnimated:)] ||
+           [object respondsToSelector:@selector(_presentControlCenterGestureBeganWithReason:)];
+}
+
 static id rc_control_center_presenter(void) {
-    return rc_shared_instance("SBControlCenterCoordinator") ?: rc_shared_instance("SBControlCenterController");
+    // Class existence is not enough: a release can ship the coordinator class without
+    // the methods that open Control Center. Use whichever object can actually present
+    // it, and return a candidate that cannot only so the caller can log.
+    id coordinator = rc_shared_instance("SBControlCenterCoordinator");
+    if (rc_can_present_control_center(coordinator)) return coordinator;
+    id controller = rc_shared_instance("SBControlCenterController");
+    if (rc_can_present_control_center(controller)) return controller;
+    return coordinator ?: controller;
 }
 
 static void load_blacklist() {
@@ -10734,6 +10776,7 @@ static NSArray *RCCommandHelpSections(void) {
             @[@"lock", @"Lock the screen"],
             @[@"unlock [passcode]", @"Wake and unlock the device"],
             @[@"lock-toggle [passcode]", @"Toggle the lock state"],
+            @[@"unlock-passcode [set CODE|forget]", @"Saved passcode, kept in the Keychain"],
             @[@"is-locked", @"Print locked or unlocked"],
             @[@"autolock [time|toggle|status]", @"30s to 5m, never, or off"],
             @[@"display sleep <time>", @"Alias for autolock"],
@@ -10800,6 +10843,8 @@ static NSArray *RCCommandHelpSections(void) {
             @[@"km trigger <name|uuid> [value]", @"Trigger a Keyboard Maestro macro"],
             @[@"km url <url>", @"Trigger a Keyboard Maestro URL"],
             @[@"mqtt pub <topic> [payload]", @"Publish an MQTT message"],
+            @[@"http-request <json|url>", @"Call a REST API with method, headers and body"],
+            @[@"rc-run <clientId> <command>", @"Run a command on another device's Web UI"],
         ]},
         @{@"title": @"System", @"rows": @[
             @[@"respring", @"Restart SpringBoard"],
@@ -10809,6 +10854,10 @@ static NSArray *RCCommandHelpSections(void) {
             @[@"uicache", @"Refresh the icon cache"],
             @[@"webui [on|off|status|...]", @"Web UI server, access, token, wifi"],
             @[@"blacklist list|add|remove|reset", @"App exclusion list"],
+            @[@"addons [reload] | addons validate <file>", @"List add-ons or check one"],
+            @[@"export [path]", @"Save everything for an exact restore"],
+            @[@"import <path>", @"Restore an exported file"],
+            @[@"pull-backup [dir]", @"Copy the newest IAmLazy backup to the Mac"],
             @[@"log", @"Stream the device log (also rc logs)"],
             @[@"exec <command>", @"Run a shell command"],
             @[@"root <command>", @"Run a shell command as root"],
@@ -11553,14 +11602,17 @@ static NSString *handle_command(NSString *cmd) {
                 return;
             }
 
-            if ([controller respondsToSelector:@selector(isVisible)] &&
-                [controller respondsToSelector:@selector(presentAnimated:)]) {
-                if ([controller isVisible]) {
-                    [controller dismissAnimated:YES];
-                } else {
-                    rc_mark_intentional_cc_open();
-                    [controller presentAnimated:YES];
-                }
+            BOOL canPresent = [controller respondsToSelector:@selector(presentAnimated:)];
+            BOOL canDismiss = [controller respondsToSelector:@selector(dismissAnimated:)];
+            // isVisible is not on every object that can open Control Center, so a
+            // missing method counts as not visible instead of blocking the toggle.
+            BOOL visible = [controller respondsToSelector:@selector(isVisible)] ? [controller isVisible] : NO;
+            if (visible && canDismiss) {
+                [controller dismissAnimated:YES];
+                opened = YES;
+            } else if (!visible && canPresent) {
+                rc_mark_intentional_cc_open();
+                [controller presentAnimated:YES];
                 opened = YES;
             } else if ([controller respondsToSelector:@selector(_presentControlCenterGestureBeganWithReason:)]) {
                  rc_mark_intentional_cc_open();
@@ -18480,6 +18532,7 @@ static BOOL RC_HomeSinglePressIsPartOfHeldClicks(void) {
 // See g_homeDoubleActionHeld
 %hook SBHomeHardwareButtonActions
 - (void)performSinglePressUpActions {
+    g_rcHomeActions = self;
     if (RC_HomeSinglePressIsPartOfHeldClicks()) return;
     %orig;
 }

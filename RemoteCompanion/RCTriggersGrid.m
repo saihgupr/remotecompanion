@@ -4,8 +4,9 @@
 #import "RCTriggerIcons.h"
 
 // A trigger in Compact: a wide card, its icon beside its name (up to three lines), or at 3 per row
-// a tile, its icon above its name. Dimmed when it has no actions yet. In Edit, a star (favorite)
-// and a minus (delete): on the card's right, or at the tile's top right.
+// a tile, its icon above its name. Dimmed when it has no actions yet, or when its integration is
+// switched off. In Edit, a star (favorite) and a minus (delete): on the card's right, or at the
+// tile's top right.
 @interface RCTriggerCardCell : UICollectionViewCell
 @property (nonatomic, strong) UIImageView *iconView;
 @property (nonatomic, strong) UILabel *nameLabel;
@@ -15,6 +16,7 @@
 @property (nonatomic, copy) void (^onFavorite)(void);
 @property (nonatomic, copy) void (^onDelete)(void);
 @property (nonatomic, assign) BOOL dimmed;
+@property (nonatomic, copy) NSString *dimmedReason; // "No actions", "MQTT off", or nil
 // The name runs to the card's edge, or (in Edit) to the star and minus
 @property (nonatomic, strong) UILabel *detailLabel;   // its default name, under a name of the user's own
 @property (nonatomic, strong) UIStackView *textStack;
@@ -189,13 +191,19 @@
     [self applyLook];
 }
 
+// Dimmed, with the reason shown to VoiceOver ("No actions", "MQTT off"); nil is the normal look
+- (void)setDimmedReason:(NSString *)reason {
+    _dimmedReason = [reason copy];
+    self.dimmed = reason.length > 0;
+}
+
 - (void)applyLook {
     RCConfigManager *cm = [RCConfigManager sharedManager];
     self.contentView.backgroundColor = [cm tweakColorForKey:@"blockBackground" defaultVal:0.12];
     self.iconView.tintColor = self.dimmed ? [UIColor tertiaryLabelColor] : [UIColor labelColor];
     self.iconView.alpha = self.dimmed ? 0.6 : 1; // an app's own icon isn't tinted
     self.nameLabel.textColor = self.dimmed ? [UIColor secondaryLabelColor] : [UIColor labelColor];
-    self.accessibilityValue = self.dimmed ? @"No actions" : nil;
+    self.accessibilityValue = self.dimmedReason;
 }
 
 - (void)showEditFavorite:(BOOL)favorite deletable:(BOOL)deletable onFavorite:(void (^)(void))onFavorite onDelete:(void (^)(void))onDelete {
@@ -249,6 +257,7 @@
     self.contentView.transform = CGAffineTransformIdentity;
     self.contentView.alpha = 1;
     [self hideEdit];
+    self.dimmedReason = nil;
     self.dimmed = NO;
 }
 
@@ -325,7 +334,7 @@
     NSString *key = [self keyAtIndexPath:indexPath];
     id<RCTriggersGridSource> source = self.source;
     [cell setName:[source gridNameForTrigger:key] detail:[source gridDetailForTrigger:key] image:[source gridImageForTrigger:key]];
-    cell.dimmed = [source gridActionCountForTrigger:key] == 0;
+    cell.dimmedReason = [source gridOffIntegrationForTrigger:key] ?: ([source gridActionCountForTrigger:key] == 0 ? @"No actions" : nil);
     cell.accessibilityHint = self.editing ? nil : @"Long press to run it now";
     if (self.editing) {
         __weak typeof(self) weakSelf = self;

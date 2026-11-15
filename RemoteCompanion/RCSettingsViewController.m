@@ -244,7 +244,7 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     } else if (section == RCSettingsSectionDiagnostics) {
         return @"See what's running on this device, and run tests that share their results.";
     } else if (section == RCSettingsSectionBackup) {
-        return @"Export saves everything on this device: settings, integrations, triggers, add-ons, gestures and variables. Import puts it back on any device. The file is not password protected and holds saved passwords and tokens, so keep it private.";
+        return @"Export saves everything on this device: settings, integrations, triggers, add-ons, gestures and variables. Import puts it back on any device. The file may include saved passwords and tokens, so keep it private.";
     }
     return nil;
 }
@@ -536,7 +536,7 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     [self.tableView reloadData];
 
     if (success) {
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Import Successful" message:@"Settings and triggers restored. Return to Triggers to see the changes." preferredStyle:UIAlertControllerStyleAlert];
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Import Complete" message:@"Settings and triggers are in place. Return to Triggers to see the changes." preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
         [self presentViewController:alert animated:YES completion:nil];
     } else {
@@ -549,28 +549,28 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
 
 - (void)confirmConfigImport:(NSData *)data {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Import Configuration?"
-                                                                   message:@"This applies every setting and trigger in the file, including integrations, and replaces the values already set here."
+                                                                   message:@"Settings and triggers in the file are applied. Everything else on this device stays as it is, and an existing trigger is updated, not duplicated."
                                                             preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Import" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+    [alert addAction:[UIAlertAction actionWithTitle:@"Import" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         [self importConfigData:data];
     }]];
     [self presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)confirmFullBackupRestore:(NSData *)data {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Restore Full Backup?"
-                                                                   message:@"This replaces all settings, triggers, integrations and add-ons on this device."
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Import Configuration?"
+                                                                   message:@"This replaces all settings, triggers, integrations and add-ons on this device with the ones in the file."
                                                             preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Restore" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+    [alert addAction:[UIAlertAction actionWithTitle:@"Import" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
         NSError *error = nil;
         BOOL success = [RCBackup restoreFullBackupData:data error:&error];
         [self.tableView reloadData];
 
         UIAlertController *result = success
-            ? [UIAlertController alertControllerWithTitle:@"Restore Complete" message:@"Everything was put back exactly as it was in the backup." preferredStyle:UIAlertControllerStyleAlert]
-            : [UIAlertController alertControllerWithTitle:@"Restore Failed" message:error.localizedDescription ?: @"Could not restore the backup" preferredStyle:UIAlertControllerStyleAlert];
+            ? [UIAlertController alertControllerWithTitle:@"Import Complete" message:@"Everything from the file is in place." preferredStyle:UIAlertControllerStyleAlert]
+            : [UIAlertController alertControllerWithTitle:@"Import Failed" message:error.localizedDescription ?: @"Could not import the file" preferredStyle:UIAlertControllerStyleAlert];
         [result addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
         [self presentViewController:result animated:YES completion:nil];
     }]];

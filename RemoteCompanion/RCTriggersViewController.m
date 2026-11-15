@@ -1010,7 +1010,6 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
         @{ @"title": @"Scheduled Trigger", @"icon": @"calendar.badge.clock", @"section": @"Time", @"handler": ^{ push([[RCScheduledTriggerViewController alloc] init]); } },
         @{ @"title": @"Battery Level", @"icon": [UIImage systemImageNamed:@"battery.50"] ? @"battery.50" : @"battery.25", @"section": @"Device", @"handler": ^{ push([[RCBatteryTriggerViewController alloc] init]); } },
         @{ @"title": @"Focus", @"icon": @"moon.fill", @"section": @"Device", @"handler": ^{ push([[RCFocusTriggerViewController alloc] init]); } },
-        @{ @"title": @"MQTT Topic", @"icon": @"antenna.radiowaves.left.and.right", @"section": @"Integrations", @"handler": ^{ push([[RCMQTTTriggerViewController alloc] init]); } },
     ] mutableCopy];
     if ([RCConfigManager supportsControlCenterButtons]) {
         [items addObject:@{ @"title": @"Control Center Button", @"icon": @"switch.2", @"section": @"Device", @"handler": ^{ push([[RCControlCenterTriggerViewController alloc] init]); } }];
@@ -1029,6 +1028,12 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     if ([[RCConfigManager sharedManager] triggerDataForKey:sequenceKey]) sequenceItem[@"detail"] = @"Added";
     [items addObject:sequenceItem];
 
+    // MQTT is only worth offering once it is set up in Integrations. A topic added while it
+    // was on stays in the trigger list after it is turned off; it just cannot be added again.
+    if ([RCConfigManager sharedManager].mqttEnabled) {
+        [items addObject:@{ @"title": @"MQTT Topic", @"icon": @"antenna.radiowaves.left.and.right", @"section": @"Integrations", @"handler": ^{ push([[RCMQTTTriggerViewController alloc] init]); } }];
+    }
+
     // Every built-in trigger is added from here. It can only be added once: when it is
     // already in the list, its menu entry opens it instead.
     void (^addBuiltIn)(NSString *, NSString *) = ^(NSString *key, NSString *section) {
@@ -1038,10 +1043,10 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
                                         @"icon": [RCTriggersViewController iconNameForTrigger:key],
                                         @"section": section,
                                         @"handler": ^{
-            // A new trigger stays disabled until it has an action; the action editor
-            // switches it on. Opening one that already exists leaves its state alone.
+            // A new trigger starts enabled, so it is ready as soon as an action is added.
+            // Opening one that already exists leaves its state alone.
             if (![config triggerDataForKey:key]) {
-                [config updateTrigger:key withData:@{ @"name": title, @"enabled": @NO, @"actions": @[], @"added": @YES }];
+                [config updateTrigger:key withData:@{ @"name": title, @"enabled": @YES, @"actions": @[], @"added": @YES }];
             }
             replaceMenuWith([[RCActionsViewController alloc] initWithTriggerKey:key]);
         } } mutableCopy];
@@ -1469,6 +1474,15 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
         cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · %@", [config defaultNameForTrigger:triggerKey], cell.detailTextLabel.text ?: @""];
     }
 
+    // A trigger whose integration is switched off stays listed and editable, dimmed, so it is
+    // clear why it does nothing until the integration comes back
+    NSString *offIntegration = [config offIntegrationNameForTrigger:triggerKey];
+    if (offIntegration) {
+        cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ off · %@", offIntegration, cell.detailTextLabel.text ?: @""];
+        cell.detailTextLabel.textColor = [UIColor tertiaryLabelColor];
+    }
+    cell.contentView.alpha = offIntegration ? 0.5 : 1.0;
+
     [self applySectionCardStyleToCell:cell atIndexPath:indexPath];
 
     return cell;
@@ -1711,6 +1725,10 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
 
 - (NSInteger)gridActionCountForTrigger:(NSString *)key {
     return (NSInteger)[[RCConfigManager sharedManager] actionsForTrigger:key].count;
+}
+
+- (NSString *)gridOffIntegrationForTrigger:(NSString *)key {
+    return [[RCConfigManager sharedManager] offIntegrationNameForTrigger:key];
 }
 
 - (BOOL)gridTriggerIsFavorite:(NSString *)key {

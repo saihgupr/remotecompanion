@@ -16,6 +16,7 @@
 - (NSString *)gridIconForTrigger:(NSString *)key;
 - (UIImage *)gridImageForTrigger:(NSString *)key; // an app's icon, or nil
 - (NSInteger)gridActionCountForTrigger:(NSString *)key;
+- (NSString *)gridOffIntegrationForTrigger:(NSString *)key; // "MQTT" when its integration is switched off, else nil
 - (BOOL)gridTriggerIsFavorite:(NSString *)key;
 - (BOOL)gridCanDeleteTrigger:(NSString *)key;
 - (void)gridOpenTrigger:(NSString *)key;

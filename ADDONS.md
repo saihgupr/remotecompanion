@@ -19,7 +19,7 @@ and RemoteCompanion talk to each other, and has recipes for the usual patterns.
 - [Rules that apply everywhere](#rules-that-apply-everywhere)
 - [Add-on](#add-on) · [Actions](#actions) · [Options](#options) · [Input](#input) · [Steps](#steps)
 - [Variables](#variables-and-templates) · [Banners](#banners) · [Conditions](#conditions)
-- [Events and triggers](#events-and-triggers) · [Settings](#settings)
+- [Events and triggers](#events-and-triggers) · [Settings](#settings) · [Kept variables](#kept-variables)
 - [Running an action](#running-an-action) · [Commands](#commands) · [Limits](#limits)
 - [Validation](#validation) · [Versioning](#versioning) · [Security](#security)
 
@@ -145,6 +145,7 @@ These are the keys at the top of the file.
 | `conditions` | | list | See [Conditions](#conditions). |
 | `events` | | list | See [Events and triggers](#events-and-triggers). |
 | `settings` | | list | See [Settings](#settings). |
+| `variables` | | list | The variables the add-on keeps, as names or name starts (`"mytweak_"`). See [Kept variables](#kept-variables). |
 
 ## Actions
 
@@ -402,7 +403,11 @@ to a preference, so people can set the tweak up without leaving RemoteCompanion.
     "domain": "com.example.mytweak", "key": "limit", "default": 80 },
   { "id": "mode", "title": "Mode", "type": "choice", "default": "auto",
     "choices": [ { "value": "auto", "label": "Automatic" }, { "value": "manual", "label": "Manual" } ],
-    "domain": "com.example.mytweak", "key": "mode" }
+    "domain": "com.example.mytweak", "key": "mode" },
+  { "id": "rooms", "title": "Rooms", "type": "list",
+    "fields": [ { "id": "name", "title": "Name", "type": "text" },
+                { "id": "level", "title": "Level", "type": "number", "min": 0, "max": 100, "unit": "%", "default": 50 } ],
+    "domain": "com.example.mytweak", "key": "rooms" }
 ]
 ```
 
@@ -410,19 +415,46 @@ to a preference, so people can set the tweak up without leaving RemoteCompanion.
 |---|---|---|
 | `id` | required | Lowercase letters, digits and `_`, starting with a letter; unique in the add-on. |
 | `title` | required | The row's name. |
-| `type` | required | `switch` (a boolean), `choice` (one of `choices`), `number` (a stepper) or `text` (one line). |
+| `type` | required | `switch` (a boolean), `choice` (one of `choices`), `number` (a stepper, or typed with the number pad), `text` (one line) or `list` (items with the controls in `fields`). |
 | `domain`, `key` | required | The preference. `com.apple.springboard` is SpringBoard's own preferences; any other domain is written through the preferences system as mobile, the same way a `defaults` step writes it. |
-| `default` | | What shows while the preference isn't set: `true` or `false`, a choice's `value`, a number or text. It isn't written until someone changes the setting. |
+| `default` | | What shows while the preference isn't set: `true` or `false`, a choice's `value`, a number, text, or for a list, a list of items. It isn't written until someone changes the setting. |
 | `note` | | A line shown under the title. |
 | `notify` | | Posted after every change, so the tweak knows to reread its settings. |
 | `choices` | required for `choice` | `[ { "value", "label" } ]`. `value` (text or a number) is what's written, and `label` is what's shown. Values must be unique. |
 | `min`, `max`, `step`, `unit` | | For `number`: the allowed range (a value outside it is refused), the stepper's step (default 1), and a unit shown after the value. Whole numbers are written as whole numbers. |
+| `fields` | required for `list` | The controls of each item: `[ { "id", "title", "type", ... } ]`, each a `switch`, `choice`, `number` or `text` with the same keys as a setting except `domain`, `key` and `notify`. A field's `default` fills a new item. |
+| `suggestions`, `suggestionsFile` | | For `text` (a setting or a list's field): names to pick from instead of typing. `suggestions` is a list in the file; `suggestionsFile` is the path of a JSON file holding a list of names, which the tweak keeps up to date (read each time the list opens). With either, the row opens a list with a search field, and anything not in it can still be used as typed. |
+
+A list setting opens its own page: one row per item (named by its first field), Add, swipe to
+delete, and Edit to reorder. Each item opens an editor with a control per field. The preference
+holds a list of dictionaries, `[ { "<field id>": value } ]`, every field filled in. On the
+command line a list is set as JSON: `addons set mytweak rooms [{"name": "Kitchen", "level": 80}]`
+(a missing field gets its default).
 
 RemoteCompanion reads and writes these preferences itself, in SpringBoard. The add-on's tweak only
 reads them, and listens for `notify` if it wants to know about changes. Settings are also available
 as commands: `addons settings <id>` gives the current values as JSON, and
 `addons set <id> <setting> <value>` changes one. A switch takes `on` or `off`, and a choice takes
 its value or its label.
+
+A tweak or app can open its add-on's page with the link `remotecompanion://addon?id=<id>`, and
+open one of its settings there with `&setting=<setting id>` (as tapping its row does).
+
+## Kept variables
+
+A tweak that keeps its state in RemoteCompanion variables (through `var set`, or the HTTP API) can
+list them, so they don't crowd the person's own:
+
+```json
+"variables": [ "mytweak_" ]
+```
+
+Each entry is a variable name, or the start of names (`mytweak_` covers `mytweak_token`,
+`mytweak_state`...). Letters, digits and `_`. Settings > Variables leaves these out and shows a
+row for the add-on instead, which opens its page; the add-on's page lists them with their values.
+In the variable pickers (the action editors, the Web UI) they're grouped under the add-on's name,
+after the person's own. They work everywhere as usual (`{mytweak_token}`, `var get`,
+`/api/variables`).
 
 ## Running an action
 
