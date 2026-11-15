@@ -16,6 +16,9 @@
 #include <ifaddrs.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
 
 @interface RCSettingsViewController () <UIDocumentPickerDelegate>
 @property (nonatomic, strong) UITableView *tableView;
@@ -468,6 +471,7 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     // The share sheet renders app icons for AirDrop and other activities, which
     // crashes IconServices on this iPad. A document picker saves the file without
     // building those icons, and Save to Files is the usual destination anyway.
+    // (The Backup section footer already says the file holds saved passwords and tokens.)
     UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForExportingURLs:@[fileURL] asCopy:YES];
     picker.modalPresentationStyle = UIModalPresentationFormSheet;
     [self presentViewController:picker animated:YES completion:nil];

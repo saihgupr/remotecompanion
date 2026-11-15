@@ -18,6 +18,7 @@ All notable changes to this project will be documented in this file.
 - **Compact New Trigger menu**: Settings > Advanced Settings > Layout has a New Trigger row, List or Compact. Compact shows the trigger types as tiles with the icons their triggers use, the same category bar as Triggers, and a check on types already added; a search stays within the picked category. Choosing a search result now opens its setup screen instead of dropping the tap (#146).
 - **Banner categories**: Settings > Banners now has the same category bar as Select Action, with All, Enabled and a chip per category. A category chip shows all of its actions whether checked or not, Enabled shows only the checked ones, and each chip has its category icon; the bar hides while scrolling down (#156).
 - **Standard iOS notifications**: `notify` now posts a real notification as the RemoteCompanion app, with a banner, a sound and an entry in Notification Center, whether or not the app is running. The Notification action gets an editor for the title, message, a symbol or app icon, Time Sensitive, Remove After, up to four buttons, and Wait for Response, whose answer becomes `{notify_response}`. Notification Tap triggers run from a tap or a button, and `notify clear` removes them (#153).
+- **Action Sequence Edited trigger**: fires when any trigger's action sequence changes, including this trigger's own, from the app or the Web UI. Add, remove, reorder or edit an action and it runs, with an optional debounce (15 seconds by default, Off, 5, 10, 30 seconds, 1, 2 or 5 minutes) that waits until the edits stop so a run of changes runs the sequence once.
 
 ### Changed
 - **MCP server: one gesture tool**: tap, hold, swipe, drag, two-finger swipe and pinch are now one `gesture` tool with a `kind`, so the server lists 21 tools instead of 26 and sends about 650 fewer tokens of tool schemas.
@@ -26,6 +27,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - **Clear Notifications with a full `.txt` list**: `rc clear notification FILE.txt` sends the command in one write, so a long list like the 66-line `CleanNotifications.txt` is no longer cut at 1 KB and silently ignored.
+- **Backup privacy warning**: the README Backup section, the app's export confirmation, and the Web UI export toast now say the configuration file may contain saved credentials and should be kept private.
+- **Imported Keyboard Maestro actions show their macro names**: importing a configuration now merges the saved macro name map, so a `km trigger <uuid>` action reads as "KM: Macro Name" instead of a bare UUID on the other device.
 
 ## [4.5.0] - 2026-11-11
 

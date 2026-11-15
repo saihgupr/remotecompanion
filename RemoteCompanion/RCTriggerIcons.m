@@ -356,6 +356,7 @@ UIImage *RCTriggerCategoryIcon(NSString *sectionTitle) {
             @"App Exit Triggers": @[@"xmark.app.fill", @"xmark.square.fill"],
             @"Scheduled Triggers": @[@"clock.fill"],
             @"MQTT Subscription Triggers": @[@"antenna.radiowaves.left.and.right"],
+            @"Configuration": @[@"square.and.pencil", @"pencil"],
             @"Add-on Triggers": @[@"puzzlepiece.extension.fill", @"puzzlepiece.fill"],
             // The New Trigger menu's own sections
             @"Nearby": @[@"dot.radiowaves.left.and.right"],

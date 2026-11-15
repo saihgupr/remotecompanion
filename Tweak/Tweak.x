@@ -2307,7 +2307,8 @@ static NSString *get_human_name_for_trigger(NSString *key, NSDictionary *trigger
             @"trigger_bottom_swipe_up_center": @"Bottom Swipe Up (Center)",
             @"trigger_bottom_swipe_up_right": @"Bottom Swipe Up (Right)",
             @"trigger_statusbar_two_finger_swipe_down": @"2-Finger Top Slide Down",
-            @"trigger_bottom_two_finger_swipe_up": @"2-Finger Bottom Slide Up"
+            @"trigger_bottom_two_finger_swipe_up": @"2-Finger Bottom Slide Up",
+            @"trigger_sequence_edited": @"Action Sequence Edited"
         };
     });
     
@@ -2341,6 +2342,72 @@ static NSString *get_human_name_for_trigger(NSString *key, NSDictionary *trigger
 
 static void RC_RefreshAXTriplePress(void);
 static BOOL RC_RunAccessibilityShortcut(void);
+
+// "Action Sequence Edited" (trigger_sequence_edited): fires when the actions of a trigger change
+// in the app or the web UI, since both save this same config. Its own actions count too, so
+// changing this trigger's sequence also runs it.
+void RCExecuteTrigger(NSString *triggerKey);
+#define kSequenceEditedTrigger @"trigger_sequence_edited"
+
+static NSDictionary *g_actionSequenceSnapshot = nil; // trigger key -> actions, nil until the first config
+static NSUInteger g_sequenceEditedGeneration = 0;    // main queue only; a newer edit makes an old timer a no-op
+
+static NSDictionary *rc_action_sequences(NSDictionary *config) {
+    NSMutableDictionary *sequences = [NSMutableDictionary dictionary];
+    id triggers = config[@"triggers"];
+    if (![triggers isKindOfClass:[NSDictionary class]]) return sequences;
+    for (NSString *key in (NSDictionary *)triggers) {
+        id trigger = ((NSDictionary *)triggers)[key];
+        NSArray *actions = [trigger isKindOfClass:[NSDictionary class]] ? trigger[@"actions"] : nil;
+        if ([actions isKindOfClass:[NSArray class]] && actions.count > 0) sequences[key] = actions;
+    }
+    return sequences;
+}
+
+static BOOL rc_action_sequences_changed(NSDictionary *before, NSDictionary *after) {
+    if (before.count != after.count) return YES;
+    for (NSString *key in after) {
+        NSArray *old = before[key];
+        if (!old || ![old isEqualToArray:(NSArray *)after[key]]) return YES;
+    }
+    return NO;
+}
+
+// On the main queue: reads the trigger's current debounce setting. A debounce waits for the edits
+// to stop, so a run of edits runs the sequence once, after the last one.
+static void rc_fire_sequence_edited_trigger(void) {
+    NSUInteger generation = ++g_sequenceEditedGeneration;
+    NSDictionary *triggers = g_triggerConfig[@"triggers"];
+    NSDictionary *trigger = [triggers isKindOfClass:[NSDictionary class]] ? (NSDictionary *)triggers[kSequenceEditedTrigger] : nil;
+    if (![trigger isKindOfClass:[NSDictionary class]]) return;
+    if (![trigger[@"enabled"] boolValue]) return;
+    NSArray *actions = trigger[@"actions"];
+    if (![actions isKindOfClass:[NSArray class]] || actions.count == 0) return;
+
+    double debounce = [trigger[@"debounce"] doubleValue];
+    if (debounce <= 0) {
+        RCExecuteTrigger(kSequenceEditedTrigger);
+        return;
+    }
+    debounce = MIN(MAX(debounce, 0.0), 3600.0);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(debounce * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (generation != g_sequenceEditedGeneration) return; // another edit came in; its timer fires instead
+        RCExecuteTrigger(kSequenceEditedTrigger);
+    });
+}
+
+// Compares the actions of every trigger with the last config seen, and reports an edit. The first
+// config after the tweak loads only sets the baseline, so a respring does not fire the trigger.
+static void rc_note_action_sequence_edit(NSDictionary *config) {
+    NSDictionary *sequences = rc_action_sequences(config);
+    BOOL changed = NO;
+    @synchronized (rc_trigger_config_lock()) {
+        changed = g_actionSequenceSnapshot && rc_action_sequences_changed(g_actionSequenceSnapshot, sequences);
+        g_actionSequenceSnapshot = sequences;
+    }
+    if (!changed) return;
+    dispatch_async(dispatch_get_main_queue(), ^{ rc_fire_sequence_edited_trigger(); });
+}
 
 static void load_trigger_config() {
     @autoreleasepool {
@@ -2381,6 +2448,8 @@ static void load_trigger_config() {
                 SRLogMin(@"Loaded trigger config from %@: triggers=%lu",
                       path,
                       (unsigned long)[newConfig[@"triggers"] count]);
+                // Another editor (the app or the web UI) may have changed an action sequence
+                rc_note_action_sequence_edit(newConfig);
                 // A triple press binding may have changed: tell iOS whether its own shortcut is on
                 dispatch_async(dispatch_get_main_queue(), ^{ RC_RefreshAXTriplePress(); });
             } else {
@@ -2393,6 +2462,24 @@ static void load_trigger_config() {
             loggedMissing = YES;
         }
     }
+}
+
+// The Settings > Backup > Export Configuration JSON, for "rc export" (the app writes the same
+// dictionary with NSJSONWritingPrettyPrinted)
+static NSString *rc_export_config_json(void) {
+    load_trigger_config();
+    NSDictionary *config = nil;
+    @synchronized (rc_trigger_config_lock()) { config = [g_triggerConfig copy]; }
+    if (![config isKindOfClass:[NSDictionary class]]) return @"Error: No configuration found\n";
+    if (![NSJSONSerialization isValidJSONObject:config]) return @"Error: Configuration cannot be exported as JSON\n";
+    NSError *error = nil;
+    NSData *data = [NSJSONSerialization dataWithJSONObject:config options:NSJSONWritingPrettyPrinted error:&error];
+    NSString *json = data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
+    if (!json) {
+        SRLogMin(@"Export config error: %@", error);
+        return @"Error: Could not export configuration\n";
+    }
+    return json;
 }
 
 // Read a file on behalf of the app. The app is sandboxed and cannot read picked
@@ -13931,6 +14018,8 @@ static NSString *handle_command(NSString *cmd) {
         return rc_backup_json();
     } else if ([cleanCmd isEqualToString:@"restore backup"]) {
         return rc_restore_backup();
+    } else if ([cleanCmd isEqualToString:@"export config"] || [cleanCmd hasPrefix:@"export config "]) {
+        return rc_export_config_json();
     } else if ([cleanCmd hasPrefix:@"read file "]) {
         return rc_read_file_base64([[cleanCmd substringFromIndex:10] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
     } else if ([cleanCmd isEqualToString:@"list-triggers"]) {
@@ -14631,6 +14720,7 @@ static void start_web_server() {
                                                         incoming[@"allowDirectRootHelper"] = g_triggerConfig[@"allowDirectRootHelper"] ?: @NO;
                                                     }
                                                     rc_set_trigger_config([incoming copy]);
+                                                    rc_note_action_sequence_edit(incoming);
                                                     save_trigger_config();
                                                     responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: 12\r\n\r\n{\"ok\": true}", cors];
                                                 }
@@ -15245,6 +15335,7 @@ static void start_web_server() {
                                     @{@"command": @"nav <panel>", @"desc": @"Companion: Open app panel (triggers, settings, ha, km, mqtt, add)"},
                                     @{@"command": @"backup config", @"desc": @"Companion: Save everything (settings, integrations, add-ons) as one backup JSON"},
                                     @{@"command": @"restore backup", @"desc": @"Companion: Apply the full backup left at /var/mobile/Documents/rc_restore.json"},
+                                    @{@"command": @"export config", @"desc": @"Companion: Export the configuration as JSON"},
                                     @{@"command": @"kill <bundleId>", @"desc": @"System: Force-close an application"},
                                     @{@"command": @"kill current", @"desc": @"System: Force-close the currently focused app"},
                                     @{@"command": @"respring", @"desc": @"System: Restart SpringBoard"},

@@ -51,6 +51,7 @@
 #import <objc/runtime.h>
 #import "RCFocusTriggerViewController.h"
 #import "RCControlCenterTriggerViewController.h"
+#import "RCSequenceEditedTriggerViewController.h"
 
 #define kSimulateNotificationPrefix "com.pizzaman.rc.simulate."
 
@@ -1562,7 +1563,8 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
                           [_triggerKey hasPrefix:@"app_launch_"] ||
                           [_triggerKey hasPrefix:@"app_exit_"] ||
                           [_triggerKey hasPrefix:@"notiftap_"] ||
-                          [_triggerKey hasPrefix:@"notifbtn_"];
+                          [_triggerKey hasPrefix:@"notifbtn_"] ||
+                          [_triggerKey isEqualToString:@"trigger_sequence_edited"];
     
     if (isConfigurable) {
         UIBarButtonItem *settingsButton = [[UIBarButtonItem alloc] 
@@ -1820,6 +1822,10 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
     UIViewController *vc = nil;
     if ([_triggerKey hasPrefix:@"trigger_device_battery_"]) {
         [self.navigationController pushViewController:[[RCBatteryTriggerViewController alloc] initWithTriggerKey:_triggerKey] animated:YES];
+        return;
+    }
+    if ([_triggerKey isEqualToString:@"trigger_sequence_edited"]) {
+        [self.navigationController pushViewController:[[RCSequenceEditedTriggerViewController alloc] initWithTriggerKey:_triggerKey] animated:YES];
         return;
     }
     

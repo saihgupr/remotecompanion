@@ -420,7 +420,9 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
             @"trigger_carplay_connect", @"trigger_carplay_disconnect",
             @"trigger_device_findmy_sound",
             @"trigger_media_play", @"trigger_media_pause", @"trigger_media_track_change",
-            @"trigger_device_call_incoming", @"trigger_device_call_start", @"trigger_device_call_end"
+            @"trigger_device_call_incoming", @"trigger_device_call_start", @"trigger_device_call_end",
+            // Configuration
+            @"trigger_sequence_edited"
         ];
     });
     return keys;
@@ -1205,6 +1207,7 @@ static NSString *RCActionCommand(id item) {
         @"trigger_device_call_incoming": @"Incoming Call",
         @"trigger_device_call_start": @"Call Started",
         @"trigger_device_call_end": @"Call Ended",
+        @"trigger_sequence_edited": @"Action Sequence Edited",
         @"volume_up_hold": @"Volume Up Hold",
         @"volume_down_hold": @"Volume Down Hold",
         @"volume_both_press": @"Volume Up + Down (Both)",
@@ -1595,6 +1598,24 @@ static NSString *RCActionCommand(id item) {
             }
             [(NSDictionary *)value enumerateKeysAndObjectsUsingBlock:^(id triggerKey, id trigger, BOOL *stop) {
                 currentTriggers[triggerKey] = [trigger mutableCopy];
+            }];
+            continue;
+        }
+
+        // Keyboard Maestro actions store the macro's UUID, so the name map is what makes an
+        // imported action read as "KM: Macro Name" instead of a bare UUID. It is display-only
+        // and both devices' entries stay useful, so keep the local names and add the rest.
+        if ([key isEqualToString:@"kmNamesByUuid"]) {
+            if (![value isKindOfClass:[NSDictionary class]]) continue;
+            NSMutableDictionary *currentNames = _config[@"kmNamesByUuid"];
+            if (![currentNames isKindOfClass:[NSMutableDictionary class]]) {
+                currentNames = currentNames ? [currentNames mutableCopy] : [NSMutableDictionary dictionary];
+                _config[@"kmNamesByUuid"] = currentNames;
+            }
+            [(NSDictionary *)value enumerateKeysAndObjectsUsingBlock:^(id nameKey, id name, BOOL *stop) {
+                if ([nameKey isKindOfClass:[NSString class]] && [name isKindOfClass:[NSString class]] && [(NSString *)name length] > 0) {
+                    currentNames[nameKey] = [name copy];
+                }
             }];
             continue;
         }

@@ -183,6 +183,15 @@ Access the desktop-class automation hub at `http://[DEVICE_IP]:8080` from any co
 - `rc button triggers pause [minutes]` / `rc button triggers resume` - Temporarily return buttons and gestures to stock behavior.
 - `rc nfc scanner [pause|resume|toggle]` - Pause or resume NFC tag scanning.
 
+### Backup
+- `rc export [path]` - Export the same JSON as Settings > Backup > Export Configuration. The file lands wherever `rc` runs, on your computer or on the device over SSH.
+  ```bash
+  rc export                    # ./rc_config_20261111_0716.json
+  rc export ~/Desktop          # ~/Desktop/rc_config_20261111_0716.json
+  rc export ~/Desktop/rc.json  # ~/Desktop/rc.json, overwrites if it exists
+  ```
+  The export includes any saved passwords and tokens in plain text (Home Assistant, Keyboard Maestro, MQTT, SSH, and the Web UI API). Only the integrations you have set up are included. Keep backups private and treat them like passwords.
+
 <details>
 <summary><b>Hardware Triggers Reference (Tweak App)</b></summary>
 
@@ -214,6 +223,7 @@ Configure these in the `RemoteCompanion` app for custom action sequences. Tip: *
   - **Focus**: Run when a chosen Focus, or any Focus, turns on or off.
   - **Find My Sound**: Run when Play Sound is sent to the phone from Find My or iCloud.com.
   - **Rotation**: Rotated to Landscape / Portrait, after a half-second settle.
+  - **Action Sequence Edited**: Run when any trigger's actions change, including this trigger's own, with an optional debounce (15 seconds by default) so a run of edits runs it once.
 
 </details>
 
