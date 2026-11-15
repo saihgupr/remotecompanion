@@ -36,6 +36,10 @@
     
     // Notification actions post as this app; show them while it's open too
     [UNUserNotificationCenter currentNotificationCenter].delegate = self;
+    // Ask at launch, not only in the action editor: `rc notify` and Notification
+    // actions post from the tweak, so anyone who never opens that editor would
+    // never be asked and iOS would drop every notification without a word.
+    [RCAppDelegate requestNotificationPermission];
 
     @try {
         self.window = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];

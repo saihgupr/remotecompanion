@@ -26,6 +26,7 @@ All notable changes to this project will be documented in this file.
 - **Tighter bar gesture zones**: the status bar and bottom bar gesture areas now cover 25pt from the edge instead of 50pt, so a touch has to land closer to the bar. Two-finger slides keep their wider 75pt landing zone.
 
 ### Fixed
+- **Notifications ask for permission on first launch**: the app now requests notification permission when it opens instead of only inside the notification action editor, so a fresh install can post Notification actions and `rc notify` straight away.
 - **Clear Notifications with a full `.txt` list**: `rc clear notification FILE.txt` sends the command in one write, so a long list like the 66-line `CleanNotifications.txt` is no longer cut at 1 KB and silently ignored.
 - **Backup privacy warning**: the README Backup section, the app's export confirmation, and the Web UI export toast now say the configuration file may contain saved credentials and should be kept private.
 - **Imported Keyboard Maestro actions show their macro names**: importing a configuration now merges the saved macro name map, so a `km trigger <uuid>` action reads as "KM: Macro Name" instead of a bare UUID on the other device.

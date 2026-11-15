@@ -647,6 +647,15 @@ If you experience the "Updating Cards" screen or other conflicts with Apple Pay 
 
 This ensures the tweak does not attempt to access the NFC controller on wake, resolving conflicts with system services.
 
+### Notifications Not Appearing
+If a Notification action or `rc notify` posts nothing, and Settings > Notifications > RemoteCompanion already shows notifications as allowed, iOS is likely holding a permission left over from an earlier install. Reinstalling the app resets it:
+
+1. Remove RemoteCompanion in Sileo or Zebra, or run `sudo dpkg -r com.saihgupr.remotecompanion`.
+2. Respring.
+3. Install it again and open the app once, so it can ask for notification permission.
+
+`rc notify` prints `OK` as soon as the command is accepted, before iOS has had a chance to drop it, so a missing banner is the only sign that this has happened.
+
 ### iOS 14 Architecture Compatibility
 RemoteCompanion ships as fat universal binaries containing both `arm64` and `arm64e` slices:
 - **A12 and newer (iPhone XS, 11, 12, etc.)**: Runs the native `arm64e` slice across iOS 14, 15, and 16+. On iOS 14, binaries are compiled targeting iOS 14.0 (`TARGET := iphone:clang:latest:14.0`) to match the iOS 14+ `arm64e` ABI v2 standard.
