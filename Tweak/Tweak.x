@@ -10794,6 +10794,7 @@ static NSArray *RCCommandHelpSections(void) {
             @[@"proximity [on|off]", @"Read or force the proximity sensor"],
             @[@"nfc scanner [pause|resume|toggle]", @"Pause or resume NFC scanning"],
             @[@"screenrecord [toggle|start|stop|status]", @"Screen recording"],
+            @[@"timer <duration|stop|pause|resume|status>", @"Start, pause, resume, stop or check the Clock timer"],
             @[@"camera [mode] [zoom] [front] [flash]", @"photo, video, portrait, slomo, timelapse"],
             @[@"camera shutter | snap", @"Press the Camera shutter"],
             @[@"camera record-toggle", @"Start or stop video recording"],
@@ -10814,6 +10815,7 @@ static NSArray *RCCommandHelpSections(void) {
             @[@"key <hex>", @"Press a HID key (0x28 is Return)"],
             @[@"toast \"Title\" [\"Subtitle\"] [\"Symbol\"]", @"Show a HUD toast"],
             @[@"notify \"Title\" [\"Body\"] [--urgent]", @"Post a notification"],
+            @[@"clear-notifications", @"Dismiss notifications"],
         ]},
         @{@"title": @"Connectivity", @"rows": @[
             @[@"wifi [on|off|toggle|status]", @"Wi-Fi"],
