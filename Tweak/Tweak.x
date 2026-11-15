@@ -35,6 +35,7 @@
 #import "RCTriggerAppExclusions.h"
 #import "RCAddOns.h"
 #import <CoreFoundation/CoreFoundation.h>
+#import <Security/Security.h>
 #import <CoreLocation/CoreLocation.h>
 #import <objc/message.h>
 #import "RCQuickActions.h"
@@ -4170,9 +4171,64 @@ static BOOL rc_variable_delete(NSString *name) {
 // How a value goes into text: as it is, single-quoted for a shell, or only {round} filled
 typedef NS_ENUM(NSInteger, RCFillMode) { RCFillPlain, RCFillShell, RCFillRoundOnly, RCFillQuoted };
 
-// One shell word whatever the value holds: 'it'\''s' for it's
-static NSString *rc_shell_quoted(NSString *value) {
-    return [NSString stringWithFormat:@"'%@'", [value stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"]];
+static NSString *rc_sh_quote(NSString *val);
+
+// Where a position in a shell command is: outside quotes, inside '...' or inside "...". A $(...) or
+// `...` starts a command of its own, unquoted again, even inside "...".
+typedef NS_ENUM(NSInteger, RCShellQuote) { RCShellUnquoted, RCShellSingle, RCShellDouble };
+
+static RCShellQuote rc_shell_quote_at(NSString *text, NSUInteger position) {
+    RCShellQuote state = RCShellUnquoted;
+    RCShellQuote outer[16]; // the state around each $(...) or `...` we're in
+    unichar closer[16];
+    int parens[16]; // ( ... ) inside a $(...), so its ) isn't taken for the end
+    int depth = 0;
+    for (NSUInteger i = 0; i < position && i < text.length; i++) {
+        unichar c = [text characterAtIndex:i];
+        unichar next = i + 1 < text.length ? [text characterAtIndex:i + 1] : 0;
+        if (state == RCShellSingle) {
+            if (c == '\'') state = RCShellUnquoted;
+        } else if (c == '\\') {
+            i++; // the next character is taken as it is (in "..." too, for the ones that matter)
+        } else if (depth > 0 && state == RCShellUnquoted && closer[depth - 1] == ')' && c == '(') {
+            parens[depth - 1]++;
+        } else if (depth > 0 && state == RCShellUnquoted && c == ')' && closer[depth - 1] == ')' && parens[depth - 1] > 0) {
+            parens[depth - 1]--;
+        } else if (depth > 0 && c == closer[depth - 1] && state == RCShellUnquoted) {
+            depth--;
+            state = outer[depth];
+        } else if ((c == '$' && next == '(') || c == '`') {
+            if (depth == 16) return RCShellUnquoted; // too deep to follow: quote as a word of its own
+            outer[depth] = state;
+            closer[depth] = c == '`' ? '`' : ')';
+            parens[depth] = 0;
+            depth++;
+            state = RCShellUnquoted;
+            if (c == '$') i++;
+        } else if (c == '\'' && state == RCShellUnquoted) {
+            state = RCShellSingle;
+        } else if (c == '"') {
+            state = state == RCShellDouble ? RCShellUnquoted : RCShellDouble;
+        }
+    }
+    return state;
+}
+
+// A value as literal text at that place in a shell command, whatever it holds. Outside quotes it
+// becomes one quoted word ('it'\''s'); inside '...' a ' in it closes and reopens the quotes; inside
+// "..." the characters the shell still reads there ($ ` " \) are escaped, so $(...) can't run.
+static NSString *rc_shell_literal(NSString *value, RCShellQuote quote) {
+    if (quote == RCShellSingle) return [value stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"];
+    if (quote == RCShellDouble) {
+        NSMutableString *escaped = [NSMutableString stringWithCapacity:value.length];
+        for (NSUInteger i = 0; i < value.length; i++) {
+            unichar c = [value characterAtIndex:i];
+            if (c == '$' || c == '`' || c == '"' || c == '\\') [escaped appendString:@"\\"];
+            [escaped appendFormat:@"%C", c];
+        }
+        return escaped;
+    }
+    return rc_sh_quote(value);
 }
 
 static NSString *rc_fill_placeholders_mode(NSString *text, RCFillMode mode);
@@ -4184,7 +4240,7 @@ static NSString *rc_fill_placeholders(NSString *text) {
 }
 
 // An action's command with its placeholders filled. In a Terminal command (exec, root, sudo) each
-// value is single-quoted, so text in it can't run as a command of its own. In Lua, whose tables
+// value is quoted for where it sits, so text in it can't run as a command of its own. In Lua, whose tables
 // use braces too, only {round} is filled, as before variables.
 static NSString *rc_fill_action(NSString *text) {
     if (![text isKindOfClass:[NSString class]]) return text;
@@ -4237,7 +4293,7 @@ static NSString *rc_fill_placeholders_mode(NSString *text, RCFillMode mode) {
             value = rc_variable_get(name);
         }
         if (!value) return;
-        if (mode == RCFillShell) value = rc_shell_quoted(value);
+        if (mode == RCFillShell) value = rc_shell_literal(value, rc_shell_quote_at(text, match.range.location));
         else if (mode == RCFillQuoted) value = [value stringByReplacingOccurrencesOfString:@"\"" withString:@"'"];
         [filled appendString:[text substringWithRange:NSMakeRange(last, match.range.location - last)]];
         [filled appendString:value];
@@ -4791,9 +4847,23 @@ static BOOL rc_web_client_allowed(const struct sockaddr_storage *addr) {
     return wifi && [networks isKindOfClass:[NSArray class]] && [networks containsObject:wifi];
 }
 
-BOOL RCIsPrivilegedCommand(NSString *cmd) {
+static BOOL rc_value_needs_token(id value, int depth);
+
+// How many triggers deep "trigger NAME" is followed. A longer chain, or triggers that run each
+// other in a loop, counts as needing the token.
+#define RC_TRIGGER_CHAIN_LIMIT 8
+
+static BOOL rc_command_needs_token(NSString *cmd, int depth) {
     if (!cmd || ![cmd isKindOfClass:[NSString class]]) return NO;
     NSString *trimmed = [cmd stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    // "trigger NAME" runs that trigger's actions, so it needs the token when they do
+    if ([trimmed hasPrefix:@"trigger "]) {
+        if (depth >= RC_TRIGGER_CHAIN_LIMIT) return YES;
+        NSString *key = [[trimmed substringFromIndex:8] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        id triggers = g_triggerConfig[@"triggers"];
+        id trigger = [triggers isKindOfClass:[NSDictionary class]] ? ((NSDictionary *)triggers)[key] : nil;
+        return [trigger isKindOfClass:[NSDictionary class]] && rc_value_needs_token(((NSDictionary *)trigger)[@"actions"], depth + 1);
+    }
     return [trimmed hasPrefix:@"root "] || [trimmed isEqualToString:@"root"] ||
            [trimmed hasPrefix:@"sudo "] || [trimmed isEqualToString:@"sudo"] ||
            [trimmed hasPrefix:@"exec "] || [trimmed isEqualToString:@"exec"] ||
@@ -4803,11 +4873,123 @@ BOOL RCIsPrivilegedCommand(NSString *cmd) {
            [trimmed hasPrefix:@"rc-run "] ||
            [trimmed hasPrefix:@"tap "] || [trimmed hasPrefix:@"hold "] || [trimmed hasPrefix:@"swipe "] ||
            [trimmed hasPrefix:@"gesture "] ||
-           [trimmed hasPrefix:@"screen "]; // a screenshot shows whatever is on screen
+           // A screenshot shows whatever is on screen
+           [trimmed hasPrefix:@"screen "] ||
+           // Unlocking with a passcode (or the saved one) opens the iPhone; "unlock" and
+           // "lock-toggle" alone only wake it to the passcode screen and stay open.
+           [trimmed hasPrefix:@"unlock "] || [trimmed hasPrefix:@"lock-toggle "] || [trimmed hasPrefix:@"lock toggle "] ||
+           [trimmed hasPrefix:@"unlock-passcode"] ||
+           // Variables go into Terminal commands, and can hold anything (names, codes, output)
+           [trimmed isEqualToString:@"var"] || [trimmed hasPrefix:@"var "];
+}
+
+// Whether a value holds, anywhere inside it, a command that needs the API token: an action, a
+// Set Variable or If command, a block nested in another, a trigger run by "trigger NAME".
+static BOOL rc_value_needs_token(id value, int depth) {
+    if ([value isKindOfClass:[NSString class]]) return rc_command_needs_token(value, depth);
+    if ([value isKindOfClass:[NSDictionary class]]) value = [(NSDictionary *)value allValues];
+    if ([value isKindOfClass:[NSArray class]]) {
+        for (id item in (NSArray *)value) {
+            if (rc_value_needs_token(item, depth)) return YES;
+        }
+    }
+    return NO;
+}
+
+BOOL RCIsPrivilegedCommand(NSString *cmd) {
+    return rc_command_needs_token(cmd, 0);
 }
 
 static BOOL rc_is_privileged_command(NSString *cmd) {
     return RCIsPrivilegedCommand(cmd);
+}
+
+// Passcodes in actions ("unlock 1234", "lock-toggle 1234"). Other devices without the token, and
+// run records, get them hidden as "unlock ••••••••"; "saved" and a bare "unlock" stay as they are.
+static NSString *const kRCHiddenPasscode = @"••••••••";
+
+// The command's verb with its trailing space ("unlock ") and passcode, when it holds one
+static BOOL rc_passcode_in_command(NSString *cmd, NSString **outVerb, NSString **outPasscode) {
+    if (![cmd isKindOfClass:[NSString class]]) return NO;
+    NSString *trimmed = [cmd stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    for (NSString *verb in @[@"unlock ", @"lock-toggle ", @"lock toggle "]) {
+        if (![trimmed hasPrefix:verb]) continue;
+        NSString *passcode = [[trimmed substringFromIndex:verb.length] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        if (!passcode.length || [passcode isEqualToString:@"saved"]) return NO;
+        if (outVerb) *outVerb = verb;
+        if (outPasscode) *outPasscode = passcode;
+        return YES;
+    }
+    return NO;
+}
+
+// A copy of a value (an action, a list of them, a whole config) with its passcodes hidden
+static id rc_hide_passcodes(id value) {
+    NSString *verb = nil;
+    if ([value isKindOfClass:[NSString class]]) {
+        return rc_passcode_in_command(value, &verb, NULL) ? [verb stringByAppendingString:kRCHiddenPasscode] : value;
+    }
+    if ([value isKindOfClass:[NSArray class]]) {
+        NSMutableArray *copy = [NSMutableArray arrayWithCapacity:[value count]];
+        for (id item in (NSArray *)value) [copy addObject:rc_hide_passcodes(item)];
+        return copy;
+    }
+    if ([value isKindOfClass:[NSDictionary class]]) {
+        NSMutableDictionary *copy = [NSMutableDictionary dictionaryWithCapacity:[value count]];
+        for (id key in (NSDictionary *)value) copy[key] = rc_hide_passcodes(((NSDictionary *)value)[key]);
+        return copy;
+    }
+    return value;
+}
+
+static void rc_collect_passcodes(id value, NSMutableSet *found) {
+    NSString *passcode = nil;
+    if ([value isKindOfClass:[NSString class]]) {
+        if (rc_passcode_in_command(value, NULL, &passcode) && ![passcode isEqualToString:kRCHiddenPasscode]) [found addObject:passcode];
+    } else if ([value isKindOfClass:[NSArray class]] || [value isKindOfClass:[NSDictionary class]]) {
+        for (id item in ([value isKindOfClass:[NSDictionary class]] ? [value allValues] : value)) rc_collect_passcodes(item, found);
+    }
+}
+
+// A config saved back from a device that saw it hidden: each "unlock ••••••••" gets the passcode
+// of the action at the same place in the saved config, or else the saved config's passcode (a
+// moved or copied action), or else none (it then only wakes the screen to the passcode).
+static id rc_restore_passcodes_at(id incoming, id current, NSString *fallback) {
+    if ([incoming isKindOfClass:[NSString class]]) {
+        NSString *verb = nil, *passcode = nil;
+        if (!rc_passcode_in_command(incoming, &verb, &passcode) || ![passcode isEqualToString:kRCHiddenPasscode]) return incoming;
+        NSString *oldVerb = nil, *oldPasscode = nil;
+        if (rc_passcode_in_command(current, &oldVerb, &oldPasscode) && ![oldPasscode isEqualToString:kRCHiddenPasscode]) {
+            return [verb stringByAppendingString:oldPasscode];
+        }
+        if (fallback) return [verb stringByAppendingString:fallback];
+        return [verb stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    }
+    if ([incoming isKindOfClass:[NSArray class]]) {
+        NSArray *old = [current isKindOfClass:[NSArray class]] ? current : nil;
+        NSMutableArray *copy = [NSMutableArray arrayWithCapacity:[incoming count]];
+        [(NSArray *)incoming enumerateObjectsUsingBlock:^(id item, NSUInteger i, __unused BOOL *stop) {
+            [copy addObject:rc_restore_passcodes_at(item, i < old.count ? old[i] : nil, fallback)];
+        }];
+        return copy;
+    }
+    if ([incoming isKindOfClass:[NSDictionary class]]) {
+        NSDictionary *old = [current isKindOfClass:[NSDictionary class]] ? current : nil;
+        NSMutableDictionary *copy = [NSMutableDictionary dictionaryWithCapacity:[incoming count]];
+        for (id key in (NSDictionary *)incoming) copy[key] = rc_restore_passcodes_at(((NSDictionary *)incoming)[key], old[key], fallback);
+        return copy;
+    }
+    return incoming;
+}
+
+static NSMutableDictionary *rc_restore_passcodes(NSDictionary *incoming, NSDictionary *current) {
+    // Only fill a moved or copied hidden action when every action in the old config agrees on one
+    // passcode. With several different passcodes to choose from, guessing could give an action
+    // someone else's passcode, so it falls back to waking the screen and asking.
+    NSMutableSet *passcodes = [NSMutableSet set];
+    rc_collect_passcodes(current, passcodes);
+    NSString *fallback = passcodes.count == 1 ? passcodes.anyObject : nil;
+    return [rc_restore_passcodes_at(incoming, current, fallback) mutableCopy];
 }
 
 BOOL RCIsApiTokenValid(NSString *providedToken) {
@@ -4864,6 +5046,55 @@ NSString *RCExtractTokenFromHeaders(NSString *requestHeaders) {
 
 static NSString *rc_extract_token_from_headers(NSString *requestHeaders) {
     return RCExtractTokenFromHeaders(requestHeaders);
+}
+
+// The settings only the API token may change. Triggers and their actions are not here: the
+// Web UI saves the whole config on every edit, so gating all of it asked for the token on
+// every trigger and action change.
+static NSArray *rc_protected_config_keys(void) {
+    return @[@"webUIApiToken", @"webUIAccess", @"webUINetworks", @"webUIEnabled",
+             @"allowDirectRootHelper", @"rootEnabled", @"haToken", @"mqttPassword",
+             @"kmPassword", @"sshHosts", @"rcClients"];
+}
+
+static BOOL rc_config_changes_protected_settings(NSDictionary *incoming, NSDictionary *current) {
+    for (NSString *key in rc_protected_config_keys()) {
+        id newValue = incoming[key];
+        id oldValue = current[key];
+        if (newValue == oldValue) continue;
+        if (!newValue || !oldValue) return YES;
+        if (![newValue isEqual:oldValue]) return YES;
+    }
+    return NO;
+}
+
+static BOOL rc_value_has_privileged_command(id value) {
+    return rc_value_needs_token(value, 0);
+}
+
+// Whether a save adds or changes something that runs a command needing the API token. Without
+// this, a trigger saved with a "root" or "exec" action ran it on its own (a schedule, a button)
+// for anyone who could reach the Web UI. Triggers are compared one by one, so editing any other
+// trigger still saves without the token; other settings are compared whole.
+static BOOL rc_config_changes_privileged_actions(NSDictionary *incoming, NSDictionary *current) {
+    NSArray *protectedKeys = rc_protected_config_keys();
+    for (NSString *key in incoming) {
+        if ([protectedKeys containsObject:key]) continue;
+        id newValue = incoming[key];
+        id oldValue = current[key];
+        if ([key isEqualToString:@"triggers"] && [newValue isKindOfClass:[NSDictionary class]]) {
+            NSDictionary *oldTriggers = [oldValue isKindOfClass:[NSDictionary class]] ? oldValue : @{};
+            for (NSString *triggerKey in (NSDictionary *)newValue) {
+                id trigger = ((NSDictionary *)newValue)[triggerKey];
+                if ([trigger isEqual:oldTriggers[triggerKey]]) continue;
+                if (rc_value_has_privileged_command(trigger)) return YES;
+            }
+            continue;
+        }
+        if ([newValue isEqual:oldValue]) continue;
+        if (rc_value_has_privileged_command(newValue)) return YES;
+    }
+    return NO;
 }
 
 // A trigger's runs. Each firing runs the actions on a thread of its own; a run carries its
@@ -4974,7 +5205,7 @@ static void rc_run_history_add(NSDictionary *info, BOOL stopped) {
             // trigger is edited; the trigger, for the Running page's list of every trigger's runs;
             // and the step a stopped run was on
             record[@"key"] = key;
-            if ([info[@"actions"] isKindOfClass:[NSArray class]] && [NSJSONSerialization isValidJSONObject:info[@"actions"]]) record[@"actions"] = info[@"actions"];
+            if ([info[@"actions"] isKindOfClass:[NSArray class]] && [NSJSONSerialization isValidJSONObject:info[@"actions"]]) record[@"actions"] = rc_hide_passcodes(info[@"actions"]);
             if (stopped && info[@"index"]) record[@"index"] = info[@"index"];
             NSMutableArray *runs = history[key] ?: [NSMutableArray array];
             [runs insertObject:record atIndex:0];
@@ -4993,7 +5224,7 @@ static void rc_run_history_add(NSDictionary *info, BOOL stopped) {
 // "run history <key>" (JSON, newest first) and "clear run history <key>"
 static NSString *rc_run_history_json(NSString *key) {
     NSArray *runs;
-    @synchronized (rc_run_lock()) { runs = [rc_run_history_locked()[key] copy] ?: @[]; }
+    @synchronized (rc_run_lock()) { runs = rc_hide_passcodes([rc_run_history_locked()[key] copy] ?: @[]); } // records from before passcodes were hidden in them
     NSData *data = [NSJSONSerialization dataWithJSONObject:runs options:0 error:nil];
     return [[NSString alloc] initWithData:data ?: [NSData data] encoding:NSUTF8StringEncoding] ?: @"[]";
 }
@@ -5014,7 +5245,7 @@ static NSString *rc_run_history_all_json(NSInteger limit) {
     }
     [runs sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) { return [b[@"started"] compare:a[@"started"]]; }];
     if (limit > 0 && (NSInteger)runs.count > limit) [runs removeObjectsInRange:NSMakeRange(limit, runs.count - limit)];
-    NSData *data = [NSJSONSerialization dataWithJSONObject:runs options:0 error:nil];
+    NSData *data = [NSJSONSerialization dataWithJSONObject:rc_hide_passcodes(runs) options:0 error:nil];
     return [[NSString alloc] initWithData:data ?: [NSData data] encoding:NSUTF8StringEncoding] ?: @"[]";
 }
 
@@ -5071,7 +5302,7 @@ static void rc_run_note_step(id item, NSInteger index, NSDictionary *loop) {
     NSMutableDictionary *info = [NSThread currentThread].threadDictionary[@"rcRunInfo"];
     if (!info) return;
     @synchronized (rc_run_lock()) {
-        if (item) info[@"step"] = item;
+        if (item) info[@"step"] = rc_hide_passcodes(item);
         info[@"index"] = @(index); // its row in the trigger's actions (the editor highlights it)
         if (loop) info[@"loop"] = loop; else [info removeObjectForKey:@"loop"];
     }
@@ -5336,6 +5567,7 @@ static void rc_execute_action_sequence_body(NSArray *actions, NSString *triggerK
             // If we reached an 'else' or 'else_if' directly, it means we were executing the TRUE branch of a preceding conditional.
             // Now we must skip the remaining branches (until the matching end_if).
             NSInteger depth = 1;
+            BOOL foundEnd = NO;
             for (NSInteger skipIdx = idx + 1; skipIdx < (NSInteger)actions.count; skipIdx++) {
                 id item = actions[skipIdx];
                 if (rc_is_if_action_item(item)) {
@@ -5344,9 +5576,16 @@ static void rc_execute_action_sequence_body(NSArray *actions, NSString *triggerK
                     depth--;
                     if (depth == 0) {
                         idx = skipIdx;
+                        foundEnd = YES;
                         break;
                     }
                 }
+            }
+            // Without its End If the Else's actions would run after the true branch: stop, as a
+            // false If without one does
+            if (!foundEnd) {
+                SRLog(@"[%@] Missing End If marker; stopping action execution.", triggerKey);
+                break;
             }
         } else if ([type isEqualToString:@"end_if"] || [type isEqualToString:@"end"]) {
             continue;
@@ -10380,6 +10619,230 @@ static NSString *rc_iamlazy_backup(void) {
 
 #import "RCGestures.h"
 
+// The CLI's command reference: `rc help` prints it, `rc help <word>` narrows it. One list, so the
+// help stays with the commands it describes.
+static NSArray *RCCommandHelpSections(void) {
+    return @[
+        @{@"title": @"Media", @"rows": @[
+            @[@"play | pause | playpause", @"Play, pause, or toggle playback"],
+            @[@"next | prev", @"Next or previous track"],
+            @[@"volume <0-100>", @"Set the volume"],
+            @[@"volume up|down [N]", @"Step the volume up or down"],
+            @[@"mute [on|off|toggle|status]", @"Media mute"],
+            @[@"ringer [silent|ring|toggle]", @"Ringer switch position"],
+            @[@"ringer volume <0-100>", @"Ringer volume"],
+            @[@"haptics <mode>", @"always, silent-only, ring-only, never"],
+            @[@"anc [on|off|transparency]", @"Headphone ANC (requires Sonitus)"],
+            @[@"audiomix [on|off|toggle]", @"AudioMix simultaneous playback"],
+            @[@"audiohandoff [on|off|toggle]", @"Automatic audio switching"],
+            @[@"airplay list", @"AirPlay receivers and their UIDs"],
+            @[@"airplay connect <name|UID>", @"Start AirPlay streaming"],
+            @[@"airplay disconnect", @"Stop AirPlay streaming"],
+            @[@"spotify play", @"Resume Spotify"],
+            @[@"spotify <type> <id>", @"type: playlist, album, or artist"],
+            @[@"playlist <id>", @"Play a Spotify playlist"],
+            @[@"shuffle playlist <id>", @"Shuffle a Spotify playlist"],
+        ]},
+        @{@"title": @"Device", @"rows": @[
+            @[@"lock", @"Lock the screen"],
+            @[@"unlock [passcode]", @"Wake and unlock the device"],
+            @[@"lock-toggle [passcode]", @"Toggle the lock state"],
+            @[@"is-locked", @"Print locked or unlocked"],
+            @[@"autolock [time|toggle|status]", @"30s to 5m, never, or off"],
+            @[@"display sleep <time>", @"Alias for autolock"],
+            @[@"button <name>", @"power, lock, home, volup, voldown, mute"],
+            @[@"button triggers pause [min] | resume", @"Return buttons to stock behavior"],
+            @[@"brightness <0-100>", @"Set screen brightness"],
+            @[@"flashlight [on|off|toggle|status]", @"Control the torch"],
+            @[@"rotate [lock|unlock|toggle|status]", @"Orientation lock"],
+            @[@"orientation status", @"Print PORTRAIT or LANDSCAPE"],
+            @[@"appearance [dark|light|toggle]", @"Light or dark appearance"],
+            @[@"dnd [on|off|toggle|status]", @"Do Not Disturb"],
+            @[@"low power mode [on|off|toggle|status]", @"Low Power Mode"],
+            @[@"haptic", @"Play a haptic tap"],
+            @[@"screenshot", @"Take a screenshot"],
+            @[@"proximity [on|off]", @"Read or force the proximity sensor"],
+            @[@"nfc scanner [pause|resume|toggle]", @"Pause or resume NFC scanning"],
+            @[@"screenrecord [toggle|start|stop|status]", @"Screen recording"],
+            @[@"camera [mode] [zoom] [front] [flash]", @"photo, video, portrait, slomo, timelapse"],
+            @[@"camera shutter | snap", @"Press the Camera shutter"],
+            @[@"camera record-toggle", @"Start or stop video recording"],
+        ]},
+        @{@"title": @"Apps & Input", @"rows": @[
+            @[@"open <alias|bundleID>", @"Launch an app"],
+            @[@"uiopen <bundleID>", @"Launch an app by bundle ID"],
+            @[@"kill <alias|bundleID>", @"Force close an app"],
+            @[@"kill current", @"Force close the front app"],
+            @[@"home", @"Press Home"],
+            @[@"switcher", @"Open the App Switcher"],
+            @[@"previous app", @"Switch to the previous app"],
+            @[@"control-center", @"Open Control Center"],
+            @[@"url <url>", @"Open a link"],
+            @[@"nav <panel>", @"triggers, settings, ha, km, mqtt, add"],
+            @[@"type \"Text\"", @"Type text"],
+            @[@"paste \"Text\"", @"Paste text"],
+            @[@"key <hex>", @"Press a HID key (0x28 is Return)"],
+            @[@"toast \"Title\" [\"Subtitle\"] [\"Symbol\"]", @"Show a HUD toast"],
+            @[@"notify \"Title\" [\"Body\"] [--urgent]", @"Post a notification"],
+        ]},
+        @{@"title": @"Connectivity", @"rows": @[
+            @[@"wifi [on|off|toggle|status]", @"Wi-Fi"],
+            @[@"bluetooth [on|off|toggle|status]", @"Bluetooth"],
+            @[@"cellular [on|off|toggle|status]", @"Cellular Data"],
+            @[@"location [on|off|toggle|status]", @"Location Services"],
+            @[@"airplane [on|off|toggle|status]", @"Airplane Mode"],
+            @[@"bluetooth connect|disconnect <name>", @"Manage paired devices"],
+            @[@"carplay status", @"CarPlay connection state"],
+            @[@"battery status", @"Battery level and charging state"],
+        ]},
+        @{@"title": @"Automation", @"rows": @[
+            @[@"shortcut \"Name\" [-i] [-p \"Input\"]", @"Run a Shortcut (-i is silent)"],
+            @[@"trigger <ID>", @"Fire a RemoteCompanion trigger"],
+            @[@"stop trigger <key>", @"Stop a running trigger sequence"],
+            @[@"delay <seconds>", @"Wait before the next action"],
+            @[@"gesture <verb> ...", @"record, play, list, trim, rename, export"],
+            @[@"tap <x> <y>", @"Tap a screen point"],
+            @[@"hold <x> <y> [ms]", @"Hold a screen point"],
+            @[@"swipe <x1> <y1> <x2> <y2>", @"Swipe between two points"],
+            @[@"var <verb> ...", @"list, get, set, add, delete, clear"],
+            @[@"lua <code>", @"Run Lua on the device"],
+            @[@"ha toggle <entity>", @"Home Assistant toggle"],
+            @[@"ha turn_on|turn_off <entity>", @"Home Assistant on or off"],
+            @[@"ha call <domain.service> <entity>", @"Call a Home Assistant service"],
+            @[@"ha raw <domain.service> <json>", @"Raw Home Assistant payload"],
+            @[@"km trigger <name|uuid> [value]", @"Trigger a Keyboard Maestro macro"],
+            @[@"km url <url>", @"Trigger a Keyboard Maestro URL"],
+            @[@"mqtt pub <topic> [payload]", @"Publish an MQTT message"],
+        ]},
+        @{@"title": @"System", @"rows": @[
+            @[@"respring", @"Restart SpringBoard"],
+            @[@"safemode", @"Enter Safe Mode"],
+            @[@"ldrestart", @"Soft reboot"],
+            @[@"userspace-reboot", @"Restart userspace"],
+            @[@"uicache", @"Refresh the icon cache"],
+            @[@"webui [on|off|status|...]", @"Web UI server, access, token, wifi"],
+            @[@"blacklist list|add|remove|reset", @"App exclusion list"],
+            @[@"log", @"Stream the device log (also rc logs)"],
+            @[@"exec <command>", @"Run a shell command"],
+            @[@"root <command>", @"Run a shell command as root"],
+            @[@"testkit ...", @"Automated UI test runs"],
+        ]},
+    ];
+}
+
+// One section's rows, padded into a command column. With a search word, only rows (or the whole
+// section, when its title matches) that contain it are kept.
+static NSString *RCCommandHelpBody(NSDictionary *section, NSString *word) {
+    NSString *title = section[@"title"];
+    BOOL wholeSection = word.length > 0 && [[title lowercaseString] containsString:word];
+    NSMutableString *body = [NSMutableString string];
+    for (NSArray *row in section[@"rows"]) {
+        NSString *command = row[0];
+        NSString *detail = row[1];
+        if (word.length > 0 && !wholeSection &&
+            ![[command lowercaseString] containsString:word] &&
+            ![[detail lowercaseString] containsString:word]) continue;
+        NSString *padding = command.length >= 38 ? @" "
+            : [@" " stringByPaddingToLength:38 - command.length withString:@" " startingAtIndex:0];
+        [body appendFormat:@"  %@%@%@\n", command, padding, detail];
+    }
+    return body;
+}
+
+static NSString *RCCommandHelp(NSString *topic) {
+    NSString *word = [topic stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]].lowercaseString ?: @"";
+    NSMutableString *out = [NSMutableString string];
+    if (word.length == 0) {
+        [out appendString:@"RemoteCompanion CLI\n\n"];
+        [out appendString:@"Usage: rc [-r|--root] <command> [args]\n"];
+        [out appendString:@"       rc help [word]       Show this help, or commands matching a word\n"];
+        [out appendString:@"       echo \"command\" | rc  Send a raw command on stdin\n"];
+    }
+    for (NSDictionary *section in RCCommandHelpSections()) {
+        NSString *body = RCCommandHelpBody(section, word);
+        if (body.length == 0) continue;
+        [out appendFormat:@"\n%@\n%@", section[@"title"], body];
+    }
+    if (out.length == 0) {
+        return [NSString stringWithFormat:@"No commands match \"%@\". Run rc help for the full list.\n", topic];
+    }
+    if (word.length == 0) [out appendString:@"\n"];
+    return out;
+}
+
+#pragma mark - Saved unlock passcode
+
+// The passcode "unlock saved" (and so "lock-toggle saved") unlocks with, kept like the test
+// kit's (see RCTestKit.x):
+// - Set only over the UNIX socket - from this phone (the app) - never over the network.
+// - Kept in the Keychain (this device only, so never in a backup; readable once the phone has
+//   been unlocked since it started): never in the config, the log, or any reply.
+// - Forgotten the moment an unlock with it doesn't work, so a wrong passcode is tried at most
+//   once - iOS disables the phone (or erases it, if set to) after repeated wrong ones.
+// Unlike the test kit's it doesn't expire: it's what triggers unlock with from now on.
+static NSDictionary *rc_unlock_passcode_query(void) {
+    return @{ (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
+              (__bridge id)kSecAttrService: @"com.goldenappleguy.rc.unlock",
+              (__bridge id)kSecAttrAccount: @"passcode" };
+}
+
+static NSString *rc_saved_unlock_passcode(void) {
+    NSMutableDictionary *query = [rc_unlock_passcode_query() mutableCopy];
+    query[(__bridge id)kSecReturnData] = @YES;
+    query[(__bridge id)kSecMatchLimit] = (__bridge id)kSecMatchLimitOne;
+    CFTypeRef result = NULL;
+    if (SecItemCopyMatching((__bridge CFDictionaryRef)query, &result) != errSecSuccess || !result) return nil;
+    NSData *data = (__bridge_transfer NSData *)result;
+    NSString *code = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    return code.length ? code : nil;
+}
+
+static void rc_forget_unlock_passcode(void) {
+    SecItemDelete((__bridge CFDictionaryRef)rc_unlock_passcode_query());
+}
+
+static OSStatus rc_save_unlock_passcode(NSString *code) {
+    rc_forget_unlock_passcode();
+    NSMutableDictionary *item = [rc_unlock_passcode_query() mutableCopy];
+    item[(__bridge id)kSecValueData] = [code dataUsingEncoding:NSUTF8StringEncoding];
+    item[(__bridge id)kSecAttrAccessible] = (__bridge id)kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly;
+    return SecItemAdd((__bridge CFDictionaryRef)item, NULL);
+}
+
+// unlock-passcode            "set" or "not set" (never the passcode)
+// unlock-passcode set CODE   saves it (from this phone only)
+// unlock-passcode forget     removes it
+static NSString *rc_handle_unlock_passcode_command(NSString *cmd) {
+    NSString *args = [[cmd substringFromIndex:@"unlock-passcode".length]
+                      stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (args.length == 0 || [args isEqualToString:@"status"]) {
+        SRLog(@"Received command: unlock-passcode");
+        return rc_saved_unlock_passcode() ? @"set\n" : @"not set\n";
+    }
+    if ([args isEqualToString:@"forget"]) {
+        SRLog(@"Received command: unlock-passcode forget");
+        rc_forget_unlock_passcode();
+        return @"forgotten\n";
+    }
+    if ([args hasPrefix:@"set "] || [args isEqualToString:@"set"]) {
+        SRLog(@"Received command: unlock-passcode set (redacted)");
+        if (!RCCommandFromLocalSocket()) return @"Error: the passcode can only be set on the phone, not over the network\n";
+        NSString *code = [[args substringFromIndex:3] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (code.length < 4 || code.length > 64 || [code rangeOfCharacterFromSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]].location != NSNotFound) {
+            return @"Error: not a passcode (4-64 characters, no spaces)\n";
+        }
+        OSStatus status = rc_save_unlock_passcode(code);
+        if (status != errSecSuccess) {
+            SRLogMin(@"[SmartUnlock] Could not save the passcode to the Keychain (%d)", (int)status);
+            return [NSString stringWithFormat:@"Error: could not save the passcode (%d)\n", (int)status];
+        }
+        SRLogMin(@"[SmartUnlock] Passcode saved to the Keychain");
+        return @"saved\n";
+    }
+    SRLog(@"Received command: unlock-passcode (unknown)");
+    return @"Error: usage: unlock-passcode [set CODE | forget]\n";
+}
+
 static NSString *handle_command(NSString *cmd) {
     if (!cmd || ![cmd isKindOfClass:[NSString class]]) {
         SRLogMin(@"ERROR: handle_command received nil or invalid command string");
@@ -10387,12 +10850,21 @@ static NSString *handle_command(NSString *cmd) {
     }
     NSString *cleanCmd = [cmd stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     if (cleanCmd.length == 0) return @"Error: Empty command\n";
+    if ([cleanCmd isEqualToString:@"help"] || [cleanCmd hasPrefix:@"help "] ||
+        [cleanCmd isEqualToString:@"-h"] || [cleanCmd isEqualToString:@"--help"]) {
+        NSString *topic = [cleanCmd hasPrefix:@"help "] ? [cleanCmd substringFromIndex:5] : @"";
+        return RCCommandHelp(topic);
+    }
     // Resolve app-owned native shortcut payloads afresh; do not log encoded data.
     if ([cleanCmd hasPrefix:@"quickactions "]) return RCQACommand(cleanCmd);
     // The test kit's passcode never reaches the log (see RCTestKit.x)
     if ([cleanCmd hasPrefix:@"testkit passcode/set"]) {
         SRLog(@"Received command: testkit passcode/set (redacted)");
         return RCTKHandleCommand([cleanCmd substringFromIndex:7]);
+    }
+    // Nor does the saved unlock passcode
+    if ([cleanCmd isEqualToString:@"unlock-passcode"] || [cleanCmd hasPrefix:@"unlock-passcode "]) {
+        return rc_handle_unlock_passcode_command(cleanCmd);
     }
     if ([cleanCmd hasPrefix:@"unlock "]) {
         SRLog(@"Received command: unlock ****");
@@ -10418,7 +10890,7 @@ static NSString *handle_command(NSString *cmd) {
     }
     
     // Debug hex dump of command
-    if ([cleanCmd hasPrefix:@"unlock "] || [cleanCmd hasPrefix:@"lock-toggle "] || [cleanCmd hasPrefix:@"lock toggle "]) {
+    if ([cleanCmd hasPrefix:@"unlock "] || [cleanCmd hasPrefix:@"unlock-passcode"] || [cleanCmd hasPrefix:@"lock-toggle "] || [cleanCmd hasPrefix:@"lock toggle "]) {
         SRLog(@"Command HEX: (redacted)");
     } else {
         NSMutableString *hex = [NSMutableString string];
@@ -11163,6 +11635,13 @@ static NSString *handle_command(NSString *cmd) {
             pin = [[cleanCmd substringFromIndex:7] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
             if (pin.length == 0) pin = nil;
         }
+        // "unlock saved": the passcode kept in the Keychain (see rc_saved_unlock_passcode)
+        BOOL usingSavedPasscode = NO;
+        if ([pin isEqualToString:@"saved"]) {
+            pin = rc_saved_unlock_passcode();
+            usingSavedPasscode = pin != nil;
+            if (!pin) SRLogMin(@"[SmartUnlock] No passcode saved; waking the screen only");
+        }
         
         if (pin) {
             SRLog(@"[SmartUnlock] Unlock command received (with passcode)");
@@ -11256,6 +11735,16 @@ static NSString *handle_command(NSString *cmd) {
                         success = [manager attemptUnlockWithPasscode:pin];
                     }
                     SRLog(@"[SmartUnlock] Passcode unlock attempt returned: %d", success);
+                    if (!success && usingSavedPasscode) {
+                        // Still locked a moment later: the saved passcode is wrong (or iOS won't
+                        // take one right now), so it's forgotten rather than tried again
+                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                            if (!rc_device_locked(manager)) return;
+                            rc_forget_unlock_passcode();
+                            SRLogMin(@"[SmartUnlock] The saved passcode did not unlock the phone, so it was forgotten");
+                            RCShowPrompt(@"Saved Passcode Forgotten", @"Unlock failed. Set it again in the app.", @"lock.slash", 3.0);
+                        });
+                    }
                     if (!success && [manager respondsToSelector:@selector(unlockUIFromSource:withOptions:)]) {
                         [manager unlockUIFromSource:0 withOptions:nil];
                     }
@@ -13928,6 +14417,8 @@ static void start_web_server() {
                                     write(new_socket, [assetData bytes], [assetData length]);
                                     responseString = nil; // Skip default write
                                 }
+                            } else if ([path isEqualToString:@"/api/answers"] && [method isEqualToString:@"GET"] && (load_trigger_config(), ![g_triggerConfig[@"webUIEnabled"] boolValue])) {
+                                responseString = [NSString stringWithFormat:@"HTTP/1.1 403 Forbidden\r\n%@Content-Length: 17\r\n\r\nWeb UI is disabled", cors];
                             } else if ([path isEqualToString:@"/api/answers"] && [method isEqualToString:@"GET"]) {
                                 // The answers of the status commands Set Variable's command list offers, for
                                 // the Web UI to show next to them. Only these: they report, they change nothing.
@@ -13944,10 +14435,18 @@ static void start_web_server() {
                                 NSData *jsonData = [NSJSONSerialization dataWithJSONObject:answers options:0 error:nil];
                                 NSString *jsonString = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
                                 responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)jsonData.length, jsonString];
+                            } else if ([path isEqualToString:@"/api/variables"] && [method isEqualToString:@"GET"] && (load_trigger_config(), ![g_triggerConfig[@"webUIEnabled"] boolValue])) {
+                                responseString = [NSString stringWithFormat:@"HTTP/1.1 403 Forbidden\r\n%@Content-Length: 17\r\n\r\nWeb UI is disabled", cors];
                             } else if ([path isEqualToString:@"/api/variables"] && [method isEqualToString:@"GET"]) {
-                                // The saved variables, for the editors' variable menus
+                                // The saved variables, for the editors' variable menus. The menus need only the
+                                // names, so another device without the token gets those with empty values.
                                 NSDictionary *all;
                                 @synchronized (rc_variables_lock()) { all = [rc_variables_locked() copy]; }
+                                if (!rc_web_client_is_local(&client_addr) && !rc_is_api_token_valid(rc_extract_token_from_headers(requestString))) {
+                                    NSMutableDictionary *names = [NSMutableDictionary dictionaryWithCapacity:all.count];
+                                    for (NSString *name in all) names[name] = @"";
+                                    all = names;
+                                }
                                 NSData *jsonData = [NSJSONSerialization dataWithJSONObject:all ?: @{} options:NSJSONWritingSortedKeys error:nil];
                                 NSString *jsonString = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
                                 responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)jsonData.length, jsonString];
@@ -14014,7 +14513,7 @@ static void start_web_server() {
                                             }
                                             mConfig[@"rcClients"] = mClients;
                                         }
-                                        configToReturn = mConfig;
+                                        configToReturn = rc_hide_passcodes(mConfig);
                                     }
                                     NSData *jsonData = [NSJSONSerialization dataWithJSONObject:configToReturn options:0 error:nil];
                                     if (jsonData) {
@@ -14024,11 +14523,7 @@ static void start_web_server() {
                                 } else if ([method isEqualToString:@"POST"]) {
                                     NSString *expectedToken = g_triggerConfig[@"webUIApiToken"];
                                     BOOL hasConfiguredToken = [expectedToken isKindOfClass:[NSString class]] && expectedToken.length > 0;
-                                    if (!isLocal && hasConfiguredToken && !isTokenValid) {
-                                        NSString *errJson = @"{\"ok\":false,\"error\":\"Saving configuration requires valid API token\"}";
-                                        NSData *errData = [errJson dataUsingEncoding:NSUTF8StringEncoding];
-                                        responseString = [NSString stringWithFormat:@"HTTP/1.1 403 Forbidden\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)errData.length, errJson];
-                                    } else {
+                                    {
                                         NSRange clRange = [requestString rangeOfString:@"Content-Length: " options:NSCaseInsensitiveSearch];
                                         int contentLength = 0;
                                         if (clRange.location != NSNotFound) {
@@ -14057,7 +14552,9 @@ static void start_web_server() {
                                             NSError *err;
                                             id jsonObj = [NSJSONSerialization JSONObjectWithData:bodyData options:NSJSONReadingMutableContainers error:&err];
                                             if (jsonObj && [jsonObj isKindOfClass:[NSDictionary class]]) {
-                                                NSMutableDictionary *incoming = [jsonObj mutableCopy];
+                                                // Passcodes the device saw hidden go back to the saved ones first, so
+                                                // the checks below see what is really saved
+                                                NSMutableDictionary *incoming = rc_restore_passcodes(jsonObj, g_triggerConfig);
                                                 if ([incoming[@"webUIApiToken"] isEqualToString:@"••••••••"]) {
                                                     incoming[@"webUIApiToken"] = g_triggerConfig[@"webUIApiToken"];
                                                 }
@@ -14109,12 +14606,34 @@ static void start_web_server() {
                                                     }
                                                     incoming[@"rcClients"] = updatedClients;
                                                 }
-                                                if (!isLocal && !isTokenValid) {
-                                                    incoming[@"allowDirectRootHelper"] = g_triggerConfig[@"allowDirectRootHelper"] ?: @NO;
+                                                // From another device, protected settings and actions that need
+                                                // the token change only with it. With no token set yet, nobody can
+                                                // send one: it is set in the app or this iPhone's own Web UI, so
+                                                // nobody on the network can set one of their own.
+                                                BOOL protectedChange = !isLocal && !isTokenValid &&
+                                                    rc_config_changes_protected_settings(incoming, g_triggerConfig);
+                                                BOOL privilegedChange = !isLocal && !isTokenValid && !protectedChange &&
+                                                    rc_config_changes_privileged_actions(incoming, g_triggerConfig);
+                                                if ((protectedChange || privilegedChange) && !hasConfiguredToken) {
+                                                    NSString *errJson = @"{\"ok\":false,\"error\":\"Set an API Token in the RemoteCompanion app first. Without one, this change can only be made on the iPhone.\"}";
+                                                    NSData *errData = [errJson dataUsingEncoding:NSUTF8StringEncoding];
+                                                    responseString = [NSString stringWithFormat:@"HTTP/1.1 403 Forbidden\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)errData.length, errJson];
+                                                } else if (privilegedChange) {
+                                                    NSString *errJson = @"{\"ok\":false,\"error\":\"Changing these actions requires valid API token\"}";
+                                                    NSData *errData = [errJson dataUsingEncoding:NSUTF8StringEncoding];
+                                                    responseString = [NSString stringWithFormat:@"HTTP/1.1 403 Forbidden\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)errData.length, errJson];
+                                                } else if (protectedChange) {
+                                                    NSString *errJson = @"{\"ok\":false,\"error\":\"Changing protected settings requires valid API token\"}";
+                                                    NSData *errData = [errJson dataUsingEncoding:NSUTF8StringEncoding];
+                                                    responseString = [NSString stringWithFormat:@"HTTP/1.1 403 Forbidden\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)errData.length, errJson];
+                                                } else {
+                                                    if (!isLocal && !isTokenValid) {
+                                                        incoming[@"allowDirectRootHelper"] = g_triggerConfig[@"allowDirectRootHelper"] ?: @NO;
+                                                    }
+                                                    rc_set_trigger_config([incoming copy]);
+                                                    save_trigger_config();
+                                                    responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: 12\r\n\r\n{\"ok\": true}", cors];
                                                 }
-                                                rc_set_trigger_config([incoming copy]);
-                                                save_trigger_config();
-                                                responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: 12\r\n\r\n{\"ok\": true}", cors];
                                             } else {
                                                 responseString = [NSString stringWithFormat:@"HTTP/1.1 400 Bad Request\r\n%@Content-Type: application/json\r\nContent-Length: 17\r\n\r\n{\"error\":\"JSON\"}", cors];
                                             }
@@ -14169,7 +14688,9 @@ static void start_web_server() {
                                         @"audiostream_running": @(is_audiostreamerd_running()),
                                         @"home_button": @(rc_has_home_button()),
                                         @"multi_timer": @([[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:(NSOperatingSystemVersion){17, 0, 0}]),
-                                        @"ios17": @([[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:(NSOperatingSystemVersion){17, 0, 0}])
+                                        @"ios17": @([[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:(NSOperatingSystemVersion){17, 0, 0}]),
+                                        // Whether one is saved - never the passcode itself
+                                        @"unlock_passcode_saved": rc_saved_unlock_passcode() ? @YES : @NO
                                     };
                                     NSData *jsonData = [NSJSONSerialization dataWithJSONObject:caps options:0 error:nil];
                                     NSString *jsonStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
@@ -14705,6 +15226,9 @@ static void start_web_server() {
                                     @{@"command": @"lock", @"desc": @"System: Lock the device screen"},
                                     @{@"command": @"unlock [passcode]", @"desc": @"Security: Unlock device with optional passcode, or wake and show lockscreen"},
                                     @{@"command": @"lock-toggle [passcode]", @"desc": @"System: Toggle device lock/unlock with optional passcode"},
+                                    @{@"command": @"unlock saved", @"desc": @"Security: Unlock device with the passcode saved in the Keychain"},
+                                    @{@"command": @"lock-toggle saved", @"desc": @"System: Toggle device lock/unlock with the passcode saved in the Keychain"},
+                                    @{@"command": @"unlock-passcode [set CODE | forget]", @"desc": @"Security: Save (from the phone only) or remove the passcode \"unlock saved\" uses"},
                                     @{@"command": @"home", @"desc": @"System: Simulate a Home Button press"},
                                     @{@"command": @"screenshot", @"desc": @"System: Take a screenshot"},
                                     @{@"command": @"stop trigger <key>", @"desc": @"Automation: Stop a trigger's actions that are still running (in a wait)"},
@@ -14868,6 +15392,8 @@ static void start_web_server() {
                                                 safeCommand = @"lock-toggle ****";
                                             } else if ([command hasPrefix:@"testkit passcode/set"]) {
                                                 safeCommand = @"testkit passcode/set (redacted)";
+                                            } else if ([command hasPrefix:@"unlock-passcode set"]) {
+                                                safeCommand = @"unlock-passcode set (redacted)";
                                             }
                                             NSDictionary *resp = @{@"ok": @YES, @"command": safeCommand, @"status": @"Acknowledged"};
                                             NSData *respData = [NSJSONSerialization dataWithJSONObject:resp options:0 error:nil];
@@ -14908,30 +15434,9 @@ static void start_web_server() {
                                         }
                                     }
                                     
-                                    BOOL hasPrivilegedAction = NO;
+                                    // Any command that needs the token, nested blocks and Set Variable included
                                     NSDictionary *trig = g_triggerConfig[@"triggers"][triggerKey];
-                                    if ([trig isKindOfClass:[NSDictionary class]]) {
-                                        NSArray *actions = trig[@"actions"];
-                                        if ([actions isKindOfClass:[NSArray class]]) {
-                                            for (id act in actions) {
-                                                if ([act isKindOfClass:[NSString class]] && rc_is_privileged_command(act)) {
-                                                    hasPrivilegedAction = YES;
-                                                    break;
-                                                } else if ([act isKindOfClass:[NSDictionary class]]) {
-                                                    NSString *type = act[@"type"];
-                                                    if ([type isEqualToString:@"set_variable"]) {
-                                                        NSString *op = act[@"op"];
-                                                        if ([op isEqualToString:@"command"] || [op isEqualToString:@"command_number"]) {
-                                                            if (rc_is_privileged_command(act[@"value"])) {
-                                                                hasPrivilegedAction = YES;
-                                                                break;
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
+                                    BOOL hasPrivilegedAction = [trig isKindOfClass:[NSDictionary class]] && rc_value_has_privileged_command(trig[@"actions"]);
                                     
                                     BOOL isLocal = rc_web_client_is_local(&client_addr) || RCCommandFromLocalSocket();
                                     if (!isLocal && hasPrivilegedAction && !rc_is_api_token_valid(clientToken)) {
@@ -16835,10 +17340,43 @@ static void RC_CheckAndFirePower() {
     }];
 }
 
+extern CFArrayRef IOHIDEventGetChildren(IOHIDEventRef event);
+extern double IOHIDEventGetFloatValue(IOHIDEventRef event, int field);
+
+// Real fingers on the touchscreen, from the HID stream (0..1, device portrait). Unlike SpringBoard's
+// own touches, this includes a finger iOS hands to the app in front.
+static os_unfair_lock g_hidFingerLock = OS_UNFAIR_LOCK_INIT;
+static uint32_t g_hidFingerMask = 0;
+static double g_hidFingerX[32], g_hidFingerY[32];
+
+static void rc_track_hid_fingers(IOHIDEventRef event) {
+    CFArrayRef children = IOHIDEventGetChildren(event);
+    if (!children) return;
+    os_unfair_lock_lock(&g_hidFingerLock);
+    BOOL anyTouching = NO;
+    for (CFIndex i = 0; i < CFArrayGetCount(children); i++) {
+        IOHIDEventRef child = (IOHIDEventRef)CFArrayGetValueAtIndex(children, i);
+        if (IOHIDEventGetType(child) != 11) continue;
+        if (fabs(IOHIDEventGetFloatValue(child, 0xB0014) - 0.04) < 1e-4) continue; // RC's own injected finger
+        uint32_t slot = (uint32_t)IOHIDEventGetIntegerValue(child, 0xB0005) & 31;
+        if (IOHIDEventGetIntegerValue(child, 0xB0009) != 0) {
+            anyTouching = YES;
+            g_hidFingerMask |= (1u << slot);
+            g_hidFingerX[slot] = IOHIDEventGetFloatValue(child, 0xB0000);
+            g_hidFingerY[slot] = IOHIDEventGetFloatValue(child, 0xB0001);
+        } else {
+            g_hidFingerMask &= ~(1u << slot);
+        }
+    }
+    if (!anyTouching) g_hidFingerMask = 0; // every finger is up
+    os_unfair_lock_unlock(&g_hidFingerLock);
+}
+
 static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientRef service, IOHIDEventRef event) {
     // Before the exclusion check: a touch is a touch whatever app is in front
     if (IOHIDEventGetType(event) == 11) g_lastTouchAt = CFAbsoluteTimeGetCurrent(); // kIOHIDEventTypeDigitizer
     if (IOHIDEventGetType(event) == 11) RCGestureHIDEvent(event); // gestures: recording, and the touchscreen's sender ID
+    if (IOHIDEventGetType(event) == 11) rc_track_hid_fingers(event); // fingers SpringBoard may not get
     if (RC_IsForegroundAppExcluded()) return;
     int type = IOHIDEventGetType(event);
     
@@ -18073,6 +18611,14 @@ static BOOL g_twoFingerBottomTriggered = NO;
 static CGFloat g_twoFingerBottomStartX = 0;
 static CGFloat g_twoFingerBottomStartY = 0;
 static NSTimeInterval g_lastTwoFingerBottomSwipeTriggerTime = 0;
+static NSTimeInterval g_lastTwoFingerTopSwipeTriggerTime = 0;
+// The system's top-edge swipes (Notification Center, Control Center), kept so a two-finger
+// top swipe can stop one that the first finger already started
+static NSHashTable<UIGestureRecognizer *> *g_rcTopEdgeRecognizers = nil;
+// The system's bottom-edge swipes (Home, App Switcher), for the same reason at the bottom
+static NSHashTable<UIGestureRecognizer *> *g_rcBottomEdgeRecognizers = nil;
+// A Control Center pull that iOS already started (the first finger moved before the second landed)
+static BOOL g_rcCCPullStarted = NO;
 
 // ============ GESTURE SCROLL SUPPRESSION (issue #81) ============
 // While a status-bar swipe or bottom swipe-up is being executed, the
@@ -18345,6 +18891,41 @@ static inline BOOL RC_InTopRegionMulti(CGPoint loc, UIInterfaceOrientation orien
     return (loc.y < threshold);
 }
 
+// The second finger of a two-finger top slide can start lower: hands rarely put both fingers
+// at the same height, and a lower finger would otherwise leave the slide to Control Center
+static inline BOOL RC_InTopRegionMultiLoose(CGPoint loc, UIInterfaceOrientation orientation, CGFloat S, CGFloat L) {
+    (void)S; (void)L;
+    CGFloat threshold = 150.0;
+    if (orientation == UIInterfaceOrientationPortrait) return (loc.y < threshold);
+    if (orientation == UIInterfaceOrientationPortraitUpsideDown) return (loc.y > L - threshold);
+    if (orientation == UIInterfaceOrientationLandscapeLeft) return (loc.x < threshold);
+    if (orientation == UIInterfaceOrientationLandscapeRight) return (loc.x > S - threshold);
+    return (loc.y < threshold);
+}
+
+// Is another real finger down in the top area, besides SpringBoard's touch at loc? iOS gives a
+// finger that lands below the status bar to the app, so only the touchscreen sees it.
+static BOOL rc_hid_second_top_finger(CGPoint loc, UIInterfaceOrientation orientation, CGFloat S, CGFloat L, CGPoint *other) {
+    os_unfair_lock_lock(&g_hidFingerLock);
+    uint32_t mask = g_hidFingerMask;
+    double xs[32], ys[32];
+    memcpy(xs, g_hidFingerX, sizeof(xs));
+    memcpy(ys, g_hidFingerY, sizeof(ys));
+    os_unfair_lock_unlock(&g_hidFingerLock);
+    int count = 0;
+    BOOL found = NO;
+    for (int slot = 0; slot < 32; slot++) {
+        if (!(mask & (1u << slot))) continue;
+        count++;
+        CGPoint p = CGPointMake(xs[slot] * S, ys[slot] * L);
+        if (hypot(p.x - loc.x, p.y - loc.y) > 40 && RC_InTopRegionMultiLoose(p, orientation, S, L)) {
+            found = YES;
+            if (other) *other = p;
+        }
+    }
+    return count >= 2 && found;
+}
+
 static inline BOOL RC_InBottomRegionMulti(CGPoint loc, UIInterfaceOrientation orientation, CGFloat S, CGFloat L) {
     (void)S; (void)L;
     CGFloat threshold = 75.0;
@@ -18353,6 +18934,33 @@ static inline BOOL RC_InBottomRegionMulti(CGPoint loc, UIInterfaceOrientation or
     if (orientation == UIInterfaceOrientationLandscapeLeft) return (loc.x > S - threshold);
     if (orientation == UIInterfaceOrientationLandscapeRight) return (loc.x < threshold);
     return (loc.y > L - threshold);
+}
+
+static inline BOOL RC_InBottomRegionMultiLoose(CGPoint loc, UIInterfaceOrientation orientation, CGFloat S, CGFloat L) {
+    (void)S; (void)L;
+    CGFloat threshold = 150.0;
+    if (orientation == UIInterfaceOrientationPortrait) return (loc.y > L - threshold);
+    if (orientation == UIInterfaceOrientationPortraitUpsideDown) return (loc.y < threshold);
+    if (orientation == UIInterfaceOrientationLandscapeLeft) return (loc.x > S - threshold);
+    if (orientation == UIInterfaceOrientationLandscapeRight) return (loc.x < threshold);
+    return (loc.y > L - threshold);
+}
+
+// Two real fingers near the bottom, from the touchscreen: a one-finger swipe there is iOS's
+// Home gesture and is left alone
+static BOOL rc_hid_two_bottom_fingers(UIInterfaceOrientation orientation, CGFloat S, CGFloat L) {
+    os_unfair_lock_lock(&g_hidFingerLock);
+    uint32_t mask = g_hidFingerMask;
+    double xs[32], ys[32];
+    memcpy(xs, g_hidFingerX, sizeof(xs));
+    memcpy(ys, g_hidFingerY, sizeof(ys));
+    os_unfair_lock_unlock(&g_hidFingerLock);
+    int near = 0;
+    for (int slot = 0; slot < 32; slot++) {
+        if (!(mask & (1u << slot))) continue;
+        if (RC_InBottomRegionMultiLoose(CGPointMake(xs[slot] * S, ys[slot] * L), orientation, S, L)) near++;
+    }
+    return near >= 2;
 }
 
 // Progress 0..1 along the UI-top / UI-bottom edge, left-to-right as the user sees it.
@@ -18472,6 +19080,33 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
             [triggers[@"trigger_bottom_two_finger_swipe_up"][@"enabled"] boolValue]);
 }
 
+static BOOL rc_recognizer_is_top_edge(UIGestureRecognizer *recognizer) {
+    if (![recognizer respondsToSelector:@selector(edges)]) return NO;
+    return ([(UIScreenEdgePanGestureRecognizer *)recognizer edges] & UIRectEdgeTop) != 0;
+}
+
+// A two-finger top swipe owns the top edge while it is down and shortly after it fires
+static inline BOOL rc_is_two_finger_top_active(void) {
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    return (g_twoFingerTopActive || g_twoFingerTopTriggered || (now - g_lastTwoFingerTopSwipeTriggerTime < 0.8)) &&
+           RC_TriggerIsActionable(@"trigger_statusbar_two_finger_swipe_down");
+}
+
+// Stop a top-edge swipe the first finger started before the second one landed. Turning a
+// recognizer off and on cancels it, and the panel it was pulling slides back.
+static void rc_cancel_edge_recognizers(NSHashTable<UIGestureRecognizer *> *table) {
+    for (UIGestureRecognizer *recognizer in [table allObjects]) {
+        if (!recognizer.enabled) continue;
+        UIGestureRecognizerState state = recognizer.state;
+        if (state != UIGestureRecognizerStateBegan && state != UIGestureRecognizerStateChanged) continue;
+        SRLog(@"[RCMultiFinger] Cancelling edge recognizer %@", recognizer);
+        recognizer.enabled = NO;
+        recognizer.enabled = YES;
+    }
+}
+
+static void rc_cancel_top_edge_recognizers(void) { rc_cancel_edge_recognizers(g_rcTopEdgeRecognizers); }
+
 static inline BOOL rc_is_bottom_gesture_active(void) {
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
     // The touch counts only when its own zone will do something. Using "any bottom trigger
@@ -18497,7 +19132,8 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
     
     CGFloat S = 0, L = 0;
     RC_ScreenSL(&S, &L);
-    if (RC_InBottomRegionMulti(loc, orientation, S, L) && RC_TriggerIsActionable(@"trigger_bottom_two_finger_swipe_up")) {
+    if (RC_InBottomRegionMulti(loc, orientation, S, L) && RC_TriggerIsActionable(@"trigger_bottom_two_finger_swipe_up") &&
+        rc_hid_two_bottom_fingers(orientation, S, L)) {
         return YES;
     }
     
@@ -18528,6 +19164,35 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
         CGFloat S = 0, L = 0;
         RC_ScreenSL(&S, &L);
 
+        // SpringBoard sees one touch at the top while the touchscreen sees a second finger the app got
+        if (allTouches.count == 1 && !g_twoFingerTopActive && !g_twoFingerTopTriggered &&
+            RC_TriggerIsActionable(@"trigger_statusbar_two_finger_swipe_down")) {
+            CGPoint loc = [touch locationInView:nil];
+            BOOL startedTop = (touch.phase == UITouchPhaseBegan && RC_InTopRegionMulti(loc, orientation, S, L)) ||
+                              (touch.phase == UITouchPhaseMoved && g_statusBarTouchActive && !g_statusBarSwipeTriggered && !g_statusBarHoldTriggered);
+            CGPoint other = CGPointZero;
+            if (startedTop && rc_hid_second_top_finger(loc, orientation, S, L, &other)) {
+                RC_SnapshotGestureOffsets();
+                if (g_statusBarHoldTimer) {
+                    [g_statusBarHoldTimer invalidate];
+                    g_statusBarHoldTimer = nil;
+                }
+                g_pendingStatusBarTrigger = nil;
+                g_statusBarTouchActive = NO;
+                g_statusBarSwipeTriggered = NO;
+                g_statusBarHoldTriggered = NO;
+                g_twoFingerTopActive = YES;
+                g_twoFingerTopTriggered = NO;
+                g_twoFingerTopStartX = loc.x; // only this finger's moves reach SpringBoard
+                g_twoFingerTopStartY = loc.y;
+                g_rcLatchedTouchOrientation = orientation;
+                g_rcLatchedTouchOrientationValid = YES;
+                SRLogMin(@"[RCMultiFinger] Two-finger top slide (second finger from the touchscreen): (%.0f, %.0f) and (%.0f, %.0f)", loc.x, loc.y, other.x, other.y);
+                rc_cancel_top_edge_recognizers();
+                if (touch.phase == UITouchPhaseBegan) { %orig; return; }
+            }
+        }
+
         // Check for multi-finger (2-finger) activation
         if (allTouches.count >= 2) {
             NSArray<UITouch *> *touchArr = [allTouches allObjects];
@@ -18538,7 +19203,13 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
             BOOL p0Bottom = RC_InBottomRegionMulti(p0, orientation, S, L);
             BOOL p1Bottom = RC_InBottomRegionMulti(p1, orientation, S, L);
 
-            if (p0Top && p1Top && !g_twoFingerTopActive && !g_twoFingerTopTriggered) {
+            BOOL twoFingerTop = (p0Top && RC_InTopRegionMultiLoose(p1, orientation, S, L)) ||
+                                (p1Top && RC_InTopRegionMultiLoose(p0, orientation, S, L));
+            if ((p0Top || p1Top) && !twoFingerTop && !g_twoFingerTopActive && !g_twoFingerTopTriggered &&
+                RC_TriggerIsActionable(@"trigger_statusbar_two_finger_swipe_down")) {
+                SRLogMin(@"[RCMultiFinger] Two fingers down, not a top slide: (%.0f, %.0f) and (%.0f, %.0f)", p0.x, p0.y, p1.x, p1.y);
+            }
+            if (twoFingerTop && !g_twoFingerTopActive && !g_twoFingerTopTriggered) {
                 RC_SnapshotGestureOffsets();
                 if (g_statusBarHoldTimer) {
                     [g_statusBarHoldTimer invalidate];
@@ -18554,7 +19225,8 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                 g_twoFingerTopStartY = (p0.y + p1.y) / 2.0;
                 g_rcLatchedTouchOrientation = orientation;
                 g_rcLatchedTouchOrientationValid = YES;
-                SRLog(@"[RCMultiFinger] Two Finger Top Active at (%.0f, %.0f)", g_twoFingerTopStartX, g_twoFingerTopStartY);
+                SRLogMin(@"[RCMultiFinger] Two-finger top slide: (%.0f, %.0f) and (%.0f, %.0f)", p0.x, p0.y, p1.x, p1.y);
+                if (RC_TriggerIsActionable(@"trigger_statusbar_two_finger_swipe_down")) rc_cancel_top_edge_recognizers();
             } else if (p0Bottom && p1Bottom && !g_twoFingerBottomActive && !g_twoFingerBottomTriggered) {
                 RC_SnapshotGestureOffsets();
                 g_bottomBarTouchActive = NO;
@@ -18567,6 +19239,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                 g_rcLatchedTouchOrientation = orientation;
                 g_rcLatchedTouchOrientationValid = YES;
                 SRLog(@"[RCMultiFinger] Two Finger Bottom Active at (%.0f, %.0f)", g_twoFingerBottomStartX, g_twoFingerBottomStartY);
+                if (RC_TriggerIsActionable(@"trigger_bottom_two_finger_swipe_up")) rc_cancel_edge_recognizers(g_rcBottomEdgeRecognizers);
             }
         }
 
@@ -18735,6 +19408,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                                        [g_triggerConfig[@"triggers"][@"trigger_statusbar_two_finger_swipe_down"][@"enabled"] boolValue];
                         if (enabled) {
                             g_twoFingerTopTriggered = YES;
+                            g_lastTwoFingerTopSwipeTriggerTime = [[NSDate date] timeIntervalSince1970];
                             trigger_haptic();
                             if (RC_TriggerIsActionable(@"trigger_statusbar_two_finger_swipe_down")) RC_FreezeGestureScrolling();
                             RCExecuteTrigger(@"trigger_statusbar_two_finger_swipe_down");
@@ -19062,6 +19736,15 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
     RC_UserDeltaForOrientation(loc.x - self.startPoint.x, loc.y - self.startPoint.y,
                               orientation, &dx, &dy);
     CGFloat ax = fabs(dx), ay = fabs(dy);
+    // Kept only for a possible two-finger slide: once moving with one finger, it's iOS's Home swipe
+    if ([self.zoneTriggerKey isEqualToString:@"trigger_bottom_two_finger_swipe_up"] && (ax > 8 || ay > 8)) {
+        CGFloat S = 0, L = 0;
+        RC_ScreenSL(&S, &L);
+        if (!rc_hid_two_bottom_fingers(orientation, S, L)) {
+            self.state = UIGestureRecognizerStateFailed;
+            return;
+        }
+    }
     // Contradicting motion (sideways or downward beyond slop): not ours.
     // Failing releases any competing recognizers immediately.
     if ((ax > 25 && ax > ay * 1.5) || dy > 18) {
@@ -19615,6 +20298,10 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
             return NO;
         }
     }
+    if (rc_is_two_finger_top_active()) {
+        SRLogMin(@"[RCMultiFinger] Control Center grabber: touch refused during a two-finger top slide");
+        return NO;
+    }
     return %orig;
 }
 
@@ -19625,11 +20312,15 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
             return NO;
         }
     }
+    if (edge == UIRectEdgeTop && rc_is_two_finger_top_active()) {
+        SRLogMin(@"[RCMultiFinger] Control Center grabber: top pull refused during a two-finger top slide");
+        return NO;
+    }
     return %orig;
 }
 
 - (void)grabberTongueBeganPulling:(id)tongue withDistance:(double)dist andVelocity:(double)vel {
-    if (rc_is_bottom_gesture_active()) {
+    if (rc_is_bottom_gesture_active() || rc_is_two_finger_top_active()) {
         SRLog(@"[RCBottom] SBControlCenterController suppressing grabberTongueBeganPulling");
         return;
     }
@@ -19642,12 +20333,22 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
         SRLog(@"[RCBottom] SBControlCenterController suppressing _presentControlCenterGestureBeganWithReason: %@", reason);
         return;
     }
+    if (rc_is_two_finger_top_active()) {
+        SRLogMin(@"[RCMultiFinger] Control Center pull not started during a two-finger top slide");
+        return;
+    }
+    g_rcCCPullStarted = YES;
     %orig;
 }
 
 - (void)_presentControlCenterGestureUpdatedWithGrabberDistance:(double)dist andVelocity:(double)vel {
     if (rc_cc_intentional_open_active()) { %orig; return; }
     if (rc_is_bottom_gesture_active()) {
+        return;
+    }
+    if (rc_is_two_finger_top_active()) {
+        // Hold a pull iOS already started shut; one it never started gets nothing
+        if (g_rcCCPullStarted) %orig(0, 0);
         return;
     }
     %orig;
@@ -19659,12 +20360,21 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
         SRLog(@"[RCBottom] SBControlCenterController suppressing _presentControlCenterGestureEndedWithVelocity");
         return;
     }
+    BOOL started = g_rcCCPullStarted;
+    g_rcCCPullStarted = NO;
+    if (rc_is_two_finger_top_active()) {
+        if (!started) return;
+        // End a pull iOS already started as a flick back up, so Control Center closes
+        SRLogMin(@"[RCMultiFinger] Control Center pull closed for a two-finger top slide");
+        %orig(-2000, comp);
+        return;
+    }
     %orig;
 }
 
 - (void)presentAnimated:(BOOL)animated {
     if (rc_cc_intentional_open_active()) { %orig; return; }
-    if (rc_is_bottom_gesture_active()) {
+    if (rc_is_bottom_gesture_active() || rc_is_two_finger_top_active()) {
         SRLog(@"[RCBottom] Suppressed Control Center presentAnimated within trigger window");
         return;
     }
@@ -19673,7 +20383,7 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
 
 - (void)presentAnimated:(BOOL)animated completion:(id)completion {
     if (rc_cc_intentional_open_active()) { %orig; return; }
-    if (rc_is_bottom_gesture_active()) {
+    if (rc_is_bottom_gesture_active() || rc_is_two_finger_top_active()) {
         SRLog(@"[RCBottom] Suppressed Control Center presentAnimated:completion: within trigger window");
         return;
     }
@@ -19682,7 +20392,7 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
 
 - (BOOL)_canPresent {
     if (rc_cc_intentional_open_active()) return %orig;
-    if (rc_is_bottom_gesture_active()) {
+    if (rc_is_bottom_gesture_active() || (rc_is_two_finger_top_active() && !g_rcCCPullStarted)) {
         return NO;
     }
     return %orig;
@@ -19732,9 +20442,23 @@ static BOOL RC_ShouldKeepBottomBarSideSwipe(void) {
 
 - (void)addGestureRecognizer:(UIGestureRecognizer *)recognizer withType:(NSUInteger)type {
     %orig;
+    if (recognizer && rc_recognizer_is_top_edge(recognizer)) {
+        if (!g_rcTopEdgeRecognizers) g_rcTopEdgeRecognizers = [NSHashTable weakObjectsHashTable];
+        [g_rcTopEdgeRecognizers addObject:recognizer];
+        SRLog(@"[RCMultiFinger] Top-edge system gesture type %lu: %@", (unsigned long)type, recognizer);
+    }
+    if (recognizer && [recognizer respondsToSelector:@selector(edges)] &&
+        ([(UIScreenEdgePanGestureRecognizer *)recognizer edges] & UIRectEdgeBottom)) {
+        if (!g_rcBottomEdgeRecognizers) g_rcBottomEdgeRecognizers = [NSHashTable weakObjectsHashTable];
+        [g_rcBottomEdgeRecognizers addObject:recognizer];
+    }
 }
 
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)recognizer shouldReceiveTouch:(UITouch *)touch {
+    if (rc_is_two_finger_top_active() && rc_recognizer_is_top_edge(recognizer)) {
+        SRLog(@"[RCMultiFinger] SBSystemGestureManager shouldReceiveTouch: NO for top-edge recognizer %@", recognizer);
+        return NO;
+    }
     if (touch && [touch isKindOfClass:[UITouch class]]) {
         CGPoint loc = [touch locationInView:nil];
         UIInterfaceOrientation orientation = get_current_interface_orientation();
@@ -19752,6 +20476,10 @@ static BOOL RC_ShouldKeepBottomBarSideSwipe(void) {
 }
 
 - (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)recognizer {
+    if (rc_is_two_finger_top_active() && rc_recognizer_is_top_edge(recognizer)) {
+        SRLog(@"[RCMultiFinger] SBSystemGestureManager gestureRecognizerShouldBegin: NO for top-edge recognizer %@", recognizer);
+        return NO;
+    }
     if (recognizer && [recognizer respondsToSelector:@selector(edges)]) {
         UIRectEdge edges = [(UIScreenEdgePanGestureRecognizer *)recognizer edges];
         if ((edges & UIRectEdgeBottom) || edges == 0) {

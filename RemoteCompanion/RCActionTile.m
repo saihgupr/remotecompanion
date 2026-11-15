@@ -36,9 +36,11 @@ static const CGFloat RCTileMinWidth = 80;
         _nameLabel = [[UILabel alloc] init];
         _nameLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightMedium];
         _nameLabel.textAlignment = NSTextAlignmentCenter;
-        _nameLabel.numberOfLines = 2;
+        // Three lines, shrinking a little, so long names such as "Ringer Unmuted (Silent Mode Off)"
+        // fit a four-column grid instead of ending in "..."
+        _nameLabel.numberOfLines = 3;
         _nameLabel.adjustsFontSizeToFitWidth = YES;
-        _nameLabel.minimumScaleFactor = 0.85;
+        _nameLabel.minimumScaleFactor = 0.8;
         _nameLabel.lineBreakMode = NSLineBreakByTruncatingTail;
         _nameLabel.translatesAutoresizingMaskIntoConstraints = NO;
         [self.contentView addSubview:_nameLabel];
@@ -52,13 +54,13 @@ static const CGFloat RCTileMinWidth = 80;
 
         [NSLayoutConstraint activateConstraints:@[
             [_iconView.centerXAnchor constraintEqualToAnchor:self.contentView.centerXAnchor],
-            [_iconView.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:14],
+            [_iconView.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:10],
             [_iconView.widthAnchor constraintEqualToConstant:30],
             [_iconView.heightAnchor constraintEqualToConstant:28],
             [_nameLabel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:5],
             [_nameLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-5],
-            [_nameLabel.topAnchor constraintEqualToAnchor:_iconView.bottomAnchor constant:6],
-            [_nameLabel.bottomAnchor constraintLessThanOrEqualToAnchor:self.contentView.bottomAnchor constant:-6],
+            [_nameLabel.topAnchor constraintEqualToAnchor:_iconView.bottomAnchor constant:4],
+            [_nameLabel.bottomAnchor constraintLessThanOrEqualToAnchor:self.contentView.bottomAnchor constant:-5],
             [_badgeView.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:7],
             [_badgeView.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-7],
             [_badgeView.widthAnchor constraintEqualToConstant:14],

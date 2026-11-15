@@ -34,71 +34,28 @@ while [[ "$1" =~ ^- ]]; do
     esac
 done
 
-if [[ "$1" == "help" || "$1" == "-h" || "$1" == "--help" ]]; then
-    HELP_CMD=1
+# Help comes from the tweak, so there is one command list. It never runs as root.
+if [[ "$1" == "help" ]]; then
+    ROOT_CMD=0
+elif [[ "$HELP_CMD" -eq 1 || "$1" == "-h" || "$1" == "--help" ]]; then
+    # `rc -h <word>` searches like `rc help <word>`
+    _help_word=""
+    if [[ -n "$1" && "$1" != "-h" && "$1" != "--help" ]]; then _help_word="$1"; fi
+    set -- help
+    if [[ -n "$_help_word" ]]; then set -- help "$_help_word"; fi
+    ROOT_CMD=0
 fi
 
-if [ "$HELP_CMD" -eq 1 ] || [ -z "$1" ]; then
-    echo "Usage: rc [-r] <command> [arg]"
+if [ -z "$1" ]; then
+    echo "Usage: rc [-r|--root] <command> [args]"
     echo ""
-    echo "Implemented Commands:"
-    echo "  -r, --root        - Run command as root"
-    echo "  play, pause       - Media Control"
-    echo "  vol-up, vol-down  - Volume Control"
-    echo "  set-vol <0-100>   - Set Volume"
-    echo "  shortcut \"Name\"   - Run a Shortcut"
-    echo "  ping              - Play Alert Sound"
-    echo "  respring          - Restart SpringBoard"
-    echo "  safemode          - Enter Safe Mode"
-    echo "  bt on/off         - Turn Bluetooth On/Off"
-    echo "  wifi on/off       - Turn WiFi On/Off"
-    echo "  cellular on/off/toggle - Turn Cellular Data On/Off/Toggle"
-    echo "  location on/off/toggle - Turn Location Services (GPS) On/Off/Toggle"
-    echo "  airplane on/off   - Turn Airplane Mode On/Off"
-    echo "  brightness <0-100> - Set screen brightness"
-    echo "  haptic            - Trigger haptic tap"
-    echo "  tap <x> <y>       - Tap screen coordinates"
-    echo "  taprecord         - Record a screen tap location after 3s delay"
-    echo "  flash on/off      - Turn flashlight on/off"
-    echo "  rotate lock/unlock - Toggle orientation lock"
-    echo "  appearance dark/light/toggle - Set device appearance"
-    echo "  lock              - Lock the device screen"
-    echo "  unlock [pin]      - Unlock the device screen"
-    echo "  lock-toggle [pin] - Toggle device lock/unlock state"
-    echo "  is-locked         - Check if device is locked"
-    echo "  autolock [30s|1m-5m|never|off|toggle|status] - Configure auto-lock timeout"
-    echo "  display sleep [30s|1m-5m|never|off] - Change when display goes to sleep"
-    echo "  timer <duration|stop|pause|resume|status> [--label \"Name\"] - Control Apple Clock timer"
-    echo "  dnd on/off/debug   - Toggle Do Not Disturb or inspect state"
-    echo "  audiomix on/off/toggle/status - Control AudioMix tweak"
-    echo "  screenrecord [toggle|start|stop] - Control system screen recording"
-    echo "  snapper [open|freeze|instant|close|last|history] - Control Snapper 2 / Snapper 3"
-    echo "  sneakycam photo/video - Trigger SneakyCam photo or toggle video"
-    echo "  camera [photo|video|portrait|slomo|timelapse] [0.5x|1x|2x] [front] [flash] - Open Camera in specified mode"
-    echo "  camera shutter / snap - Press Camera shutter button to take photo or toggle recording"
-    echo "  camera record     - Toggle video recording in Camera app"
-    echo "  toast \"Title\" [\"Subtitle\"] [\"Icon\"] - Display HUD toast notification"
-    echo "  notify \"Title\" [\"Message\"] [--urgent] [--remove-after SECONDS] [--image \"sf:NAME\"|\"app:BUNDLE\"] [--image-url URL] - Post a standard iOS notification"
-    echo "         --image sets its icon; --image-url attaches a photo from the web; --tap ID runs notiftap_ID on a tap"
-    echo "         --button \"ID|Title|flags\" adds a button; --wait SECONDS waits for the answer"
-    echo "  notify clear - Remove RC's notifications from Notification Center"
-    echo "  clear notification [--all] [--app BUNDLE|rc] [--text TEXT] [FILE.txt|TEXT...]"
-    echo "         Clear notifications by app and/or matching text (or a line-by-line .txt file)"
-    echo "  ha <toggle|turn_on|turn_off|call> - Control Home Assistant"
-    echo "  km <trigger|url>  - Trigger Keyboard Maestro Macro or URL"
-    echo "  mqtt <pub|publish> <topic> [payload] - Publish MQTT topic"
-    echo "  http-request <json|url> - Call a REST API with method, headers and body"
-    echo "  blacklist <list|add|remove|reset> - Manage app exclusion"
-    echo "  nav <panel>       - Navigate companion app (triggers, settings, ha, km, mqtt, add)"
-    echo "  export [path]     - Save everything for an exact restore (default: current directory; a directory or file)"
-    echo "  import <path>     - Restore an exported file on the device"
-    echo "  backup [path]     - Back up the tweaks with IAmLazy and move the archive (default: current directory; a directory or file)"
-    echo "  pull-backup [dir] - Move the newest IAmLazy backup to the Mac, printing its path"
-    echo "  ialazy <backup|list> - Start an on-device IAmLazy backup or list archives on the device"
-    echo "  -h, --help        - Show this help message"
-    echo "  log               - Stream device logs"
+    echo "Run 'rc help' for every command, or 'rc help <word>' to search."
     echo ""
-    [ "$HELP_CMD" -eq 1 ] && exit 0 || exit 1
+    echo "Examples:"
+    echo "  rc lock"
+    echo "  rc volume 40"
+    echo "  rc shortcut \"Good Night\""
+    exit 1
 fi
 
 # Send one command and print the reply, using the same delivery paths as below
@@ -745,6 +702,8 @@ fi
 if [ $? -eq 0 ]; then
     if [ ! -z "$RESPONSE" ]; then
         echo "$RESPONSE"
+    elif [[ "$_CMD" == "help" || "$_CMD" == help\ * ]]; then
+        echo "No help was returned. Is the RemoteCompanion tweak loaded on the device?" >&2
     fi
     exit 0
 else

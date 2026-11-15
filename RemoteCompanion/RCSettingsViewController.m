@@ -340,7 +340,7 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     } else if (indexPath.section == RCSettingsSectionGestures) {
         cell.textLabel.text = @"Gestures";
         cell.imageView.image = [UIImage systemImageNamed:@"hand.draw.fill"];
-        cell.imageView.tintColor = [UIColor systemRedColor];
+        cell.imageView.tintColor = [UIColor systemPinkColor];
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     } else if (indexPath.section == RCSettingsSectionBackup) {
         if (indexPath.row == 0) {
@@ -424,7 +424,6 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
 - (void)openGitHub {
     [[UIApplication sharedApplication] openURL:[NSURL URLWithString:@"https://github.com/saihgupr/RemoteCompanion"] options:@{} completionHandler:nil];
 }
-
 #pragma mark - Backup / Import
 
 - (void)exportConfig {

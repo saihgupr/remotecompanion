@@ -90,6 +90,8 @@ Access the desktop-class automation hub at `http://[DEVICE_IP]:8080` from any co
 
 ## CLI Commands & System Control
 
+> Run `rc help` (or `rc -h`) for this whole list in the terminal, and `rc help <word>` to show only matching commands.
+
 ### Media, Sound & Volume
 - `rc play` / `rc pause` / `rc playpause` / `rc next` / `rc prev` - Control media playback.
 - `rc volume 0-100` - Set volume level.
@@ -418,10 +420,11 @@ The background listener daemon runs inside SpringBoard with automatic 60s keep-a
 ### 2. Installation
 
 #### Option 1: Package Manager (Recommended)
-Install from **[Havoc](https://havoc.app/package/remotecompanion)** without adding a source, or add the project repo `https://saihgupr.github.io/remotecompanion` to Sileo or Zebra:
-- [Add to Sileo](sileo://source/https://saihgupr.github.io/remotecompanion)
-- [Add to Zebra](zbra://sources/add/https://saihgupr.github.io/remotecompanion)
-- [Get it on Havoc](https://havoc.app/package/remotecompanion)
+Install from **[Havoc](https://havoc.app/package/remotecompanion)** without adding a source, or add this repo in Sileo or Zebra by copying its URL into Sources > +:
+
+```
+https://saihgupr.github.io/remotecompanion
+```
 
 #### Option 2: Manual .deb Installation
 Download the latest `.deb` package from [Releases](https://github.com/saihgupr/remotecompanion/releases) and install via Sileo, Filza, or `dpkg -i`.
@@ -566,7 +569,14 @@ Send command strings via `GET` or `POST`:
 - **Example (GET)**: `http://[device_ip]:8080/api/command?cmd=play`
 - **Example (POST)**: `curl -X POST "http://[device_ip]:8080/api/command" -d "haptic"`
 
-If an API token is set in Settings > Web UI > Access, privileged commands (`root`, `sudo`, `exec`), triggers containing privileged actions, and TestKit execution require it as `Authorization: Bearer <TOKEN>`, `X-API-Key: <TOKEN>`, `?token=` or `?key=`.
+If an API token is set in Settings > Web UI > Access, privileged calls from another device require it as `Authorization: Bearer <TOKEN>`, `X-API-Key: <TOKEN>`, `?token=` or `?key=`. That covers `root`, `sudo`, `exec`, `var`, unlocks with a passcode (`unlock <pin>`, `lock-toggle <pin>`, `unlock-passcode`), triggers holding any of those, TestKit execution, and config saves that change protected settings.
+
+```bash
+curl -H "Authorization: Bearer <TOKEN>" \
+  "http://[device_ip]:8080/api/command?cmd=unlock%201234"
+```
+
+Everyday commands (`lock`, plain `unlock` with no passcode, `volume`, `media`, `play`, and the rest) work without a token. Calls made on the iPhone itself, over the local socket or from the `rc` CLI, never need one.
 
 **3. Fire an Automation Trigger:**
 Execution URLs for your specific triggers:
@@ -609,8 +619,8 @@ RemoteCompanion implements multiple layers of protection to ensure your device r
 
 - **Local Execution**: Local apps and the `rc` CLI communicate securely via a local UNIX socket file (`/var/mobile/Documents/rc.sock`), bypassing network exposure.
 - **Setuid Root Helper Protection**: `rc-root` verifies its calling parent process is SpringBoard before executing privileged actions. Direct execution by unprivileged mobile processes is blocked by default.
-- **API Token Authentication**: Setting an API token in Settings > Web UI > Access (`rc webui token`) gates privileged commands (`root`, `sudo`, `exec`), triggers containing privileged actions, and TestKit test runs from network clients. Everyday safe commands (`lock`, `volume`, `media`, etc.) remain accessible for local network automations.
-- **Credential Masking in API**: `GET /api/config` automatically masks sensitive passwords and tokens (`webUIApiToken`, `haToken`, `mqttPassword`, and SSH credentials) as `••••••••` for unauthenticated remote callers, and `POST /api/config` requires a valid token to save changes.
+- **API Token Authentication**: Setting an API token in Settings > Web UI > Access (`rc webui token`) gates privileged commands (`root`, `sudo`, `exec`, unlocking with a passcode), triggers containing privileged actions, and TestKit test runs from network clients. Everyday safe commands (`lock`, `volume`, `media`, etc.) remain accessible for local network automations.
+- **Credential Masking in API**: `GET /api/config` automatically masks sensitive passwords and tokens (`webUIApiToken`, `haToken`, `mqttPassword`, and SSH credentials) as `••••••••` for unauthenticated remote callers, and `POST /api/config` requires a valid token only when a save changes protected settings such as the token itself, Web UI access, the root helper, or saved credentials, or adds or changes a trigger holding a privileged command. Other trigger and action edits save without one. With no token set, those changes can only be made on the iPhone itself.
 - **Strict CORS Origin Validation**: Cross-origin requests from public websites to the Web UI API are rejected with `403 Forbidden`. CORS is strictly restricted to localhost, loopback addresses, `.local` mDNS domains, and RFC 1918 private subnets.
 - **POSIX Shell Quoting**: SSH action commands and variable substitutions are strictly POSIX single-quoted to eliminate injection vulnerabilities on target hosts.
 - **Configuration Permissions**: Sensitive trigger plists (`/var/mobile/Documents/rc_triggers.plist`) are written with `0600` permissions (readable/writable only by owner).

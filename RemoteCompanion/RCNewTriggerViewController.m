@@ -5,7 +5,8 @@
 #import "RCCategoryBar.h"
 #import "RCTriggerIcons.h"
 
-@interface RCNewTriggerViewController () <UISearchResultsUpdating, UITableViewDataSource, UITableViewDelegate,
+@interface RCNewTriggerViewController () <UISearchResultsUpdating, UISearchControllerDelegate,
+                                          UITableViewDataSource, UITableViewDelegate,
                                           UICollectionViewDataSource, UICollectionViewDelegateFlowLayout>
 // Everything the picker was given, and the part currently shown (the search filters it)
 @property (nonatomic, strong) NSArray<NSString *> *allSectionTitles;
@@ -20,6 +21,8 @@
 // Compact: the Triggers list's category bar over the grid, and the section it picked (nil: All)
 @property (nonatomic, strong) RCCategoryBar *categoryBar;
 @property (nonatomic, copy) NSString *selectedCategoryTitle;
+// A chosen item waits here until the search that found it has finished closing
+@property (nonatomic, copy) void (^pendingHandler)(void);
 @end
 
 @implementation RCNewTriggerViewController
@@ -76,6 +79,7 @@
 
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
+    self.searchController.delegate = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
     self.searchController.searchBar.placeholder = @"Search Triggers";
     self.navigationItem.searchController = self.searchController;
@@ -359,13 +363,34 @@
     void (^handler)(void) = item[@"handler"];
     if (!handler) return;
     // The setup screen is pushed under a clean navigation bar, not an active search. Pushing while the
-    // search is still closing is dropped, so the choice runs once it has closed.
+    // search is still closing is dropped (on iPad), so the choice runs once it has closed.
     if (!self.searchController.isActive) { handler(); return; }
+    // Held so the choice runs once, whichever reports the search closed first
+    self.pendingHandler = handler;
     self.searchController.active = NO;
+    __weak typeof(self) weakSelf = self;
+    // In case the dismissal does not report back (it does on most releases), do not
+    // leave the tap doing nothing.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [weakSelf runPendingHandler];
+    });
+    // And run it as soon as the closing search's transition ends, if it reports one
     id<UIViewControllerTransitionCoordinator> closing = self.searchController.transitionCoordinator ?: self.transitionCoordinator;
-    if (!closing || ![closing animateAlongsideTransition:nil completion:^(__unused id<UIViewControllerTransitionCoordinatorContext> context) { handler(); }]) {
-        dispatch_async(dispatch_get_main_queue(), handler);
+    if (closing) {
+        [closing animateAlongsideTransition:nil completion:^(__unused id<UIViewControllerTransitionCoordinatorContext> context) {
+            [weakSelf runPendingHandler];
+        }];
     }
+}
+
+- (void)searchControllerDidDismissSearchController:(UISearchController *)searchController {
+    [self runPendingHandler];
+}
+
+- (void)runPendingHandler {
+    void (^pending)(void) = self.pendingHandler;
+    self.pendingHandler = nil;
+    if (pending) pending();
 }
 
 @end
