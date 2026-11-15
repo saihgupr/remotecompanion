@@ -373,10 +373,11 @@ The background listener daemon runs inside SpringBoard with automatic 60s keep-a
 ### 2. Installation
 
 #### Option 1: Package Manager (Recommended)
-Install from **[Havoc](https://havoc.app/package/remotecompanion)** without adding a source, or add the project repo `https://saihgupr.github.io/remotecompanion` to Sileo or Zebra:
-- [Add to Sileo](sileo://source/https://saihgupr.github.io/remotecompanion)
-- [Add to Zebra](zbra://sources/add/https://saihgupr.github.io/remotecompanion)
-- [Get it on Havoc](https://havoc.app/package/remotecompanion)
+Install from **[Havoc](https://havoc.app/package/remotecompanion)** without adding a source, or add this repo in Sileo or Zebra by copying its URL into Sources > +:
+
+```
+https://saihgupr.github.io/remotecompanion
+```
 
 #### Option 2: Manual .deb Installation
 Download the latest `.deb` package from [Releases](https://github.com/saihgupr/remotecompanion/releases) and install via Sileo, Filza, or `dpkg -i`.
