@@ -1262,7 +1262,14 @@
       outline: none;
     }
     .dialog-btns button:active { background-color: var(--rc-fill); }
+    /* Three buttons: one per row, Cancel last, like iOS */
+    .dialog-btns.stacked { flex-direction: column; }
+    .dialog-btns.stacked button { flex: none; border-top: 0.5px solid var(--rc-border-heavy); }
+    .dialog-btns.stacked button:first-child { order: 3; }
+    .dialog-btns.stacked #dialog-ok { order: 1; border-top: none; font-weight: 600; }
+    .dialog-btns.stacked #dialog-alt { order: 2; }
     .dialog-btns button:not(:last-child) { border-right: 0.5px solid var(--rc-border-heavy); }
+    .dialog-btns.stacked button:not(:last-child) { border-right: none; }
     .dialog-btns button:last-child { font-weight: 600; }
     #dialog-record { color: var(--rc-orange); font-weight: 400; }
     .dialog-box.wide {
@@ -2645,6 +2652,7 @@
     <div class="dialog-btns">
       <button onclick="closeDialog()">Cancel</button>
       <button id="dialog-record" style="display:none;" onclick="dialogRecord()">Record</button>
+      <button id="dialog-alt" onclick="dialogAlt()" style="display:none"></button>
       <button id="dialog-ok" onclick="dialogOk()">OK</button>
     </div>
   </div>
@@ -3387,6 +3395,7 @@ let config = { masterEnabled: true, nfcEnabled: true, webUIEnabled: false, fixed
 let hasLoadedData = false;
 let currentKey = null;
 let dialogCallback = null;
+let dialogAltCallback = null;
 let editMode = false;
 let g_selectedCategoryId = null; // null = All (mirrors iOS RCCategoryBar selectedIndex -1)
 try {
@@ -3666,7 +3675,7 @@ function triggerIconHTML(key) {
   const exit = key.startsWith('app_exit_');
   const appBadge = (exit || key.startsWith('app_launch_'))
     ? `<span class="row-icon-app-badge ${exit ? 'exit' : 'launch'}"><i class="f7-icons">${exit ? 'xmark_circle_fill' : 'checkmark_circle_fill'}</i></span>` : '';
-  return `<i class="f7-icons">${icon}</i>${letter ? `<span class="row-icon-letter">${escHtml(letter)}</span>` : ''}${appBadge}`;
+  return `<i class="f7-icons">${icon}</i>${letter ? `<span class="row-icon-letter">${escapeHtml(letter)}</span>` : ''}${appBadge}`;
 }
 
 // A trigger or action that needs an integration that is switched off: still listed and usable,
@@ -3794,7 +3803,7 @@ const CMD_NAMES = {
   'camera shutter':'Camera Shutter / Snap','camera snap':'Camera Shutter / Snap',
   'camera record':'Camera Record Toggle','camera record toggle':'Camera Record Toggle',
   'sneakycam photo':'SneakyCam Photo','sneakycam takephoto':'SneakyCam Photo','sneakycam video':'SneakyCam Video','sneakycam startstopvideo':'SneakyCam Video','sneakycam record':'SneakyCam Video',
-  'lock':'Lock Device','unlock':'Unlock Device','lock-toggle':'Lock Toggle','lock toggle':'Lock Toggle',
+  'lock':'Lock Device','unlock':'Unlock Device (Ask for Passcode)','lock-toggle':'Lock Toggle (Ask for Passcode)','lock toggle':'Lock Toggle (Ask for Passcode)','unlock-passcode forget':'Forget Saved Passcode',
   'dnd on':'Do Not Disturb On','dnd off':'Do Not Disturb Off','dnd toggle':'Do Not Disturb Toggle',
   'focus off':'Focus Off',
   'audiomix on':'AudioMix On','audiomix off':'AudioMix Off','audiomix toggle':'AudioMix Toggle',
@@ -3924,8 +3933,8 @@ function renderRecent(box) {
       <div class="app-picker-row-inner" style="display:flex; align-items:center; gap:10px;">
         <i class="f7-icons" style="font-size:22px;flex-shrink:0;color:${stopped ? 'var(--rc-orange)' : 'var(--rc-green)'}">${stopped ? 'stop_circle' : 'checkmark_circle'}</i>
         <div style="min-width:0; flex:1;">
-          <div class="app-picker-name">${escHtml(nameForKey(run.key || ''))}</div>
-          <div class="app-picker-bid">${escHtml(runWhenText(run.started))} · ${runDurationText(run.seconds)} · ${run.test ? 'Test · ' : ''}${stopped ? 'Stopped' : 'Finished'}</div>
+          <div class="app-picker-name">${escapeHtml(nameForKey(run.key || ''))}</div>
+          <div class="app-picker-bid">${escapeHtml(runWhenText(run.started))} · ${runDurationText(run.seconds)} · ${run.test ? 'Test · ' : ''}${stopped ? 'Stopped' : 'Finished'}</div>
         </div>
       </div>
     `;
@@ -3952,8 +3961,8 @@ function renderRunning() {
       <div class="app-picker-row-inner" style="display:flex; align-items:center; gap:10px;">
         <div class="row-icon ${cls}" style="flex-shrink:0"><i class="f7-icons">${icon}</i></div>
         <div style="min-width:0; flex:1;">
-          <div class="app-picker-name">${escHtml(nameForKey(run.key))}</div>
-          <div class="app-picker-bid">${run.test ? 'Test · ' : ''}${runElapsedText(run.seconds)} · ${escHtml(runStepText(run))}</div>
+          <div class="app-picker-name">${escapeHtml(nameForKey(run.key))}</div>
+          <div class="app-picker-bid">${run.test ? 'Test · ' : ''}${runElapsedText(run.seconds)} · ${escapeHtml(runStepText(run))}</div>
         </div>
       </div>
       <button class="nav-btn" title="Stop" style="color:var(--rc-red);flex-shrink:0"><i class="f7-icons" style="font-size:22px">stop_circle_fill</i></button>
@@ -4128,9 +4137,12 @@ function nameForCmd(cmd) {
   if (lowCmd.startsWith('focus on '))     return `Turn On ${cmd.slice(9)}`;
   if (lowCmd.startsWith('focus toggle ')) return `Toggle ${cmd.slice(13)}`;
   if (lowCmd.startsWith('airplay connect ')) return `AirPlay Connect ${cmd.slice(16)}`;
-  if (lowCmd.startsWith('unlock '))       return 'Unlock Device (Passcode)';
-  if (lowCmd.startsWith('lock-toggle ') || lowCmd.startsWith('lock toggle ')) return 'Lock Toggle (Passcode)';
-  if (lowCmd === 'lock-toggle' || lowCmd === 'lock toggle') return 'Lock Toggle';
+  // "... saved" without a saved passcode only wakes the screen to the passcode screen
+  const unlockKind = /^(unlock|lock[- ]toggle) saved$/.test(lowCmd) && 'unlock_passcode_saved' in serverCapabilities && !serverCapabilities.unlock_passcode_saved ? '(Ask for Passcode)' : '(Saved Passcode)';
+  if (lowCmd.startsWith('unlock '))       return `Unlock Device ${unlockKind}`;
+  if (lowCmd.startsWith('lock-toggle ') || lowCmd.startsWith('lock toggle ')) return `Lock Toggle ${unlockKind}`;
+  if (lowCmd === 'lock-toggle' || lowCmd === 'lock toggle') return 'Lock Toggle (Ask for Passcode)';
+  if (lowCmd === 'unlock')         return 'Unlock Device (Ask for Passcode)';
   if (lowCmd.startsWith('set-vol '))      return `Set Volume ${cmd.slice(8)}%`;
   if (lowCmd.startsWith('ringer volume ')) return `Set Ringer Volume ${cmd.slice(14)}%`;
   if (lowCmd.startsWith('brightness '))   return `Set Brightness ${cmd.slice(11)}%`;
@@ -4317,7 +4329,7 @@ function iconForCmd(cmd) {
     'wifi on':'wifi','wifi off':'wifi_slash','wifi toggle':'wifi',
     'bluetooth on':'bolt_horizontal_fill','bluetooth off':'bolt_horizontal','bluetooth toggle':'bolt_horizontal_fill',
     'airplane on':'airplane','airplane off':'airplane','airplane toggle':'airplane',
-    'lock':'lock_fill','unlock':'lock_open_fill','lock-toggle':'lock_fill','lock toggle':'lock_fill',
+    'lock':'lock_fill','unlock':'lock_open_fill','lock-toggle':'lock_fill','lock toggle':'lock_fill','unlock-passcode forget':'lock_fill',
     'dnd on':'moon_fill','dnd off':'moon','dnd toggle':'moon_circle_fill',
     'audiomix on':'equalizer','audiomix off':'equalizer','audiomix toggle':'equalizer',
     'audiohandoff enabled on':'headphones','audiohandoff enabled off':'headphones','audiohandoff enabled toggle':'headphones','audiohandoff auto on':'headphones','audiohandoff auto off':'headphones','audiohandoff auto toggle':'headphones',
@@ -4437,6 +4449,7 @@ const ACTION_SECTIONS = [
     { name:'Lock Device',       cmd:'lock',          icon:'lock_fill' },
     { name:'Unlock Device',     cmd:'unlock',        icon:'lock_open_fill' },
     { name:'Lock Toggle',       cmd:'lock-toggle',   icon:'lock_fill', is_toggle:true },
+    { name:'Forget Saved Passcode', cmd:'unlock-passcode forget', icon:'lock_fill' },
     { name:'Do Not Disturb',    cmd:'dnd toggle',    icon:'moon_circle_fill', is_toggle:true },
     { name:'Set Focus…',        cmd:'__FOCUS__',     icon:'moon_circle_fill', needs_input:true },
     { name:'Low Power Mode',    cmd:'low power toggle',icon:'battery_25', is_toggle:true },
@@ -4692,12 +4705,12 @@ function askAddOnDetails(cmd, done) {
   for (const o of options) {
     const el = document.createElement('div');
     el.className = 'ao-opt';
-    el.innerHTML = `<div class="ao-head"><span>${escHtml(o.title || o.id)}</span><span class="ao-val"></span><i class="f7-icons ao-chev">chevron_right</i></div><div class="ao-choices"></div>`;
+    el.innerHTML = `<div class="ao-head"><span>${escapeHtml(o.title || o.id)}</span><span class="ao-val"></span><i class="f7-icons ao-chev">chevron_right</i></div><div class="ao-choices"></div>`;
     const box = el.querySelector('.ao-choices');
     const items = choicesOf(o).map(ch => {
       const row = document.createElement('div');
       row.className = 'ao-choice';
-      row.innerHTML = `<span>${escHtml(ch.label || ch.word)}</span><i class="f7-icons">checkmark_alt</i>`;
+      row.innerHTML = `<span>${escapeHtml(ch.label || ch.word)}</span><i class="f7-icons">checkmark_alt</i>`;
       row.onclick = () => { chosen[o.id] = ch.word; open = null; update(); };
       box.appendChild(row);
       return row;
@@ -4710,7 +4723,7 @@ function askAddOnDetails(cmd, done) {
   if (input) {
     const row = document.createElement('div');
     row.className = 'ao-opt ao-input';
-    row.innerHTML = `<span>${escHtml(input.title || m.action.name)}</span><input class="dialog-input" type="text" placeholder="${escHtml(input.placeholder || '')}" autocapitalize="none" autocorrect="off" spellcheck="false" ${input.number ? 'inputmode="decimal"' : ''}>`;
+    row.innerHTML = `<span>${escapeHtml(input.title || m.action.name)}</span><input class="dialog-input" type="text" placeholder="${escapeHtml(input.placeholder || '')}" autocapitalize="none" autocorrect="off" spellcheck="false" ${input.number ? 'inputmode="decimal"' : ''}>`;
     field = row.querySelector('input');
     list.appendChild(row);
   }
@@ -4803,14 +4816,18 @@ async function saveConfig() {
         let detail = errorText.trim();
         try { detail = JSON.parse(errorText).error || detail; } catch(e) {}
         showToast('⚠ ' + (detail || 'Could not save'));
+        loadData(); // show what is really saved
       }
-      return;
+      return false;
     }
     if (!res.ok) {
         showToast('⚠ Failed to save settings');
+        return false;
     }
+    return true;
   } catch(e) {
     showToast('⚠ Offline - unable to save');
+    return false;
   }
 }
 
@@ -4979,7 +4996,7 @@ function renderAll() {
     const hdr = document.createElement('div');
     hdr.className = 'section-header' + (sec.id === 'favorites' ? ' favorites' : '');
     const catIcon = TRIGGER_CATEGORY_ICONS[sec.title];
-    hdr.innerHTML = (catIcon ? `<span class="section-icon">${catIcon.startsWith('<') ? catIcon : `<i class="f7-icons">${catIcon}</i>`}</span>` : '') + escHtml(sec.title.toUpperCase());
+    hdr.innerHTML = (catIcon ? `<span class="section-icon">${catIcon.startsWith('<') ? catIcon : `<i class="f7-icons">${catIcon}</i>`}</span>` : '') + escapeHtml(sec.title.toUpperCase());
     root.appendChild(hdr);
 
     // Card
@@ -5086,10 +5103,10 @@ function renderTriggerRow(key, deletable) {
     </div>
     <div class="row-text">
       <div class="row-title">
-        <span>${escHtml(name)}</span>
+        <span>${escapeHtml(name)}</span>
         ${isFav ? '<i class="f7-icons" style="font-size:12px;color:var(--rc-gold)">star_fill</i>' : ''}
       </div>
-      <div class="row-subtitle">${escHtml(subtitle)}</div>
+      <div class="row-subtitle">${escapeHtml(subtitle)}</div>
     </div>
     <i class="f7-icons row-chevron">chevron_right</i>
   `;
@@ -5201,11 +5218,6 @@ function renderTriggerRow(key, deletable) {
   });
 
   return row;
-}
-
-function escHtml(s) {
-  if (!s) return '';
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 // ── Action management ─────────────────────────────────────────────────────────
@@ -5707,22 +5719,22 @@ function renderActionNameHtml(action, idx) {
     if (action.command && typeof action.command === 'string') {
       return renderActionNameHtml(action.command, idx);
     }
-    return escHtml(nameForCmd(action));
+    return escapeHtml(nameForCmd(action));
   }
   const toggleInfo = parseToggleCmd(action);
   if (toggleInfo) {
     const charLen = toggleInfo.currentDisplaySuffix ? toggleInfo.currentDisplaySuffix.length : 2;
     const selectWidth = (charLen + 1.8) + 'ch';
-    let html = `<span>${escHtml(toggleInfo.name)}</span> `;
+    let html = `<span>${escapeHtml(toggleInfo.name)}</span> `;
     html += `<select onchange="updateToggleAction(${idx}, this.value)" onclick="event.stopPropagation()" style="appearance:none;-webkit-appearance:none;-moz-appearance:none;background:var(--rc-surface-2);color:var(--rc-blue);border:none;border-radius:6px;padding:2px 4px;font-size:14px;font-weight:600;font-family:inherit;outline:none;cursor:pointer;text-align:center;text-align-last:center;width:${selectWidth};box-sizing:border-box;">`;
     toggleInfo.suffixes.forEach((s, i) => {
       const sel = s === toggleInfo.currentSuffix ? 'selected' : '';
-      html += `<option value="${s}" ${sel}>${escHtml(toggleInfo.displaySuffixes[i])}</option>`;
+      html += `<option value="${s}" ${sel}>${escapeHtml(toggleInfo.displaySuffixes[i])}</option>`;
     });
     html += `</select>`;
     return html;
   }
-  return escHtml(nameForCmd(action));
+  return escapeHtml(nameForCmd(action));
 }
 
 function parseToggleCmd(cmd) {
@@ -6324,7 +6336,7 @@ function renderSymbolPicker() {
     tile.type = 'button';
     tile.className = 'sym-tile' + (n === current ? ' selected' : '');
     tile.title = n || 'None';
-    tile.innerHTML = `<i class="f7-icons">${n ? symbolGlyph(n) : 'nosign'}</i><span>${escHtml(n || 'None')}</span>`;
+    tile.innerHTML = `<i class="f7-icons">${n ? symbolGlyph(n) : 'nosign'}</i><span>${escapeHtml(n || 'None')}</span>`;
     tile.onclick = () => {
       document.getElementById('toast-icon-input').value = n;
       updateToastPreview();
@@ -6734,17 +6746,17 @@ function renderLogsUI() {
       return;
     }
 
-    let safeMsg = escHtml(parsed.msg);
+    let safeMsg = escapeHtml(parsed.msg);
     safeMsg = safeMsg.replace(/(trigger_[a-zA-Z0-9_]+)/g, '<span class="hl-target">$1</span>');
     safeMsg = safeMsg.replace(/(com\.[a-zA-Z0-9_\.]+)/g, '<span class="hl-target">$1</span>');
     safeMsg = safeMsg.replace(/\b(SUCCESSFULLY|SUCCESSFUL|SUCCESS|OK|ACKNOWLEDGED|PASSED)\b/gi, '<span class="hl-success">$1</span>');
     safeMsg = safeMsg.replace(/\b(FAILED|FAILURE|FORBIDDEN|ERROR|ERRORS|BAD REQUEST)\b/gi, '<span class="hl-error">$1</span>');
 
-    const timePill = parsed.timeStr ? `<span class="log-time-pill">${escHtml(parsed.timeStr)}</span>` : '';
+    const timePill = parsed.timeStr ? `<span class="log-time-pill">${escapeHtml(parsed.timeStr)}</span>` : '';
     const logKey = line.trim();
     const isExpanded = g_expandedLogKeys.has(logKey);
     const expandedClass = isExpanded ? ' expanded' : '';
-    const attrKey = escHtml(logKey).replace(/"/g, '&quot;');
+    const attrKey = escapeHtml(logKey).replace(/"/g, '&quot;');
 
     html += `<div class="log-row-container${expandedClass}" data-log-key="${attrKey}">
       <div class="log-row" onclick="toggleLogRowDetail(this)">
@@ -6754,9 +6766,9 @@ function renderLogsUI() {
         <i class="f7-icons log-row-expand-icon">chevron_right</i>
       </div>
       <div class="log-row-details">
-        <div><strong style="color:var(--rc-label);">Raw Entry:</strong> ${escHtml(line)}</div>
+        <div><strong style="color:var(--rc-label);">Raw Entry:</strong> ${escapeHtml(line)}</div>
         <div><strong style="color:var(--rc-label);">Category:</strong> ${parsed.cat} (${parsed.catKey.toUpperCase()})</div>
-        ${parsed.timeStr ? `<div><strong style="color:var(--rc-label);">Timestamp:</strong> ${escHtml(parsed.timeStr)}</div>` : ''}
+        ${parsed.timeStr ? `<div><strong style="color:var(--rc-label);">Timestamp:</strong> ${escapeHtml(parsed.timeStr)}</div>` : ''}
       </div>
     </div>`;
   });
@@ -6883,15 +6895,13 @@ function editAction(idx) {
     } else if (isLevelCommand(low, 'brightness ')) {
       promptLevelAction('brightness ', idx);
     } else if (low === 'unlock' || low.startsWith('unlock ')) {
-      const currentPin = low.startsWith('unlock ') ? act.slice(7).trim() : '';
-      promptUnlockDialog(currentPin, val => {
+      promptUnlockDialog(val => {
         actions[idx] = val;
         saveConfig();
         renderActionList();
       });
     } else if (low === 'lock-toggle' || low === 'lock toggle' || low.startsWith('lock-toggle ') || low.startsWith('lock toggle ')) {
-      const currentPin = (low.startsWith('lock-toggle ') || low.startsWith('lock toggle ')) ? act.slice(12).trim() : '';
-      promptLockToggleDialog(currentPin, val => {
+      promptLockToggleDialog(val => {
         actions[idx] = val;
         saveConfig();
         renderActionList();
@@ -7131,7 +7141,7 @@ function pickerRowFor(act) {
     <div class="dialog-row-icon ${act.iconUrl ? 'icon-image' : ''}">
       ${iconMarkup(act)}
     </div>
-    <div class="picker-row-text">${escHtml(act.name)}</div>
+    <div class="picker-row-text">${escapeHtml(act.name)}</div>
     <i class="f7-icons picker-row-chevron">${chevron}</i>
   `;
   row.onclick = () => act.is_group ? openPickerGroup(act) : selectPickerAction(act);
@@ -7320,11 +7330,11 @@ function selectPickerAction(act) {
   } else if (c === '__HTTP_REQUEST__') {
     openRestActionDialog(null);
   } else if (c === 'unlock') {
-    promptUnlockDialog('', val => {
+    promptUnlockDialog(val => {
       addActionToCurrent(val);
     });
   } else if (c === 'lock-toggle') {
-    promptLockToggleDialog('', val => {
+    promptLockToggleDialog(val => {
       addActionToCurrent(val);
     });
   } else {
@@ -7785,7 +7795,7 @@ function varEdGrid(kinds, perRow, compact) {
     tile.type = 'button';
     tile.className = 'var-ed-tile' + (k.op === varEd.op ? ' selected' : '');
     tile.dataset.op = k.op;
-    tile.innerHTML = `<i class="f7-icons">${k.icon}</i><span>${escHtml(k.title)}</span>`;
+    tile.innerHTML = `<i class="f7-icons">${k.icon}</i><span>${escapeHtml(k.title)}</span>`;
     tile.onclick = () => varEdTileTapped(k.op);
     grid.appendChild(tile);
   });
@@ -7795,7 +7805,7 @@ function varEdGrid(kinds, perRow, compact) {
 function varEdSwitchRow(label, on, onChange) {
   const row = document.createElement('label');
   row.className = 'var-ed-row';
-  row.innerHTML = `<span class="var-ed-label">${escHtml(label)}</span>
+  row.innerHTML = `<span class="var-ed-label">${escapeHtml(label)}</span>
     <span class="toggle-switch"><input type="checkbox"${on ? ' checked' : ''}><span class="toggle-slider"></span></span>`;
   row.querySelector('input').onchange = e => { onChange(e.target.checked); varEdUpdate(); };
   return row;
@@ -7827,7 +7837,7 @@ function varEdRenderVariable() {
       if (!names.length) return;
       html += `<optgroup label="${title}">` + names.map(n => {
         const on = varEd.picked && !varEd.typingNew && varEd.picked.name === n && varEd.picked.run === isRun;
-        return `<option value="${isRun ? 'r' : 's'}:${escHtml(n)}"${on ? ' selected' : ''}>${escHtml(n)}</option>`;
+        return `<option value="${isRun ? 'r' : 's'}:${escapeHtml(n)}"${on ? ' selected' : ''}>${escapeHtml(n)}</option>`;
       }).join('') + '</optgroup>';
     };
     group('This Run', run, true);
@@ -7904,7 +7914,7 @@ function varEdRenderFields() {
   fields.forEach(([label, key, placeholder, numeric], i) => {
     const row = document.createElement('div');
     row.className = 'var-ed-row';
-    row.innerHTML = `<span class="var-ed-label">${escHtml(label)}</span>
+    row.innerHTML = `<span class="var-ed-label">${escapeHtml(label)}</span>
       <input class="var-ed-input" type="text" autocorrect="off" autocapitalize="none" spellcheck="false">
       <button type="button" class="var-ed-insert" title="Insert Variable"><i class="f7-icons">plus_circle</i></button>`;
     const input = row.querySelector('input');
@@ -8218,8 +8228,8 @@ function renderCommandPicker(current) {
       row.className = 'cmd-row';
       const answer = commandPickerAnswers[cmd];
       row.innerHTML = `<i class="f7-icons">${icon}</i>
-        <div class="cmd-text"><div class="cmd-title">${escHtml(name)}</div>
-        <div class="cmd-sub"><code>${escHtml(cmd)}</code><span>${answer === undefined ? '…' : escHtml(answer || '—')}</span></div></div>
+        <div class="cmd-text"><div class="cmd-title">${escapeHtml(name)}</div>
+        <div class="cmd-sub"><code>${escapeHtml(cmd)}</code><span>${answer === undefined ? '…' : escapeHtml(answer || '—')}</span></div></div>
         ${cmd === (current || '').toLowerCase() ? '<i class="f7-icons cmd-check">checkmark_alt</i>' : ''}`;
       row.onclick = () => {
         closeCommandPicker();
@@ -8250,7 +8260,7 @@ function varEdOpenMenu(anchor, onPick) {
     names.forEach(n => {
       const item = document.createElement('div');
       item.className = 'var-ed-menu-item';
-      item.innerHTML = `<span>${escHtml(n)}</span>`;
+      item.innerHTML = `<span>${escapeHtml(n)}</span>`;
       item.onclick = () => { varEdCloseMenu(); onPick(n); };
       menu.appendChild(item);
     });
@@ -8305,7 +8315,7 @@ function promptCondText(def) {
 function condOptionRow(text, textCls, rightHtml, onTap) {
   const row = document.createElement('div');
   row.className = 'picker-row cond-option-row';
-  row.innerHTML = `<div class="picker-row-text${textCls ? ' ' + textCls : ''}">${escHtml(text)}</div>${rightHtml || ''}`;
+  row.innerHTML = `<div class="picker-row-text${textCls ? ' ' + textCls : ''}">${escapeHtml(text)}</div>${rightHtml || ''}`;
   if (onTap) row.onclick = onTap;
   else row.style.cursor = 'default';
   return row;
@@ -8431,7 +8441,7 @@ function renderCondPicker() {
         <div class="dialog-row-icon ${d.iconUrl ? 'icon-image' : ''}">
           ${d.iconUrl ? iconMarkup(d) : `<i class="f7-icons">${d.icon || 'question_circle'}</i>`}
         </div>
-        <div class="picker-row-text">${escHtml(d.title)}</div>
+        <div class="picker-row-text">${escapeHtml(d.title)}</div>
         <i class="f7-icons picker-row-chevron">${expanded ? 'chevron_up' : 'chevron_down'}</i>
       `;
       row.onclick = () => selectCond(d.key);
@@ -8883,7 +8893,7 @@ function copyWebUIToken() {
   }
 }
 
-function generateWebUIApiToken() {
+async function generateWebUIApiToken() {
   const bytes = new Uint8Array(16);
   crypto.getRandomValues(bytes);
   const token = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
@@ -8897,7 +8907,10 @@ function generateWebUIApiToken() {
     if (eyeIcon) eyeIcon.textContent = 'eye';
   }
   config.webUIApiToken = token;
-  saveConfig();
+  if (!(await saveConfig())) {
+    localStorage.removeItem('rc_api_token');
+    return;
+  }
   
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(token).catch(() => {});
@@ -9445,7 +9458,7 @@ async function fetchKMMacros(isRefresh = false) {
         if (loadingEl) {
           loadingEl.style.display = 'block';
           loadingEl.innerHTML = `
-            <div style="color:var(--rc-red);margin-bottom:8px;">⚠ ${escHtml(data.error || 'Could not fetch macros')}</div>
+            <div style="color:var(--rc-red);margin-bottom:8px;">⚠ ${escapeHtml(data.error || 'Could not fetch macros')}</div>
             <div style="font-size:12px;color:var(--rc-label-2);margin-bottom:12px;">Check KM Web Server status and credentials.</div>
             <div style="display:flex;gap:8px;justify-content:center;">
               <button onclick="fetchKMMacros(true)" style="background:var(--rc-fill-raised);color:var(--rc-label);border:none;border-radius:8px;padding:6px 14px;font-size:13px;font-weight:600;cursor:pointer;">Retry</button>
@@ -9506,7 +9519,7 @@ function renderKMMacroList(groups) {
     header.innerHTML = `
       <div class="km-group-title">
         <i class="f7-icons" style="font-size:14px;color:var(--rc-blue);">folder_fill</i>
-        <span>${escHtml(group.name)}</span>
+        <span>${escapeHtml(group.name)}</span>
         <span class="km-group-badge">${group.macros.length}</span>
       </div>
       <i class="f7-icons km-group-chevron">chevron_down</i>
@@ -9535,7 +9548,7 @@ function renderKMMacroList(groups) {
         <div class="app-picker-row-inner" style="display:flex; align-items:center; gap:10px;">
           <i class="f7-icons" style="font-size:17px; color:var(--rc-orange); flex-shrink:0;">command</i>
           <div style="min-width:0; flex:1;">
-            <div class="app-picker-name">${escHtml(macro.name)}</div>
+            <div class="app-picker-name">${escapeHtml(macro.name)}</div>
           </div>
         </div>
         <i class="f7-icons" style="font-size:15px; color: var(--rc-glyph); flex-shrink:0;">ellipsis_circle</i>
@@ -9796,8 +9809,8 @@ function renderHAPickerItems(entities) {
       <div class="app-picker-row-inner" style="display:flex; align-items:center; gap: 10px;">
         <i class="f7-icons" style="font-size:18px; color:var(--rc-blue);">${icon}</i>
         <div>
-          <div class="app-picker-name" style="font-weight:600;">${escHtml(friendlyName)}</div>
-          <div class="app-picker-bid" style="font-size:12px; color:var(--rc-label-2);">${escHtml(entityId)} &bull; <span style="color:var(--rc-green);">${escHtml(stateVal)}</span></div>
+          <div class="app-picker-name" style="font-weight:600;">${escapeHtml(friendlyName)}</div>
+          <div class="app-picker-bid" style="font-size:12px; color:var(--rc-label-2);">${escapeHtml(entityId)} &bull; <span style="color:var(--rc-green);">${escapeHtml(stateVal)}</span></div>
         </div>
       </div>
       <i class="f7-icons" style="font-size:16px;color: var(--rc-glyph)">chevron_right</i>
@@ -10072,7 +10085,7 @@ function renderBannersList() {
       row.innerHTML = `
         <span class="settings-label" style="display:flex;align-items:center;gap:12px">
           <i class="f7-icons" style="font-size:18px;color:var(--rc-label-2);width:22px;text-align:center">${a.icon || 'circle'}</i>
-          <span>${escHtml(a.name)}</span>
+          <span>${escapeHtml(a.name)}</span>
         </span>
         <div class="settings-btn">${bannerIsSelected(a.cmd) ? '<i class="f7-icons" style="color:var(--rc-blue);font-size:18px">checkmark_alt</i>' : ''}</div>`;
       row.addEventListener('click', () => toggleBannerSelection(a.cmd));
@@ -10206,8 +10219,8 @@ function renderAppPickerItems(apps) {
     row.dataset.bid = (app.bundleId || '').toLowerCase();
     row.innerHTML = `
       <div class="app-picker-row-inner">
-        <div class="app-picker-name">${escHtml(app.name)}</div>
-        <div class="app-picker-bid">${escHtml(app.bundleId)}</div>
+        <div class="app-picker-name">${escapeHtml(app.name)}</div>
+        <div class="app-picker-bid">${escapeHtml(app.bundleId)}</div>
       </div>
       <i class="f7-icons app-picker-mark" style="font-size:16px;color: var(--rc-glyph)">chevron_right</i>
     `;
@@ -10797,7 +10810,7 @@ function closeSheet() {
 // ── Generic Dialog System ──────────────────────────────────────────────────────
 // Confirm dialog without a text field. Reuses #dialog-backdrop; Cancel dismisses,
 // OK runs onOk. Restores the input row next time showDialog is used.
-function showConfirm(title, msg, onOk, okLabel) {
+function showConfirm(title, msg, onOk, okLabel, altLabel, onAlt) {
   document.getElementById('dialog-title').textContent = title;
   document.getElementById('dialog-msg').textContent = msg;
   document.getElementById('dialog-input').style.display = 'none';
@@ -10805,6 +10818,12 @@ function showConfirm(title, msg, onOk, okLabel) {
   document.getElementById('dialog-record').style.display = 'none';
   document.getElementById('dialog-ok').textContent = okLabel || 'OK';
   dialogCallback = () => { if (onOk) onOk(); };
+  // An optional third button, between Cancel and OK
+  const alt = document.getElementById('dialog-alt');
+  alt.textContent = altLabel || '';
+  alt.style.display = altLabel ? '' : 'none';
+  alt.parentElement.classList.toggle('stacked', !!altLabel);
+  dialogAltCallback = onAlt || null;
   const box = document.querySelector('#dialog-backdrop .dialog-box');
   if (box) box.classList.remove('wide');
   document.getElementById('dialog-backdrop').classList.add('visible');
@@ -10848,8 +10867,18 @@ function showDialog(title, msg, defaultVal, okLabel, callback, isNumber = false,
   setupDialogAutocomplete(title, input, auto);
 }
 
+
+function dialogAlt() {
+  const cb = dialogAltCallback;
+  closeDialog();
+  if (cb) cb();
+}
+
 function closeDialog() {
   document.getElementById('dialog-backdrop').classList.remove('visible');
+  document.getElementById('dialog-alt').style.display = 'none';
+  document.getElementById('dialog-alt').parentElement.classList.remove('stacked');
+  dialogAltCallback = null;
   const input = document.getElementById('dialog-input');
   if (input) {
     input.type = 'text';
@@ -10858,35 +10887,26 @@ function closeDialog() {
   dialogCallback = null;
 }
 
-function promptUnlockDialog(initialPasscode = '', callback) {
-  showDialog(
+// The passcode itself is kept in the phone's Keychain and can only be set in the app there
+function promptUnlockDialog(callback) {
+  showConfirm(
     'Unlock Device',
-    'Enter your device passcode to automatically unlock, or leave empty to wake screen only:',
-    initialPasscode,
-    'Save',
-    val => {
-      const pin = (val || '').trim();
-      callback(pin ? `unlock ${pin}` : 'unlock');
-    },
-    false,
-    false,
-    true
+    'Unlocks automatically with the device passcode saved in the app on the phone.',
+    () => callback('unlock saved'),
+    'Use Saved Passcode',
+    'Ask for Passcode',
+    () => callback('unlock')
   );
 }
 
-function promptLockToggleDialog(initialPasscode = '', callback) {
-  showDialog(
+function promptLockToggleDialog(callback) {
+  showConfirm(
     'Lock Toggle',
-    'Enter your device passcode to automatically unlock when locked, or leave empty to toggle without passcode:',
-    initialPasscode,
-    'Save',
-    val => {
-      const pin = (val || '').trim();
-      callback(pin ? `lock-toggle ${pin}` : 'lock-toggle');
-    },
-    false,
-    false,
-    true
+    'Unlocks automatically with the device passcode saved in the app on the phone.',
+    () => callback('lock-toggle saved'),
+    'Use Saved Passcode',
+    'Ask for Passcode',
+    () => callback('lock-toggle')
   );
 }
 
@@ -10938,8 +10958,8 @@ function setupDialogAutocomplete(title, input, autoEl) {
       const item = document.createElement('div');
       item.className = 'autocomplete-item';
       item.innerHTML = `
-        <div class="autocomplete-name">${escHtml(m.name)}</div>
-        ${m.sub ? `<div class="autocomplete-subtitle">${escHtml(m.sub)}</div>` : ''}
+        <div class="autocomplete-name">${escapeHtml(m.name)}</div>
+        ${m.sub ? `<div class="autocomplete-subtitle">${escapeHtml(m.sub)}</div>` : ''}
       `;
       item.onclick = () => {
         input.value = m.val;
