@@ -420,7 +420,7 @@ static BOOL rcao_is_text(id value) {
     NSDictionary *item = row[@"item"];
 
     if ([kind isEqualToString:@"enabled"]) {
-        cell.textLabel.text = @"Enabled";
+        cell.textLabel.text = @"Add-On Enabled";
         cell.imageView.image = [RCAddOnCatalog iconImageForAddOn:self.addOn] ?: [UIImage systemImageNamed:[RCAddOnCatalog iconForAddOn:self.addOn]];
         cell.imageView.tintColor = self.on ? [UIColor systemOrangeColor] : [UIColor secondaryLabelColor];
         UISwitch *toggle = [[UISwitch alloc] init];
