@@ -144,6 +144,8 @@ CASES = {
     "builtin_whole_details": lambda d: whole_builtin(d, details=True),
     # settings
     "settings_text": lambda d: d.update(settings="x"),
+    "variables_text": lambda d: d.update(variables="cookbook_"),
+    "variables_bad_name": lambda d: d.update(variables=["cook book"]),
     "setting_not_obj": lambda d: d["settings"].append(3),
     "setting_bad_id": lambda d: d["settings"][0].update(id="Enabled"),
     "setting_dup": lambda d: d["settings"].append(dict(d["settings"][0])),

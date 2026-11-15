@@ -1,4 +1,5 @@
 #import "RCSetVariableViewController.h"
+#import "RCAddOnCatalog.h"
 #import "RCConfigManager.h"
 #import "RCServerClient.h"
 #import "RCVariableEditorParts.h"
@@ -65,11 +66,10 @@ UIMenu *RCVariableInsertMenuWithRound(NSArray<NSString *> *runNames, NSArray<NSS
         return [UIAction actionWithTitle:name image:nil identifier:nil handler:^(__unused UIAction *a) { insert(name); }];
     };
     NSMutableArray *children = [NSMutableArray array];
-    NSMutableArray *runItems = [NSMutableArray array], *savedItems = [NSMutableArray array];
+    NSMutableArray *runItems = [NSMutableArray array];
     for (NSString *name in runNames) [runItems addObject:item(name)];
-    for (NSString *name in savedNames) [savedItems addObject:item(name)];
     if (runItems.count) [children addObject:[UIMenu menuWithTitle:@"This Run" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:runItems]];
-    if (savedItems.count) [children addObject:[UIMenu menuWithTitle:@"Saved" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:savedItems]];
+    [children addObjectsFromArray:[RCAddOnCatalog savedVariableMenus:savedNames item:^UIMenuElement *(NSString *name) { return item(name); }]];
     // {round} isn't a variable that's set: it's the pass a Repeat is on
     if (includesRound) {
         UIAction *round = [UIAction actionWithTitle:@"Repeat Round" image:[UIImage systemImageNamed:@"repeat"] identifier:nil handler:^(__unused UIAction *a) { insert(@"round"); }];
@@ -422,17 +422,16 @@ UIMenu *RCVariableInsertMenuWithRound(NSArray<NSString *> *runNames, NSArray<NSS
         if (!weakSelf.typingNewName && [weakSelf.pickedName isEqualToString:name] && weakSelf.pickedRunOnly == runOnly) action.state = UIMenuElementStateOn;
         return action;
     };
-    NSMutableArray *runItems = [NSMutableArray array], *savedItems = [NSMutableArray array];
+    NSMutableArray *runItems = [NSMutableArray array];
     NSMutableArray *runNames = [self.runNames mutableCopy], *savedNames = [self.savedNames mutableCopy];
     // A name from the action being edited that isn't set anywhere else still shows
     if (self.pickedName && ![runNames containsObject:self.pickedName] && ![savedNames containsObject:self.pickedName]) {
         [(self.pickedRunOnly ? runNames : savedNames) addObject:self.pickedName];
     }
     for (NSString *name in runNames) [runItems addObject:pick(name, YES)];
-    for (NSString *name in savedNames) [savedItems addObject:pick(name, NO)];
     NSMutableArray *children = [NSMutableArray array];
     if (runItems.count) [children addObject:[UIMenu menuWithTitle:@"This Run" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:runItems]];
-    if (savedItems.count) [children addObject:[UIMenu menuWithTitle:@"Saved" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:savedItems]];
+    [children addObjectsFromArray:[RCAddOnCatalog savedVariableMenus:savedNames item:^UIMenuElement *(NSString *name) { return pick(name, NO); }]];
     UIAction *newName = [UIAction actionWithTitle:@"New Name" image:[UIImage systemImageNamed:@"plus"] identifier:nil handler:^(__unused UIAction *a) {
         [weakSelf startNewName];
     }];
@@ -651,7 +650,10 @@ UIMenu *RCVariableInsertMenuWithRound(NSArray<NSString *> *runNames, NSArray<NSS
 }
 
 - (void)nameChipTapped:(UIButton *)chip {
-    NSString *name = [chip titleForState:UIControlStateNormal];
+    [self useName:[chip titleForState:UIControlStateNormal]];
+}
+
+- (void)useName:(NSString *)name {
     self.nameField.text = name;
     // Using a This Run variable's name keeps it This Run Only
     if ([self.runNames containsObject:name]) self.runOnlySwitch.on = YES;
@@ -861,7 +863,41 @@ UIMenu *RCVariableInsertMenuWithRound(NSArray<NSString *> *runNames, NSArray<NSS
     row.spacing = 8;
     row.translatesAutoresizingMaskIntoConstraints = NO;
     RCConfigManager *cm = [RCConfigManager sharedManager];
+    // The person's own names as chips; an add-on's kept ones under one chip (its name) with a menu
+    NSMutableArray<NSString *> *own = [NSMutableArray array];
+    NSMutableArray<NSString *> *addOnIds = [NSMutableArray array];
+    NSMutableDictionary<NSString *, NSMutableArray *> *kept = [NSMutableDictionary dictionary];
+    NSMutableDictionary<NSString *, NSDictionary *> *addOns = [NSMutableDictionary dictionary];
     for (NSString *name in self.allNames) {
+        NSDictionary *addOn = [self.runNames containsObject:name] ? nil : [RCAddOnCatalog addOnKeepingVariable:name];
+        if (!addOn[@"id"]) { [own addObject:name]; continue; }
+        if (!kept[addOn[@"id"]]) { kept[addOn[@"id"]] = [NSMutableArray array]; addOns[addOn[@"id"]] = addOn; [addOnIds addObject:addOn[@"id"]]; }
+        [kept[addOn[@"id"]] addObject:name];
+    }
+    __weak typeof(self) weakSelf = self;
+    for (NSString *addOnId in addOnIds) {
+        NSMutableArray *items = [NSMutableArray array];
+        for (NSString *name in kept[addOnId]) [items addObject:[UIAction actionWithTitle:name image:nil identifier:nil handler:^(__unused UIAction *a) { [weakSelf useName:name]; }]];
+        NSString *title = addOns[addOnId][@"name"] ?: addOnId;
+        UIButton *chip = [UIButton buttonWithType:UIButtonTypeSystem];
+        [chip setTitle:title forState:UIControlStateNormal];
+        [chip setImage:[UIImage systemImageNamed:@"chevron.down" withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:11 weight:UIImageSymbolWeightSemibold]] forState:UIControlStateNormal];
+        chip.semanticContentAttribute = UISemanticContentAttributeForceRightToLeft;
+        chip.imageEdgeInsets = UIEdgeInsetsMake(0, 4, 0, -4);
+        chip.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
+        chip.backgroundColor = [cm tweakColorForKey:@"selectionHighlight" defaultVal:0.15];
+        chip.layer.cornerRadius = 15;
+        chip.menu = [UIMenu menuWithTitle:title children:items];
+        chip.showsMenuAsPrimaryAction = YES;
+        chip.translatesAutoresizingMaskIntoConstraints = NO;
+        CGFloat width = [title sizeWithAttributes:@{ NSFontAttributeName: chip.titleLabel.font }].width + 40;
+        [NSLayoutConstraint activateConstraints:@[
+            [chip.heightAnchor constraintEqualToConstant:30],
+            [chip.widthAnchor constraintEqualToConstant:ceil(width)],
+        ]];
+        [row addArrangedSubview:chip];
+    }
+    for (NSString *name in own) {
         UIButton *chip = [UIButton buttonWithType:UIButtonTypeSystem];
         [chip setTitle:name forState:UIControlStateNormal];
         chip.titleLabel.font = [UIFont monospacedSystemFontOfSize:14 weight:UIFontWeightMedium];

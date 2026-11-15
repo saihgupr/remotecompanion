@@ -1,11 +1,14 @@
 #import "RCVariablesViewController.h"
 #import "RCConfigManager.h"
 #import "RCServerClient.h"
+#import "RCAddOnCatalog.h"
+#import "RCAddOnDetailViewController.h"
 
 @interface RCVariablesViewController ()
 @property (nonatomic, strong) NSArray<NSString *> *names;
 @property (nonatomic, strong) NSDictionary<NSString *, NSString *> *values;
 @property (nonatomic, assign) BOOL loaded;
+@property (nonatomic, strong) NSArray<NSDictionary *> *kept;   // { addOn, count }: add-ons keeping variables, listed apart
 - (void)reload;
 @end
 
@@ -63,8 +66,21 @@ static void RCVariablesChanged(CFNotificationCenterRef center, void *observer, C
             if (!strongSelf) return;
             [strongSelf.refreshControl endRefreshing];
             if (![parsed isKindOfClass:[NSDictionary class]]) return; // the tweak didn't answer: keep what's shown
-            strongSelf.values = parsed;
-            strongSelf.names = [[parsed allKeys] sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
+            // Variables an add-on keeps are listed on its page; here one row per add-on
+            NSMutableDictionary<NSString *, NSMutableDictionary *> *byAddOn = [NSMutableDictionary dictionary];
+            for (NSString *name in parsed) {
+                NSDictionary *addOn = [RCAddOnCatalog addOnKeepingVariable:name];
+                if (!addOn[@"id"]) continue;
+                NSMutableDictionary *group = byAddOn[addOn[@"id"]] ?: [@{ @"addOn": addOn, @"count": @0 } mutableCopy];
+                group[@"count"] = @([group[@"count"] integerValue] + 1);
+                byAddOn[addOn[@"id"]] = group;
+            }
+            strongSelf.kept = [byAddOn.allValues sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+                return [a[@"addOn"][@"name"] ?: @"" localizedCaseInsensitiveCompare:b[@"addOn"][@"name"] ?: @""];
+            }];
+            NSDictionary *own = [RCAddOnCatalog variablesWithoutKept:parsed];
+            strongSelf.values = own;
+            strongSelf.names = [[own allKeys] sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
             strongSelf.loaded = YES;
             [strongSelf.tableView reloadData];
         });
@@ -130,11 +146,20 @@ static BOOL RCVariableNameAllowed(NSString *name) {
 
 #pragma mark - Rows
 
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
+    return self.kept.count ? 2 : 1;
+}
+
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    return MAX(self.names.count, 1);
+    return section == 1 ? (NSInteger)self.kept.count : MAX(self.names.count, 1);
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+    return section == 1 ? @"Add-ons" : nil;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+    if (section == 1) return @"Variables these add-ons keep for themselves, listed on their pages.";
     return @"Set Variable actions save variables here, for all triggers. In an action's text, {name} becomes the value. Tap one to change it; swipe to delete.";
 }
 
@@ -145,6 +170,18 @@ static BOOL RCVariableNameAllowed(NSString *name) {
     UIView *selBg = [[UIView alloc] init];
     selBg.backgroundColor = [cm tweakColorForKey:@"selectionHighlight" defaultVal:0.15];
     cell.selectedBackgroundView = selBg;
+    if (indexPath.section == 1) {
+        NSDictionary *group = self.kept[(NSUInteger)indexPath.row];
+        NSDictionary *addOn = group[@"addOn"];
+        NSInteger count = [group[@"count"] integerValue];
+        cell.textLabel.text = addOn[@"name"];
+        cell.detailTextLabel.text = [NSString stringWithFormat:@"%ld variable%@", (long)count, count == 1 ? @"" : @"s"];
+        cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
+        cell.imageView.image = [RCAddOnCatalog iconImageForAddOn:addOn] ?: [UIImage systemImageNamed:[RCAddOnCatalog iconForAddOn:addOn]];
+        cell.imageView.tintColor = [UIColor secondaryLabelColor];
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        return cell;
+    }
     if (!self.names.count) {
         cell.textLabel.text = self.loaded ? @"No Variables" : @"Loading…";
         cell.textLabel.textColor = [UIColor secondaryLabelColor];
@@ -163,11 +200,16 @@ static BOOL RCVariableNameAllowed(NSString *name) {
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    if (indexPath.section == 1) {
+        NSString *addOnId = self.kept[(NSUInteger)indexPath.row][@"addOn"][@"id"];
+        if (addOnId) [self.navigationController pushViewController:[[RCAddOnDetailViewController alloc] initWithAddOnId:addOnId] animated:YES];
+        return;
+    }
     if (self.names.count) [self editVariable:self.names[indexPath.row]];
 }
 
 - (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
-    if (!self.names.count) return nil;
+    if (!self.names.count || indexPath.section != 0) return nil;
     __weak typeof(self) weakSelf = self;
     UIContextualAction *delete = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleDestructive title:@"Delete" handler:^(__unused UIContextualAction *action, __unused UIView *view, void (^done)(BOOL)) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
