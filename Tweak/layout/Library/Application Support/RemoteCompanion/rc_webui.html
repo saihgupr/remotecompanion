@@ -7856,7 +7856,7 @@ function varEdRenderVariable() {
       }).join('') + '</optgroup>';
     };
     group('This Run', run, true);
-    savedVariableGroups(saved).forEach(([title, names]) => group(escHtml(title), names, false));
+    savedVariableGroups(saved).forEach(([title, names]) => group(escapeHtml(title), names, false));
     html += `<option value="new"${varEd.typingNew ? ' selected' : ''}>${newLabel}</option>`;
     sel.innerHTML = html;
     sel.onchange = () => {
@@ -8302,10 +8302,10 @@ function varEdOpenMenu(anchor, onPick, only) {
       menu.appendChild(item);
     });
   };
-  if (only) section(escHtml(only[0]), only[1]);
+  if (only) section(escapeHtml(only[0]), only[1]);
   else {
     section('This Run', varEd.runNames);
-    savedVariableGroups(varEd.savedNames).forEach(([title, names]) => section(escHtml(title), names));
+    savedVariableGroups(varEd.savedNames).forEach(([title, names]) => section(escapeHtml(title), names));
   }
   const withRound = !only && !(varEd.mode === 'number' && varEd.opts.allowsRound === false); // {round} has a value only inside a Repeat
   if (withRound) {
