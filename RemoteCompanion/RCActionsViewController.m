@@ -25,6 +25,9 @@
 #import "RCVariableConditionViewController.h"
 #import "RCNumberSettingViewController.h"
 #import "RCInlineValuePanel.h"
+#import "RCInlineRowItem.h"
+#import "RCInlineRowEditor.h"
+#import "RCInlineRowChip.h"
 #import "RCVariableEditorParts.h"
 #import "RCVariableIcon.h"
 #import "RCSymbolPickerViewController.h"
@@ -268,19 +271,6 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
     cell.separatorInset = inset;
 }
 
-// The value chip's pill corner follows its height, so a long value keeps the same shape
-@interface RCActionValueChip : UIView
-@end
-
-@implementation RCActionValueChip
-
-- (void)layoutSubviews {
-    [super layoutSubviews];
-    self.layer.cornerRadius = CGRectGetHeight(self.bounds) / 2.0;
-}
-
-@end
-
 @interface RCActionCell : UITableViewCell
 @property (nonatomic, strong) UIView *inlinePanel;
 @property (nonatomic, strong) UIView *inlinePanelContainer;
@@ -301,7 +291,7 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
 @end
 
 @interface RCActionCell ()
-@property (nonatomic, strong) UIView *rcValueChip;
+@property (nonatomic, strong) RCInlineRowChip *rcValueChip;
 @property (nonatomic, strong) UILabel *rcValueChipLabel;
 @property (nonatomic, strong) NSLayoutConstraint *rcValueChipCenterY;
 @property (nonatomic, strong) NSLayoutConstraint *rcValueChipWidth;
@@ -393,32 +383,20 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
 - (void)rc_buildValueChipIfNeeded {
     if (self.rcValueChip) return;
 
-    UIView *chip = [[RCActionValueChip alloc] init];
-    chip.translatesAutoresizingMaskIntoConstraints = NO;
+    RCInlineRowChip *chip = [[RCInlineRowChip alloc] initWithFrame:CGRectZero];
     chip.userInteractionEnabled = NO; // a tap on the chip is a tap on the row, which opens the editor
-    chip.backgroundColor = [UIColor secondarySystemFillColor];
-    chip.layer.cornerCurve = kCACornerCurveContinuous;
-    chip.clipsToBounds = YES;
     chip.hidden = YES;
-
-    UILabel *label = [[UILabel alloc] init];
-    label.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleSubheadline] scaledFontForFont:[UIFont monospacedDigitSystemFontOfSize:15 weight:UIFontWeightSemibold]];
-    label.textColor = [UIColor labelColor];
-    label.numberOfLines = 1;
-    label.lineBreakMode = NSLineBreakByTruncatingTail;
-    label.isAccessibilityElement = NO; // the row reads its value, so the chip doesn't stop on it too
-    label.translatesAutoresizingMaskIntoConstraints = NO;
-    [chip addSubview:label];
+    chip.titleLabel.isAccessibilityElement = NO; // the row reads its value, so the chip doesn't stop on it too
 
     [self.contentView addSubview:chip];
 
     self.rcValueChip = chip;
-    self.rcValueChipLabel = label;
+    self.rcValueChipLabel = chip.titleLabel;
     self.rcValueChipCenterY = [chip.centerYAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:35.0];
     NSLayoutConstraint *width = [chip.widthAnchor constraintEqualToConstant:0];
     width.priority = 999; // a long value truncates in the chip rather than squeezing the title
     self.rcValueChipWidth = width;
-    CGFloat chipHeight = MAX(30.0, ceil(label.font.lineHeight) + 12.0);
+    CGFloat chipHeight = MAX(30.0, ceil(chip.titleLabel.font.lineHeight) + 12.0);
 
     [NSLayoutConstraint activateConstraints:@[
         self.rcValueChipCenterY,
@@ -426,9 +404,6 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
         [chip.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-6],
         [chip.widthAnchor constraintLessThanOrEqualToAnchor:self.contentView.widthAnchor multiplier:0.46],
         [chip.heightAnchor constraintEqualToConstant:chipHeight],
-        [label.leadingAnchor constraintEqualToAnchor:chip.leadingAnchor constant:11],
-        [label.trailingAnchor constraintEqualToAnchor:chip.trailingAnchor constant:-10],
-        [label.centerYAnchor constraintEqualToAnchor:chip.centerYAnchor],
     ]];
 }
 
@@ -440,17 +415,15 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
     }
     [self rc_buildValueChipIfNeeded];
     self.rcValueChip.hidden = NO;
-    self.rcValueChipLabel.text = text;
-    CGFloat width = ceil([text sizeWithAttributes:@{ NSFontAttributeName: self.rcValueChipLabel.font }].width) + 21.0;
+    [self.rcValueChip setValueText:text];
+    CGFloat width = ceil([text sizeWithAttributes:@{ NSFontAttributeName: self.rcValueChipLabel.font }].width) + 35.0; // label insets, caret and its gaps
     self.rcValueChipWidth.constant = width;
     self.rcValueChipWidthValue = width;
     [self setNeedsLayout];
 }
 
 - (void)rc_setValueChipAccented:(BOOL)accented {
-    UIColor *accent = self.tintColor ?: [UIColor systemBlueColor];
-    self.rcValueChip.backgroundColor = accented ? [accent colorWithAlphaComponent:0.16] : [UIColor secondarySystemFillColor];
-    self.rcValueChipLabel.textColor = accented ? accent : [UIColor labelColor];
+    self.rcValueChip.accented = accented;
 }
 
 // Grows to show the whole title and subtitle, never below the usual row height
@@ -552,6 +525,11 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
 @property (nonatomic, copy) NSString *inlineEditorCommand;
 @property (nonatomic, strong) RCInlineValuePanel *inlineEditorPanel;
 @property (nonatomic, assign) CGFloat inlineEditorRowHeight;
+// A choice or a text row's editor, open in place the same way: its value (kept here so scrolling
+// away and back doesn't lose what was typed) and whether a fold is already storing it
+@property (nonatomic, strong) RCInlineRowItem *inlineRowItem;
+@property (nonatomic, strong) RCInlineRowEditor *inlineRowEditor;
+@property (nonatomic, assign) BOOL inlineRowCommitting;
 // The row whose value editor is open (NSNotFound when none is), and whether the row is still the
 // one it was opened for after the actions changed under it
 - (NSInteger)inlineEditorOpenRow;
@@ -1500,7 +1478,7 @@ static void RCSetRunWatching(BOOL watching) {
 - (void)viewWillDisappear:(BOOL)animated {
     [super viewWillDisappear:animated];
     // Leaving the screen with a value editor open keeps what it shows
-    if (self.isMovingFromParentViewController || self.isBeingDismissed) [self commitInlineEditor];
+    if (self.isMovingFromParentViewController || self.isBeingDismissed) { [self commitInlineEditor]; [self commitInlineRowEditor]; }
     [self stopRunWatch];
 }
 
@@ -2034,6 +2012,7 @@ static void RCSetRunWatching(BOOL watching) {
 - (void)runSequence {
     // What's in an open value editor is part of the sequence that runs
     [self commitInlineEditor];
+    [self commitInlineRowEditor];
     UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
     [haptic impactOccurred];
     
@@ -3535,6 +3514,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 - (BOOL)toggleInlineEditorForCommand:(NSString *)command index:(NSInteger)index {
     NSString *value = [self inlineValueForCommand:command];
     if (!value) return NO;
+    [self commitInlineRowEditor];
     if (self.inlineEditorIndex == index) {
         [self commitInlineEditor];
         return YES;
@@ -3543,9 +3523,165 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     return YES;
 }
 
+// A tap on a choice or a text row. NO: the row holds no single value, so its own editor opens as
+// before.
+- (BOOL)toggleInlineRowEditorForCommand:(NSString *)command index:(NSInteger)index {
+    RCInlineRowItem *item = [self inlineRowItemForCommand:command];
+    if (!item) return NO;
+    if (self.inlineEditorIndex == index && self.inlineRowEditor) {
+        [self commitInlineRowEditor];
+        return YES;
+    }
+    [self expandInlineRowEditorForItem:item command:command index:index];
+    return YES;
+}
+
+// The row's editor, opened in place under it: the same card, dimming and chevron as a number row.
+// A choice saves each tap straight away; a text row saves when it folds.
+- (void)expandInlineRowEditorForItem:(RCInlineRowItem *)item command:(NSString *)command index:(NSInteger)index {
+    [self commitInlineEditor];
+    RCInlineRowEditor *panel = [[RCInlineRowEditor alloc] initWithItem:item style:RCInlineRowEditorStyleCompact otherActions:self.actions];
+    __weak typeof(self) weakSelf = self;
+    panel.onChange = ^{ [weakSelf inlineRowEditorChanged]; };
+    panel.onCommit = ^{ [weakSelf commitInlineRowEditor]; };
+    self.inlineEditorIndex = index;
+    self.inlineEditorCommand = command;
+    self.inlineRowItem = item;
+    self.inlineRowEditor = panel;
+    self.inlineEditorRowHeight = 70.0;
+    if ([[NSUserDefaults standardUserDefaults] boolForKey:@"RCWrapLongNamesEnabled"]) {
+        UITableViewCell *oldCell = [self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:index inSection:0]];
+        if (oldCell) self.inlineEditorRowHeight = RCWrappedCellHeight(oldCell, self.tableView.bounds.size.width, 70.0);
+    }
+
+    NSIndexPath *path = [NSIndexPath indexPathForRow:index inSection:0];
+    if (![self.tableView cellForRowAtIndexPath:path]) {
+        [self.tableView reloadData];
+        return;
+    }
+    // The row is rebuilt at its new height, and cellForRow puts the panel under its title
+    [self.tableView beginUpdates];
+    [self.tableView reloadRowsAtIndexPaths:@[path] withRowAnimation:UITableViewRowAnimationNone];
+    [self.tableView endUpdates];
+    [self.tableView scrollToRowAtIndexPath:path atScrollPosition:UITableViewScrollPositionNone animated:YES];
+
+    // The new chevron starts pointing right, then turns down as the row opens
+    RCActionCell *cell = (RCActionCell *)[self.tableView cellForRowAtIndexPath:path];
+    [self applySectionCardStyleToCell:cell atIndexPath:path]; // the card now fills the taller row
+    UIImageView *chevron = (UIImageView *)[cell.accessoryView viewWithTag:RCActionCellChevronTag];
+    if (chevron) {
+        chevron.transform = CGAffineTransformIdentity;
+        [UIView animateWithDuration:0.2 animations:^{ [cell rc_setExpanded:YES]; }];
+    }
+    [self updateInlineEditorDimming];
+}
+
+// A choice lands as it is tapped; typed text only repaints the chip, and is kept when the row folds.
+- (void)inlineRowEditorChanged {
+    RCInlineRowItem *item = self.inlineRowItem;
+    if (!item || !self.inlineRowEditor) return;
+    if (self.inlineEditorIndex == NSNotFound) return;
+    if (item.kind == RCInlineRowKindChoice) {
+        NSString *command = [item command];
+        if (!command.length) return;
+        self.inlineEditorCommand = command; // the open row is still the row it was opened for
+        [self storeCommand:command atIndex:self.inlineEditorIndex]; // reloads, and cellForRow reattaches the editor
+    } else {
+        NSIndexPath *path = [NSIndexPath indexPathForRow:self.inlineEditorIndex inSection:0];
+        RCActionCell *cell = (RCActionCell *)[self.tableView cellForRowAtIndexPath:path];
+        [cell rc_showValueChipText:[item displayValue]];
+    }
+}
+
+// Folds the open choice or text editor, keeping what it shows. An empty message leaves the action as it was.
+- (void)commitInlineRowEditor {
+    if (!self.inlineRowEditor) return;
+    if (self.inlineRowCommitting) return; // the keyboard going away reports its commit through here
+    self.inlineRowCommitting = YES;
+    NSInteger index = self.inlineEditorIndex;
+    NSString *command = [self.inlineRowItem command];
+    [self.inlineRowEditor endEditing];
+    [self.view endEditing:YES];
+    self.inlineEditorIndex = NSNotFound;
+    self.inlineEditorCommand = nil;
+    self.inlineRowItem = nil;
+    self.inlineRowEditor = nil;
+    if (command.length && index >= 0 && index < (NSInteger)self.actions.count) {
+        [self storeCommand:command atIndex:index];
+    } else {
+        [self.tableView reloadData];
+    }
+    self.inlineRowCommitting = NO;
+    [self updateInlineEditorDimming];
+}
+
+// A choice or a text row's value, the way the prototype gallery draws its cards: the name alone
+// in the title, the value in the chip. nil for any other row, which keeps its own editor.
+- (RCInlineRowItem *)inlineRowItemForCommand:(NSString *)command {
+    if (![command isKindOfClass:[NSString class]]) return nil;
+    RCInlineRowItem *choice = [self inlineChoiceItemForCommand:command];
+    if (choice) return choice;
+    return [self inlineTextItemForCommand:command];
+}
+
+// A switch's states, ticked where the command stands. nil when the command's value isn't one of
+// them, so the row's own picker still has it.
+- (RCInlineRowItem *)inlineChoiceItemForCommand:(NSString *)command {
+    NSDictionary *toggle = [[RCConfigManager sharedManager] toggleInfoForCommand:command];
+    if (!toggle) return nil;
+    NSString *matchedPrefix = toggle[@"matchedPrefix"];
+    NSArray *prefixes = toggle[@"prefixes"];
+    NSString *canonicalPrefix = matchedPrefix.length ? matchedPrefix : (prefixes.firstObject ?: @"");
+    if (!canonicalPrefix.length || ![command hasPrefix:canonicalPrefix]) return nil;
+    NSString *rest = [[command substringFromIndex:canonicalPrefix.length] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    NSArray *suffixes = toggle[@"suffixes"];
+    NSInteger index = NSNotFound;
+    for (NSUInteger i = 0; i < suffixes.count; i++) {
+        if ([suffixes[i] caseInsensitiveCompare:rest] == NSOrderedSame) { index = (NSInteger)i; break; }
+    }
+    if (index == NSNotFound) return nil;
+
+    RCInlineRowItem *item = [[RCInlineRowItem alloc] init];
+    item.kind = RCInlineRowKindChoice;
+    item.name = toggle[@"name"] ?: command;
+    item.caption = item.name;
+    item.options = toggle[@"displaySuffixes"] ?: suffixes;
+    item.optionValues = suffixes;
+    item.choiceIndex = index;
+    NSString *key = toggle[@"key"];
+    item.commandBuilder = ^NSString *(RCInlineRowItem *row) {
+        if (row.choiceIndex < 0 || row.choiceIndex >= (NSInteger)suffixes.count) return nil;
+        NSString *suffix = suffixes[row.choiceIndex];
+        if (!matchedPrefix.length && [key isEqualToString:@"audiomix"] && [suffix isEqualToString:@"toggle"]) return @"audiomix";
+        return [canonicalPrefix stringByAppendingString:suffix];
+    };
+    return item;
+}
+
+// A toast: its message in the chip, its subtitle and icon kept as they are.
+- (RCInlineRowItem *)inlineTextItemForCommand:(NSString *)command {
+    if (![command hasPrefix:@"toast "] && ![command isEqualToString:@"toast"]) return nil;
+    NSString *title = nil, *subtitle = nil, *icon = nil;
+    rc_parse_toast_cmd(command, &title, &subtitle, &icon);
+    RCInlineRowItem *item = [[RCInlineRowItem alloc] init];
+    item.kind = RCInlineRowKindText;
+    item.name = @"Toast";
+    item.caption = @"Message";
+    item.textValue = title ?: @"";
+    item.placeholder = @"Type a message";
+    item.commandBuilder = ^NSString *(RCInlineRowItem *row) {
+        NSString *text = [row.textValue stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (!text.length) return nil;
+        return rc_build_toast_command(text, subtitle, icon);
+    };
+    return item;
+}
+
 // A delay or level row's name alone, and its value (a number, or "{variable}") as the chip shows
-// it. nil for any other row, and for one whose value isn't a number or a variable.
+// it. A choice or a text row reads the same way off its item. nil for any other row.
 - (NSDictionary *)inlineValuePartsForCommand:(NSString *)command {
+    RCInlineRowItem *rowItem = [self inlineRowItemForCommand:command];
+    if (rowItem) return @{ @"title": rowItem.name, @"chip": [rowItem displayValue] };
     NSString *value = [self inlineValueTextForCommand:command];
     if (!value.length) return nil;
     BOOL variable = [value hasPrefix:@"{"];
@@ -3566,7 +3702,8 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 }
 
 - (BOOL)inlineEditorIsOpenAtRow:(NSInteger)row {
-    if (row == NSNotFound || row != self.inlineEditorIndex || !self.inlineEditorPanel) return NO;
+    if (row == NSNotFound || row != self.inlineEditorIndex) return NO;
+    if (!self.inlineEditorPanel && !self.inlineRowEditor) return NO;
     if (row < 0 || row >= (NSInteger)self.actions.count) return NO;
     id item = self.actions[row];
     NSString *command = [item isKindOfClass:[NSDictionary class]] ? ((NSDictionary *)item)[@"command"] : item;
@@ -3644,7 +3781,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 // Folds the open editor, keeping what it shows. Text that isn't a value in range leaves the action as it was.
 - (void)commitInlineEditor {
     NSInteger index = self.inlineEditorIndex;
-    if (index == NSNotFound) return;
+    if (index == NSNotFound || !self.inlineEditorPanel) return;
     NSString *command = [self.inlineEditorPanel currentCommand];
     [self.view endEditing:YES];
     self.inlineEditorIndex = NSNotFound;
@@ -4184,6 +4321,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             [self.tableView reloadData];
         }];
     } else if (toggleInfo) {
+        if (!remoteParts && [self toggleInlineRowEditorForCommand:currentAction index:indexPath.row]) return;
         UIAlertController *picker = [UIAlertController alertControllerWithTitle:toggleInfo[@"name"]
                                                                          message:@"Select desired state"
                                                                   preferredStyle:UIAlertControllerStyleActionSheet];
@@ -4475,7 +4613,8 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             [weakSelf storeCommand:cmd atIndex:index];
         }];
     } else if ([currentAction hasPrefix:@"toast "] || [currentAction isEqualToString:@"toast"]) {
-        // Edit Toast: same editor as creation
+        // Edit Toast in place; anything without a message keeps the full editor
+        if (!remoteParts && [self toggleInlineRowEditorForCommand:currentAction index:indexPath.row]) return;
         NSString *toastTitle = nil, *toastSub = nil, *toastIcon = nil;
         rc_parse_toast_cmd(currentAction, &toastTitle, &toastSub, &toastIcon);
         __weak typeof(self) weakSelf = self;
@@ -5325,7 +5464,8 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
     CGFloat cellWidth = cell ? cell.bounds.size.width : tableView.bounds.size.width - 40.0;
     CGFloat panelWidth = cellWidth - 2.0 * (RCActionCellCardInset + RCActionCellInlineSideInset);
-    CGFloat panelHeight = [self.inlineEditorPanel preferredHeightForWidth:panelWidth];
+    UIView *panel = self.inlineEditorPanel ?: self.inlineRowEditor;
+    CGFloat panelHeight = [(id)panel preferredHeightForWidth:panelWidth];
     return ceil(self.inlineEditorRowHeight + 1.0 / [UIScreen mainScreen].scale + RCActionCellInlineTopGap + panelHeight + RCActionCellCardInset + RCActionCellInlineBottomGap);
 }
 
@@ -5598,7 +5738,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     }
 
     // Custom reorder handle (since editing = NO), with a chevron on a row that opens its value in place
-    BOOL expandsInline = !remoteParts && [self inlineValueForCommand:action] != nil;
+    BOOL expandsInline = !remoteParts && ([self inlineValueForCommand:action] != nil || [self inlineRowItemForCommand:action] != nil);
     BOOL inlineExpanded = expandsInline && [self inlineEditorIsOpenAtRow:indexPath.row];
     cell.accessoryView = [self grabberAccessoryWithChevron:expandsInline expanded:inlineExpanded];
     if (inlineParts) [cell rc_setValueChipAccented:inlineExpanded];
@@ -5607,8 +5747,9 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     BOOL isDisabled = [[RCConfigManager sharedManager] isActionDisabled:actionItem];
     cell.contentView.alpha = isDisabled ? 0.38f : 1.0f;
     cell.accessoryView.alpha = isDisabled ? 0.38f : 1.0f;
-    if (inlineExpanded && self.inlineEditorPanel && [action isKindOfClass:[NSString class]] && [self.inlineEditorCommand isEqualToString:action]) {
-        [cell rc_showInlinePanel:self.inlineEditorPanel rowContentHeight:self.inlineEditorRowHeight];
+    UIView *openPanel = self.inlineEditorPanel ?: self.inlineRowEditor;
+    if (inlineExpanded && openPanel && [action isKindOfClass:[NSString class]] && [self.inlineEditorCommand isEqualToString:action]) {
+        [cell rc_showInlinePanel:openPanel rowContentHeight:self.inlineEditorRowHeight];
         [cell rc_setExpanded:YES];
     } else {
         [cell rc_showInlinePanel:nil rowContentHeight:70.0];
