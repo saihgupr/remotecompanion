@@ -303,6 +303,7 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
 @property (nonatomic, strong) UILabel *rcValueChipLabel;
 @property (nonatomic, strong) UILabel *rcInlineTitleLabel;
 @property (nonatomic, strong) UIView *rcIconTile;
+@property (nonatomic, assign) CGFloat rcFoldedTitleCenterY;
 @property (nonatomic, strong) NSLayoutConstraint *rcValueChipCenterY;
 @property (nonatomic, strong) NSLayoutConstraint *rcValueChipWidth;
 @property (nonatomic, assign) CGFloat rcValueChipWidthValue;
@@ -422,6 +423,13 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
     label.hidden = NO;
     label.alpha = 1.0; // the open row's own title never dims with the rows around it
     self.accessibilityLabel = source.text;
+    // Where the row shows its title folded: the system label's own centre, read while it still
+    // shows, so the open title sits exactly there and opening never visibly moves the text.
+    // A frame outside the row's own height is a reused cell's stale tall layout: keep whatever
+    // the cell already measured, or fall back to the row's centre.
+    if (!source.hidden && !CGRectIsEmpty(source.frame) && CGRectGetMidY(source.frame) <= 70.0) {
+        self.rcFoldedTitleCenterY = CGRectGetMidY(source.frame);
+    }
     source.hidden = YES;
 }
 
@@ -543,6 +551,12 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
         CGFloat maxW = textRight - textFrame.origin.x;
         textFrame.size.width = MAX(0, maxW);
         self.textLabel.frame = textFrame;
+        // Where this row shows its title folded: the open state's own title comes back to this
+        // exact spot, so opening and closing never visibly move the text. A centre past the row's
+        // own height (a wrapped row, a grown cell) is not the spot a plain row opens at.
+        if (!self.textLabel.hidden && CGRectGetMidY(textFrame) > 0 && CGRectGetMidY(textFrame) <= 70.0) {
+            self.rcFoldedTitleCenterY = CGRectGetMidY(textFrame);
+        }
     }
     
     if (self.detailTextLabel && !CGRectIsEmpty(self.detailTextLabel.frame)) {
@@ -585,7 +599,10 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
             CGFloat maxW = MAX(8.0, textRight - x);
             CGSize fit = [inlineTitle sizeThatFits:CGSizeMake(maxW, CGFLOAT_MAX)];
             CGFloat h = MAX(inlineTitle.font.lineHeight, ceil(fit.height));
-            inlineTitle.frame = CGRectMake(x, midY - h / 2.0, maxW, h);
+            // Exactly where the row showed its title folded, so the text doesn't shift as the
+            // card opens or closes; the row's centre until that spot has been measured
+            CGFloat centerY = self.rcFoldedTitleCenterY > 0 ? self.rcFoldedTitleCenterY : midY;
+            inlineTitle.frame = CGRectMake(x, centerY - h / 2.0, maxW, h);
         }
     }
 }
