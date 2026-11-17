@@ -7055,14 +7055,21 @@ static void rc_physical_orientation_start_observing(void) {
             return;
         }
         if (orientation == g_rcPhysicalCandidate) {
-            if (g_rcPhysicalCandidateCount < 2) g_rcPhysicalCandidateCount++;
-        } else {
-            g_rcPhysicalCandidate = orientation;
-            g_rcPhysicalCandidateCount = 1;
+            // Same orientation as the last sample. Count it once, and only the sample that makes
+            // it two in a row schedules the check: later samples must schedule nothing, otherwise
+            // they keep bumping the generation and the 0.4 s settle never gets to elapse while the
+            // phone sits still.
+            if (g_rcPhysicalCandidateCount < 2) {
+                g_rcPhysicalCandidateCount++;
+                if (g_rcPhysicalCandidateCount == 2) {
+                    rc_physical_orientation_maybe_changed(orientation, a.x, a.y, a.z);
+                }
+            }
+            return;
         }
-        if (g_rcPhysicalCandidateCount == 2) {
-            rc_physical_orientation_maybe_changed(orientation, a.x, a.y, a.z);
-        }
+        g_rcPhysicalCandidate = orientation;
+        g_rcPhysicalCandidateCount = 1;
+        SRLog(@"📱 [RCSystem] Physical orientation candidate %@ (x %.2f y %.2f z %.2f).", rc_physical_orientation_label(orientation), a.x, a.y, a.z);
     }];
     // Same sparing spirit as the screen triggers: settle for a couple of seconds, then remember a
     // stable orientation without firing, so launching the tweak never fires a trigger by itself.
