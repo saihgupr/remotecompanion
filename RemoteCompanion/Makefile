@@ -28,6 +28,7 @@ RemoteCompanion_FILES += RCTestKitViewController.m RCTestReportViewController.m 
 # Shared UI components
 RemoteCompanion_FILES += RCCategoryBar.m RCActionTile.m RCTriggersGrid.m RCTriggerIcons.m
 RemoteCompanion_FILES += RCToastPill.m
+RemoteCompanion_FILES += RCSectionCardView.m
 RemoteCompanion_FILES += RCActionsViewController+Selection.m
 RemoteCompanion_FILES += RCFocusPickerViewController.m
 RemoteCompanion_FILES += RCWebUIAccessViewController.m

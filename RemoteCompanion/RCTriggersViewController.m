@@ -1,5 +1,6 @@
 #import "RCTriggersViewController.h"
 #import "RCConfigManager.h"
+#import "RCSectionCardView.h"
 #import "RCActionsViewController.h"
 #import "RCNewTriggerViewController.h"
 #import "RCNotificationTapTriggerViewController.h"
@@ -1163,27 +1164,6 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     [[UIApplication sharedApplication] openURL:[NSURL URLWithString:@"https://github.com/saihgupr/RemoteCompanion"] options:@{} completionHandler:nil];
 }
 
-- (UIBezierPath *)fillPathForRect:(CGRect)rect
-                            first:(BOOL)isFirst
-                             last:(BOOL)isLast
-                           single:(BOOL)isSingle
-                     cornerRadius:(CGFloat)cornerRadius {
-    if (isSingle) {
-        return [UIBezierPath bezierPathWithRoundedRect:rect cornerRadius:cornerRadius];
-    }
-    if (isFirst) {
-        return [UIBezierPath bezierPathWithRoundedRect:rect
-                                     byRoundingCorners:(UIRectCornerTopLeft | UIRectCornerTopRight)
-                                           cornerRadii:CGSizeMake(cornerRadius, cornerRadius)];
-    }
-    if (isLast) {
-        return [UIBezierPath bezierPathWithRoundedRect:rect
-                                     byRoundingCorners:(UIRectCornerBottomLeft | UIRectCornerBottomRight)
-                                           cornerRadii:CGSizeMake(cornerRadius, cornerRadius)];
-    }
-    return [UIBezierPath bezierPathWithRect:rect];
-}
-
 - (void)applySectionCardStyleToCell:(UITableViewCell *)cell atIndexPath:(NSIndexPath *)indexPath {
     RCConfigManager *config = [RCConfigManager sharedManager];
     UIColor *fillColor = [config tweakColorForKey:@"blockBackground" defaultVal:0.12];
@@ -1201,97 +1181,41 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     
     CGFloat lineWidth = 1.0;
     CGFloat cornerRadius = 12.0;
-    CGFloat horizontalInset = 0.0;
-    CGRect fillRect = CGRectInset(cell.bounds, horizontalInset, 0.0);
-    CGRect borderRect = CGRectInset(fillRect, lineWidth * 0.5, lineWidth * 0.5);
-    if (CGRectGetWidth(fillRect) <= 0 || CGRectGetHeight(fillRect) <= 0) {
-        return;
+
+    RCSectionCardPosition position = RCSectionCardPositionMiddle;
+    if (isSingle) {
+        position = RCSectionCardPositionSingle;
+    } else if (isFirst) {
+        position = RCSectionCardPositionFirst;
+    } else if (isLast) {
+        position = RCSectionCardPositionLast;
     }
-    if (CGRectGetWidth(borderRect) <= 0 || CGRectGetHeight(borderRect) <= 0) {
-        return;
-    }
-    
-    UIBezierPath *fillPath = [self fillPathForRect:fillRect
-                                             first:isFirst
-                                              last:isLast
-                                            single:isSingle
-                                      cornerRadius:cornerRadius];
-    
-    UIBezierPath *borderPath = [self fillPathForRect:borderRect
-                                             first:isFirst
-                                              last:isLast
-                                            single:isSingle
-                                      cornerRadius:cornerRadius];
-    
-    UIView *normalBackgroundView = [[UIView alloc] initWithFrame:cell.bounds];
-    normalBackgroundView.backgroundColor = [UIColor clearColor];
-    
-    CAShapeLayer *normalFillLayer = [CAShapeLayer layer];
-    normalFillLayer.frame = normalBackgroundView.bounds;
-    normalFillLayer.path = fillPath.CGPath;
-    normalFillLayer.fillColor = fillColor.CGColor;
-    [normalBackgroundView.layer addSublayer:normalFillLayer];
-    
-    CAShapeLayer *normalBorderLayer = [CAShapeLayer layer];
-    normalBorderLayer.frame = normalBackgroundView.bounds;
-    normalBorderLayer.path = borderPath.CGPath;
-    normalBorderLayer.fillColor = [UIColor clearColor].CGColor;
-    normalBorderLayer.strokeColor = borderColor.CGColor;
-    normalBorderLayer.lineWidth = lineWidth;
-    
-    if (!isSingle) {
-        CGRect maskRect = normalBorderLayer.bounds;
-        if (isFirst) {
-            maskRect.size.height = MAX(0.0, maskRect.size.height - lineWidth);
-        } else if (isLast) {
-            maskRect.origin.y = lineWidth;
-            maskRect.size.height = MAX(0.0, maskRect.size.height - lineWidth);
-        } else {
-            maskRect.origin.y = lineWidth;
-            maskRect.size.height = MAX(0.0, maskRect.size.height - (2.0 * lineWidth));
-        }
-        CAShapeLayer *maskLayer = [CAShapeLayer layer];
-        maskLayer.path = [UIBezierPath bezierPathWithRect:maskRect].CGPath;
-        normalBorderLayer.mask = maskLayer;
-    }
-    [normalBackgroundView.layer addSublayer:normalBorderLayer];
-    
-    UIView *selectedBackgroundView = [[UIView alloc] initWithFrame:cell.bounds];
-    selectedBackgroundView.backgroundColor = [UIColor clearColor];
-    
-    CAShapeLayer *selectedFillLayer = [CAShapeLayer layer];
-    selectedFillLayer.frame = selectedBackgroundView.bounds;
-    selectedFillLayer.path = fillPath.CGPath;
-    selectedFillLayer.fillColor = selectedFillColor.CGColor;
-    [selectedBackgroundView.layer addSublayer:selectedFillLayer];
-    
-    CAShapeLayer *selectedBorderLayer = [CAShapeLayer layer];
-    selectedBorderLayer.frame = selectedBackgroundView.bounds;
-    selectedBorderLayer.path = borderPath.CGPath;
-    selectedBorderLayer.fillColor = [UIColor clearColor].CGColor;
-    selectedBorderLayer.strokeColor = borderColor.CGColor;
-    selectedBorderLayer.lineWidth = lineWidth;
-    if (!isSingle) {
-        CGRect maskRect = selectedBorderLayer.bounds;
-        if (isFirst) {
-            maskRect.size.height = MAX(0.0, maskRect.size.height - lineWidth);
-        } else if (isLast) {
-            maskRect.origin.y = lineWidth;
-            maskRect.size.height = MAX(0.0, maskRect.size.height - lineWidth);
-        } else {
-            maskRect.origin.y = lineWidth;
-            maskRect.size.height = MAX(0.0, maskRect.size.height - (2.0 * lineWidth));
-        }
-        CAShapeLayer *maskLayer = [CAShapeLayer layer];
-        maskLayer.path = [UIBezierPath bezierPathWithRect:maskRect].CGPath;
-        selectedBorderLayer.mask = maskLayer;
-    }
-    [selectedBackgroundView.layer addSublayer:selectedBorderLayer];
-    
+
+    // The cards are reused with their cell, so a row configured again only
+    // updates the colours. Each view rebuilds its shape from its own bounds,
+    // which is what keeps the card the right width after a rotation.
+    RCSectionCardView *normalCard = [cell.backgroundView isKindOfClass:[RCSectionCardView class]]
+        ? (RCSectionCardView *)cell.backgroundView
+        : [[RCSectionCardView alloc] initWithFrame:cell.bounds];
+    [normalCard configureWithFillColor:fillColor
+                           borderColor:borderColor
+                           borderWidth:lineWidth
+                          cornerRadius:cornerRadius
+                              position:position];
+
+    RCSectionCardView *selectedCard = [cell.selectedBackgroundView isKindOfClass:[RCSectionCardView class]]
+        ? (RCSectionCardView *)cell.selectedBackgroundView
+        : [[RCSectionCardView alloc] initWithFrame:cell.bounds];
+    [selectedCard configureWithFillColor:selectedFillColor
+                             borderColor:borderColor
+                             borderWidth:lineWidth
+                            cornerRadius:cornerRadius
+                                position:position];
+
     cell.backgroundColor = [UIColor clearColor];
     cell.contentView.backgroundColor = [UIColor clearColor];
-    cell.backgroundView = normalBackgroundView;
-    cell.selectedBackgroundView = selectedBackgroundView;
+    cell.backgroundView = normalCard;
+    cell.selectedBackgroundView = selectedCard;
 }
 
 - (void)handleLongPress:(UILongPressGestureRecognizer *)gesture {
