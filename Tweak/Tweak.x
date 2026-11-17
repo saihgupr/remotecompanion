@@ -37,6 +37,7 @@
 #import <CoreFoundation/CoreFoundation.h>
 #import <Security/Security.h>
 #import <CoreLocation/CoreLocation.h>
+#import <CoreMotion/CoreMotion.h>
 #import <objc/message.h>
 #import "RCQuickActions.h"
 
@@ -6963,6 +6964,116 @@ static void rc_orientation_start_observing(void) {
     });
 }
 
+// Physical orientation triggers: where the phone really is in space, whether or not the screen
+// rotates (orientation lock, or an app that won't turn). CoreMotion's accelerometer is public and
+// on every iOS version. Updates start only when this observer starts (never at load) and then keep
+// running: at 0.25 s the cost is small, and stopping between turns would miss the first one after
+// each pause. It runs whether or not any physical orientation trigger is enabled.
+static CMMotionManager *g_rcMotionManager = nil;
+static NSOperationQueue *g_rcMotionQueue = nil;
+static UIDeviceOrientation g_rcPhysicalOrientation = UIDeviceOrientationUnknown;
+static UIDeviceOrientation g_rcPhysicalCandidate = UIDeviceOrientationUnknown;
+static NSUInteger g_rcPhysicalCandidateCount = 0;
+static BOOL g_rcPhysicalReady = NO;
+static NSUInteger g_rcPhysicalCheck = 0;
+
+static NSString *rc_physical_orientation_key(UIDeviceOrientation orientation) {
+    switch (orientation) {
+        case UIDeviceOrientationPortrait: return @"trigger_device_orientation_portrait_up";
+        case UIDeviceOrientationLandscapeLeft: return @"trigger_device_orientation_landscape_left";
+        case UIDeviceOrientationLandscapeRight: return @"trigger_device_orientation_landscape_right";
+        case UIDeviceOrientationPortraitUpsideDown: return @"trigger_device_orientation_portrait_upside_down";
+        default: return nil;
+    }
+}
+
+static NSString *rc_physical_orientation_label(UIDeviceOrientation orientation) {
+    switch (orientation) {
+        case UIDeviceOrientationPortrait: return @"PORTRAIT UP";
+        case UIDeviceOrientationLandscapeLeft: return @"LANDSCAPE LEFT";
+        case UIDeviceOrientationLandscapeRight: return @"LANDSCAPE RIGHT";
+        case UIDeviceOrientationPortraitUpsideDown: return @"PORTRAIT UPSIDE DOWN";
+        case UIDeviceOrientationFaceUp: return @"FACE UP";
+        case UIDeviceOrientationFaceDown: return @"FACE DOWN";
+        default: return @"UNKNOWN";
+    }
+}
+
+// Units of g: the axis pointing up reads about -1. Apple's landscape left is the home button on
+// the right, which turns the screen's +x axis to point up, so gravity reads about -1 on x;
+// landscape right reads about +1. Upside down puts +y down (+1), portrait up reads -1.
+// Anything else (flat on a table, or tilted near 45 degrees) has no orientation.
+static UIDeviceOrientation rc_physical_orientation_from_acceleration(double x, double y) {
+    if (x >= 0.6) return UIDeviceOrientationLandscapeRight;
+    if (x <= -0.6) return UIDeviceOrientationLandscapeLeft;
+    if (y >= 0.6) return UIDeviceOrientationPortraitUpsideDown;
+    if (y <= -0.6) return UIDeviceOrientationPortrait;
+    return UIDeviceOrientationUnknown;
+}
+
+// Two samples in a row must agree before a turn counts, so a quick tilt through 45 degrees doesn't.
+// Then the usual short settle: a newer confirmed turn cancels this check, and it fires only if the
+// phone is still there and the orientation differs from the last one. Face up/down and unknown
+// never fire and don't clear the last orientation: setting the phone down and picking it up the
+// same way is no turn.
+static void rc_physical_orientation_maybe_changed(UIDeviceOrientation orientation, double x, double y, double z) {
+    if (!g_rcPhysicalReady) return;
+    NSUInteger check = ++g_rcPhysicalCheck;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (check != g_rcPhysicalCheck) return; // a newer turn: that one decides
+        if (orientation != g_rcPhysicalCandidate || g_rcPhysicalCandidateCount < 2) return; // already moving again
+        if (g_rcPhysicalOrientation == UIDeviceOrientationUnknown) {
+            // First real reading after startup: remember it without firing
+            g_rcPhysicalOrientation = orientation;
+            SRLog(@"📱 [RCSystem] Physical orientation initialized to: %@", rc_physical_orientation_label(orientation));
+            return;
+        }
+        if (orientation == g_rcPhysicalOrientation) return;
+        g_rcPhysicalOrientation = orientation;
+        SRLog(@"📱 [RCSystem] Phone physically %@ (x %.2f y %.2f z %.2f).", rc_physical_orientation_label(orientation), x, y, z);
+        SRLogMin(@"📱 [RCSystem] Phone physically %@.", rc_physical_orientation_label(orientation));
+        RCExecuteTrigger(rc_physical_orientation_key(orientation));
+    });
+}
+
+static void rc_physical_orientation_start_observing(void) {
+    if (g_rcMotionManager) return;
+    CMMotionManager *motion = [CMMotionManager new];
+    NSOperationQueue *queue = [NSOperationQueue new];
+    queue.qualityOfService = NSQualityOfServiceUtility;
+    queue.name = @"com.saihgupr.remotecompanion.physical-orientation";
+    motion.accelerometerUpdateInterval = 0.25;
+    g_rcMotionManager = motion;
+    g_rcMotionQueue = queue;
+    [motion startAccelerometerUpdatesToQueue:queue withHandler:^(CMAccelerometerData *data, NSError *error) {
+        if (!data) return;
+        CMAcceleration a = data.acceleration;
+        UIDeviceOrientation orientation = rc_physical_orientation_from_acceleration(a.x, a.y);
+        if (orientation == UIDeviceOrientationUnknown) {
+            g_rcPhysicalCandidate = UIDeviceOrientationUnknown;
+            g_rcPhysicalCandidateCount = 0;
+            return;
+        }
+        if (orientation == g_rcPhysicalCandidate) {
+            if (g_rcPhysicalCandidateCount < 2) g_rcPhysicalCandidateCount++;
+        } else {
+            g_rcPhysicalCandidate = orientation;
+            g_rcPhysicalCandidateCount = 1;
+        }
+        if (g_rcPhysicalCandidateCount == 2) {
+            rc_physical_orientation_maybe_changed(orientation, a.x, a.y, a.z);
+        }
+    }];
+    // Same sparing spirit as the screen triggers: settle for a couple of seconds, then remember a
+    // stable orientation without firing, so launching the tweak never fires a trigger by itself.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        UIDeviceOrientation stable = (g_rcPhysicalCandidateCount >= 2) ? g_rcPhysicalCandidate : UIDeviceOrientationUnknown;
+        g_rcPhysicalOrientation = stable;
+        g_rcPhysicalReady = YES;
+        SRLog(@"📱 [RCSystem] Physical orientation observing started (currently %@)", rc_physical_orientation_label(stable));
+    });
+}
+
 // Whether this phone has a Home button: SpringBoard's lock button knows the Home button
 // type (2 = none, on Face ID phones)
 static BOOL rc_has_home_button(void) {
@@ -7363,6 +7474,7 @@ static void register_system_event_observers() {
     initialize_power_state();
     rc_carplay_start_observing();
     rc_orientation_start_observing();
+    rc_physical_orientation_start_observing();
 
     // Power State: Cocoa Touch observers
     [nc addObserverForName:UIDeviceBatteryStateDidChangeNotification 

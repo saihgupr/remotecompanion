@@ -342,6 +342,12 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     if ([triggerKey isEqualToString:@"trigger_carplay_disconnect"]) return @"car";
     if ([triggerKey isEqualToString:@"trigger_device_rotated_landscape"]) return @"iphone.landscape";
     if ([triggerKey isEqualToString:@"trigger_device_rotated_portrait"]) return @"iphone";
+    // Physical orientation: arrows, since a symbol can't show the phone turned (the Triggers list
+    // draws it instead: RCTriggerIcons). Apple's Landscape Left is the Home button on the right.
+    if ([triggerKey isEqualToString:@"trigger_device_orientation_portrait_up"]) return @"arrow.up";
+    if ([triggerKey isEqualToString:@"trigger_device_orientation_landscape_left"]) return @"arrow.left";
+    if ([triggerKey isEqualToString:@"trigger_device_orientation_landscape_right"]) return @"arrow.right";
+    if ([triggerKey isEqualToString:@"trigger_device_orientation_portrait_upside_down"]) return @"arrow.down";
     if ([triggerKey isEqualToString:@"trigger_device_lock"]) return @"lock.fill";
     if ([triggerKey isEqualToString:@"trigger_device_unlock"]) return @"lock.open.fill";
     if ([triggerKey isEqualToString:@"trigger_media_play"]) return @"play.fill";
@@ -793,6 +799,13 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
         if ([configuredKeys containsObject:key]) [deviceStateKeys addObject:key];
     }
     addSection(deviceStateKeys, @"Device State", YES);
+    // Physical orientation: how the phone is held, whatever the screen does (rotation lock
+    // included). Its own section, so the rotated triggers above stay about the screen.
+    NSMutableArray *orientationKeys = [NSMutableArray array];
+    for (NSString *key in @[@"trigger_device_orientation_portrait_up", @"trigger_device_orientation_landscape_left", @"trigger_device_orientation_landscape_right", @"trigger_device_orientation_portrait_upside_down"]) {
+        if ([configuredKeys containsObject:key]) [orientationKeys addObject:key];
+    }
+    addSection(orientationKeys, @"Physical Orientation", YES);
     // Control Center buttons, by number
     NSMutableArray *ccButtonKeys = [NSMutableArray array];
     for (NSString *key in [[RCConfigManager sharedManager] allConfiguredTriggerKeys]) {
@@ -1087,6 +1100,9 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
 
     for (NSString *key in @[@"trigger_device_lock", @"trigger_device_unlock", @"trigger_power_connect", @"trigger_power_disconnect", @"trigger_device_rotated_landscape", @"trigger_device_rotated_portrait", @"trigger_carplay_connect", @"trigger_carplay_disconnect", @"trigger_device_findmy_sound"]) {
         addBuiltIn(key, @"Device State");
+    }
+    for (NSString *key in @[@"trigger_device_orientation_portrait_up", @"trigger_device_orientation_landscape_left", @"trigger_device_orientation_landscape_right", @"trigger_device_orientation_portrait_upside_down"]) {
+        addBuiltIn(key, @"Physical Orientation");
     }
     for (NSString *key in @[@"trigger_media_play", @"trigger_media_pause", @"trigger_media_track_change"]) {
         addBuiltIn(key, @"Media");
@@ -1415,6 +1431,16 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     CGFloat topPadding = 0;
     if (@available(iOS 15.0, *)) topPadding = 15;
     return 40.0f + topPadding;
+}
+
+// The physical orientation triggers follow the way the phone is held; the rotated ones, the
+// screen. Said once, under their section.
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+    NSInteger real = [self realSectionForDisplaySection:section];
+    if (real < (NSInteger)self.sectionTitles.count && [self.sectionTitles[real] isEqualToString:@"Physical Orientation"]) {
+        return @"Follows how the phone is held, even with rotation lock on.";
+    }
+    return nil;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {

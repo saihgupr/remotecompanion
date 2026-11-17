@@ -33,7 +33,7 @@ RemoteCompanion provides fast, scriptable system control for modern rootless jai
 ## Features
 - **Hardware Triggers**: Bind actions to Power/Volume buttons, Home button, Touch ID (Tap/Hold), or the Ringer Switch.
 - **Only Unlock Out of Pocket**: an off-by-default option in Settings > Advanced Settings > Options that makes Unlock Device and lock toggle skip unlocking while the proximity sensor is covered, such as in a pocket.
-- **New Triggers**: Rotated to Landscape / Portrait, Find My Sound (with optional silent ping), Incoming Call / Call Started / Call Ended, Battery Level (fires once at 1-100%), and Focus on / off for a chosen Focus or any Focus.
+- **New Triggers**: Physical Orientation (Portrait Up, Landscape Left, Landscape Right, Portrait Upside Down), Rotated to Landscape / Portrait, Find My Sound (with optional silent ping), Incoming Call / Call Started / Call Ended, Battery Level (fires once at 1-100%), and Focus on / off for a chosen Focus or any Focus.
 - **Gesture Recorder**: Settings > Gestures records a mix of taps, swipes and scrolls, saves it under a name, and plays it back at 0.5x to 3x. Each recording can be trimmed, re-recorded, replaced, renamed, exported and imported.
 - **Two-Finger Slides**: two-finger slide up from the bottom bar and slide down from the status bar are their own triggers, with distance-based firing, a widened landing zone, and an optional Lock Scrolling During Gestures toggle.
 - **Compact Layout and Trigger Icons**: Triggers, Select Action and Settings > Banners can each show a grid of tiles instead of a list (Advanced Settings > Layout, list stays default). Button and gesture triggers show a small phone or screen-area icon, app triggers show the app icon, and "Screen Gestures" now reads "Status Bar".
@@ -222,7 +222,8 @@ Configure these in the `RemoteCompanion` app for custom action sequences. Tip: *
   - **Battery Level**: Fire once when the battery drops to or rises to a chosen level from 1 to 100%.
   - **Focus**: Run when a chosen Focus, or any Focus, turns on or off.
   - **Find My Sound**: Run when Play Sound is sent to the phone from Find My or iCloud.com.
-  - **Rotation**: Rotated to Landscape / Portrait, after a half-second settle.
+  - **Rotation**: Rotated to Landscape / Portrait, after a half-second settle. These follow the screen, so orientation lock and the app in front decide when they fire.
+  - **Physical Orientation**: Portrait Up, Landscape Left, Landscape Right or Portrait Upside Down, from the accelerometer, so it fires however the phone is actually held even with orientation lock on. Face up and face down are ignored.
   - **Action Sequence Edited**: Run when any trigger's actions change, including this trigger's own, with an optional debounce (15 seconds by default) so a run of edits runs it once.
 
 </details>

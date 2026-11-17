@@ -200,7 +200,7 @@ static NSString *RCFitOneLine(NSString *text, UIFont *font, CGFloat width) {
     }];
     [deviceStateKeys addObjectsFromArray:batteryKeys];
 
-    for (NSString *key in @[@"trigger_device_lock", @"trigger_device_unlock", @"trigger_power_connect", @"trigger_power_disconnect", @"trigger_device_rotated_landscape", @"trigger_device_rotated_portrait", @"trigger_carplay_connect", @"trigger_carplay_disconnect", @"trigger_device_findmy_sound", @"trigger_media_play", @"trigger_media_pause", @"trigger_media_track_change", @"trigger_device_call_incoming", @"trigger_device_call_start", @"trigger_device_call_end"]) {
+    for (NSString *key in @[@"trigger_device_lock", @"trigger_device_unlock", @"trigger_power_connect", @"trigger_power_disconnect", @"trigger_device_rotated_landscape", @"trigger_device_rotated_portrait", @"trigger_device_orientation_portrait_up", @"trigger_device_orientation_landscape_left", @"trigger_device_orientation_landscape_right", @"trigger_device_orientation_portrait_upside_down", @"trigger_carplay_connect", @"trigger_carplay_disconnect", @"trigger_device_findmy_sound", @"trigger_media_play", @"trigger_media_pause", @"trigger_media_track_change", @"trigger_device_call_incoming", @"trigger_device_call_start", @"trigger_device_call_end"]) {
         if ([configuredKeys containsObject:key]) [deviceStateKeys addObject:key];
     }
     addSection(deviceStateKeys, @"Device State");

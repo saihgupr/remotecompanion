@@ -58,6 +58,12 @@ static NSDictionary<NSString *, NSDictionary *> *RCPhoneIconSpecs(void) {
             // No phone button: the watch (tall like the phone, so it's as big), with a clock for a hold
             @"trigger_watch_ping":           @{ @"symbol": @"applewatch", @"tall": @YES },
             @"trigger_watch_ping_hold":      @{ @"symbol": @"applewatch", @"tall": @YES, @"mark": hold },
+            // Physical orientation: the phone turned the way it is held, so all four are told
+            // apart even with rotation lock on
+            @"trigger_device_orientation_portrait_up": @{ @"orientation": @"portraitUp" },
+            @"trigger_device_orientation_landscape_left": @{ @"orientation": @"landscapeLeft" },
+            @"trigger_device_orientation_landscape_right": @{ @"orientation": @"landscapeRight" },
+            @"trigger_device_orientation_portrait_upside_down": @{ @"orientation": @"portraitDown" },
             // The Bluetooth Device kind itself (a bare "bt_", never a real trigger's key): the logo, for
             // screens that show one icon per kind of trigger
             @"bt_":                          @{ @"symbol": RCBluetoothIconName },
@@ -188,11 +194,26 @@ static UIImage *RCDrawPhoneIcon(NSDictionary *spec, CGFloat side) {
             return;
         }
 
+        // A physical orientation: the whole phone (buttons and bars with it) turned the way it is
+        // held. Apple's sides: Landscape Left has the Home button on the right.
+        NSString *orientation = spec[@"orientation"];
+        BOOL turned = orientation.length > 0;
+        if (turned) {
+            CGFloat angle = 0;
+            if ([orientation isEqualToString:@"landscapeLeft"]) angle = -M_PI_2;
+            else if ([orientation isEqualToString:@"landscapeRight"]) angle = M_PI_2;
+            else if ([orientation isEqualToString:@"portraitDown"]) angle = M_PI;
+            CGContextTranslateCTM(context, 20 * k, 20 * k);
+            CGContextRotateCTM(context, angle);
+            CGContextTranslateCTM(context, -20 * k, -20 * k);
+        }
+
         // The phone
         UIBezierPath *outline = [UIBezierPath bezierPathWithRoundedRect:R(9, 1, 22, 38) cornerRadius:5 * k];
         outline.lineWidth = 2.4 * k;
         [outline stroke];
-        for (NSString *button in spec[@"buttons"]) {
+        NSArray *buttons = spec[@"buttons"] ?: (turned ? @[@"ringer", @"volUp", @"volDown", @"power"] : @[]);
+        for (NSString *button in buttons) {
             CGRect r = CGRectZero;
             if ([button isEqualToString:@"ringer"]) r = R(5, 5, 3.4, 5);
             else if ([button isEqualToString:@"volUp"]) r = R(5, 12, 3.4, 7);
@@ -205,6 +226,12 @@ static UIImage *RCDrawPhoneIcon(NSDictionary *spec, CGFloat side) {
             UIBezierPath *ring = [UIBezierPath bezierPathWithOvalInRect:R(16, 29.5, 8, 8)];
             ring.lineWidth = 2.2 * k;
             [ring stroke];
+        }
+        // Which way is up: the earpiece at the top of the phone, the Home bar at the bottom of
+        // the screen. Both turn with it, so upside down and the two landscapes each read.
+        if (turned) {
+            [[UIBezierPath bezierPathWithRoundedRect:R(16, 3.2, 8, 1.8) cornerRadius:0.9 * k] fill];
+            [[UIBezierPath bezierPathWithRoundedRect:R(14, 34.6, 12, 1.8) cornerRadius:0.9 * k] fill];
         }
 
         // The part of the screen that's touched
@@ -344,6 +371,8 @@ UIImage *RCTriggerCategoryIcon(NSString *sectionTitle) {
             @"Ringer Switch": @[@"bell.fill"],
             @"Apple Watch": @[@"applewatch"],
             @"Device State": @[@"iphone"],
+            // How the phone is held, whichever way the screen is turned
+            @"Physical Orientation": @[@"arrow.up.and.down.and.arrow.left.and.right", @"gyroscope", @"rotate.right"],
             @"Motion Gestures": @[@"iphone.radiowaves.left.and.right", @"waveform.path"],
             @"NFC Tags": @[@"wave.3.right"],
             @"Notifications": @[@"bell.fill"],

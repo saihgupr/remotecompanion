@@ -66,6 +66,9 @@
     if ([key hasPrefix:@"trigger_home_"] || [key hasPrefix:@"touchid_"]) return @"Home Button";
     if ([key hasPrefix:@"trigger_ringer_"]) return @"Ringer Switch";
     if ([key hasPrefix:@"trigger_watch_"]) return @"Apple Watch";
+    // The physical orientation ones are their own group, so they don't fall in with the
+    // rotated (screen) triggers below
+    if ([key hasPrefix:@"trigger_device_orientation_"]) return @"Physical Orientation";
     if ([key hasPrefix:@"trigger_device_"] || [key hasPrefix:@"trigger_power_"] || [key hasPrefix:@"trigger_carplay_"] || [key hasPrefix:@"trigger_media_"]) return @"Device State";
     if ([key isEqualToString:@"shake"]) return @"Motion Gestures";
     if ([key hasPrefix:@"nfc_"]) return @"NFC Tags";
@@ -83,7 +86,7 @@
 
 - (NSArray<NSString *> *)sectionOrder {
     return @[@"Volume Buttons", @"Power Button", @"Screen Gestures", @"Edge Gestures", @"Bottom Bar Gestures", @"Home Button",
-             @"Ringer Switch", @"Apple Watch", @"Device State", @"Motion Gestures", @"NFC Tags", @"Notifications", @"WiFi Network Triggers",
+             @"Ringer Switch", @"Apple Watch", @"Device State", @"Physical Orientation", @"Motion Gestures", @"NFC Tags", @"Notifications", @"WiFi Network Triggers",
              @"Bluetooth Device Triggers", @"Audio Output Triggers", @"App Triggers", @"Notification Triggers",
              @"Scheduled Triggers", @"MQTT Triggers", @"Configuration", @"Other"];
 }
@@ -141,7 +144,13 @@
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    return section == MAX((NSInteger)self.sections.count, 1) - 1 ? self.footerText : nil;
+    NSMutableArray<NSString *> *lines = [NSMutableArray array];
+    // The physical orientation triggers follow how the phone is held, not the screen
+    if (section < (NSInteger)self.sections.count && [self.sectionTitles[section] isEqualToString:@"Physical Orientation"]) {
+        [lines addObject:@"Follows how the phone is held, even with rotation lock on."];
+    }
+    if (self.footerText.length && section == MAX((NSInteger)self.sections.count, 1) - 1) [lines addObject:self.footerText];
+    return lines.count ? [lines componentsJoinedByString:@"\n\n"] : nil;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {

@@ -3564,6 +3564,7 @@ const TRIGGER_SECTIONS = [
   { title: 'Ringer Switch',          id: 'ringer',    keys: ['trigger_ringer_mute','trigger_ringer_unmute','trigger_ringer_toggle'] },
   { title: 'Apple Watch',            id: 'watch',     keys: ['trigger_watch_ping','trigger_watch_ping_hold'] },
   { title: 'Device State',           id: 'status',    keys: [], prefix: 'trigger_device_', prefix2: 'trigger_media_', deletable: true },
+  { title: 'Physical Orientation',   id: 'orientation', keys: ['trigger_device_orientation_portrait_up','trigger_device_orientation_landscape_left','trigger_device_orientation_landscape_right','trigger_device_orientation_portrait_upside_down'] },
   { title: 'Motion Gestures',        id: 'motion',    keys: ['shake'] },
   { title: 'NFC Tags',               id: 'nfc',       keys: [], dynamic: true, prefix: 'nfc_',        deletable: true },
   { title: 'WiFi Network Triggers',  id: 'wifi',      keys: [], dynamic: true, prefix: 'wifi_',       deletable: true },
@@ -3602,6 +3603,8 @@ const TRIGGER_NAMES = {
   trigger_device_lock: 'Device Locked', trigger_device_unlock: 'Device Unlocked',
   trigger_power_connect: 'Power Connected', trigger_power_disconnect: 'Power Disconnected',
   trigger_device_rotated_landscape: 'Rotated to Landscape', trigger_device_rotated_portrait: 'Rotated to Portrait',
+  trigger_device_orientation_portrait_up: 'Portrait Up', trigger_device_orientation_landscape_left: 'Landscape Left',
+  trigger_device_orientation_landscape_right: 'Landscape Right', trigger_device_orientation_portrait_upside_down: 'Portrait Upside Down',
   trigger_carplay_connect: 'CarPlay Connected', trigger_carplay_disconnect: 'CarPlay Disconnected',
   trigger_device_findmy_sound: 'Find My Sound',
   trigger_media_play: 'Media Playing', trigger_media_pause: 'Media Paused', trigger_media_track_change: 'Media Track Changed',
@@ -3655,6 +3658,10 @@ const TRIGGER_ICONS = {
   trigger_power_disconnect: { icon:'bolt_slash_fill', cls:'icon-orange' },
   trigger_device_rotated_landscape: { icon:'device_phone_landscape', cls:'icon-blue' },
   trigger_device_rotated_portrait:  { icon:'device_phone_portrait',  cls:'icon-blue' },
+  trigger_device_orientation_portrait_up:         { icon:'device_phone_portrait',  cls:'icon-blue' },
+  trigger_device_orientation_landscape_left:      { icon:'device_phone_landscape', cls:'icon-blue' },
+  trigger_device_orientation_landscape_right:     { icon:'device_phone_landscape', cls:'icon-blue' },
+  trigger_device_orientation_portrait_upside_down:{ icon:'rotate_right',           cls:'icon-blue' },
   trigger_carplay_connect:    { icon:'car_fill',      cls:'icon-green' },
   trigger_device_findmy_sound: { icon:'location_circle_fill', cls:'icon-green' },
   trigger_carplay_disconnect: { icon:'car_fill',      cls:'icon-orange' },
@@ -5064,7 +5071,7 @@ function computeVisibleSections() {
   TRIGGER_SECTIONS.forEach(sec => {
     let keys;
     if (sec.id === 'status') {
-      keys = allKeys.filter(k => ['trigger_device_','trigger_media_','trigger_power_','trigger_carplay_'].some(p => k.startsWith(p)));
+      keys = allKeys.filter(k => ['trigger_device_','trigger_media_','trigger_power_','trigger_carplay_'].some(p => k.startsWith(p)) && !k.startsWith('trigger_device_orientation_'));
     } else if (sec.id === 'favorites') {
       keys = favs.filter(k => triggerIsAdded(k));
     } else if (sec.dynamic) {
@@ -5171,6 +5178,7 @@ const TRIGGER_CATEGORY_ICONS = {
   'Ringer Switch': 'bell_fill',
   'Apple Watch': 'clock',
   'Device State': 'device_phone_portrait',
+  'Physical Orientation': 'rotate_right',
   'Motion Gestures': 'waveform_path',
   'NFC Tags': 'dot_radiowaves_right',
   'WiFi Network Triggers': 'wifi',
@@ -11035,6 +11043,7 @@ const BUILT_IN_TRIGGER_GROUPS = [
   { title: 'Ringer Switch', keys: ['trigger_ringer_mute','trigger_ringer_unmute','trigger_ringer_toggle'] },
   { title: 'Motion Gestures', keys: ['shake'] },
   { title: 'Device State', keys: ['trigger_device_lock','trigger_device_unlock','trigger_power_connect','trigger_power_disconnect','trigger_device_rotated_landscape','trigger_device_rotated_portrait','trigger_carplay_connect','trigger_carplay_disconnect','trigger_device_findmy_sound'] },
+  { title: 'Physical Orientation', keys: ['trigger_device_orientation_portrait_up','trigger_device_orientation_landscape_left','trigger_device_orientation_landscape_right','trigger_device_orientation_portrait_upside_down'] },
   { title: 'Media', keys: ['trigger_media_play','trigger_media_pause','trigger_media_track_change'] },
   { title: 'Calls', keys: ['trigger_device_call_incoming','trigger_device_call_start','trigger_device_call_end'] },
   { title: 'Apple Watch', keys: ['trigger_watch_ping','trigger_watch_ping_hold'] },
