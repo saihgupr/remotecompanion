@@ -106,6 +106,9 @@ typedef uint32_t IOOptionBits;
 
 @interface UIApplication (Private)
 - (void)_enqueueHIDEvent:(IOHIDEventRef)event;
+- (void)_setDeviceOrientation:(long)orientation animated:(BOOL)animated logMessage:(id)message;
+- (void)setWantsOrientationEvents:(BOOL)wants logMessage:(id)message;
+- (long)rawDeviceOrientationIgnoringOrientationLocks;
 @end
 
 extern void BKSHIDEventSetDigitizerInfo(IOHIDEventRef digitizerEvent, uint32_t contextID, uint8_t systemGestureisPossible, uint8_t isSystemGestureStateChangeEvent, CFStringRef displayUUID, CFTimeInterval initialTouchTimestamp, float maxForce);
@@ -522,8 +525,20 @@ extern void BKSTerminateApplicationForReasonAndReportWithDescription(NSString *b
 @interface SBOrientationLockManager : NSObject
 + (instancetype)sharedInstance;
 - (void)lock;
+- (void)lock:(long)orientation;
 - (void)unlock;
 - (BOOL)isUserLocked;
+- (BOOL)isEffectivelyLocked;
+- (BOOL)lockOverrideEnabled;
+- (long)userLockOrientation;
+- (long)effectiveLockedOrientation;
+- (long)deviceOrientationAsFarAsAppsAreConcerned;
+- (void)setLockOverrideEnabled:(BOOL)enabled forReason:(id)reason;
+- (void)updateLockOverrideForCurrentDeviceOrientation;
+@end
+
+@interface UIDevice (RCPrivateOrientation)
+- (void)setOrientation:(long)orientation animated:(BOOL)animated;
 @end
 
 @interface SBProximitySensorManager : NSObject
@@ -7011,6 +7026,37 @@ static UIDeviceOrientation rc_physical_orientation_from_acceleration(double x, d
     return UIDeviceOrientationUnknown;
 }
 
+static BOOL g_rcOrientationForcedUnlocked = NO;
+
+// Apply a target UIDeviceOrientation / UIInterfaceOrientation (1..4) on the main thread.
+// Syncs SBDeviceOrientationUpdateManager's _lastUpdatedDeviceOrientation so the next physical
+// sensor turn is never dropped as a duplicate, and resets UIDevice's cached orientation first
+// if it already matches `value` so UIDeviceOrientationDidChangeNotification is always posted.
+static void rc_apply_device_orientation(long value) {
+    UIApplication *app = [UIApplication sharedApplication];
+    @try {
+        id dm = [app valueForKey:@"_deviceOrientationManager"];
+        if (dm) {
+            [dm setValue:@(value) forKey:@"_lastUpdatedDeviceOrientation"];
+            [dm setValue:@NO forKey:@"_deviceOrientationIsDirty"];
+        }
+    } @catch (__unused NSException *e) {}
+
+    UIDevice *dev = [UIDevice currentDevice];
+    if ([dev respondsToSelector:@selector(setOrientation:animated:)] && (long)[dev orientation] == value) {
+        ((void (*)(id, SEL, long, BOOL))objc_msgSend)(dev, @selector(setOrientation:animated:), (long)UIDeviceOrientationUnknown, NO);
+    }
+    if ([app respondsToSelector:@selector(_setDeviceOrientation:animated:logMessage:)]) {
+        ((void (*)(id, SEL, long, BOOL, id))objc_msgSend)(app, @selector(_setDeviceOrientation:animated:logMessage:), value, YES, @"RemoteCompanion");
+    } else {
+        [dev setValue:@(value) forKey:@"orientation"];
+    }
+    if ([app respondsToSelector:@selector(setWantsOrientationEvents:logMessage:)]) {
+        ((void (*)(id, SEL, BOOL, id))objc_msgSend)(app, @selector(setWantsOrientationEvents:logMessage:), YES, @"RemoteCompanion");
+    }
+    [UIViewController attemptRotationToDeviceOrientation];
+}
+
 // Two samples in a row must agree before a turn counts, so a quick tilt through 45 degrees doesn't.
 // Then the usual short settle: a newer confirmed turn cancels this check, and it fires only if the
 // phone is still there and the orientation differs from the last one. Face up/down and unknown
@@ -7022,6 +7068,16 @@ static void rc_physical_orientation_maybe_changed(UIDeviceOrientation orientatio
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (check != g_rcPhysicalCheck) return; // a newer turn: that one decides
         if (orientation != g_rcPhysicalCandidate || g_rcPhysicalCandidateCount < 2) return; // already moving again
+        if (g_rcOrientationForcedUnlocked && orientation >= UIDeviceOrientationPortrait && orientation <= UIDeviceOrientationLandscapeRight) {
+            g_rcOrientationForcedUnlocked = NO;
+            SBOrientationLockManager *mgr = [objc_getClass("SBOrientationLockManager") sharedInstance];
+            BOOL locked = mgr && [mgr respondsToSelector:@selector(isUserLocked)] && [mgr isUserLocked];
+            SpringBoard *sb = (SpringBoard *)[UIApplication sharedApplication];
+            if (!locked && (![sb respondsToSelector:@selector(activeInterfaceOrientation)] || [sb activeInterfaceOrientation] != (UIInterfaceOrientation)orientation)) {
+                SRLog(@"📱 [RCSystem] Handing orientation back to sensor: %@", rc_physical_orientation_label(orientation));
+                rc_apply_device_orientation((long)orientation);
+            }
+        }
         if (g_rcPhysicalOrientation == UIDeviceOrientationUnknown) {
             // First real reading after startup: remember it without firing
             g_rcPhysicalOrientation = orientation;
@@ -10905,6 +10961,7 @@ static NSArray *RCCommandHelpSections(void) {
             @[@"flashlight [on|off|toggle|status]", @"Control the torch"],
             @[@"rotate [lock|unlock|toggle|status]", @"Orientation lock"],
             @[@"orientation status", @"Print PORTRAIT or LANDSCAPE"],
+            @[@"orientation set <mode>", @"Rotate screen (portrait, landscape left/right, upside down, auto)"],
             @[@"appearance [dark|light|toggle]", @"Light or dark appearance"],
             @[@"dnd [on|off|toggle|status]", @"Do Not Disturb"],
             @[@"low power mode [on|off|toggle|status]", @"Low Power Mode"],
@@ -12484,6 +12541,86 @@ static NSString *handle_command(NSString *cmd) {
         if ([NSThread isMainThread]) orientationBlock();
         else dispatch_sync(dispatch_get_main_queue(), orientationBlock);
         return result;
+    } else if ([[cleanCmd lowercaseString] isEqualToString:@"orientation set"] || [[cleanCmd lowercaseString] hasPrefix:@"orientation set "]) {
+        NSString *lower = [cleanCmd lowercaseString];
+        if ([lower isEqualToString:@"orientation set"]) {
+            return @"Usage: rc orientation set <portrait|landscape left|landscape right|upside down|auto>\n";
+        }
+        NSString *mode = [[lower substringFromIndex:16] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        long value = 0;
+        NSString *label = nil;
+        BOOL autoRotate = NO;
+        if ([mode isEqualToString:@"portrait"] || [mode isEqualToString:@"portrait up"]) {
+            value = (long)UIInterfaceOrientationPortrait;
+            label = @"Portrait";
+        } else if ([mode isEqualToString:@"portrait upside down"] || [mode isEqualToString:@"upside down"]) {
+            value = (long)UIInterfaceOrientationPortraitUpsideDown;
+            label = @"Portrait Upside Down";
+        } else if ([mode isEqualToString:@"landscape left"] || [mode isEqualToString:@"landscape"]) {
+            value = (long)UIInterfaceOrientationLandscapeLeft;
+            label = @"Landscape Left";
+        } else if ([mode isEqualToString:@"landscape right"]) {
+            value = (long)UIInterfaceOrientationLandscapeRight;
+            label = @"Landscape Right";
+        } else if ([mode isEqualToString:@"auto"]) {
+            autoRotate = YES;
+        } else {
+            return @"Usage: rc orientation set <portrait|landscape left|landscape right|upside down|auto>\n";
+        }
+
+        __block NSString *result = nil;
+        void (^setBlock)(void) = ^{
+            SBOrientationLockManager *manager = [objc_getClass("SBOrientationLockManager") sharedInstance];
+            UIApplication *app = [UIApplication sharedApplication];
+            if (manager && [manager respondsToSelector:@selector(lockOverrideEnabled)] && [manager lockOverrideEnabled] &&
+                [manager respondsToSelector:@selector(setLockOverrideEnabled:forReason:)]) {
+                [manager setLockOverrideEnabled:NO forReason:@"RemoteCompanionOrientation"];
+            }
+            BOOL wasLocked = manager && [manager respondsToSelector:@selector(isUserLocked)] && [manager isUserLocked];
+
+            if (autoRotate) {
+                g_rcOrientationForcedUnlocked = NO;
+                if (wasLocked && [manager respondsToSelector:@selector(unlock)]) {
+                    [manager unlock];
+                }
+                if ([manager respondsToSelector:@selector(updateLockOverrideForCurrentDeviceOrientation)]) {
+                    [manager updateLockOverrideForCurrentDeviceOrientation];
+                }
+                long physical = (long)g_rcPhysicalOrientation;
+                if (physical < UIDeviceOrientationPortrait || physical > UIDeviceOrientationLandscapeRight) {
+                    if ([app respondsToSelector:@selector(rawDeviceOrientationIgnoringOrientationLocks)]) {
+                        physical = [app rawDeviceOrientationIgnoringOrientationLocks];
+                    }
+                }
+                if (physical >= UIDeviceOrientationPortrait && physical <= UIDeviceOrientationLandscapeRight) {
+                    rc_apply_device_orientation(physical);
+                }
+                SRLogMin(@"📱 [RCSystem] Orientation set: auto (rotation unlocked)");
+                result = @"Rotation Unlocked\n";
+                return;
+            }
+
+            if (wasLocked) {
+                g_rcOrientationForcedUnlocked = NO;
+                if ([manager respondsToSelector:@selector(lock:)]) {
+                    [manager lock:value];
+                }
+                rc_apply_device_orientation(value);
+            } else {
+                rc_apply_device_orientation(value);
+                if (manager && [manager respondsToSelector:@selector(isUserLocked)] && [manager isUserLocked] &&
+                    [manager respondsToSelector:@selector(unlock)]) {
+                    [manager unlock];
+                }
+                g_rcOrientationForcedUnlocked = YES;
+            }
+            SRLogMin(@"📱 [RCSystem] Orientation set: %@ (%@)", label, wasLocked ? @"lock held" : @"lock off");
+            result = [NSString stringWithFormat:@"Orientation: %@\n", label];
+        };
+
+        if ([NSThread isMainThread]) setBlock();
+        else dispatch_sync(dispatch_get_main_queue(), setBlock);
+        return result;
     } else if ([cleanCmd isEqualToString:@"orientation lock"] || [cleanCmd isEqualToString:@"orientation"] || [cleanCmd isEqualToString:@"rotation"] || [cleanCmd isEqualToString:@"rotate"]) {
         return handle_command(@"orientation toggle");
     } else if ([cleanCmd hasPrefix:@"rotate "]) {
@@ -12496,11 +12633,22 @@ static NSString *handle_command(NSString *cmd) {
                 [manager lock];
                 result = @"Orientation Locked\n";
             } else if ([arg isEqualToString:@"unlock"]) {
+                g_rcOrientationForcedUnlocked = NO;
                 [manager unlock];
+                if (g_rcPhysicalOrientation >= UIDeviceOrientationPortrait && g_rcPhysicalOrientation <= UIDeviceOrientationLandscapeRight) {
+                    rc_apply_device_orientation((long)g_rcPhysicalOrientation);
+                }
                 result = @"Orientation Unlocked\n";
             } else if ([arg isEqualToString:@"toggle"]) {
-                if ([manager isUserLocked]) [manager unlock];
-                else [manager lock];
+                if ([manager isUserLocked]) {
+                    g_rcOrientationForcedUnlocked = NO;
+                    [manager unlock];
+                    if (g_rcPhysicalOrientation >= UIDeviceOrientationPortrait && g_rcPhysicalOrientation <= UIDeviceOrientationLandscapeRight) {
+                        rc_apply_device_orientation((long)g_rcPhysicalOrientation);
+                    }
+                } else {
+                    [manager lock];
+                }
                 result = [NSString stringWithFormat:@"Orientation %@\n", ![manager isUserLocked] ? @"Locked" : @"Unlocked"];
             } else {
                 BOOL isLocked = [manager isUserLocked];

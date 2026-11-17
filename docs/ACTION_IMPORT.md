@@ -76,6 +76,7 @@ Here is the complete list of valid commands you can write, along with parameters
 | `low power on` / `low power off` / `low power toggle` | Turn Low Power Mode on, off, or toggle state | `low power toggle` |
 | `mute` | Toggle silent/ringer mode | `mute` |
 | `rotate lock` / `rotate unlock` / `rotate toggle` | Turn Orientation Lock on, off, or toggle state | `rotate toggle` |
+| `orientation set <mode>` | Set screen orientation to `portrait`, `landscape left`, `landscape right`, `portrait upside down`, or `auto` | `orientation set landscape left` |
 
 ### Automations & Execution
 | Command Syntax | Description | Example |

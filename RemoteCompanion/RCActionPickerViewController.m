@@ -305,6 +305,7 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
             @{ @"name": @"Set Brightness...", @"command": @"__SET_BRIGHTNESS__", @"icon": @"sun.max.fill" },
             @{ @"name": @"Flashlight", @"command": @"flashlight toggle", @"icon": @"flashlight.on.fill" },
             @{ @"name": @"Rotation Lock", @"command": @"rotate toggle", @"icon": @"lock.rotation" },
+            @{ @"name": @"Set Orientation...", @"command": @"__SET_ORIENTATION__", @"icon": @"rotate.right", @"keywords": @"rotate rotation landscape portrait orientation screen sideways" },
             @{ @"name": @"Lock Device", @"command": @"lock", @"icon": @"lock.fill" },
             @{ @"name": @"Unlock Device...", @"command": @"__UNLOCK_DEVICE__", @"icon": @"lock.open.fill" },
             @{ @"name": @"Lock Toggle...", @"command": @"__LOCK_TOGGLE__", @"icon": @"lock.circle" },
@@ -501,7 +502,7 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
                 @"__UNLOCK_DEVICE__", @"__LOCK_TOGGLE__", @"__TAP__", @"__HOLD__", @"__SWIPE__",
                 @"__PLAY_GESTURE__", @"__RECORD_GESTURE__", @"__AIRPLAY_CONNECT__",
                 @"__BT_CONNECT__", @"__BT_DISCONNECT__", @"__FOCUS__", @"__HA_PICKER__",
-                @"__KM_TRIGGER__", @"__MQTT_PUBLISH__", @"__CAMERA_PICKER__", @"__CAMERA_VIDEO_PICKER__"
+                @"__KM_TRIGGER__", @"__MQTT_PUBLISH__", @"__CAMERA_PICKER__", @"__CAMERA_VIDEO_PICKER__", @"__SET_ORIENTATION__"
             ]];
         });
         NSMutableArray *remoteSections = [NSMutableArray array];
@@ -650,7 +651,7 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
                                      @"__IF_CONDITION__", @"__REPEAT__", @"__REPEAT_WHILE__", @"__WAIT_UNTIL__", @"__DELAY__",
                                      @"__STOP_TRIGGER__", @"__CUSTOM__", @"__HA_PICKER__", @"__KM_TRIGGER__", @"__MQTT_PUBLISH__",
                                      @"__CAMERA_PICKER__", @"__CAMERA_VIDEO_PICKER__", @"__TAP__", @"__HOLD__", @"__SWIPE__",
-                                     @"__UNLOCK_DEVICE__", @"__LOCK_TOGGLE__"]];
+                                     @"__UNLOCK_DEVICE__", @"__LOCK_TOGGLE__", @"__SET_ORIENTATION__"]];
     });
     if (![command isKindOfClass:[NSString class]]) return NO;
     // Any other placeholder opens something too; a plain command is added as it is
@@ -759,6 +760,11 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
 
     if ([command isEqualToString:@"__LOCK_TOGGLE__"]) {
         [self handleLockToggle];
+        return;
+    }
+
+    if ([command isEqualToString:@"__SET_ORIENTATION__"]) {
+        [self handleSetOrientation];
         return;
     }
 
@@ -1237,6 +1243,34 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
     } else {
         [self dismissViewControllerAnimated:YES completion:nil];
     }
+}
+
+// The screen turns to the mode picked and holds while Rotation Lock is on; otherwise the phone takes over
+- (void)handleSetOrientation {
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Set Orientation"
+                                                                   message:@"Turns the whole screen once and holds it while Rotation Lock is on; otherwise the phone takes over."
+                                                            preferredStyle:UIAlertControllerStyleActionSheet];
+    NSArray<NSArray<NSString *> *> *choices = @[
+        @[ @"Portrait", @"portrait" ],
+        @[ @"Landscape Left", @"landscape left" ],
+        @[ @"Landscape Right", @"landscape right" ],
+        @[ @"Portrait Upside Down", @"portrait upside down" ],
+        @[ @"Auto Rotate", @"auto" ]
+    ];
+    __weak typeof(self) weakSelf = self;
+    for (NSArray<NSString *> *choice in choices) {
+        [sheet addAction:[UIAlertAction actionWithTitle:choice[0] style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction * _Nonnull action) {
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) return;
+            [strongSelf finishWithFocusCommand:[NSString stringWithFormat:@"orientation set %@", choice[1]]];
+        }]];
+    }
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(__unused UIAlertAction * _Nonnull action) {
+        [weakSelf deselectTiles];
+    }]];
+    sheet.popoverPresentationController.sourceView = self.view;
+    sheet.popoverPresentationController.sourceRect = CGRectMake(self.view.bounds.size.width / 2, self.view.bounds.size.height / 2, 1, 1);
+    [self presentViewController:sheet animated:YES completion:nil];
 }
 
 // A new Play Gesture action: its own page, which gesture and how fast

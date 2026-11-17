@@ -226,6 +226,7 @@ static NSArray<NSArray<NSDictionary *> *> *RCBannerCatalog(NSArray<NSString *> *
             @"__SET_VOLUME__": @[@"set-vol "],
             @"__SET_RINGER_VOLUME__": @[@"ringer volume "],
             @"__SET_BRIGHTNESS__": @[@"brightness "],
+            @"__SET_ORIENTATION__": @[@"orientation set "],
             @"__CAMERA_PICKER__": @[@"camera ", @"open camera ", @"camera", @"open camera"],
             @"__CAMERA_VIDEO_PICKER__": @[@"camera video ", @"open camera video ", @"camera video", @"open camera video", @"camera 2x"],
             @"__BT_CONNECT__": @[@"bt connect ", @"bluetooth connect "],

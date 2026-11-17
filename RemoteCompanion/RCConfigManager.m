@@ -1796,6 +1796,14 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         @"rotate lock": @"Rotate Lock",
         @"rotate unlock": @"Rotate Unlock",
         @"rotate toggle": @"Rotate Toggle",
+        @"orientation set portrait": @"Orientation: Portrait",
+        @"orientation set portrait up": @"Orientation: Portrait",
+        @"orientation set landscape left": @"Orientation: Landscape Left",
+        @"orientation set landscape": @"Orientation: Landscape Left",
+        @"orientation set landscape right": @"Orientation: Landscape Right",
+        @"orientation set portrait upside down": @"Orientation: Upside Down",
+        @"orientation set upside down": @"Orientation: Upside Down",
+        @"orientation set auto": @"Orientation: Auto",
         @"wifi on": @"WiFi On",
         @"wifi off": @"WiFi Off",
         @"wifi toggle": @"WiFi Toggle",
@@ -2080,6 +2088,8 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
             result = [NSString stringWithFormat:@"Set Ringer Volume %@", [cmd substringFromIndex:14]];
         } else if ([cmd hasPrefix:@"brightness "]) {
             result = [NSString stringWithFormat:@"Set Brightness %@", [cmd substringFromIndex:11]];
+        } else if ([cmd hasPrefix:@"orientation set "] && cmd.length > 16) {
+            result = [NSString stringWithFormat:@"Orientation: %@", [[originalCmd substringFromIndex:16] capitalizedString]];
         } else if ([cmd hasPrefix:@"flashlight "] && ![[cmd lowercaseString] hasSuffix:@"on"] && ![[cmd lowercaseString] hasSuffix:@"off"] && ![[cmd lowercaseString] hasSuffix:@"toggle"]) {
             result = [NSString stringWithFormat:@"Flashlight %@%%", [cmd substringFromIndex:11]];
         } else if ([cmd hasPrefix:@"flash "] && ![[cmd lowercaseString] hasSuffix:@"on"] && ![[cmd lowercaseString] hasSuffix:@"off"] && ![[cmd lowercaseString] hasSuffix:@"toggle"]) {
@@ -2382,6 +2392,11 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
     if ([cmd hasPrefix:@"ringer "]) return @"bell.slash.fill";
     if ([cmd hasPrefix:@"haptics "]) return @"iphone.radiowaves.left.and.right";
     if ([cmd hasPrefix:@"brightness "]) return @"sun.max.fill";
+    if ([cmd hasPrefix:@"orientation set "]) {
+        if ([cmd containsString:@"landscape"]) return ([UIImage systemImageNamed:@"rectangle.landscape.rotate"] ? @"rectangle.landscape.rotate" : @"rotate.right");
+        if ([cmd containsString:@"auto"]) return ([UIImage systemImageNamed:@"gyroscope"] ? @"gyroscope" : @"rotate.right");
+        return ([UIImage systemImageNamed:@"rectangle.portrait.rotate"] ? @"rectangle.portrait.rotate" : @"rotate.right");
+    }
     if ([cmd hasPrefix:@"flashlight "] || [cmd hasPrefix:@"flash "]) return @"flashlight.on.fill";
     if ([cmd hasPrefix:@"Lua "] || [cmd hasPrefix:@"lua_eval "] || [cmd hasPrefix:@"lua-eval "] || [cmd hasPrefix:@"lua "]) return @"scroll.fill";
     if ([cmd hasPrefix:@"spotify "]) return @"music.note";
