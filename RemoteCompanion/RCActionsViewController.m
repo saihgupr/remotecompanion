@@ -183,6 +183,9 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
 static CGFloat const RCActionCellInlineTopGap = 12.0;
 static CGFloat const RCActionCellInlineBottomGap = 14.0;
 static CGFloat const RCActionCellInlineSideInset = 16.0;
+// The air between the icon and the open row's own title label, where the system label's own
+// margin sits
+static CGFloat const RCActionCellInlineTitleGap = 18.0;
 // The card an open row draws around itself and its editor: inset from the rows around it, the same
 // corner as the rest of the sequence, in the row's tint
 static CGFloat const RCActionCellCardInset = 6.0;
@@ -286,10 +289,12 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
 @interface RCActionCell ()
 @property (nonatomic, strong) RCInlineRowChip *rcValueChip;
 @property (nonatomic, strong) UILabel *rcValueChipLabel;
+@property (nonatomic, strong) UILabel *rcInlineTitleLabel;
 @property (nonatomic, strong) NSLayoutConstraint *rcValueChipCenterY;
 @property (nonatomic, strong) NSLayoutConstraint *rcValueChipWidth;
 @property (nonatomic, assign) CGFloat rcValueChipWidthValue;
 - (void)rc_buildValueChipIfNeeded;
+- (void)rc_showInlineTitleFromLabel:(UILabel *)source;
 @end
 
 @implementation RCActionCell
@@ -329,7 +334,13 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
     self.inlinePanelContainer = nil;
     self.inlinePanel = panel;
     self.inlineRowContentHeight = rowContentHeight;
-    if (!panel) return;
+    if (!panel) {
+        // folded again: the system label shows the title once more
+        self.textLabel.hidden = NO;
+        self.rcInlineTitleLabel.hidden = YES;
+        self.accessibilityLabel = nil;
+        return;
+    }
 
     UIView *container = [[UIView alloc] init];
     container.translatesAutoresizingMaskIntoConstraints = NO;
@@ -364,6 +375,39 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
         [panel.bottomAnchor constraintLessThanOrEqualToAnchor:container.bottomAnchor constant:-(RCActionCellCardInset + RCActionCellInlineBottomGap)],
     ]];
     self.inlinePanelContainer = container;
+    [self rc_showInlineTitleFromLabel:self.textLabel];
+}
+
+// The open row's title: the table lays its own label out for a row as tall as its editor, and that
+// layout never comes back up to the row's own height (the icon, pinned by hand, does draw there).
+// So the open row draws its title with a label of its own, pinned like the icon, while the system
+// label waits hidden for the fold. The system label keeps its text, and the cell carries it as its
+// accessibility label, so the row still reads the same.
+- (void)rc_showInlineTitleFromLabel:(UILabel *)source {
+    UILabel *label = self.rcInlineTitleLabel;
+    if (!label) {
+        label = [[UILabel alloc] init];
+        label.userInteractionEnabled = NO; // a tap on the title is a tap on the row, which folds it
+        label.isAccessibilityElement = NO; // the row reads its title; the label doesn't repeat it
+        [self.contentView addSubview:label];
+        self.rcInlineTitleLabel = label;
+    }
+    if (!source.text.length && source.attributedText.length) {
+        label.attributedText = source.attributedText;
+    } else {
+        label.text = source.text;
+        label.textColor = source.textColor;
+    }
+    label.font = source.font;
+    label.textAlignment = source.textAlignment;
+    label.numberOfLines = source.numberOfLines;
+    label.lineBreakMode = source.lineBreakMode;
+    label.adjustsFontSizeToFitWidth = source.adjustsFontSizeToFitWidth;
+    label.minimumScaleFactor = source.minimumScaleFactor;
+    label.hidden = NO;
+    label.alpha = 1.0; // the open row's own title never dims with the rows around it
+    self.accessibilityLabel = source.text;
+    source.hidden = YES;
 }
 
 #pragma mark - The value chip
@@ -464,14 +508,38 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
         self.detailTextLabel.frame = detailFrame;
     }
     
-    // An open panel doesn't move the row's title: it stays centred in the usual row height above it
+    // An open panel doesn't move the row's title: it stays centred in the usual row height
+    // above it. Pinned absolutely (not shifted by a delta), so repeated layouts can't walk it
+    // off the card.
     if (self.inlinePanel) {
-        CGFloat shift = MAX(0.0, self.contentView.bounds.size.height - self.inlineRowContentHeight) / 2.0;
-        for (UIView *view in @[self.imageView, self.textLabel, self.detailTextLabel, self.accessoryView]) {
+        CGFloat midY = self.inlineRowContentHeight / 2.0;
+        for (UIView *view in @[self.imageView, self.textLabel, self.detailTextLabel]) {
             if (!view || view.hidden || CGRectIsEmpty(view.frame)) continue;
             CGRect frame = view.frame;
-            frame.origin.y -= shift;
+            frame.origin.y = midY - CGRectGetHeight(frame) / 2.0;
             view.frame = frame;
+        }
+        UIView *accessory = self.accessoryView;
+        if (accessory && !accessory.hidden && !CGRectIsEmpty(accessory.frame)) {
+            CGRect frame = accessory.frame;
+            frame.origin.y = midY - CGRectGetHeight(frame) / 2.0;
+            accessory.frame = frame;
+        }
+        // The open row's own title, pinned like the icon rather than left to the table's layout of
+        // a grown row: it keeps the x the system label has (indent included), and its width never
+        // drops to nothing that could hide it
+        UILabel *inlineTitle = self.rcInlineTitleLabel;
+        if (inlineTitle && !inlineTitle.hidden) {
+            CGFloat x = 16.0 + indentOffset;
+            if (self.textLabel && !CGRectIsEmpty(self.textLabel.frame)) {
+                x = self.textLabel.frame.origin.x;
+            } else if (self.imageView && !CGRectIsEmpty(self.imageView.frame)) {
+                x = CGRectGetMaxX(self.imageView.frame) + RCActionCellInlineTitleGap;
+            }
+            CGFloat maxW = MAX(8.0, textRight - x);
+            CGSize fit = [inlineTitle sizeThatFits:CGSizeMake(maxW, CGFLOAT_MAX)];
+            CGFloat h = MAX(inlineTitle.font.lineHeight, ceil(fit.height));
+            inlineTitle.frame = CGRectMake(x, midY - h / 2.0, maxW, h);
         }
     }
 }
@@ -1998,7 +2066,6 @@ static void RCSetRunWatching(BOOL watching) {
 
 - (void)runSequence {
     // What's in an open value editor is part of the sequence that runs
-    [self commitInlineRowEditor];
     [self commitInlineRowEditor];
     UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
     [haptic impactOccurred];
