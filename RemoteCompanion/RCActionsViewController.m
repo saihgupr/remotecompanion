@@ -183,15 +183,23 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
 static CGFloat const RCActionCellInlineTopGap = 12.0;
 static CGFloat const RCActionCellInlineBottomGap = 14.0;
 static CGFloat const RCActionCellInlineSideInset = 16.0;
-// The air between the icon and the open row's own title label, where the system label's own
-// margin sits
-static CGFloat const RCActionCellInlineTitleGap = 18.0;
 // The card an open row draws around itself and its editor: inset from the rows around it, the same
 // corner as the rest of the sequence, in the row's tint
 static CGFloat const RCActionCellCardInset = 6.0;
 static CGFloat const RCActionCellCardCornerRadius = 12.0;
+// Every row stands alone as its own card, the prototype sequence look: the card is inset this much
+// at the top and bottom of the cell, so a breath shows between rows
+static CGFloat const RCActionCellCardGap = 3.0;
+// The row's icon, as the prototype draws it: a rounded tile with the symbol inside
+static CGFloat const RCActionCellIconTileSize = 40.0;
+static CGFloat const RCActionCellIconTileInset = 12.0;
+static CGFloat const RCActionCellIconTileGap = 12.0;
 // The rows around an open editor step back a little, still readable and still tappable
 static CGFloat const RCActionCellDimmedAlpha = 0.4;
+// The prototype row's title: the body text style at medium weight
+static inline UIFont *RCActionCellTitleFont(void) {
+    return [[UIFontMetrics metricsForTextStyle:UIFontTextStyleBody] scaledFontForFont:[UIFont systemFontOfSize:17 weight:UIFontWeightMedium]];
+}
 @interface RCActionCardBackgroundView : UIView
 @property (nonatomic, strong) UIColor *fillColor;
 @property (nonatomic, strong) UIColor *borderColor;
@@ -237,7 +245,11 @@ static CGFloat const RCActionCellDimmedAlpha = 0.4;
     _fillLayer.frame = self.bounds;
     _borderLayer.frame = self.bounds;
 
-    CGRect card = CGRectInset(self.bounds, RCActionCellCardInset, RCActionCellCardInset);
+    // The card is as wide as the cell and inset from its top and bottom, the same breath the
+    // folded rows' cards keep from their cells, so the open card lines up with its neighbours
+    CGRect card = CGRectMake(0.0, RCActionCellCardGap,
+                              self.bounds.size.width,
+                              self.bounds.size.height - 2.0 * RCActionCellCardGap);
     if (CGRectGetWidth(card) <= 0 || CGRectGetHeight(card) <= 0) {
         _fillLayer.path = nil;
         _borderLayer.path = nil;
@@ -290,10 +302,12 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
 @property (nonatomic, strong) RCInlineRowChip *rcValueChip;
 @property (nonatomic, strong) UILabel *rcValueChipLabel;
 @property (nonatomic, strong) UILabel *rcInlineTitleLabel;
+@property (nonatomic, strong) UIView *rcIconTile;
 @property (nonatomic, strong) NSLayoutConstraint *rcValueChipCenterY;
 @property (nonatomic, strong) NSLayoutConstraint *rcValueChipWidth;
 @property (nonatomic, assign) CGFloat rcValueChipWidthValue;
 - (void)rc_buildValueChipIfNeeded;
+- (void)rc_buildIconTileIfNeeded;
 - (void)rc_showInlineTitleFromLabel:(UILabel *)source;
 @end
 
@@ -356,10 +370,9 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
     [container addSubview:divider];
     [container addSubview:panel];
     [self addSubview:container];
-    // The container spans the cell, not the content view: the accessory (chevron and handle) narrows
-    // the content view, and the divider and the panel keep the card's own inset on both sides, so
-    // the card closes just below the panel
-    CGFloat side = RCActionCellCardInset + RCActionCellInlineSideInset;
+    // The container spans the cell, which is the card's own width: the divider and the panel keep
+    // the card's inset on both sides, and the card closes just below the panel
+    CGFloat side = RCActionCellInlineSideInset;
     [NSLayoutConstraint activateConstraints:@[
         [container.leadingAnchor constraintEqualToAnchor:self.leadingAnchor],
         [container.trailingAnchor constraintEqualToAnchor:self.trailingAnchor],
@@ -372,10 +385,12 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
         [panel.leadingAnchor constraintEqualToAnchor:container.leadingAnchor constant:side],
         [panel.trailingAnchor constraintEqualToAnchor:container.trailingAnchor constant:-side],
         [panel.topAnchor constraintEqualToAnchor:divider.bottomAnchor constant:RCActionCellInlineTopGap],
-        [panel.bottomAnchor constraintLessThanOrEqualToAnchor:container.bottomAnchor constant:-(RCActionCellCardInset + RCActionCellInlineBottomGap)],
+        [panel.bottomAnchor constraintLessThanOrEqualToAnchor:container.bottomAnchor constant:-(RCActionCellCardGap + RCActionCellInlineBottomGap)],
     ]];
     self.inlinePanelContainer = container;
     [self rc_showInlineTitleFromLabel:self.textLabel];
+    // The open row's icon takes the row's tint, as its card and its chip do
+    if (self.imageView) self.imageView.tintColor = self.tintColor ?: [UIColor systemBlueColor];
 }
 
 // The open row's title: the table lays its own label out for a row as tall as its editor, and that
@@ -412,6 +427,19 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
 
 #pragma mark - The value chip
 
+// The rounded square the row's symbol sits in, the prototype row's own icon tile
+- (void)rc_buildIconTileIfNeeded {
+    if (self.rcIconTile) return;
+    UIView *tile = [[UIView alloc] init];
+    tile.backgroundColor = [UIColor tertiarySystemFillColor];
+    tile.layer.cornerRadius = 10.0;
+    tile.layer.cornerCurve = kCACornerCurveContinuous;
+    tile.userInteractionEnabled = NO; // a tap on the icon is a tap on the row
+    tile.isAccessibilityElement = NO; // the row reads its own title; the tile isn't a control
+    [self.contentView insertSubview:tile atIndex:0];
+    self.rcIconTile = tile;
+}
+
 - (void)rc_buildValueChipIfNeeded {
     if (self.rcValueChip) return;
 
@@ -433,7 +461,7 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
     [NSLayoutConstraint activateConstraints:@[
         self.rcValueChipCenterY,
         width,
-        [chip.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-6],
+        [chip.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-10],
         [chip.widthAnchor constraintLessThanOrEqualToAnchor:self.contentView.widthAnchor multiplier:0.46],
         [chip.heightAnchor constraintEqualToConstant:chipHeight],
     ]];
@@ -470,16 +498,37 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
     CGFloat indentWidth = self.indentationWidth > 0 ? self.indentationWidth : 14.0f;
     CGFloat indentOffset = self.indentationLevel * indentWidth;
     
-    if (self.indentationLevel > 0 && self.imageView && !CGRectIsEmpty(self.imageView.frame)) {
+    // The row's own height: the centre everything on the row pins to, a row grown for its editor
+    // still shows its own height above it
+    CGFloat rowHeight = self.inlinePanel ? self.inlineRowContentHeight : self.contentView.bounds.size.height;
+    
+    // The icon in its tile, as the prototype row draws it: the tile stands at the row's own left
+    // inset (indent included) and centres on the row's own height, whatever the cell has grown to
+    if (self.imageView && self.imageView.image) {
+        [self rc_buildIconTileIfNeeded];
+        CGFloat tileX = RCActionCellIconTileInset + indentOffset;
+        self.rcIconTile.hidden = NO;
+        self.rcIconTile.frame = CGRectMake(tileX, rowHeight / 2.0 - RCActionCellIconTileSize / 2.0,
+                                           RCActionCellIconTileSize, RCActionCellIconTileSize);
+        CGFloat side = MIN(24.0, MAX(20.0, self.imageView.image.size.width));
         CGRect imgFrame = self.imageView.frame;
-        imgFrame.origin.x += indentOffset;
+        imgFrame.size.width = side;
+        imgFrame.size.height = side;
+        imgFrame.origin.x = tileX + (RCActionCellIconTileSize - side) / 2.0;
+        imgFrame.origin.y = rowHeight / 2.0 - side / 2.0;
         self.imageView.frame = imgFrame;
+    } else if (self.rcIconTile) {
+        self.rcIconTile.hidden = YES;
+    }
+    // Where the row's text begins: after the tile, or at the row's own left inset with no icon
+    CGFloat textLeft = RCActionCellIconTileInset + indentOffset;
+    if (self.rcIconTile && !self.rcIconTile.hidden) {
+        textLeft = CGRectGetMaxX(self.rcIconTile.frame) + RCActionCellIconTileGap;
     }
     
     // The chip stays centred on the row itself, not on the row plus its editor
     CGFloat chipWidth = 0;
     if (self.rcValueChip && !self.rcValueChip.hidden) {
-        CGFloat rowHeight = self.inlinePanel ? self.inlineRowContentHeight : self.contentView.bounds.size.height;
         if (fabs(self.rcValueChipCenterY.constant - rowHeight / 2.0) > 0.5) {
             self.rcValueChipCenterY.constant = rowHeight / 2.0;
         }
@@ -490,9 +539,7 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
     
     if (self.textLabel && !CGRectIsEmpty(self.textLabel.frame)) {
         CGRect textFrame = self.textLabel.frame;
-        if (self.indentationLevel > 0) {
-            textFrame.origin.x += indentOffset;
-        }
+        textFrame.origin.x = textLeft;
         CGFloat maxW = textRight - textFrame.origin.x;
         textFrame.size.width = MAX(0, maxW);
         self.textLabel.frame = textFrame;
@@ -500,9 +547,7 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
     
     if (self.detailTextLabel && !CGRectIsEmpty(self.detailTextLabel.frame)) {
         CGRect detailFrame = self.detailTextLabel.frame;
-        if (self.indentationLevel > 0) {
-            detailFrame.origin.x += indentOffset;
-        }
+        detailFrame.origin.x = textLeft;
         CGFloat maxW = textRight - detailFrame.origin.x;
         detailFrame.size.width = MAX(0, maxW);
         self.detailTextLabel.frame = detailFrame;
@@ -530,11 +575,12 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
         // drops to nothing that could hide it
         UILabel *inlineTitle = self.rcInlineTitleLabel;
         if (inlineTitle && !inlineTitle.hidden) {
-            CGFloat x = 16.0 + indentOffset;
+            CGFloat x = RCActionCellIconTileInset + indentOffset;
+            if (self.rcIconTile && !self.rcIconTile.hidden) {
+                x = CGRectGetMaxX(self.rcIconTile.frame) + RCActionCellIconTileGap;
+            }
             if (self.textLabel && !CGRectIsEmpty(self.textLabel.frame)) {
                 x = self.textLabel.frame.origin.x;
-            } else if (self.imageView && !CGRectIsEmpty(self.imageView.frame)) {
-                x = CGRectGetMaxX(self.imageView.frame) + RCActionCellInlineTitleGap;
             }
             CGFloat maxW = MAX(8.0, textRight - x);
             CGSize fit = [inlineTitle sizeThatFits:CGSizeMake(maxW, CGFLOAT_MAX)];
@@ -1885,6 +1931,8 @@ static void RCSetRunWatching(BOOL watching) {
     // rightBarButtonItems set above
 
     [self.tableView registerClass:[RCActionCell class] forCellReuseIdentifier:@"ActionCell"];
+    // Every row stands alone as its own card, so the table's own hairlines have nothing to divide
+    self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
     // Long names wrap and the row grows with them, never below the usual 70
     self.tableView.rowHeight = [[NSUserDefaults standardUserDefaults] boolForKey:@"RCWrapLongNamesEnabled"] ? UITableViewAutomaticDimension : 70.0;
     self.tableView.estimatedRowHeight = 70;
@@ -3548,6 +3596,9 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 - (BOOL)toggleInlineEditorForCommand:(NSString *)command index:(NSInteger)index {
     RCInlineRowItem *item = [self inlineRowItemForCommand:command];
     if (!item) return NO;
+    // The tap itself lands with a tick, as the prototype sequence's rows do
+    UISelectionFeedbackGenerator *tick = [[UISelectionFeedbackGenerator alloc] init];
+    [tick selectionChanged];
     if (self.inlineEditorIndex == index && self.inlineRowEditor) {
         [self commitInlineRowEditor];
         return YES;
@@ -3576,16 +3627,33 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     }
 
     NSIndexPath *path = [NSIndexPath indexPathForRow:index inSection:0];
-    if (![self.tableView cellForRowAtIndexPath:path]) {
+    RCActionCell *cell = (RCActionCell *)[self.tableView cellForRowAtIndexPath:path];
+    if (!cell) {
         [self.tableView reloadData];
         return;
     }
-    // The row is rebuilt at its new height, and cellForRow puts the panel under its title
-    [self.tableView beginUpdates];
-    [self.tableView reloadRowsAtIndexPaths:@[path] withRowAnimation:UITableViewRowAnimationNone];
-    [self.tableView endUpdates];
+    // The card opening lands with its own light tap, as the prototype's does
+    UIImpactFeedbackGenerator *impact = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
+    [impact prepare];
+    [impact impactOccurred];
+    // The row grows in place into its open card, the way the prototype sequence expands: the panel
+    // fades in as the card grows, and the rows around step back in the same movement
+    [cell rc_setValueChipAccented:YES];
+    [self applySectionCardStyleToCell:cell atIndexPath:path];
+    [cell rc_showInlinePanel:panel rowContentHeight:self.inlineEditorRowHeight];
+    cell.inlinePanelContainer.alpha = 0.0;
+    void (^changes)(void) = ^{
+        [self.tableView beginUpdates];
+        [self.tableView endUpdates];
+        cell.inlinePanelContainer.alpha = 1.0;
+        [self updateInlineEditorDimming];
+    };
+    if (UIAccessibilityIsReduceMotionEnabled()) {
+        changes();
+    } else {
+        [UIView animateWithDuration:0.28 delay:0 options:UIViewAnimationOptionCurveEaseInOut animations:changes completion:nil];
+    }
     [self.tableView scrollToRowAtIndexPath:path atScrollPosition:UITableViewScrollPositionNone animated:YES];
-    [self updateInlineEditorDimming];
 }
 
 // A choice lands as it is tapped; stepping, typing or picking a variable only repaints the
@@ -3615,17 +3683,46 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     NSString *command = [self.inlineRowItem command];
     [self.inlineRowEditor endEditing];
     [self.view endEditing:YES];
+    RCActionCell *openCell = (index >= 0 && index < (NSInteger)self.actions.count)
+        ? (RCActionCell *)[self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:index inSection:0]]
+        : nil;
     self.inlineEditorIndex = NSNotFound;
     self.inlineEditorCommand = nil;
     self.inlineRowItem = nil;
     self.inlineRowEditor = nil;
-    if (command.length && index >= 0 && index < (NSInteger)self.actions.count) {
-        [self storeCommand:command atIndex:index];
-    } else {
-        [self.tableView reloadData];
+    if (!openCell || UIAccessibilityIsReduceMotionEnabled()) {
+        // No card in view to fold, or no movement wanted: keep what it shows and settle at once
+        if (command.length && index >= 0 && index < (NSInteger)self.actions.count) {
+            [self storeCommand:command atIndex:index];
+        } else {
+            [self.tableView reloadData];
+        }
+        self.inlineRowCommitting = NO;
+        [self updateInlineEditorDimming];
+        return;
     }
-    self.inlineRowCommitting = NO;
-    [self updateInlineEditorDimming];
+    // The card folds back the way it grew: the panel fades as the row shrinks and the rows around
+    // come forward, and only then does the row take what the editor kept
+    NSIndexPath *path = [NSIndexPath indexPathForRow:index inSection:0];
+    UIView *container = openCell.inlinePanelContainer;
+    void (^changes)(void) = ^{
+        [self.tableView beginUpdates];
+        [self.tableView endUpdates];
+        container.alpha = 0.0;
+        [self updateInlineEditorDimming];
+    };
+    [UIView animateWithDuration:0.26 delay:0 options:UIViewAnimationOptionCurveEaseInOut animations:changes completion:^(BOOL finished) {
+        [openCell rc_showInlinePanel:nil rowContentHeight:70.0];
+        [openCell rc_setValueChipAccented:NO];
+        [self applySectionCardStyleToCell:openCell atIndexPath:path];
+        if (command.length && index >= 0 && index < (NSInteger)self.actions.count) {
+            [self storeCommand:command atIndex:index];
+        } else {
+            [self.tableView reloadData];
+        }
+        self.inlineRowCommitting = NO;
+        [self updateInlineEditorDimming];
+    }];
 }
 
 // A delay or a level: its name alone, and its number or "{variable}" as the chip shows it.
@@ -5176,27 +5273,6 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     [self presentViewController:nav animated:YES completion:nil];
 }
 
-- (UIBezierPath *)fillPathForRect:(CGRect)rect
-                            first:(BOOL)isFirst
-                             last:(BOOL)isLast
-                           single:(BOOL)isSingle
-                     cornerRadius:(CGFloat)cornerRadius {
-    if (isSingle) {
-        return [UIBezierPath bezierPathWithRoundedRect:rect cornerRadius:cornerRadius];
-    }
-    if (isFirst) {
-        return [UIBezierPath bezierPathWithRoundedRect:rect
-                                     byRoundingCorners:(UIRectCornerTopLeft | UIRectCornerTopRight)
-                                           cornerRadii:CGSizeMake(cornerRadius, cornerRadius)];
-    }
-    if (isLast) {
-        return [UIBezierPath bezierPathWithRoundedRect:rect
-                                     byRoundingCorners:(UIRectCornerBottomLeft | UIRectCornerBottomRight)
-                                           cornerRadii:CGSizeMake(cornerRadius, cornerRadius)];
-    }
-    return [UIBezierPath bezierPathWithRect:rect];
-}
-
 - (void)applySectionCardStyleToCell:(UITableViewCell *)cell atIndexPath:(NSIndexPath *)indexPath {
     RCConfigManager *config = [RCConfigManager sharedManager];
     UIColor *fillColor = [config tweakColorForKey:@"blockBackground" defaultVal:0.12];
@@ -5235,18 +5311,13 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         return;
     }
     
-    NSInteger rowCount = [self.tableView numberOfRowsInSection:indexPath.section];
-    if (rowCount < 1) {
-        return;
-    }
-    
-    BOOL isSingle = (rowCount == 1);
-    BOOL isFirst = (indexPath.row == 0);
-    BOOL isLast = (indexPath.row == rowCount - 1);
-    
+    // Every row stands alone: its own rounded card with a breath between rows, the way the
+    // prototype sequence draws them
     CGFloat lineWidth = 1.0;
-    CGFloat cornerRadius = 12.0;
-    CGRect fillRect = CGRectInset(cell.bounds, 0.0, 0.0);
+    CGFloat cornerRadius = RCActionCellCardCornerRadius;
+    CGRect fillRect = CGRectMake(0.0, RCActionCellCardGap,
+                                 cell.bounds.size.width,
+                                 cell.bounds.size.height - 2.0 * RCActionCellCardGap);
     CGRect borderRect = CGRectInset(fillRect, lineWidth * 0.5, lineWidth * 0.5);
     if (CGRectGetWidth(fillRect) <= 0 || CGRectGetHeight(fillRect) <= 0) {
         return;
@@ -5255,17 +5326,9 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         return;
     }
     
-    UIBezierPath *fillPath = [self fillPathForRect:fillRect
-                                             first:isFirst
-                                              last:isLast
-                                            single:isSingle
-                                      cornerRadius:cornerRadius];
-    
-    UIBezierPath *borderPath = [self fillPathForRect:borderRect
-                                             first:isFirst
-                                              last:isLast
-                                            single:isSingle
-                                      cornerRadius:cornerRadius];
+    UIBezierPath *fillPath = [UIBezierPath bezierPathWithRoundedRect:fillRect cornerRadius:cornerRadius];
+
+    UIBezierPath *borderPath = [UIBezierPath bezierPathWithRoundedRect:borderRect cornerRadius:cornerRadius];
     
     UIView *normalBackgroundView = [[UIView alloc] initWithFrame:cell.bounds];
     normalBackgroundView.backgroundColor = [UIColor clearColor];
@@ -5282,22 +5345,6 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     normalBorderLayer.fillColor = [UIColor clearColor].CGColor;
     normalBorderLayer.strokeColor = borderColor.CGColor;
     normalBorderLayer.lineWidth = lineWidth;
-    
-    if (!isSingle) {
-        CGRect maskRect = normalBorderLayer.bounds;
-        if (isFirst) {
-            maskRect.size.height = MAX(0.0, maskRect.size.height - lineWidth);
-        } else if (isLast) {
-            maskRect.origin.y = lineWidth;
-            maskRect.size.height = MAX(0.0, maskRect.size.height - lineWidth);
-        } else {
-            maskRect.origin.y = lineWidth;
-            maskRect.size.height = MAX(0.0, maskRect.size.height - (2.0 * lineWidth));
-        }
-        CAShapeLayer *maskLayer = [CAShapeLayer layer];
-        maskLayer.path = [UIBezierPath bezierPathWithRect:maskRect].CGPath;
-        normalBorderLayer.mask = maskLayer;
-    }
     [normalBackgroundView.layer addSublayer:normalBorderLayer];
     
     UIView *selectedBackgroundView = [[UIView alloc] initWithFrame:cell.bounds];
@@ -5315,21 +5362,6 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     selectedBorderLayer.fillColor = [UIColor clearColor].CGColor;
     selectedBorderLayer.strokeColor = borderColor.CGColor;
     selectedBorderLayer.lineWidth = lineWidth;
-    if (!isSingle) {
-        CGRect maskRect = selectedBorderLayer.bounds;
-        if (isFirst) {
-            maskRect.size.height = MAX(0.0, maskRect.size.height - lineWidth);
-        } else if (isLast) {
-            maskRect.origin.y = lineWidth;
-            maskRect.size.height = MAX(0.0, maskRect.size.height - lineWidth);
-        } else {
-            maskRect.origin.y = lineWidth;
-            maskRect.size.height = MAX(0.0, maskRect.size.height - (2.0 * lineWidth));
-        }
-        CAShapeLayer *maskLayer = [CAShapeLayer layer];
-        maskLayer.path = [UIBezierPath bezierPathWithRect:maskRect].CGPath;
-        selectedBorderLayer.mask = maskLayer;
-    }
     [selectedBackgroundView.layer addSublayer:selectedBorderLayer];
     
     cell.backgroundColor = [UIColor clearColor];
@@ -5417,9 +5449,13 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         [headerView addSubview:banner];
     }
     UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(20, 15 + top, width - 40, 20)];
-    label.text = @"ACTION SEQUENCE";
-    label.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
-    label.textColor = [UIColor secondaryLabelColor];
+    // The prototype sequence's own eyebrow: caption type at semibold, with its slight tracking
+    UIFont *eyebrowFont = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]];
+    label.attributedText = [[NSAttributedString alloc] initWithString:@"ACTION SEQUENCE" attributes:@{
+        NSFontAttributeName: eyebrowFont,
+        NSForegroundColorAttributeName: [UIColor secondaryLabelColor],
+        NSKernAttributeName: @1.2,
+    }];
     [headerView addSubview:label];
     return headerView;
 }
@@ -5445,7 +5481,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     CGFloat panelWidth = cellWidth - 2.0 * (RCActionCellCardInset + RCActionCellInlineSideInset);
     UIView *panel = self.inlineRowEditor;
     CGFloat panelHeight = [(id)panel preferredHeightForWidth:panelWidth];
-    return ceil(self.inlineEditorRowHeight + 1.0 / [UIScreen mainScreen].scale + RCActionCellInlineTopGap + panelHeight + RCActionCellCardInset + RCActionCellInlineBottomGap);
+    return ceil(self.inlineEditorRowHeight + 1.0 / [UIScreen mainScreen].scale + RCActionCellInlineTopGap + panelHeight + RCActionCellCardGap + RCActionCellInlineBottomGap);
 }
 
 // The ordinary editor while its trigger runs (the debugger view has the run above its title instead)
@@ -5493,7 +5529,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 
     if ([actionItem isKindOfClass:[NSDictionary class]] && !((NSDictionary *)actionItem)[@"command"]) {
         cell.textLabel.text = cleanName;
-        cell.textLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightMedium];
+        cell.textLabel.font = RCActionCellTitleFont();
         // If / Else If rows can be long ("If Bluetooth Device Connected is …"): wrap to a second line
         cell.textLabel.numberOfLines = wrapLongNames ? 0 : 1;
         cell.textLabel.lineBreakMode = NSLineBreakByTruncatingTail;
@@ -5505,9 +5541,9 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         if ([stepIcon isEqualToString:@"x.squareroot"]) {
             cell.imageView.image = RCVariableMenuIconActionSized(22);
         } else {
-            cell.imageView.image = [UIImage systemImageNamed:stepIcon];
+            cell.imageView.image = [UIImage systemImageNamed:stepIcon withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:17 weight:UIImageSymbolWeightSemibold]];
         }
-        cell.imageView.tintColor = isControl ? [UIColor tertiaryLabelColor] : [UIColor systemGrayColor];
+        cell.imageView.tintColor = isControl ? [UIColor tertiaryLabelColor] : [UIColor secondaryLabelColor];
         
         UIImageView *handleView = [[UIImageView alloc] initWithImage:RCGrabberImage()];
         handleView.tintColor = [UIColor systemGray3Color];
@@ -5535,7 +5571,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     // Logic to separate "Type" from "Value"
     if (inlineParts) {
         cell.textLabel.attributedText = nil;
-        cell.textLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightMedium];
+        cell.textLabel.font = RCActionCellTitleFont();
         cell.textLabel.text = inlineParts[@"title"];
         cell.textLabel.textColor = [UIColor labelColor];
         subtitle = nil;
@@ -5550,7 +5586,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         
         UIColor *accentColor = [UIColor systemBlueColor];
         
-        [attrStr addAttribute:NSFontAttributeName value:[UIFont systemFontOfSize:16 weight:UIFontWeightMedium] range:NSMakeRange(0, fullText.length)];
+        [attrStr addAttribute:NSFontAttributeName value:RCActionCellTitleFont() range:NSMakeRange(0, fullText.length)];
         [attrStr addAttribute:NSForegroundColorAttributeName value:[UIColor labelColor] range:baseRange];
         if (suffixRange.location != NSNotFound) {
             [attrStr addAttribute:NSForegroundColorAttributeName value:accentColor range:suffixRange];
@@ -5561,7 +5597,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         cell.textLabel.attributedText = nil; // Clear any attributed text
         // The plain style first: a reused cell keeps the font of the row it last showed (a Terminal
         // Command's monospace, say), and once text is set attributedText is never nil to check
-        cell.textLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightMedium];
+        cell.textLabel.font = RCActionCellTitleFont();
         cell.textLabel.textColor = [UIColor labelColor];
         
         NSAttributedString *paramAttrStr = [self attributedDisplayNameForCommand:action];
@@ -5693,11 +5729,12 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         cell.imageView.tintColor = nil;
     } else if ([iconName isEqualToString:@"x.squareroot"]) {
         cell.imageView.image = RCVariableMenuIconActionSized(22);
-        cell.imageView.tintColor = [UIColor systemGrayColor];
+        cell.imageView.tintColor = [UIColor secondaryLabelColor];
     } else {
         UIImage *custom = [action isKindOfClass:[NSString class]] ? [RCAddOnCatalog imageForCommand:action] : nil;   // an add-on's image icon
-        cell.imageView.image = custom ?: [UIImage systemImageNamed:iconName];
-        cell.imageView.tintColor = custom ? nil : [UIColor systemGrayColor];
+        UIImageSymbolConfiguration *symbolConfig = [UIImageSymbolConfiguration configurationWithPointSize:17 weight:UIImageSymbolWeightSemibold];
+        cell.imageView.image = custom ?: [UIImage systemImageNamed:iconName withConfiguration:symbolConfig];
+        cell.imageView.tintColor = custom ? nil : [UIColor secondaryLabelColor];
     }
 
     // Custom reorder handle (since editing = NO), with a chevron on a row that opens its value in place
@@ -5728,7 +5765,9 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     
     if (indentationLevel <= 0) return;
     
-    UIView *container = [[UIView alloc] initWithFrame:cell.contentView.bounds];
+    // The guides stay within the row's own card, so they never cross the breath between cards
+    CGRect guideFrame = CGRectInset(cell.contentView.bounds, 0.0, RCActionCellCardGap);
+    UIView *container = [[UIView alloc] initWithFrame:guideFrame];
     container.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     container.userInteractionEnabled = NO;
     container.tag = 998811;
