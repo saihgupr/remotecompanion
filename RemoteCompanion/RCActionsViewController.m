@@ -24,7 +24,6 @@
 #import "RCSetVariableViewController.h"
 #import "RCVariableConditionViewController.h"
 #import "RCNumberSettingViewController.h"
-#import "RCInlineValuePanel.h"
 #import "RCInlineRowItem.h"
 #import "RCInlineRowEditor.h"
 #import "RCInlineRowChip.h"
@@ -190,10 +189,6 @@ static CGFloat const RCActionCellCardInset = 6.0;
 static CGFloat const RCActionCellCardCornerRadius = 12.0;
 // The rows around an open editor step back a little, still readable and still tappable
 static CGFloat const RCActionCellDimmedAlpha = 0.4;
-static NSInteger const RCActionCellChevronTag = 990311;
-
-// The card an open row draws around itself and its editor. It redraws when the row changes size
-// (the row grows to hold its panel), so the card always holds the whole row.
 @interface RCActionCardBackgroundView : UIView
 @property (nonatomic, strong) UIColor *fillColor;
 @property (nonatomic, strong) UIColor *borderColor;
@@ -282,8 +277,6 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
 - (void)rc_showInlinePanel:(UIView *)panel rowContentHeight:(CGFloat)rowContentHeight;
 // Whether a point in the cell's own coordinates lands in the open editor
 - (BOOL)rc_pointIsInInlinePanel:(CGPoint)pointInCell;
-// The chevron in the accessory points down once the row is open
-- (void)rc_setExpanded:(BOOL)expanded;
 // The row's value on the right, as a chip ("2 s", "40%"). Nil takes the chip away.
 - (void)rc_showValueChipText:(NSString *)text;
 // A chip on the open row takes the row's tint, as the card does
@@ -371,11 +364,6 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
         [panel.bottomAnchor constraintLessThanOrEqualToAnchor:container.bottomAnchor constant:-(RCActionCellCardInset + RCActionCellInlineBottomGap)],
     ]];
     self.inlinePanelContainer = container;
-}
-
-- (void)rc_setExpanded:(BOOL)expanded {
-    UIImageView *chevron = (UIImageView *)[self.accessoryView viewWithTag:RCActionCellChevronTag];
-    chevron.transform = expanded ? CGAffineTransformMakeRotation((CGFloat)M_PI_2) : CGAffineTransformIdentity;
 }
 
 #pragma mark - The value chip
@@ -523,7 +511,6 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
 // the height of the row above the panel
 @property (nonatomic, assign) NSInteger inlineEditorIndex;
 @property (nonatomic, copy) NSString *inlineEditorCommand;
-@property (nonatomic, strong) RCInlineValuePanel *inlineEditorPanel;
 @property (nonatomic, assign) CGFloat inlineEditorRowHeight;
 // A choice or a text row's editor, open in place the same way: its value (kept here so scrolling
 // away and back doesn't lose what was typed) and whether a fold is already storing it
@@ -1478,7 +1465,7 @@ static void RCSetRunWatching(BOOL watching) {
 - (void)viewWillDisappear:(BOOL)animated {
     [super viewWillDisappear:animated];
     // Leaving the screen with a value editor open keeps what it shows
-    if (self.isMovingFromParentViewController || self.isBeingDismissed) { [self commitInlineEditor]; [self commitInlineRowEditor]; }
+    if (self.isMovingFromParentViewController || self.isBeingDismissed) [self commitInlineRowEditor];
     [self stopRunWatch];
 }
 
@@ -2011,7 +1998,7 @@ static void RCSetRunWatching(BOOL watching) {
 
 - (void)runSequence {
     // What's in an open value editor is part of the sequence that runs
-    [self commitInlineEditor];
+    [self commitInlineRowEditor];
     [self commitInlineRowEditor];
     UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
     [haptic impactOccurred];
@@ -3489,43 +3476,9 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 
 #pragma mark - A value row that opens in place
 
-// What follows a delay or level command's prefix ("2", "40", "{volume}"), or nil for any other
-// command, and for one whose value is missing.
-- (NSString *)inlineValueTextForCommand:(NSString *)command {
-    if (![command isKindOfClass:[NSString class]]) return nil;
-    NSString *prefix = [command hasPrefix:@"delay "] ? @"delay " : [self levelPrefixForCommand:command];
-    if (!prefix.length || ![command hasPrefix:prefix]) return nil;
-    NSString *rest = [[command substringFromIndex:prefix.length] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-    return rest.length ? rest : nil;
-}
-
-// The number a command holds ("delay 2", "set-vol 40"), or nil. A variable is not a number: that
-// row shows its variable in the chip and opens its own editor, as before.
-- (NSString *)inlineValueForCommand:(NSString *)command {
-    NSString *text = [self inlineValueTextForCommand:command];
-    if (!text.length) return nil;
-    static NSRegularExpression *number;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{ number = [NSRegularExpression regularExpressionWithPattern:@"^\\d+(\\.\\d+)?$" options:0 error:NULL]; });
-    return [number firstMatchInString:text options:0 range:NSMakeRange(0, text.length)] ? text : nil;
-}
-
-// A tap on a delay or level row. NO: it doesn't hold a single number, so its own sheet opens as before.
+// A tap on a delay, level, choice or text row. NO: the row holds no single value, so its own
+// editor opens as before.
 - (BOOL)toggleInlineEditorForCommand:(NSString *)command index:(NSInteger)index {
-    NSString *value = [self inlineValueForCommand:command];
-    if (!value) return NO;
-    [self commitInlineRowEditor];
-    if (self.inlineEditorIndex == index) {
-        [self commitInlineEditor];
-        return YES;
-    }
-    [self expandInlineEditorForCommand:command index:index value:value];
-    return YES;
-}
-
-// A tap on a choice or a text row. NO: the row holds no single value, so its own editor opens as
-// before.
-- (BOOL)toggleInlineRowEditorForCommand:(NSString *)command index:(NSInteger)index {
     RCInlineRowItem *item = [self inlineRowItemForCommand:command];
     if (!item) return NO;
     if (self.inlineEditorIndex == index && self.inlineRowEditor) {
@@ -3536,10 +3489,11 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     return YES;
 }
 
-// The row's editor, opened in place under it: the same card, dimming and chevron as a number row.
-// A choice saves each tap straight away; a text row saves when it folds.
+// The row's editor, opened in place under it: the row's card, tinted and outlined, while the
+// rest of the sequence steps back. A choice saves each tap straight away; a number or a text row
+// saves when it folds.
 - (void)expandInlineRowEditorForItem:(RCInlineRowItem *)item command:(NSString *)command index:(NSInteger)index {
-    [self commitInlineEditor];
+    if (item.kind == RCInlineRowKindNumber) item.allowsRound = [self roundAvailableAtIndex:index];
     RCInlineRowEditor *panel = [[RCInlineRowEditor alloc] initWithItem:item style:RCInlineRowEditorStyleCompact otherActions:self.actions];
     __weak typeof(self) weakSelf = self;
     panel.onChange = ^{ [weakSelf inlineRowEditorChanged]; };
@@ -3564,19 +3518,11 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     [self.tableView reloadRowsAtIndexPaths:@[path] withRowAnimation:UITableViewRowAnimationNone];
     [self.tableView endUpdates];
     [self.tableView scrollToRowAtIndexPath:path atScrollPosition:UITableViewScrollPositionNone animated:YES];
-
-    // The new chevron starts pointing right, then turns down as the row opens
-    RCActionCell *cell = (RCActionCell *)[self.tableView cellForRowAtIndexPath:path];
-    [self applySectionCardStyleToCell:cell atIndexPath:path]; // the card now fills the taller row
-    UIImageView *chevron = (UIImageView *)[cell.accessoryView viewWithTag:RCActionCellChevronTag];
-    if (chevron) {
-        chevron.transform = CGAffineTransformIdentity;
-        [UIView animateWithDuration:0.2 animations:^{ [cell rc_setExpanded:YES]; }];
-    }
     [self updateInlineEditorDimming];
 }
 
-// A choice lands as it is tapped; typed text only repaints the chip, and is kept when the row folds.
+// A choice lands as it is tapped; stepping, typing or picking a variable only repaints the
+// chip, and is kept when the row folds.
 - (void)inlineRowEditorChanged {
     RCInlineRowItem *item = self.inlineRowItem;
     if (!item || !self.inlineRowEditor) return;
@@ -3615,10 +3561,51 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     [self updateInlineEditorDimming];
 }
 
+// A delay or a level: its name alone, and its number or "{variable}" as the chip shows it.
+// nil for any other row.
+- (RCInlineRowItem *)inlineNumberItemForCommand:(NSString *)command {
+    if (![command isKindOfClass:[NSString class]]) return nil;
+    NSString *prefix = [command hasPrefix:@"delay "] ? @"delay " : [self levelPrefixForCommand:command];
+    if (!prefix.length || ![command hasPrefix:prefix]) return nil;
+    NSString *text = [[command substringFromIndex:prefix.length] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    if (!text.length) return nil;
+    BOOL delay = [prefix isEqualToString:@"delay "];
+
+    RCInlineRowItem *item = [[RCInlineRowItem alloc] init];
+    item.kind = RCInlineRowKindNumber;
+    item.name = delay ? @"Wait" : [prefix isEqualToString:@"set-vol "] ? @"Set Volume"
+             : [prefix isEqualToString:@"ringer volume "] ? @"Set Ringer Volume" : @"Set Brightness";
+    item.caption = delay ? @"Seconds" : @"Percent";
+    item.unit = delay ? @"s" : @"%";
+    item.unitNeedsSpace = delay;
+    item.prefix = prefix;
+    item.minimumValue = 0;
+    item.maximumValue = delay ? 86400 : 100;
+    item.step = delay ? 0.5 : 1;
+    item.decimals = delay ? 2 : 0;
+    item.allowsDecimals = delay;
+    item.allowsRound = YES;
+
+    if ([text hasPrefix:@"{"]) {
+        NSString *name = [text stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"{}"]];
+        if (!name.length) return nil;
+        item.variableName = name;
+    } else {
+        NSScanner *scanner = [NSScanner scannerWithString:[text stringByReplacingOccurrencesOfString:@"," withString:@"."]];
+        double number = 0;
+        if (![scanner scanDouble:&number] || !scanner.isAtEnd) return nil;
+        if (!delay && floor(number) != number) return nil;
+        item.numberValue = number;
+    }
+    return item;
+}
+
 // A choice or a text row's value, the way the prototype gallery draws its cards: the name alone
 // in the title, the value in the chip. nil for any other row, which keeps its own editor.
 - (RCInlineRowItem *)inlineRowItemForCommand:(NSString *)command {
     if (![command isKindOfClass:[NSString class]]) return nil;
+    RCInlineRowItem *number = [self inlineNumberItemForCommand:command];
+    if (number) return number;
     RCInlineRowItem *choice = [self inlineChoiceItemForCommand:command];
     if (choice) return choice;
     return [self inlineTextItemForCommand:command];
@@ -3677,22 +3664,12 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     return item;
 }
 
-// A delay or level row's name alone, and its value (a number, or "{variable}") as the chip shows
-// it. A choice or a text row reads the same way off its item. nil for any other row.
+// A delay, level, choice or text row's name without its value, and the value as the chip shows
+// it. nil for any other row.
 - (NSDictionary *)inlineValuePartsForCommand:(NSString *)command {
     RCInlineRowItem *rowItem = [self inlineRowItemForCommand:command];
-    if (rowItem) return @{ @"title": rowItem.name, @"chip": [rowItem displayValue] };
-    NSString *value = [self inlineValueTextForCommand:command];
-    if (!value.length) return nil;
-    BOOL variable = [value hasPrefix:@"{"];
-    if (!variable && ![self inlineValueForCommand:command].length) return nil;
-    NSString *prefix = [command hasPrefix:@"delay "] ? @"delay " : [self levelPrefixForCommand:command];
-    if ([prefix isEqualToString:@"delay "]) {
-        return @{ @"title": @"Wait", @"chip": variable ? value : [NSString stringWithFormat:@"%@ s", value] };
-    }
-    NSString *title = [prefix isEqualToString:@"set-vol "] ? @"Set Volume"
-                   : [prefix isEqualToString:@"ringer volume "] ? @"Set Ringer Volume" : @"Set Brightness";
-    return @{ @"title": title, @"chip": variable ? value : [NSString stringWithFormat:@"%@%%", value] };
+    if (!rowItem) return nil;
+    return @{ @"title": rowItem.name, @"chip": [rowItem displayValue] };
 }
 
 // The row whose editor is open, or NSNotFound when there is none (or its action changed under it)
@@ -3703,7 +3680,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 
 - (BOOL)inlineEditorIsOpenAtRow:(NSInteger)row {
     if (row == NSNotFound || row != self.inlineEditorIndex) return NO;
-    if (!self.inlineEditorPanel && !self.inlineRowEditor) return NO;
+    if (!self.inlineRowEditor) return NO;
     if (row < 0 || row >= (NSInteger)self.actions.count) return NO;
     id item = self.actions[row];
     NSString *command = [item isKindOfClass:[NSDictionary class]] ? ((NSDictionary *)item)[@"command"] : item;
@@ -3728,71 +3705,6 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 - (BOOL)inlineEditorHairlineIsHiddenAtRow:(NSInteger)row {
     NSInteger openRow = [self inlineEditorOpenRow];
     return openRow != NSNotFound && (row == openRow || row == openRow - 1);
-}
-
-- (void)expandInlineEditorForCommand:(NSString *)command index:(NSInteger)index value:(NSString *)value {
-    NSString *prefix = [command hasPrefix:@"delay "] ? @"delay " : [self levelPrefixForCommand:command];
-    if (!prefix.length) return;
-    BOOL delay = [prefix isEqualToString:@"delay "];
-    RCInlineValuePanel *panel = [[RCInlineValuePanel alloc] initWithCaption:(delay ? @"Seconds" : @"Percent")
-                                                                       unit:(delay ? @"s" : @"%")
-                                                                     prefix:prefix
-                                                                      value:value
-                                                               otherActions:self.actions];
-    panel.minimum = 0;
-    panel.maximum = delay ? 86400 : 100;
-    panel.step = delay ? 0.5 : 1;
-    panel.allowsDecimals = delay;
-    panel.allowsRound = [self roundAvailableAtIndex:index];
-    __weak typeof(self) weakSelf = self;
-    panel.onCommit = ^{ [weakSelf commitInlineEditor]; };
-
-    self.inlineEditorIndex = index;
-    self.inlineEditorCommand = command;
-    self.inlineEditorPanel = panel;
-    self.inlineEditorRowHeight = 70.0;
-    if ([[NSUserDefaults standardUserDefaults] boolForKey:@"RCWrapLongNamesEnabled"]) {
-        UITableViewCell *oldCell = [self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:index inSection:0]];
-        if (oldCell) self.inlineEditorRowHeight = RCWrappedCellHeight(oldCell, self.tableView.bounds.size.width, 70.0);
-    }
-
-    NSIndexPath *path = [NSIndexPath indexPathForRow:index inSection:0];
-    if (![self.tableView cellForRowAtIndexPath:path]) {
-        [self.tableView reloadData];
-        return;
-    }
-    // The row is rebuilt at its new height, and cellForRow puts the panel under its title
-    [self.tableView beginUpdates];
-    [self.tableView reloadRowsAtIndexPaths:@[path] withRowAnimation:UITableViewRowAnimationNone];
-    [self.tableView endUpdates];
-    [self.tableView scrollToRowAtIndexPath:path atScrollPosition:UITableViewScrollPositionNone animated:YES];
-
-    // The new chevron starts pointing right, then turns down as the row opens
-    RCActionCell *cell = (RCActionCell *)[self.tableView cellForRowAtIndexPath:path];
-    [self applySectionCardStyleToCell:cell atIndexPath:path]; // the card now fills the taller row
-    UIImageView *chevron = (UIImageView *)[cell.accessoryView viewWithTag:RCActionCellChevronTag];
-    if (chevron) {
-        chevron.transform = CGAffineTransformIdentity;
-        [UIView animateWithDuration:0.2 animations:^{ [cell rc_setExpanded:YES]; }];
-    }
-    [self updateInlineEditorDimming];
-}
-
-// Folds the open editor, keeping what it shows. Text that isn't a value in range leaves the action as it was.
-- (void)commitInlineEditor {
-    NSInteger index = self.inlineEditorIndex;
-    if (index == NSNotFound || !self.inlineEditorPanel) return;
-    NSString *command = [self.inlineEditorPanel currentCommand];
-    [self.view endEditing:YES];
-    self.inlineEditorIndex = NSNotFound;
-    self.inlineEditorCommand = nil;
-    self.inlineEditorPanel = nil;
-    if (command.length && index >= 0 && index < (NSInteger)self.actions.count) {
-        [self storeCommand:command atIndex:index];
-    } else {
-        [self.tableView reloadData];
-    }
-    [self updateInlineEditorDimming];
 }
 
 // A level action on the number panel: 0 to 100, or a variable. Edits the action at index, or adds one at the end.
@@ -4283,7 +4195,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     }
     // Tapping another row folds the open value editor, keeping what it shows
     if (self.inlineEditorIndex != NSNotFound && self.inlineEditorIndex != indexPath.row) {
-        [self commitInlineEditor];
+        [self commitInlineRowEditor];
     }
     id actionData = self.actions[indexPath.row];
     
@@ -4321,7 +4233,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             [self.tableView reloadData];
         }];
     } else if (toggleInfo) {
-        if (!remoteParts && [self toggleInlineRowEditorForCommand:currentAction index:indexPath.row]) return;
+        if (!remoteParts && [self toggleInlineEditorForCommand:currentAction index:indexPath.row]) return;
         UIAlertController *picker = [UIAlertController alertControllerWithTitle:toggleInfo[@"name"]
                                                                          message:@"Select desired state"
                                                                   preferredStyle:UIAlertControllerStyleActionSheet];
@@ -4614,7 +4526,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         }];
     } else if ([currentAction hasPrefix:@"toast "] || [currentAction isEqualToString:@"toast"]) {
         // Edit Toast in place; anything without a message keeps the full editor
-        if (!remoteParts && [self toggleInlineRowEditorForCommand:currentAction index:indexPath.row]) return;
+        if (!remoteParts && [self toggleInlineEditorForCommand:currentAction index:indexPath.row]) return;
         NSString *toastTitle = nil, *toastSub = nil, *toastIcon = nil;
         rc_parse_toast_cmd(currentAction, &toastTitle, &toastSub, &toastIcon);
         __weak typeof(self) weakSelf = self;
@@ -5464,7 +5376,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
     CGFloat cellWidth = cell ? cell.bounds.size.width : tableView.bounds.size.width - 40.0;
     CGFloat panelWidth = cellWidth - 2.0 * (RCActionCellCardInset + RCActionCellInlineSideInset);
-    UIView *panel = self.inlineEditorPanel ?: self.inlineRowEditor;
+    UIView *panel = self.inlineRowEditor;
     CGFloat panelHeight = [(id)panel preferredHeightForWidth:panelWidth];
     return ceil(self.inlineEditorRowHeight + 1.0 / [UIScreen mainScreen].scale + RCActionCellInlineTopGap + panelHeight + RCActionCellCardInset + RCActionCellInlineBottomGap);
 }
@@ -5482,27 +5394,11 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 }
 
 // The drag handle, and on a row that opens its value in place, a chevron that points down once open
-- (UIView *)grabberAccessoryWithChevron:(BOOL)showsChevron expanded:(BOOL)expanded {
-    if (!showsChevron) {
-        UIImageView *handle = [[UIImageView alloc] initWithImage:RCGrabberImage()];
-        handle.tintColor = [UIColor systemGray3Color];
-        return handle;
-    }
-    UIView *box = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 46, 44)];
-    box.userInteractionEnabled = NO; // taps and the drag handle's press still reach the row
-    UIImageView *chevron = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"chevron.right"]];
-    chevron.tag = RCActionCellChevronTag;
-    chevron.tintColor = [UIColor tertiaryLabelColor];
-    chevron.contentMode = UIViewContentModeScaleAspectFit;
-    chevron.frame = CGRectMake(0, 14, 12, 16);
-    chevron.transform = expanded ? CGAffineTransformMakeRotation((CGFloat)M_PI_2) : CGAffineTransformIdentity;
+// The drag handle on its own: the value chip's caret says the row opens in place
+- (UIView *)grabberAccessory {
     UIImageView *handle = [[UIImageView alloc] initWithImage:RCGrabberImage()];
     handle.tintColor = [UIColor systemGray3Color];
-    handle.contentMode = UIViewContentModeScaleAspectFit;
-    handle.frame = CGRectMake(28, 13, 18, 18);
-    [box addSubview:chevron];
-    [box addSubview:handle];
-    return box;
+    return handle;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -5738,19 +5634,18 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     }
 
     // Custom reorder handle (since editing = NO), with a chevron on a row that opens its value in place
-    BOOL expandsInline = !remoteParts && ([self inlineValueForCommand:action] != nil || [self inlineRowItemForCommand:action] != nil);
+    BOOL expandsInline = !remoteParts && [self inlineRowItemForCommand:action] != nil;
     BOOL inlineExpanded = expandsInline && [self inlineEditorIsOpenAtRow:indexPath.row];
-    cell.accessoryView = [self grabberAccessoryWithChevron:expandsInline expanded:inlineExpanded];
+    cell.accessoryView = [self grabberAccessory];
     if (inlineParts) [cell rc_setValueChipAccented:inlineExpanded];
     [self applySectionCardStyleToCell:cell atIndexPath:indexPath];
     
     BOOL isDisabled = [[RCConfigManager sharedManager] isActionDisabled:actionItem];
     cell.contentView.alpha = isDisabled ? 0.38f : 1.0f;
     cell.accessoryView.alpha = isDisabled ? 0.38f : 1.0f;
-    UIView *openPanel = self.inlineEditorPanel ?: self.inlineRowEditor;
+    UIView *openPanel = self.inlineRowEditor;
     if (inlineExpanded && openPanel && [action isKindOfClass:[NSString class]] && [self.inlineEditorCommand isEqualToString:action]) {
         [cell rc_showInlinePanel:openPanel rowContentHeight:self.inlineEditorRowHeight];
-        [cell rc_setExpanded:YES];
     } else {
         [cell rc_showInlinePanel:nil rowContentHeight:70.0];
     }
@@ -5899,7 +5794,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 - (void)beginReorderAtPoint:(CGPoint)point {
     if (self.reorderSnapshot) return;
     // Picking a row up folds an open value editor first, keeping what it shows
-    if (self.inlineEditorIndex != NSNotFound) [self commitInlineEditor];
+    if (self.inlineEditorIndex != NSNotFound) [self commitInlineRowEditor];
     NSIndexPath *indexPath = [self.tableView indexPathForRowAtPoint:point];
     if (!indexPath || indexPath.row >= (NSInteger)self.actions.count) return;
     NSRange range = [self ifBlockRangeForIndex:indexPath.row];
