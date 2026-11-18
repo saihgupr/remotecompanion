@@ -274,6 +274,10 @@ static volatile BOOL g_playStopOnTouch;
 static volatile BOOL g_playTouched;            // the last playback was stopped by a touch
 static NSString *g_playResult = @"none";       // how the last playback ended (gesture play-status)
 
+BOOL RCGestureIsBusy(void) {
+    return g_recActive || g_playing;
+}
+
 // The touches playback sends, by timestamp, so they aren't mistaken for real ones
 static uint64_t g_sentStamps[64];
 static volatile uint32_t g_sentNext;
