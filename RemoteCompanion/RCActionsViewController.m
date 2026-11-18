@@ -5302,13 +5302,12 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         cell.imageView.tintColor = [UIColor systemGreenColor];
     }
 
-    // The row with its value editor open is one card of its own: inset from the rows around it,
-    // tinted, and outlined in the row's tint (the card the prototype gallery draws)
+    // The row with its value editor open keeps the card's fill and is outlined in the row's tint
     if ([self inlineEditorIsOpenAtRow:indexPath.row]) {
         BOOL running = [self.runningIndexes containsIndex:indexPath.row];
         UIColor *accent = cell.tintColor ?: [UIColor systemBlueColor];
-        UIColor *cardFill = running ? [[UIColor systemGreenColor] colorWithAlphaComponent:0.22] : [accent colorWithAlphaComponent:0.10];
-        UIColor *cardFillSelected = running ? [[UIColor systemGreenColor] colorWithAlphaComponent:0.28] : [accent colorWithAlphaComponent:0.18];
+        UIColor *cardFill = running ? [[UIColor systemGreenColor] colorWithAlphaComponent:0.22] : fillColor;
+        UIColor *cardFillSelected = running ? [[UIColor systemGreenColor] colorWithAlphaComponent:0.28] : selectedFillColor;
         UIColor *cardBorder = running ? [UIColor systemGreenColor] : accent;
 
         RCActionCardBackgroundView *card = [[RCActionCardBackgroundView alloc] initWithFrame:cell.bounds];
