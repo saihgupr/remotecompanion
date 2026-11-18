@@ -415,6 +415,7 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
             // Status Bar
             @"trigger_statusbar_left_hold", @"trigger_statusbar_center_hold", @"trigger_statusbar_right_hold",
             @"trigger_statusbar_swipe_left", @"trigger_statusbar_swipe_right", @"trigger_statusbar_double_tap",
+            @"trigger_statusbar_swipe_down_left", @"trigger_statusbar_swipe_down_center", @"trigger_statusbar_swipe_down_right",
             // Edge Gestures
             @"trigger_edge_left_swipe_up", @"trigger_edge_left_swipe_down",
             @"trigger_edge_right_swipe_up", @"trigger_edge_right_swipe_down",
@@ -433,6 +434,7 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
             // Device State
             @"trigger_device_lock", @"trigger_device_unlock",
             @"trigger_power_connect", @"trigger_power_disconnect",
+            @"trigger_device_airplane_on", @"trigger_device_airplane_off",
             @"trigger_device_rotated_landscape", @"trigger_device_rotated_portrait",
             @"trigger_device_orientation_portrait_up", @"trigger_device_orientation_landscape_left",
             @"trigger_device_orientation_landscape_right", @"trigger_device_orientation_portrait_upside_down",
@@ -1217,6 +1219,8 @@ static NSString *RCActionCommand(id item) {
         @"trigger_device_unlock": @"Device Unlocked",
         @"trigger_power_connect": @"Power Connected",
         @"trigger_power_disconnect": @"Power Disconnected",
+        @"trigger_device_airplane_on": @"Airplane Mode On",
+        @"trigger_device_airplane_off": @"Airplane Mode Off",
         @"trigger_device_findmy_sound": @"Find My Sound",
         @"trigger_carplay_connect": @"CarPlay Connected",
         @"trigger_carplay_disconnect": @"CarPlay Disconnected",
@@ -1250,6 +1254,9 @@ static NSString *RCActionCommand(id item) {
         @"trigger_statusbar_swipe_left": @"Status Bar Swipe Left",
         @"trigger_statusbar_swipe_right": @"Status Bar Swipe Right",
         @"trigger_statusbar_double_tap": @"Status Bar Double Tap",
+        @"trigger_statusbar_swipe_down_left": @"Top Swipe Down (Left)",
+        @"trigger_statusbar_swipe_down_center": @"Top Swipe Down (Center)",
+        @"trigger_statusbar_swipe_down_right": @"Top Swipe Down (Right)",
         @"trigger_statusbar_two_finger_swipe_down": @"2-Finger Top Slide Down",
         @"trigger_bottom_two_finger_swipe_up": @"2-Finger Bottom Slide Up",
         @"trigger_two_finger_tap": @"2-Finger Tap",

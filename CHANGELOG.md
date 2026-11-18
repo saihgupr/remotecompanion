@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Airplane Mode triggers**: New Trigger > Device State adds Airplane Mode On and Airplane Mode Off, firing whenever Airplane Mode flips on or off from Control Center, Settings, Shortcuts, or `rc airplane`.
 - **Set Orientation action**: New Action > Device Controls > Set Orientation picks Portrait, Landscape Left, Landscape Right, Portrait Upside Down or Auto Rotate. The screen turns straight away and holds only while rotation lock is on; with lock off the phone takes over again as soon as it moves. Auto Rotate releases the hold. `orientation set <mode>` does the same in scripts, the Web UI and the CLI.
 - **Physical orientation triggers**: New Trigger > Physical Orientation adds Portrait Up, Landscape Left, Landscape Right or Portrait Upside Down, each its own trigger. They read the accelerometer, so they fire for the way the phone is actually held, even with orientation lock on and whichever app is in front. Face up and face down are ignored, and a quick tilt and back fires nothing. The existing Rotated to Landscape / Portrait triggers are unchanged and still follow the screen, so the two are listed separately.
 - **Test Kit passcode Forever**: the Keep For row now has a Forever choice. A passcode set with it never expires by time and survives a respring and a restart, until it is forgotten, replaced, or fails an unlock. After a reboot it is available once the phone has been unlocked, since the Keychain cannot be read before that. The 30 minute to 8 hour choices behave as before, and a passcode that doesn't unlock is still forgotten after one try.
@@ -28,6 +29,7 @@ All notable changes to this project will be documented in this file.
 - **Tighter bar gesture zones**: the status bar and bottom bar gesture areas now cover 25pt from the edge instead of 50pt, so a touch has to land closer to the bar. Two-finger slides keep their wider 75pt landing zone.
 
 ### Fixed
+- **Wi-Fi off no longer runs the Wi-Fi Network disconnect trigger**: turning the radio off with `wifi off` or `wifi toggle` is the command itself, not the network going away, so `wifi_disconnect_<SSID>` is skipped for a few seconds afterwards. An action that turned Wi-Fi off could otherwise be undone by that trigger's own actions a second later.
 - **Cards keep their portrait width after rotating**: the rounded card behind action rows and trigger rows is now redrawn to the row's real width, so in landscape it reaches the normal right margin instead of stopping halfway across the screen. The Trigger and Action Sequence screens both use the same card view.
 - **Notifications ask for permission on first launch**: the app now requests notification permission when it opens instead of only inside the notification action editor, so a fresh install can post Notification actions and `rc notify` straight away.
 - **Clear Notifications with a full `.txt` list**: `rc clear notification FILE.txt` sends the command in one write, so a long list like the 66-line `CleanNotifications.txt` is no longer cut at 1 KB and silently ignored.

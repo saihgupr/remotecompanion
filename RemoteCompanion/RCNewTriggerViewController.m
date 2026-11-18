@@ -18,9 +18,11 @@
 // List: the table. Compact: the grid. Only the one for the layout setting is shown.
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) UICollectionView *collectionView;
-// Compact: the Triggers list's category bar over the grid, and the section it picked (nil: All)
+// The Triggers list's category bar over the list or grid, and the section it picked (nil: All)
 @property (nonatomic, strong) RCCategoryBar *categoryBar;
 @property (nonatomic, copy) NSString *selectedCategoryTitle;
+@property (nonatomic, copy) NSString *lastSearchQuery;
+@property (nonatomic, assign) BOOL didSetInitialTop;
 // A chosen item waits here until the search that found it has finished closing
 @property (nonatomic, copy) void (^pendingHandler)(void);
 @end
@@ -61,6 +63,11 @@
     self.tableView.dataSource = self;
     self.tableView.delegate = self;
     self.tableView.rowHeight = 52;
+    if (@available(iOS 15.0, *)) {
+        // Spacing above headers is built into the header views instead (see
+        // heightForHeaderInSection:), so the first one can sit close to the category bar
+        self.tableView.sectionHeaderTopPadding = 0;
+    }
     self.tableView.backgroundColor = bg;
     self.tableView.separatorColor = [cm tweakColorForKey:@"separators" defaultVal:0.30];
     self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
@@ -92,7 +99,7 @@
     self.emptyLabel.textColor = [UIColor secondaryLabelColor];
     self.emptyLabel.textAlignment = NSTextAlignmentCenter;
 
-    // Compact: chips for the sections, as on Triggers. A chip narrows the grid (and a search) to its section.
+    // Chips for the sections, as on Triggers. A chip narrows the list or grid (and a search) to its section.
     self.categoryBar = [[RCCategoryBar alloc] initWithWidth:self.view.bounds.size.width];
     NSMutableArray *chipIcons = [NSMutableArray array];
     for (NSString *title in self.allSectionTitles) [chipIcons addObject:RCTriggerCategoryIcon(title) ?: [NSNull null]];
@@ -102,6 +109,7 @@
     self.categoryBar.onSelect = ^(NSInteger index) {
         weakSelf.selectedCategoryTitle = (index >= 0 && index < (NSInteger)weakSelf.allSectionTitles.count) ? weakSelf.allSectionTitles[index] : nil;
         [weakSelf reloadData];
+        [weakSelf scrollToTop];
     };
 
     // List or Compact (Settings), followed while open
@@ -127,16 +135,14 @@
     if ([note.object isEqual:RCLayoutNewTrigger]) [self applyLayout];
 }
 
-// Shows the table or the grid; the other is hidden behind it. The category bar comes with the grid.
+// Shows the table or the grid; the other is hidden behind it. The category bar follows the active view.
 - (void)applyLayout {
     UIScrollView *active = [self activeScrollView];
     UIScrollView *other = active == self.tableView ? (UIScrollView *)self.collectionView : self.tableView;
-    if ([self compact]) {
-        if (self.categoryBar.superview != self.collectionView) [self.categoryBar attachToScrollView:self.collectionView];
-    } else if (self.categoryBar.superview) {
-        [self.categoryBar detachFromScrollView:self.collectionView];
-        self.selectedCategoryTitle = nil;
-        self.categoryBar.selectedIndex = -1;
+    [self.categoryBar detachFromScrollView:other];
+    if (self.categoryBar.superview != active) {
+        if (active == self.tableView) [self.categoryBar attachToTableView:self.tableView];
+        else [self.categoryBar attachToScrollView:self.collectionView];
     }
     active.hidden = NO;
     other.hidden = YES;
@@ -145,6 +151,13 @@
     [self.view sendSubviewToBack:active];
     if (@available(iOS 15.0, *)) [self setContentScrollView:active forEdge:NSDirectionalRectEdgeAll];
     [self reloadData];
+    if (self.didSetInitialTop) [self scrollToTop];
+}
+
+- (void)scrollToTop {
+    UIScrollView *active = [self activeScrollView];
+    [active setContentOffset:CGPointMake(0, -active.adjustedContentInset.top) animated:NO];
+    [self.categoryBar layoutInScrollView:active];
 }
 
 - (void)reloadData {
@@ -152,32 +165,37 @@
     UIScrollView *other = active == self.tableView ? (UIScrollView *)self.collectionView : self.tableView;
     if ([other isKindOfClass:[UITableView class]]) ((UITableView *)other).backgroundView = nil;
     else ((UICollectionView *)other).backgroundView = nil;
-    UIView *empty = (active == self.tableView ? self.sections.count : [self gridSections].count) == 0 ? self.emptyLabel : nil;
+    UIView *empty = [self displayedSections].count == 0 ? self.emptyLabel : nil;
     if (active == self.tableView) self.tableView.backgroundView = empty;
     else self.collectionView.backgroundView = empty;
     [self.tableView reloadData];
     [self.collectionView.collectionViewLayout invalidateLayout];
     [self.collectionView reloadData];
-    if ([self compact]) [self.categoryBar layoutInScrollView:self.collectionView];
+    [self.categoryBar layoutInScrollView:active];
 }
 
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
-    if ([self compact]) [self.categoryBar layoutInScrollView:self.collectionView];
+    UIScrollView *active = [self activeScrollView];
+    if (!self.didSetInitialTop && active.safeAreaInsets.top > 0) {
+        self.didSetInitialTop = YES;
+        active.contentOffset = CGPointMake(0, -active.adjustedContentInset.top);
+    }
+    [self.categoryBar layoutInScrollView:active];
 }
 
 - (void)scrollViewDidScroll:(UIScrollView *)scrollView {
-    if (scrollView == self.collectionView) [self.categoryBar scrollViewDidScroll:scrollView];
+    if (scrollView == [self activeScrollView]) [self.categoryBar scrollViewDidScroll:scrollView];
 }
 
-// The grid's sections: all of them (as the search left them), or the one its chip picked
-- (NSArray<NSArray<NSDictionary *> *> *)gridSections {
+// The sections shown: all of them (as the search left them), or the one the category chip picked
+- (NSArray<NSArray<NSDictionary *> *> *)displayedSections {
     if (!self.selectedCategoryTitle) return self.sections;
     NSUInteger at = [self.sectionTitles indexOfObject:self.selectedCategoryTitle];
     return at == NSNotFound ? @[] : @[self.sections[at]];
 }
 
-- (NSArray<NSString *> *)gridSectionTitles {
+- (NSArray<NSString *> *)displayedSectionTitles {
     if (!self.selectedCategoryTitle) return self.sectionTitles;
     return [self.sectionTitles containsObject:self.selectedCategoryTitle] ? @[self.selectedCategoryTitle] : @[];
 }
@@ -188,7 +206,7 @@
     [coordinator animateAlongsideTransition:^(__unused id<UIViewControllerTransitionCoordinatorContext> context) {
         [self.collectionView.collectionViewLayout invalidateLayout];
     } completion:^(__unused id<UIViewControllerTransitionCoordinatorContext> context) {
-        if ([self compact]) [self.categoryBar layoutInScrollView:self.collectionView];
+        [self.categoryBar layoutInScrollView:[self activeScrollView]];
     }];
 }
 
@@ -248,6 +266,8 @@
 
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
     NSString *query = [self normalizedText:searchController.searchBar.text];
+    BOOL queryChanged = ![query isEqualToString:self.lastSearchQuery ?: @""];
+    self.lastSearchQuery = query;
     if (query.length == 0) {
         self.sectionTitles = self.allSectionTitles;
         self.sections = self.allSections;
@@ -268,25 +288,68 @@
         self.sections = sections;
     }
     [self reloadData];
+    if (queryChanged) [self scrollToTop];
 }
 
 #pragma mark - Table view
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    return self.sections.count;
+    return [self displayedSections].count;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    return self.sections[section].count;
+    return [self displayedSections][section].count;
 }
 
-- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    return self.sectionTitles[section];
+- (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
+    NSString *title = [self displayedSectionTitles][section];
+    CGFloat height = [self tableView:tableView heightForHeaderInSection:section];
+    UIView *headerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, tableView.bounds.size.width, height)];
+
+    UILabel *label = [[UILabel alloc] init];
+    label.translatesAutoresizingMaskIntoConstraints = NO;
+    label.text = [title uppercaseString];
+    label.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+    label.textColor = [UIColor secondaryLabelColor];
+    [headerView addSubview:label];
+
+    UIImage *icon = RCTriggerCategoryIcon(title);
+    if (icon) {
+        UIImageView *iconView = [[UIImageView alloc] initWithImage:icon];
+        iconView.preferredSymbolConfiguration = [UIImageSymbolConfiguration configurationWithPointSize:13 weight:UIImageSymbolWeightSemibold];
+        iconView.contentMode = UIViewContentModeScaleAspectFit;
+        iconView.tintColor = label.textColor;
+        iconView.translatesAutoresizingMaskIntoConstraints = NO;
+        [headerView addSubview:iconView];
+        [NSLayoutConstraint activateConstraints:@[
+            [iconView.leadingAnchor constraintEqualToAnchor:headerView.safeAreaLayoutGuide.leadingAnchor constant:20],
+            [iconView.centerYAnchor constraintEqualToAnchor:label.centerYAnchor],
+            [iconView.widthAnchor constraintEqualToConstant:18],
+            [iconView.heightAnchor constraintEqualToConstant:18],
+        ]];
+    }
+
+    [NSLayoutConstraint activateConstraints:@[
+        [label.leadingAnchor constraintEqualToAnchor:headerView.safeAreaLayoutGuide.leadingAnchor constant:icon ? 44 : 20],
+        [label.trailingAnchor constraintEqualToAnchor:headerView.safeAreaLayoutGuide.trailingAnchor constant:-20],
+        [label.bottomAnchor constraintEqualToAnchor:headerView.bottomAnchor constant:-5],
+        [label.heightAnchor constraintEqualToConstant:20],
+    ]];
+    return headerView;
+}
+
+- (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section {
+    // The first section sits just below the category bar. The others keep their old
+    // spacing, including the 15pt sectionHeaderTopPadding they had on iOS 15+.
+    if (section == 0) return 29.0f;
+    CGFloat topPadding = 0;
+    if (@available(iOS 15.0, *)) topPadding = 15;
+    return 40.0f + topPadding;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     RCConfigManager *cm = [RCConfigManager sharedManager];
-    NSDictionary *item = self.sections[indexPath.section][indexPath.row];
+    NSDictionary *item = [self displayedSections][indexPath.section][indexPath.row];
 
     UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:nil];
     cell.backgroundColor = [cm tweakColorForKey:@"blockBackground" defaultVal:0.12];
@@ -306,22 +369,22 @@
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    [self selectItem:self.sections[indexPath.section][indexPath.row]];
+    [self selectItem:[self displayedSections][indexPath.section][indexPath.row]];
 }
 
 #pragma mark - Grid (Compact)
 
 - (NSInteger)numberOfSectionsInCollectionView:(UICollectionView *)collectionView {
-    return [self gridSections].count;
+    return [self displayedSections].count;
 }
 
 - (NSInteger)collectionView:(UICollectionView *)collectionView numberOfItemsInSection:(NSInteger)section {
-    return [self gridSections][section].count;
+    return [self displayedSections][section].count;
 }
 
 - (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView cellForItemAtIndexPath:(NSIndexPath *)indexPath {
     RCActionTileCell *cell = [collectionView dequeueReusableCellWithReuseIdentifier:@"Tile" forIndexPath:indexPath];
-    NSDictionary *item = [self gridSections][indexPath.section][indexPath.item];
+    NSDictionary *item = [self displayedSections][indexPath.section][indexPath.item];
     // The icon its triggers have in the Triggers list, when there is one
     UIImage *custom = [item[@"compactImage"] isKindOfClass:[UIImage class]] ? item[@"compactImage"]
                     : [item[@"image"] isKindOfClass:[UIImage class]] ? item[@"image"] : nil;
@@ -339,7 +402,7 @@
 
 - (UICollectionReusableView *)collectionView:(UICollectionView *)collectionView viewForSupplementaryElementOfKind:(NSString *)kind atIndexPath:(NSIndexPath *)indexPath {
     RCActionGridHeader *header = [collectionView dequeueReusableSupplementaryViewOfKind:kind withReuseIdentifier:@"Header" forIndexPath:indexPath];
-    NSString *title = [self gridSectionTitles][indexPath.section];
+    NSString *title = [self displayedSectionTitles][indexPath.section];
     [header setTitle:title icon:RCTriggerCategoryIcon(title)];
     return header;
 }
@@ -354,7 +417,7 @@
 
 - (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)indexPath {
     [collectionView deselectItemAtIndexPath:indexPath animated:YES];
-    [self selectItem:[self gridSections][indexPath.section][indexPath.item]];
+    [self selectItem:[self displayedSections][indexPath.section][indexPath.item]];
 }
 
 #pragma mark - Choosing
