@@ -338,6 +338,8 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     if ([triggerKey isEqualToString:@"shake"]) return @"waveform.path.ecg";
     if ([triggerKey isEqualToString:@"trigger_power_connect"]) return @"bolt.fill";
     if ([triggerKey isEqualToString:@"trigger_power_disconnect"]) return @"bolt.slash.fill";
+    if ([triggerKey isEqualToString:@"trigger_device_airplane_on"]) return @"airplane.circle.fill";
+    if ([triggerKey isEqualToString:@"trigger_device_airplane_off"]) return @"airplane.circle";
     if ([triggerKey isEqualToString:@"trigger_device_findmy_sound"]) return @"location.circle.fill";
     if ([triggerKey isEqualToString:@"trigger_carplay_connect"]) return @"car.fill";
     if ([triggerKey isEqualToString:@"trigger_carplay_disconnect"]) return @"car";
@@ -775,6 +777,9 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     if ([configuredKeys containsObject:@"trigger_power_disconnect"]) {
         [deviceStateKeys addObject:@"trigger_power_disconnect"];
     }
+    for (NSString *key in @[@"trigger_device_airplane_on", @"trigger_device_airplane_off"]) {
+        if ([configuredKeys containsObject:key]) [deviceStateKeys addObject:key];
+    }
     for (NSString *key in @[@"trigger_device_rotated_landscape", @"trigger_device_rotated_portrait"]) {
         if ([configuredKeys containsObject:key]) [deviceStateKeys addObject:key];
     }
@@ -1099,7 +1104,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     }
     addBuiltIn(@"shake", @"Motion Gestures");
 
-    for (NSString *key in @[@"trigger_device_lock", @"trigger_device_unlock", @"trigger_power_connect", @"trigger_power_disconnect", @"trigger_device_rotated_landscape", @"trigger_device_rotated_portrait", @"trigger_carplay_connect", @"trigger_carplay_disconnect", @"trigger_device_findmy_sound"]) {
+    for (NSString *key in @[@"trigger_device_lock", @"trigger_device_unlock", @"trigger_power_connect", @"trigger_power_disconnect", @"trigger_device_airplane_on", @"trigger_device_airplane_off", @"trigger_device_rotated_landscape", @"trigger_device_rotated_portrait", @"trigger_carplay_connect", @"trigger_carplay_disconnect", @"trigger_device_findmy_sound"]) {
         addBuiltIn(key, @"Device State");
     }
     for (NSString *key in @[@"trigger_device_orientation_portrait_up", @"trigger_device_orientation_landscape_left", @"trigger_device_orientation_landscape_right", @"trigger_device_orientation_portrait_upside_down"]) {

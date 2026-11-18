@@ -352,9 +352,12 @@ extern Boolean MRMediaRemoteSendCommandToApp(MRMediaRemoteCommand command, NSDic
 
 // Airplane Mode APIs (AppSupport)
 @interface RadiosPreferences : NSObject
+- (instancetype)initWithQueue:(dispatch_queue_t)queue;
 - (BOOL)airplaneMode;
 - (void)setAirplaneMode:(BOOL)enabled;
 - (void)synchronize;
+- (void)refresh;
+- (void)setDelegate:(id)delegate;
 @end
 
 // SBWiFiManager API
@@ -2366,6 +2369,8 @@ static NSString *get_human_name_for_trigger(NSString *key, NSDictionary *trigger
             @"trigger_bottom_swipe_up_right": @"Bottom Swipe Up (Right)",
             @"trigger_statusbar_two_finger_swipe_down": @"2-Finger Top Slide Down",
             @"trigger_bottom_two_finger_swipe_up": @"2-Finger Bottom Slide Up",
+            @"trigger_device_airplane_on": @"Airplane Mode On",
+            @"trigger_device_airplane_off": @"Airplane Mode Off",
             @"trigger_sequence_edited": @"Action Sequence Edited"
         };
     });
@@ -6945,6 +6950,78 @@ static void rc_carplay_start_observing(void) {
     });
 }
 
+// Airplane Mode triggers: trigger_device_airplane_on and trigger_device_airplane_off fire when
+// Airplane Mode changes. RadiosPreferences (AppSupport) notifies its delegate on the main queue
+// from SCPreferences updates, with the Darwin notification as a fallback.
+@interface RCAirplaneModeObserver : NSObject
+@end
+
+static RadiosPreferences *g_rcAirplanePrefs = nil;
+static RCAirplaneModeObserver *g_rcAirplaneObserver = nil;
+static BOOL g_rcAirplaneMode = NO;
+static BOOL g_rcAirplaneReady = NO;
+
+static BOOL rc_airplane_mode_is_on(void) {
+    dlopen("/System/Library/PrivateFrameworks/AppSupport.framework/AppSupport", RTLD_NOW);
+    Class RPClass = objc_getClass("RadiosPreferences");
+    if (!RPClass) return NO;
+    RadiosPreferences *prefs = [[RPClass alloc] init];
+    return [prefs airplaneMode];
+}
+
+static void rc_airplane_mode_maybe_changed(NSString *source) {
+    if (!g_rcAirplaneReady) return;
+    BOOL now = rc_airplane_mode_is_on();
+    if (now == g_rcAirplaneMode) return;
+    g_rcAirplaneMode = now;
+    SRLog(@"✈️ [RCSystem] Transition detected (%@): AIRPLANE MODE %@.", source, now ? @"ON" : @"OFF");
+    SRLogMin(@"✈️ [RCSystem] Airplane Mode %@.", now ? @"ON" : @"OFF");
+    RCExecuteTrigger(now ? @"trigger_device_airplane_on" : @"trigger_device_airplane_off");
+}
+
+@implementation RCAirplaneModeObserver
+- (void)airplaneModeChanged {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        rc_airplane_mode_maybe_changed(@"RadiosPreferencesDelegate");
+    });
+}
+@end
+
+static void handle_airplane_mode_notification(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        rc_airplane_mode_maybe_changed(@"Darwin Notification");
+    });
+}
+
+static void rc_airplane_mode_start_observing(void) {
+    dlopen("/System/Library/PrivateFrameworks/AppSupport.framework/AppSupport", RTLD_NOW);
+    Class RPClass = objc_getClass("RadiosPreferences");
+    if (!RPClass) {
+        SRLog(@"✈️ [RCSystem] RadiosPreferences not found - no Airplane Mode triggers");
+        return;
+    }
+    if ([RPClass instancesRespondToSelector:@selector(initWithQueue:)]) {
+        g_rcAirplanePrefs = [[RPClass alloc] initWithQueue:dispatch_get_main_queue()];
+    } else {
+        g_rcAirplanePrefs = [[RPClass alloc] init];
+    }
+    g_rcAirplaneObserver = [RCAirplaneModeObserver new];
+    if ([g_rcAirplanePrefs respondsToSelector:@selector(setDelegate:)]) {
+        [g_rcAirplanePrefs setDelegate:g_rcAirplaneObserver];
+    }
+    // Reading once ensures SCPreferences is initialized on this RadiosPreferences observer
+    g_rcAirplaneMode = [g_rcAirplanePrefs airplaneMode];
+    g_rcAirplaneReady = YES;
+    SRLog(@"✈️ [RCSystem] Airplane Mode state initialized to: %@", g_rcAirplaneMode ? @"ON" : @"OFF");
+
+    CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),
+                                    NULL,
+                                    handle_airplane_mode_notification,
+                                    CFSTR("RadiosPreferencesAirplaneModeDidChangeNotification"),
+                                    NULL,
+                                    CFNotificationSuspensionBehaviorDeliverImmediately);
+}
+
 // Orientation triggers: the screen turning to landscape or back to portrait. SpringBoard says when
 // its active orientation changes (only on a rotation, so nothing runs while the phone is still);
 // the check waits half a second for it to settle, so a quick turn and back fires nothing.
@@ -7536,6 +7613,7 @@ static void register_system_event_observers() {
     rc_calls_start_observing();
     initialize_power_state();
     rc_carplay_start_observing();
+    rc_airplane_mode_start_observing();
     rc_orientation_start_observing();
     rc_physical_orientation_start_observing();
 

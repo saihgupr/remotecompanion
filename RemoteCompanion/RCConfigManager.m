@@ -416,6 +416,7 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
             // Device State
             @"trigger_device_lock", @"trigger_device_unlock",
             @"trigger_power_connect", @"trigger_power_disconnect",
+            @"trigger_device_airplane_on", @"trigger_device_airplane_off",
             @"trigger_device_rotated_landscape", @"trigger_device_rotated_portrait",
             @"trigger_device_orientation_portrait_up", @"trigger_device_orientation_landscape_left",
             @"trigger_device_orientation_landscape_right", @"trigger_device_orientation_portrait_upside_down",
@@ -1198,6 +1199,8 @@ static NSString *RCActionCommand(id item) {
         @"trigger_device_unlock": @"Device Unlocked",
         @"trigger_power_connect": @"Power Connected",
         @"trigger_power_disconnect": @"Power Disconnected",
+        @"trigger_device_airplane_on": @"Airplane Mode On",
+        @"trigger_device_airplane_off": @"Airplane Mode Off",
         @"trigger_device_findmy_sound": @"Find My Sound",
         @"trigger_carplay_connect": @"CarPlay Connected",
         @"trigger_carplay_disconnect": @"CarPlay Disconnected",
