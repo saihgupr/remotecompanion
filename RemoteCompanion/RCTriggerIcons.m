@@ -7,6 +7,7 @@
 //   buttons: volUp, volDown, power, ringer      home: a Home button
 //   zone: top, bottom, left, right               dot: L, C, R (in the top zone)
 //   arrow: left, right, up, down (in the zone)   arrowAt: L, C, R (a swipe up from the bottom)
+//   arrowDownAt: L, C, R (a swipe down from the top)
 //   fingers: up, down (two fingertips in the zone, with a big arrow the way they slide)
 //   mark: @"2×" (text), @"sym:clock" (a symbol), @"arrows:up,down"
 //   symbol: a plain symbol instead of the phone (Touch ID), with a mark as a small badge
@@ -33,6 +34,9 @@ static NSDictionary<NSString *, NSDictionary *> *RCPhoneIconSpecs(void) {
             @"trigger_statusbar_swipe_left":  @{ @"zone": @"top", @"arrow": @"left" },
             @"trigger_statusbar_swipe_right": @{ @"zone": @"top", @"arrow": @"right" },
             @"trigger_statusbar_double_tap":  @{ @"zone": @"top", @"mark": @"2×" },
+            @"trigger_statusbar_swipe_down_left":   @{ @"arrowDownAt": @"L" },
+            @"trigger_statusbar_swipe_down_center": @{ @"arrowDownAt": @"C" },
+            @"trigger_statusbar_swipe_down_right":  @{ @"arrowDownAt": @"R" },
             @"trigger_edge_left_swipe_up":    @{ @"zone": @"left", @"arrow": @"up" },
             @"trigger_edge_left_swipe_down":  @{ @"zone": @"left", @"arrow": @"down" },
             @"trigger_edge_right_swipe_up":   @{ @"zone": @"right", @"arrow": @"up" },
@@ -269,6 +273,12 @@ static UIImage *RCDrawPhoneIcon(NSDictionary *spec, CGFloat side) {
             CGFloat x = [arrowAt isEqualToString:@"L"] ? 11 : [arrowAt isEqualToString:@"C"] ? 16 : 21;
             RCDrawFitted(RCSymbol(@"arrow.up", 14 * k, UIImageSymbolWeightBlack), R(x, 18, 8, 16), kCGBlendModeNormal);
             [[UIBezierPath bezierPathWithRoundedRect:R(14, 35, 12, 1.8) cornerRadius:0.9 * k] fill];   // the home bar
+        }
+        NSString *arrowDownAt = spec[@"arrowDownAt"];
+        if (arrowDownAt) {
+            CGFloat x = [arrowDownAt isEqualToString:@"L"] ? 11 : [arrowDownAt isEqualToString:@"C"] ? 16 : 21;
+            RCDrawFitted(RCSymbol(@"arrow.down", 14 * k, UIImageSymbolWeightBlack), R(x, 6, 8, 16), kCGBlendModeNormal);
+            [[UIBezierPath bezierPathWithRoundedRect:R(14, 3.2, 12, 1.8) cornerRadius:0.9 * k] fill]; // the status bar
         }
         NSString *fingers = spec[@"fingers"];
         if (fingers) {
