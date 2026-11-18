@@ -3498,7 +3498,8 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             @"section": @"Variables",
             @"input": @"variable"
         }
-    ] arrayByAddingObjectsFromArray:[self addOnConditionDefinitions]]);
+    ] arrayByAddingObjectsFromArray:[self addOnConditionDefinitions]];
+    return RCAdaptVibrationConditions(definitions);
 }
 
 // Add-on conditions (ADDONS.md), one section per add-on
