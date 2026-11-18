@@ -267,7 +267,7 @@ typedef NS_ENUM(NSInteger, RCNESection) { RCNESectionPreview, RCNESectionText, R
         case RCNESectionPreview: return 1;
         case RCNESectionText: return 2;
         case RCNESectionPicture: return 2;
-        case RCNESectionOptions: return 3;
+        case RCNESectionOptions: return 4;
         case RCNESectionButtons: return _buttons.count + (_buttons.count < 4 ? 1 : 0);
     }
     return 0;
@@ -287,7 +287,7 @@ typedef NS_ENUM(NSInteger, RCNESection) { RCNESectionPreview, RCNESectionText, R
     switch (section) {
         case RCNESectionText: return @"Shows as a notification, also with RC closed.";
         case RCNESectionPicture: return @"Optional. Picture replaces RC's icon. Image Link shows a photo from the web beside the notification, and larger when it is held.";
-        case RCNESectionOptions: return @"Time Sensitive shows through Focus. Remove After takes it out of Notification Center. Wait for Response holds the next actions until it's answered, with the answer in {notify_response}.";
+        case RCNESectionOptions: return @"Time Sensitive shows through Focus. Apple Watch can force delivery even while the iPhone is unlocked, or send only to your Watch. Remove After takes it out of Notification Center. Wait for Response holds the next actions until it's answered, with the answer in {notify_response}.";
         case RCNESectionButtons: return @"Shown when the notification is held. Each runs a trigger of its own, listed under Notifications.";
     }
     return nil;
@@ -336,9 +336,15 @@ typedef NS_ENUM(NSInteger, RCNESection) { RCNESectionPreview, RCNESectionText, R
                 cell.accessoryView = toggle;
                 return cell;
             }
-            NSInteger s = indexPath.row == 1 ? _notify.removeAfter : _notify.wait;
-            NSString *value = s <= 0 ? (indexPath.row == 1 ? @"Never" : @"Off") : (s % 60 == 0 ? [NSString stringWithFormat:@"%ld min", (long)(s / 60)] : [NSString stringWithFormat:@"%ld s", (long)s]);
-            return [self valueCell:indexPath.row == 1 ? @"Remove After" : @"Wait for Response" value:value];
+            if (indexPath.row == 1) {
+                NSString *watchValue = @"Automatic";
+                if (_notify.watchMode == RCNotifyWatchAlso) watchValue = @"Also Alert Watch";
+                else if (_notify.watchMode == RCNotifyWatchOnly) watchValue = @"Watch Only";
+                return [self valueCell:@"Apple Watch" value:watchValue];
+            }
+            NSInteger s = indexPath.row == 2 ? _notify.removeAfter : _notify.wait;
+            NSString *value = s <= 0 ? (indexPath.row == 2 ? @"Never" : @"Off") : (s % 60 == 0 ? [NSString stringWithFormat:@"%ld min", (long)(s / 60)] : [NSString stringWithFormat:@"%ld s", (long)s]);
+            return [self valueCell:indexPath.row == 2 ? @"Remove After" : @"Wait for Response" value:value];
         }
         case RCNESectionButtons: {
             if ((NSUInteger)indexPath.row >= _buttons.count) {
@@ -364,8 +370,9 @@ typedef NS_ENUM(NSInteger, RCNESection) { RCNESectionPreview, RCNESectionText, R
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     [self.view endEditing:YES];
     if (indexPath.section == RCNESectionPicture && indexPath.row == 0) [self choosePicture:[tableView cellForRowAtIndexPath:indexPath]];
-    else if (indexPath.section == RCNESectionOptions && indexPath.row == 1) [self chooseMinutes:NO];
-    else if (indexPath.section == RCNESectionOptions && indexPath.row == 2) [self chooseMinutes:YES];
+    else if (indexPath.section == RCNESectionOptions && indexPath.row == 1) [self chooseWatchMode:[tableView cellForRowAtIndexPath:indexPath]];
+    else if (indexPath.section == RCNESectionOptions && indexPath.row == 2) [self chooseMinutes:NO];
+    else if (indexPath.section == RCNESectionOptions && indexPath.row == 3) [self chooseMinutes:YES];
     else if (indexPath.section == RCNESectionButtons) {
         if ((NSUInteger)indexPath.row >= _buttons.count) [self nameButton:nil];
         else [self editButton:indexPath.row cell:[tableView cellForRowAtIndexPath:indexPath]];
@@ -426,6 +433,31 @@ typedef NS_ENUM(NSInteger, RCNESection) { RCNESectionPreview, RCNESectionText, R
 
 - (void)urgentChanged:(UISwitch *)toggle {
     _notify.urgent = toggle.on;
+}
+
+- (void)chooseWatchMode:(UITableViewCell *)cell {
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Apple Watch Delivery"
+                                                                   message:@"Force this notification to alert a paired Apple Watch even while your iPhone is unlocked."
+                                                            preferredStyle:UIAlertControllerStyleActionSheet];
+    __weak typeof(self) weakSelf = self;
+    NSArray<NSArray *> *choices = @[
+        @[@"Automatic (Default iOS)", @(RCNotifyWatchNormal)],
+        @[@"Also Alert Watch", @(RCNotifyWatchAlso)],
+        @[@"Watch Only (Quiet iPhone)", @(RCNotifyWatchOnly)],
+    ];
+    for (NSArray *choice in choices) {
+        RCNotifyWatchMode mode = [choice[1] integerValue];
+        NSString *title = _notify.watchMode == mode ? [choice[0] stringByAppendingString:@" ✓"] : choice[0];
+        [sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
+            __strong typeof(weakSelf) self = weakSelf;
+            if (!self) return;
+            self->_notify.watchMode = mode;
+            [self reloadSection:RCNESectionOptions];
+        }]];
+    }
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    sheet.popoverPresentationController.sourceView = cell;
+    [self presentViewController:sheet animated:YES completion:nil];
 }
 
 // Remove After, or Wait for Response's time limit, in minutes

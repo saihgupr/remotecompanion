@@ -1442,6 +1442,17 @@ static id g_actionClipboard = nil;
     } else if ([lower hasPrefix:@"notify "]) {
         baseText = @"Notification ";
         paramText = [RCNotifyCommand commandWithString:cmd].title;
+    } else if ([lower hasPrefix:@"watch face "]) {
+        NSString *val = [[cmd substringFromIndex:11] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        NSString *lowVal = [val lowercaseString];
+        if (![lowVal isEqualToString:@"next"] && ![lowVal isEqualToString:@"prev"] && ![lowVal isEqualToString:@"previous"]) {
+            NSRange hash = [val rangeOfString:@" # "];
+            if (hash.location != NSNotFound) val = [val substringFromIndex:NSMaxRange(hash)];
+            if (val.length) {
+                baseText = @"Watch Face ";
+                paramText = val;
+            }
+        }
     } else if ([lower isEqualToString:@"unlock"] || [lower hasPrefix:@"unlock "]) {
         // Without a passcode (or with "saved" and none saved) it wakes the screen to the passcode screen
         baseText = @"Unlock Device ";
@@ -3273,6 +3284,16 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             ]
         },
         @{
+            @"key": @"watch",
+            @"title": @"Apple Watch",
+            @"icon": @"applewatch",
+            @"section": @"Connectivity",
+            @"values": @[
+                @{ @"value": @"CONNECTED", @"title": @"Connected" },
+                @{ @"value": @"NOT_CONNECTED", @"title": @"Not Connected" }
+            ]
+        },
+        @{
             @"key": @"cellular",
             @"title": @"Cellular Data",
             @"icon": @"antenna.radiowaves.left.and.right",
@@ -4918,6 +4939,8 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         [self presentViewController:nav animated:YES completion:nil];
     } else if ([currentAction hasPrefix:@"airplay connect "] || [currentAction hasPrefix:@"airplay-connect "]) {
         [self editAirPlayConnectAtIndex:indexPath.row];
+    } else if ([[currentAction lowercaseString] hasPrefix:@"watch face "]) {
+        [self editWatchFaceAtIndex:indexPath.row];
     } else if ([currentAction hasPrefix:@"bt connect "] || [currentAction hasPrefix:@"bluetooth connect "] || [currentAction hasPrefix:@"bt-connect "]) {
         [self editBluetoothConnectAtIndex:indexPath.row isDisconnect:NO];
     } else if ([currentAction hasPrefix:@"bt disconnect "] || [currentAction hasPrefix:@"bluetooth disconnect "] || [currentAction hasPrefix:@"bt-disconnect "]) {
@@ -5546,6 +5569,10 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     [self presentDevicePickerWithKind:RCDevicePickerKindAirPlay title:@"AirPlay Device" commandPrefix:@"airplay connect" index:index];
 }
 
+- (void)editWatchFaceAtIndex:(NSInteger)index {
+    [self presentDevicePickerWithKind:RCDevicePickerKindWatchFace title:@"Switch Watch Face" commandPrefix:@"watch face" index:index];
+}
+
 - (void)editBluetoothConnectAtIndex:(NSInteger)index isDisconnect:(BOOL)isDisconnect {
     [self presentDevicePickerWithKind:RCDevicePickerKindBluetooth
                                 title:isDisconnect ? @"Disconnect Bluetooth" : @"Connect Bluetooth"
@@ -5558,10 +5585,10 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 - (void)presentDevicePickerWithKind:(RCDevicePickerKind)kind title:(NSString *)title commandPrefix:(NSString *)prefix index:(NSInteger)index {
     if (index < 0 || index >= (NSInteger)self.actions.count || ![self.actions[index] isKindOfClass:[NSString class]]) return;
     NSString *action = self.actions[index];
-    // The device: everything after the command word(s), minus an AirPlay "UID # " part
+    // The device: everything after the command word(s), minus an AirPlay/WatchFace "UID # " part
     NSString *current = @"";
-    for (NSString *word in @[ @"airplay connect ", @"airplay-connect ", @"bluetooth disconnect ", @"bluetooth connect ", @"bt disconnect ", @"bt connect ", @"bt-disconnect ", @"bt-connect " ]) {
-        if ([action hasPrefix:word]) { current = [action substringFromIndex:word.length]; break; }
+    for (NSString *word in @[ @"airplay connect ", @"airplay-connect ", @"watch face ", @"bluetooth disconnect ", @"bluetooth connect ", @"bt disconnect ", @"bt connect ", @"bt-disconnect ", @"bt-connect " ]) {
+        if ([action.lowercaseString hasPrefix:word]) { current = [action substringFromIndex:word.length]; break; }
     }
     NSRange hash = [current rangeOfString:@" # "];
     if (hash.location != NSNotFound) current = [current substringFromIndex:NSMaxRange(hash)];
@@ -5868,6 +5895,10 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
                 subtitle = [[RCClearNotificationsCommand commandWithString:action] actionDetailText];
             } else if ([RCTimerCommand isTimerCommand:action]) {
                 subtitle = [[RCTimerCommand commandWithString:action] actionDetailText];
+            } else if ([RCNotifyCommand isNotifyCommand:action]) {
+                RCNotifyCommand *notifyCmd = [RCNotifyCommand commandWithString:action];
+                if (notifyCmd.watchMode == RCNotifyWatchOnly) subtitle = @"Watch Only";
+                else if (notifyCmd.watchMode == RCNotifyWatchAlso) subtitle = @"Also Alert Watch";
             }
         } else {
             if ([action hasPrefix:@"exec "]) {

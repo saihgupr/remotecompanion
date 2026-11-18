@@ -19,7 +19,7 @@ THEOS_PACKAGE_SCHEME ?= rootless
 
 include $(THEOS)/makefiles/common.mk
 
-TWEAK_NAME = RemoteCommand RCShortcutsHelper RCNFCReader RCWatchPing RCFindMyPing RCIAmLazyFix
+TWEAK_NAME = RemoteCommand RCShortcutsHelper RCNFCReader RCWatchPing RCWatchNotify RCFindMyPing RCIAmLazyFix
 
 # Lua source files
 LUA_FILES = $(wildcard lua/*.c)
@@ -54,6 +54,11 @@ RCNFCReader_CFLAGS = -fobjc-arc
 # (Watch Ping triggers, see RCWatchPing.m)
 RCWatchPing_FILES = RCWatchPing.m
 RCWatchPing_CFLAGS = -fobjc-arc
+
+# Loaded into bulletindistributord, where it forwards --watch notifications to a paired Apple Watch
+# (Force-to-Watch notifications, see RCWatchNotify.m)
+RCWatchNotify_FILES = RCWatchNotify.m
+RCWatchNotify_CFLAGS = -fobjc-arc
 
 # Loaded into findmydeviced, where it passes Play Sound from Find My to SpringBoard
 # (Find My Sound trigger, see RCFindMyPing.m)
