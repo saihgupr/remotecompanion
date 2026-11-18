@@ -2569,7 +2569,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 }
 
 - (NSArray<NSDictionary *> *)ifConditionDefinitions {
-    return RCAdaptVibrationConditions([@[
+    NSArray<NSDictionary *> *definitions = [@[
         @{
             @"key": @"time_between",
             @"title": @"Time of Day (Between)",
@@ -2888,7 +2888,17 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             @"section": @"Variables",
             @"input": @"variable"
         }
-    ] arrayByAddingObjectsFromArray:[self addOnConditionDefinitions]]);
+    ] arrayByAddingObjectsFromArray:[self addOnConditionDefinitions]];
+    // The Watch condition only makes sense where the Apple Watch app is installed
+    if (![RCConfigManager watchFeaturesAvailable]) {
+        NSMutableArray<NSDictionary *> *kept = [NSMutableArray array];
+        for (NSDictionary *definition in definitions) {
+            if ([definition[@"key"] isEqualToString:@"watch"]) continue;
+            [kept addObject:definition];
+        }
+        definitions = kept;
+    }
+    return RCAdaptVibrationConditions(definitions);
 }
 
 // Add-on conditions (ADDONS.md), one section per add-on

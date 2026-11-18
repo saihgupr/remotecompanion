@@ -12,15 +12,21 @@ static NSArray<NSArray *> *RCValueCommandSections(void) {
                 @{ @"title": @"Battery Level", @"command": @"battery", @"icon": @"battery.75", @"fallbackIcon": @"battery.100", @"number": @YES },
                 @{ @"title": @"Volume", @"command": @"volume", @"icon": @"speaker.wave.2.fill", @"number": @YES },
             ]],
-            @[@"Connectivity", @[
-                @{ @"title": @"Wi-Fi", @"command": @"wifi status", @"icon": @"wifi" },
-                @{ @"title": @"Bluetooth", @"command": @"bt status", @"icon": @"antenna.radiowaves.left.and.right" },
-                @{ @"title": @"Cellular Data", @"command": @"cell status", @"icon": @"antenna.radiowaves.left.and.right" },
-                @{ @"title": @"Airplane Mode", @"command": @"airplane status", @"icon": @"airplane" },
-                @{ @"title": @"Location Services", @"command": @"location status", @"icon": @"location.fill" },
-                @{ @"title": @"CarPlay", @"command": @"carplay status", @"icon": @"car.fill" },
-                @{ @"title": @"Apple Watch", @"command": @"watch status", @"icon": @"applewatch" },
-            ]],
+            @[@"Connectivity", ({
+                NSMutableArray *rows = [@[
+                    @{ @"title": @"Wi-Fi", @"command": @"wifi status", @"icon": @"wifi" },
+                    @{ @"title": @"Bluetooth", @"command": @"bt status", @"icon": @"antenna.radiowaves.left.and.right" },
+                    @{ @"title": @"Cellular Data", @"command": @"cell status", @"icon": @"antenna.radiowaves.left.and.right" },
+                    @{ @"title": @"Airplane Mode", @"command": @"airplane status", @"icon": @"airplane" },
+                    @{ @"title": @"Location Services", @"command": @"location status", @"icon": @"location.fill" },
+                    @{ @"title": @"CarPlay", @"command": @"carplay status", @"icon": @"car.fill" },
+                ] mutableCopy];
+                // Watch status only makes sense where the Apple Watch app is installed
+                if ([RCConfigManager watchFeaturesAvailable]) {
+                    [rows addObject:@{ @"title": @"Apple Watch", @"command": @"watch status", @"icon": @"applewatch" }];
+                }
+                rows;
+            })],
             @[@"Sound", @[
                 @{ @"title": @"Ringer", @"command": @"ringer status", @"icon": @"bell.fill" },
                 @{ @"title": @"Silent Vibrate", @"command": @"vibration silent-status", @"icon": @"iphone.radiowaves.left.and.right" },

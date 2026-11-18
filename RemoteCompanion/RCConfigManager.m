@@ -8,6 +8,7 @@
 #import <sys/sysctl.h>
 #import "RCAddOnCatalog.h"
 #import <LocalAuthentication/LocalAuthentication.h>
+#import <objc/message.h>
 #import <notify.h>
 #import "RCServerClient.h"
 #include <fcntl.h>
@@ -2667,6 +2668,35 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         hasHomeButton = context.biometryType != LABiometryTypeFaceID;
     });
     return hasHomeButton;
+}
+
+// Answers whether the Apple Watch app (Bridge) is installed, so Watch features make sense on
+// this device: never on iPad, and otherwise wherever the app can be found
++ (BOOL)watchFeaturesAvailable {
+    static BOOL available;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        if ([UIDevice currentDevice].userInterfaceIdiom == UIUserInterfaceIdiomPad) return;
+        if ([[NSFileManager defaultManager] fileExistsAtPath:@"/Applications/Bridge.app"]) {
+            available = YES;
+            return;
+        }
+        Class workspaceClass = objc_getClass("LSApplicationWorkspace");
+        SEL defaultWorkspace = NSSelectorFromString(@"defaultWorkspace");
+        id workspace = [workspaceClass respondsToSelector:defaultWorkspace] ? ((id (*)(id, SEL))objc_msgSend)(workspaceClass, defaultWorkspace) : nil;
+        SEL isInstalled = NSSelectorFromString(@"applicationIsInstalled:");
+        if ([workspace respondsToSelector:isInstalled]) {
+            available = ((BOOL (*)(id, SEL, id))objc_msgSend)(workspace, isInstalled, @"com.apple.Bridge");
+        }
+        if (!available) {
+            SEL appsForBundle = NSSelectorFromString(@"applicationsForBundleID:");
+            if ([workspace respondsToSelector:appsForBundle]) {
+                NSArray *apps = ((id (*)(id, SEL, id))objc_msgSend)(workspace, appsForBundle, @"com.apple.Bridge");
+                available = apps.count > 0;
+            }
+        }
+    });
+    return available;
 }
 
 + (BOOL)usesHapticsMenu {
