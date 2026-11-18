@@ -6655,11 +6655,11 @@ static NSTimeInterval g_rcIntentionalWifiOffUntil = 0;
 
 static BOOL RCWifiOffWasIntentional(void) {
     return g_rcIntentionalWifiOffUntil > 0 &&
-           [NSDate timeIntervalSince1970] < g_rcIntentionalWifiOffUntil;
+           [[NSDate date] timeIntervalSince1970] < g_rcIntentionalWifiOffUntil;
 }
 
 static void RCNoteIntentionalWifiOff(void) {
-    g_rcIntentionalWifiOffUntil = [NSDate timeIntervalSince1970] + 5.0;
+    g_rcIntentionalWifiOffUntil = [[NSDate date] timeIntervalSince1970] + 10.0;
 }
 
 static void handle_wifi_transition() {
@@ -6676,7 +6676,7 @@ static void handle_wifi_transition() {
     } else if (!currentSSID && g_lastKnownSSID) {
         // Disconnected from previous network
         if (RCWifiOffWasIntentional()) {
-            SRLog(@"[RCWiFi] Disconnection trigger skipped: the radio was turned off by RemoteCompanion");
+            SRLogMin(@"[RCWiFi] Disconnection trigger skipped: the radio was turned off by RemoteCompanion");
         } else {
             NSString *triggerKey = [NSString stringWithFormat:@"wifi_disconnect_%@", g_lastKnownSSID];
             SRLog(@"[RCWiFi] Disconnection trigger: %@", triggerKey);
