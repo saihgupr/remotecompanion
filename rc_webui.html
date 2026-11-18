@@ -4718,6 +4718,9 @@ const CONDITION_DEFS = [
 ];
 
 let serverCapabilities = { snapper: false, sneakycam: false, audiostream: false, audiohandoff: false };
+// The Apple Watch entries only exist when the phone has a Watch app. Before the
+// capabilities arrive the dictionary is empty, so the entries stay, as with home_button.
+function watchAvailable() { return !(typeof serverCapabilities !== 'undefined' && serverCapabilities.watch === false); }
 // ── Add-ons (ADDONS.md) ──────────────────────────────────────────────────────
 let addOnCatalog = [];
 // The add-on that keeps a variable for itself (its "variables": names or name starts), else null
@@ -7691,7 +7694,7 @@ function renderPickerCategoryBar() {
     bar.appendChild(btn);
   };
   mkChip('All', null);
-  ACTION_SECTIONS.forEach(sec => mkChip(sec.title, sec.title));
+  ACTION_SECTIONS.filter(sec => sec.title !== 'Apple Watch' || watchAvailable()).forEach(sec => mkChip(sec.title, sec.title));
 }
 
 function selectPickerCategory(title, btnEl) {
@@ -7806,9 +7809,9 @@ function renderPickerSections() {
     return;
   }
 
-  const sections = g_pickerCategory
+  const sections = (g_pickerCategory
     ? ACTION_SECTIONS.filter(sec => sec.title === g_pickerCategory)
-    : ACTION_SECTIONS;
+    : ACTION_SECTIONS).filter(sec => sec.title !== 'Apple Watch' || watchAvailable());
 
   sections.forEach(sec => {
     // Searching finds an add-on's actions themselves, in place of its row
@@ -8139,7 +8142,7 @@ function saveTimeCondDialog() {
 // ── Condition picker (mirrors iOS RCConditionPickerViewController: grouped, ──
 // searchable sections; tapping a condition expands its options inline beneath it)
 const COND_SECTION_ORDER = ['Time', 'Device', 'Power', 'Sound', 'Connectivity', 'Variables', 'Other', 'Add-ons'];
-function allCondDefs() { return CONDITION_DEFS.concat(addOnConditionDefs); }
+function allCondDefs() { return CONDITION_DEFS.filter(d => d.key !== 'watch' || watchAvailable()).concat(addOnConditionDefs); }
 const COND_DAY_CODES = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
 const COND_DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 let condPickerEditIdx = null;
@@ -8890,8 +8893,7 @@ const VALUE_COMMANDS = [
   ['Levels', [['Battery Level', 'battery', 'battery_100', true], ['Volume', 'volume', 'speaker_2_fill', true]]],
   ['Connectivity', [['Wi-Fi', 'wifi status', 'wifi'], ['Bluetooth', 'bt status', 'antenna_radiowaves_left_right'],
     ['Cellular Data', 'cell status', 'antenna_radiowaves_left_right'], ['Airplane Mode', 'airplane status', 'airplane'],
-    ['Location Services', 'location status', 'location_fill'], ['CarPlay', 'carplay status', 'car_fill'],
-    ['Apple Watch', 'watch status', 'timer']]],
+    ['Location Services', 'location status', 'location_fill'], ['CarPlay', 'carplay status', 'car_fill']]],
   ['Sound', [['Ringer', 'ringer status', 'bell_fill'], ['Silent Vibrate', 'vibration silent-status', 'iphone'],
     ['Haptics', 'haptics status', 'hand_draw'], ['Media Playing', 'is-playing', 'play_fill']]],
   ['Device', [['Lock State', 'lock status', 'lock_fill'], ['Low Power Mode', 'low power status', 'battery_25'],
@@ -11027,6 +11029,7 @@ function promptControlCenterTrigger() {
 }
 
 async function promptWatchFaceTrigger() {
+  if (!watchAvailable()) return;
   const buttons = [
     {
       label: 'Any Watch Face',
@@ -11177,7 +11180,7 @@ function showAddTriggerSheet() {
     { label: 'Audio Output Trigger', action: () => promptAudioOutputTrigger() },
     { label: 'Control Center Button', action: () => promptControlCenterTrigger() },
     { label: 'Focus Trigger', action: () => promptFocusTrigger() },
-    { label: 'Watch Face Trigger', action: () => promptWatchFaceTrigger() },
+    ...(watchAvailable() ? [{ label: 'Watch Face Trigger', action: () => promptWatchFaceTrigger() }] : []),
     { label: 'Notification Trigger', action: () => promptNotifTrigger() },
     { label: 'App Launch Trigger', action: () => promptAppLaunchPicker() },
     { label: 'App Exit Trigger', action: () => promptAppLaunchPicker(null, 'exit') },
@@ -11224,6 +11227,7 @@ function showBuiltInTriggerSheet() {
   const rows = [];
   BUILT_IN_TRIGGER_GROUPS.forEach(group => {
     if (group.title === 'Home Button' && typeof serverCapabilities !== 'undefined' && serverCapabilities.home_button === false) return;
+    if (group.title === 'Apple Watch' && !watchAvailable()) return;
     rows.push({ header: group.title });
     group.keys.forEach(key => {
       rows.push({ label: `${defaultNameForKey(key)}${triggerIsAdded(key) ? ' ✓' : ''}`, action: () => addBuiltInTrigger(key) });

@@ -1042,7 +1042,10 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
         @{ @"title": @"Scheduled Trigger", @"icon": @"calendar.badge.clock", @"section": @"Time", @"handler": ^{ push([[RCScheduledTriggerViewController alloc] init]); } },
         @{ @"title": @"Battery Level", @"icon": [UIImage systemImageNamed:@"battery.50"] ? @"battery.50" : @"battery.25", @"section": @"Device", @"handler": ^{ push([[RCBatteryTriggerViewController alloc] init]); } },
         @{ @"title": @"Focus", @"icon": @"moon.fill", @"section": @"Device", @"handler": ^{ push([[RCFocusTriggerViewController alloc] init]); } },
-        @{ @"title": @"Watch Face", @"icon": ([UIImage systemImageNamed:@"applewatch.watchface"] ? @"applewatch.watchface" : @"applewatch"), @"section": @"Apple Watch", @"handler": ^{
+    ] mutableCopy];
+    // Watch triggers only make sense where the Apple Watch app is installed
+    if ([RCConfigManager watchFeaturesAvailable]) {
+        [items addObject:@{ @"title": @"Watch Face", @"icon": ([UIImage systemImageNamed:@"applewatch.watchface"] ? @"applewatch.watchface" : @"applewatch"), @"section": @"Apple Watch", @"handler": ^{
             RCDevicePickerViewController *vc = [[RCDevicePickerViewController alloc] initWithKind:RCDevicePickerKindWatchFace title:@"Watch Face Trigger"];
             vc.includeAnyOption = YES;
             vc.onDeviceSelected = ^(NSDictionary *device) {
@@ -1069,8 +1072,8 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
                 [self.navigationController setViewControllers:vcs animated:YES];
             };
             push(vc);
-        } },
-    ] mutableCopy];
+        } }];
+    }
     if ([RCConfigManager supportsControlCenterButtons]) {
         [items addObject:@{ @"title": @"Control Center Button", @"icon": @"switch.2", @"section": @"Device", @"handler": ^{ push([[RCControlCenterTriggerViewController alloc] init]); } }];
     }
@@ -1157,8 +1160,11 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     for (NSString *key in @[@"trigger_device_call_incoming", @"trigger_device_call_start", @"trigger_device_call_end"]) {
         addBuiltIn(key, @"Calls");
     }
-    for (NSString *key in @[@"trigger_watch_ping", @"trigger_watch_ping_hold", @"trigger_watch_connect", @"trigger_watch_disconnect"]) {
-        addBuiltIn(key, @"Apple Watch");
+    // Watch connection and ping triggers only make sense where the Apple Watch app is installed
+    if ([RCConfigManager watchFeaturesAvailable]) {
+        for (NSString *key in @[@"trigger_watch_ping", @"trigger_watch_ping_hold", @"trigger_watch_connect", @"trigger_watch_disconnect"]) {
+            addBuiltIn(key, @"Apple Watch");
+        }
     }
 
     // Add-ons: a row for each one that has triggers, opening its list (last, so they come after

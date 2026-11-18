@@ -2569,7 +2569,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 }
 
 - (NSArray<NSDictionary *> *)ifConditionDefinitions {
-    return RCAdaptVibrationConditions([@[
+    NSArray<NSDictionary *> *definitions = [@[
         @{
             @"key": @"time_between",
             @"title": @"Time of Day (Between)",
