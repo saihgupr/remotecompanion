@@ -252,10 +252,14 @@ static inline UIFont *RCActionCellTitleFont(void) {
         _borderLayer.path = nil;
         return;
     }
-    UIBezierPath *path = [UIBezierPath bezierPathWithRoundedRect:card cornerRadius:RCActionCellCardCornerRadius];
-    _fillLayer.path = path.CGPath;
+    UIBezierPath *fillPath = [UIBezierPath bezierPathWithRoundedRect:card cornerRadius:RCActionCellCardCornerRadius];
+    CGRect borderRect = CGRectInset(card, self.borderWidth * 0.5, self.borderWidth * 0.5);
+    UIBezierPath *borderPath = (CGRectGetWidth(borderRect) > 0 && CGRectGetHeight(borderRect) > 0)
+        ? [UIBezierPath bezierPathWithRoundedRect:borderRect cornerRadius:RCActionCellCardCornerRadius]
+        : nil;
+    _fillLayer.path = fillPath.CGPath;
     _fillLayer.fillColor = [(self.fillColor ?: [UIColor clearColor]) resolvedColorWithTraitCollection:self.traitCollection].CGColor;
-    _borderLayer.path = path.CGPath;
+    _borderLayer.path = borderPath.CGPath;
     _borderLayer.lineWidth = self.borderWidth;
     _borderLayer.strokeColor = [(self.borderColor ?: [UIColor clearColor]) resolvedColorWithTraitCollection:self.traitCollection].CGColor;
 }
@@ -387,8 +391,6 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
     ]];
     self.inlinePanelContainer = container;
     [self rc_showInlineTitleFromLabel:self.textLabel];
-    // The open row's icon takes the row's tint, as its card and its chip do
-    if (self.imageView) self.imageView.tintColor = self.tintColor ?: [UIColor systemBlueColor];
 }
 
 // The open row's title: the table lays its own label out for a row as tall as its editor, and that
@@ -3652,7 +3654,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     [impact impactOccurred];
     // The row grows in place into its open card, the way the prototype sequence expands: the panel
     // fades in as the card grows, and the rows around step back in the same movement
-    [cell rc_setValueChipAccented:YES];
+    [cell rc_setValueChipAccented:NO];
     [self applySectionCardStyleToCell:cell atIndexPath:path];
     [cell rc_showInlinePanel:panel rowContentHeight:self.inlineEditorRowHeight];
     cell.inlinePanelContainer.alpha = 0.0;
@@ -5299,23 +5301,23 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         cell.imageView.tintColor = [UIColor systemGreenColor];
     }
 
-    // The row with its value editor open keeps the card's fill and is outlined in the row's tint
+    // The row with its value editor open keeps the card's normal fill and border
     if ([self inlineEditorIsOpenAtRow:indexPath.row]) {
         BOOL running = [self.runningIndexes containsIndex:indexPath.row];
-        UIColor *accent = cell.tintColor ?: [UIColor systemBlueColor];
         UIColor *cardFill = running ? [[UIColor systemGreenColor] colorWithAlphaComponent:0.22] : fillColor;
         UIColor *cardFillSelected = running ? [[UIColor systemGreenColor] colorWithAlphaComponent:0.28] : selectedFillColor;
-        UIColor *cardBorder = running ? [UIColor systemGreenColor] : accent;
+        UIColor *cardBorder = running ? [UIColor systemGreenColor] : borderColor;
+        CGFloat cardBorderWidth = running ? 1.5 : 1.0;
 
         RCActionCardBackgroundView *card = [[RCActionCardBackgroundView alloc] initWithFrame:cell.bounds];
         card.fillColor = cardFill;
         card.borderColor = cardBorder;
-        card.borderWidth = 1.5;
+        card.borderWidth = cardBorderWidth;
 
         RCActionCardBackgroundView *selectedCard = [[RCActionCardBackgroundView alloc] initWithFrame:cell.bounds];
         selectedCard.fillColor = cardFillSelected;
         selectedCard.borderColor = cardBorder;
-        selectedCard.borderWidth = 1.5;
+        selectedCard.borderWidth = cardBorderWidth;
 
         cell.backgroundColor = [UIColor clearColor];
         cell.contentView.backgroundColor = [UIColor clearColor];
@@ -5754,7 +5756,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     BOOL expandsInline = !remoteParts && [self inlineRowItemForCommand:action] != nil;
     BOOL inlineExpanded = expandsInline && [self inlineEditorIsOpenAtRow:indexPath.row];
     cell.accessoryView = [self grabberAccessory];
-    if (inlineParts) [cell rc_setValueChipAccented:inlineExpanded];
+    if (inlineParts) [cell rc_setValueChipAccented:NO];
     [self applySectionCardStyleToCell:cell atIndexPath:indexPath];
     
     BOOL isDisabled = [[RCConfigManager sharedManager] isActionDisabled:actionItem];
