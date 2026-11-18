@@ -123,6 +123,7 @@ static NSString *RCInlineRowEditorUnitSuffix(RCInlineRowItem *item) {
 @property (nonatomic, strong) RCInlineRowItem *item;
 @property (nonatomic, assign) BOOL compact;
 @property (nonatomic, strong) RCInlineRowReadoutControl *valueButton;
+@property (nonatomic, strong) NSLayoutConstraint *valueRowCenterXConstraint;
 @property (nonatomic, strong) UITextField *field;
 - (void)stepBy:(double)delta;
 - (void)beginTyping;
@@ -172,6 +173,9 @@ static NSString *RCInlineRowEditorUnitSuffix(RCInlineRowItem *item) {
         [_valueButton addTarget:self action:@selector(beginTyping) forControlEvents:UIControlEventTouchUpInside];
         [_valueButton addSubview:valueRow];
 
+        _valueRowCenterXConstraint = [valueRow.centerXAnchor constraintEqualToAnchor:_valueButton.centerXAnchor];
+        _valueRowCenterXConstraint.priority = UILayoutPriorityDefaultHigh;
+
         _field = [[UITextField alloc] init];
         _field.font = RCInlineRowEditorDigitFontSized(compact ? 26 : 34, compact ? UIFontTextStyleTitle2 : UIFontTextStyleTitle1, UIFontWeightSemibold);
         _field.adjustsFontSizeToFitWidth = YES;
@@ -218,7 +222,7 @@ static NSString *RCInlineRowEditorUnitSuffix(RCInlineRowItem *item) {
             [_valueButton.trailingAnchor constraintEqualToAnchor:_plusButton.leadingAnchor constant:-6],
             [_valueButton.topAnchor constraintEqualToAnchor:self.topAnchor],
             [_valueButton.bottomAnchor constraintEqualToAnchor:self.bottomAnchor],
-            [valueRow.centerXAnchor constraintEqualToAnchor:_valueButton.centerXAnchor],
+            _valueRowCenterXConstraint,
             [valueRow.centerYAnchor constraintEqualToAnchor:_valueButton.centerYAnchor],
             [valueRow.topAnchor constraintGreaterThanOrEqualToAnchor:_valueButton.topAnchor constant:inset],
             [valueRow.bottomAnchor constraintLessThanOrEqualToAnchor:_valueButton.bottomAnchor constant:-inset],
@@ -315,6 +319,7 @@ static NSString *RCInlineRowEditorUnitSuffix(RCInlineRowItem *item) {
         self.readout.font = RCInlineRowEditorMonoFontSized(self.compact ? 20 : 22, UIFontTextStyleTitle3, UIFontWeightSemibold);
         self.readout.text = [NSString stringWithFormat:@"{%@}", self.item.variableName];
         self.unitLabel.hidden = YES;
+        self.valueRowCenterXConstraint.constant = -7.0;
         self.minusButton.enabled = NO;
         self.plusButton.enabled = NO;
     } else {
@@ -322,6 +327,7 @@ static NSString *RCInlineRowEditorUnitSuffix(RCInlineRowItem *item) {
         self.readout.text = [self.item numberText];
         self.unitLabel.text = self.item.unit;
         self.unitLabel.hidden = self.item.unit.length == 0;
+        self.valueRowCenterXConstraint.constant = 0.0;
         self.minusButton.enabled = self.item.numberValue > self.item.minimumValue;
         self.plusButton.enabled = self.item.numberValue < self.item.maximumValue;
     }
