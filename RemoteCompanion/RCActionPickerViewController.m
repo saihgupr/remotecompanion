@@ -321,6 +321,10 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
         // Apple Watch
         @[
             @{ @"name": @"Theater Mode", @"command": @"watch theater toggle", @"icon": ([UIImage systemImageNamed:@"theatermasks.fill"] ? @"theatermasks.fill" : @"applewatch"), @"keywords": @"watch theater theatre cinema mode silent display toggle" },
+            @{ @"name": @"Silent Mode", @"command": @"watch silent toggle", @"icon": @"bell.slash.fill", @"keywords": @"watch silent mute sound vibrate toggle" },
+            @{ @"name": @"Wake on Wrist Raise", @"command": @"watch wake toggle", @"icon": @"hand.raised.fill", @"keywords": @"watch wake wrist raise screen display toggle" },
+            @{ @"name": @"Water Lock", @"command": @"watch water toggle", @"icon": ([UIImage systemImageNamed:@"drop.fill"] ? @"drop.fill" : @"applewatch"), @"keywords": @"watch water lock swim eject toggle" },
+            @{ @"name": @"Always On Display", @"command": @"watch alwayson toggle", @"icon": @"sun.max.fill", @"keywords": @"watch always on display screen toggle" },
             @{ @"name": @"Switch Watch Face...", @"command": @"__WATCH_FACE__", @"icon": ([UIImage systemImageNamed:@"applewatch.watchface"] ? @"applewatch.watchface" : @"applewatch"), @"keywords": @"watch face switch change cycle next prev" }
         ],
         // Connectivity

@@ -1897,6 +1897,22 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         @"watch theater on": @"Watch Theater Mode On",
         @"watch theater off": @"Watch Theater Mode Off",
         @"watch theater toggle": @"Watch Theater Mode Toggle",
+        @"watch silent": @"Watch Silent Mode Toggle",
+        @"watch silent on": @"Watch Silent Mode On",
+        @"watch silent off": @"Watch Silent Mode Off",
+        @"watch silent toggle": @"Watch Silent Mode Toggle",
+        @"watch wake": @"Watch Wake on Wrist Raise Toggle",
+        @"watch wake on": @"Watch Wake on Wrist Raise On",
+        @"watch wake off": @"Watch Wake on Wrist Raise Off",
+        @"watch wake toggle": @"Watch Wake on Wrist Raise Toggle",
+        @"watch water": @"Watch Water Lock Toggle",
+        @"watch water on": @"Watch Water Lock On",
+        @"watch water off": @"Watch Water Lock Off",
+        @"watch water toggle": @"Watch Water Lock Toggle",
+        @"watch alwayson": @"Watch Always On Toggle",
+        @"watch alwayson on": @"Watch Always On On",
+        @"watch alwayson off": @"Watch Always On Off",
+        @"watch alwayson toggle": @"Watch Always On Toggle",
         @"mute toggle": @"Mute Toggle",
         @"mute on": @"Mute On",
         @"mute off": @"Mute Off",
@@ -2403,6 +2419,19 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         if ([cmd hasSuffix:@" off"]) return ([UIImage systemImageNamed:@"theatermasks"] ? @"theatermasks" : @"applewatch");
         return ([UIImage systemImageNamed:@"theatermasks.fill"] ? @"theatermasks.fill" : @"applewatch");
     }
+    if ([cmd isEqualToString:@"watch silent"] || [cmd hasPrefix:@"watch silent "]) {
+        return [cmd hasSuffix:@" off"] ? @"bell" : @"bell.slash.fill";
+    }
+    if ([cmd isEqualToString:@"watch wake"] || [cmd hasPrefix:@"watch wake "]) {
+        return [cmd hasSuffix:@" off"] ? @"hand.raised" : @"hand.raised.fill";
+    }
+    if ([cmd isEqualToString:@"watch water"] || [cmd hasPrefix:@"watch water "]) {
+        NSString *sym = [cmd hasSuffix:@" off"] ? @"drop" : @"drop.fill";
+        return ([UIImage systemImageNamed:sym] ? sym : @"applewatch");
+    }
+    if ([cmd isEqualToString:@"watch alwayson"] || [cmd hasPrefix:@"watch alwayson "]) {
+        return [cmd hasSuffix:@" off"] ? @"sun.max" : @"sun.max.fill";
+    }
     if ([cmd hasPrefix:@"watch face"]) return ([UIImage systemImageNamed:@"applewatch.watchface"] ? @"applewatch.watchface" : @"applewatch");
     if ([cmd hasPrefix:@"focus "]) return @"moon.circle";
     if ([cmd hasPrefix:@"shortcut:"]) return @"wand.and.stars";
@@ -2527,6 +2556,22 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         @"watch theater on": ([UIImage systemImageNamed:@"theatermasks.fill"] ? @"theatermasks.fill" : @"applewatch"),
         @"watch theater off": ([UIImage systemImageNamed:@"theatermasks"] ? @"theatermasks" : @"applewatch"),
         @"watch theater toggle": ([UIImage systemImageNamed:@"theatermasks.fill"] ? @"theatermasks.fill" : @"applewatch"),
+        @"watch silent": @"bell.slash.fill",
+        @"watch silent on": @"bell.slash.fill",
+        @"watch silent off": @"bell",
+        @"watch silent toggle": @"bell.slash.fill",
+        @"watch wake": @"hand.raised.fill",
+        @"watch wake on": @"hand.raised.fill",
+        @"watch wake off": @"hand.raised",
+        @"watch wake toggle": @"hand.raised.fill",
+        @"watch water": ([UIImage systemImageNamed:@"drop.fill"] ? @"drop.fill" : @"applewatch"),
+        @"watch water on": ([UIImage systemImageNamed:@"drop.fill"] ? @"drop.fill" : @"applewatch"),
+        @"watch water off": ([UIImage systemImageNamed:@"drop"] ? @"drop" : @"applewatch"),
+        @"watch water toggle": ([UIImage systemImageNamed:@"drop.fill"] ? @"drop.fill" : @"applewatch"),
+        @"watch alwayson": @"sun.max.fill",
+        @"watch alwayson on": @"sun.max.fill",
+        @"watch alwayson off": @"sun.max",
+        @"watch alwayson toggle": @"sun.max.fill",
         @"anc on": @"ear.badge.checkmark",
         @"anc off": @"ear",
         @"anc transparency": @"waveform.circle.fill",
@@ -2752,6 +2797,50 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
             @"displaySuffixes": @[@"On", @"Off", @"Toggle"],
             @"exactMatches": @{
                 @"watch theater": @"toggle"
+            }
+        },
+        @{
+            @"key": @"watch_silent",
+            @"name": @"Watch Silent Mode",
+            @"icon": @"bell.slash.fill",
+            @"prefixes": @[@"watch silent "],
+            @"suffixes": @[@"on", @"off", @"toggle"],
+            @"displaySuffixes": @[@"On", @"Off", @"Toggle"],
+            @"exactMatches": @{
+                @"watch silent": @"toggle"
+            }
+        },
+        @{
+            @"key": @"watch_wake",
+            @"name": @"Watch Wake on Wrist Raise",
+            @"icon": @"hand.raised.fill",
+            @"prefixes": @[@"watch wake "],
+            @"suffixes": @[@"on", @"off", @"toggle"],
+            @"displaySuffixes": @[@"On", @"Off", @"Toggle"],
+            @"exactMatches": @{
+                @"watch wake": @"toggle"
+            }
+        },
+        @{
+            @"key": @"watch_water",
+            @"name": @"Watch Water Lock",
+            @"icon": ([UIImage systemImageNamed:@"drop.fill"] ? @"drop.fill" : @"applewatch"),
+            @"prefixes": @[@"watch water "],
+            @"suffixes": @[@"on", @"off", @"toggle"],
+            @"displaySuffixes": @[@"On", @"Off", @"Toggle"],
+            @"exactMatches": @{
+                @"watch water": @"toggle"
+            }
+        },
+        @{
+            @"key": @"watch_alwayson",
+            @"name": @"Watch Always On",
+            @"icon": @"sun.max.fill",
+            @"prefixes": @[@"watch alwayson "],
+            @"suffixes": @[@"on", @"off", @"toggle"],
+            @"displaySuffixes": @[@"On", @"Off", @"Toggle"],
+            @"exactMatches": @{
+                @"watch alwayson": @"toggle"
             }
         },
         @{

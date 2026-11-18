@@ -11019,6 +11019,10 @@ static NSArray *RCCommandHelpSections(void) {
             @[@"notify \"Title\" [\"Body\"] [--urgent] [--watch [only]]", @"Post a notification"],
             @[@"clear-notifications", @"Dismiss notifications"],
             @[@"watch theater [on|off|toggle]", @"Set or toggle Apple Watch Theater Mode"],
+            @[@"watch silent [on|off|toggle]", @"Set or toggle Apple Watch Silent Mode"],
+            @[@"watch wake [on|off|toggle]", @"Set or toggle Apple Watch Wake on Wrist Raise"],
+            @[@"watch water [on|off|toggle]", @"Set or toggle Apple Watch Water Lock"],
+            @[@"watch alwayson [on|off|toggle]", @"Set or toggle Apple Watch Always On"],
             @[@"watch face [<name|uuid|next|prev|status|list>]", @"Switch or inspect Apple Watch face"],
         ]},
         @{@"title": @"Connectivity", @"rows": @[
@@ -11452,8 +11456,36 @@ static NSString *rc_handle_watch_face_command(NSString *cleanCmd) {
 }
 @end
 
-static NSString *rc_handle_watch_theater_command(NSString *cleanCmd) {
-    NSString *arg = cleanCmd.length > 13 ? [[[cleanCmd substringFromIndex:13] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString] : @"";
+typedef struct {
+    const char *subcmd;
+    const char *intentIdentifier;
+    const char *label;
+} RCWatchSettingSpec;
+
+static const RCWatchSettingSpec kRCWatchSettingSpecs[] = {
+    { "theater",  "com.apple.NanoSettings.NPRFSetTheaterModeIntent",      "Watch Theater Mode" },
+    { "silent",   "com.apple.NanoSettings.NPRFSetSilentModeIntent",       "Watch Silent Mode" },
+    { "wake",     "com.apple.NanoSettings.NPRFSetWakeOnWristRaiseIntent", "Watch Wake on Wrist Raise" },
+    { "water",    "com.apple.NanoSettings.NPRFSetWaterLockIntent",        "Watch Water Lock" },
+    { "alwayson", "com.apple.NanoSettings.NPRFSetAlwaysOnIntent",         "Watch Always On" },
+};
+
+static const RCWatchSettingSpec *rc_match_watch_setting_spec(NSString *cleanCmd) {
+    for (size_t i = 0; i < sizeof(kRCWatchSettingSpecs) / sizeof(kRCWatchSettingSpecs[0]); i++) {
+        NSString *prefix = [NSString stringWithFormat:@"watch %s", kRCWatchSettingSpecs[i].subcmd];
+        if ([cleanCmd isEqualToString:prefix] || [cleanCmd hasPrefix:[prefix stringByAppendingString:@" "]]) {
+            return &kRCWatchSettingSpecs[i];
+        }
+    }
+    return NULL;
+}
+
+static NSString *rc_handle_watch_setting_command(NSString *cleanCmd) {
+    const RCWatchSettingSpec *spec = rc_match_watch_setting_spec(cleanCmd);
+    if (!spec) return @"Error: Unknown Apple Watch setting\n";
+
+    NSString *prefix = [NSString stringWithFormat:@"watch %s", spec->subcmd];
+    NSString *arg = cleanCmd.length > prefix.length ? [[[cleanCmd substringFromIndex:prefix.length] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString] : @"";
     NSString *opStr = @"toggle";
     NSString *stStr = nil;
     if ([arg isEqualToString:@"on"] || [arg isEqualToString:@"1"] || [arg isEqualToString:@"true"]) {
@@ -11463,7 +11495,7 @@ static NSString *rc_handle_watch_theater_command(NSString *cleanCmd) {
         opStr = @"set";
         stStr = @"off";
     } else if (arg.length > 0 && ![arg isEqualToString:@"toggle"]) {
-        return @"Usage: watch theater [on|off|toggle]\n";
+        return [NSString stringWithFormat:@"Usage: watch %s [on|off|toggle]\n", spec->subcmd];
     }
 
     static dispatch_once_t once;
@@ -11476,7 +11508,7 @@ static NSString *rc_handle_watch_theater_command(NSString *cleanCmd) {
     Class reqCls = objc_getClass("WFWorkflowRunRequest");
     Class clientCls = objc_getClass("WFWorkflowRunnerClient");
     if (!descCls || !reqCls || !clientCls) {
-        return @"Error: Apple Watch Theater Mode runner unavailable on this iOS\n";
+        return [NSString stringWithFormat:@"Error: %s runner unavailable on this iOS\n", spec->label];
     }
 
     NSMutableDictionary *params = [@{ @"operation": opStr, @"ShowWhenRun": @NO } mutableCopy];
@@ -11487,7 +11519,7 @@ static NSString *rc_handle_watch_theater_command(NSString *cleanCmd) {
         @"WFWorkflowClientVersion": @"1146.16.2.2",
         @"WFWorkflowIcon": @{ @"WFWorkflowIconStartColor": @4282601983U, @"WFWorkflowIconGlyphNumber": @59511 },
         @"WFWorkflowActions": @[ @{
-            @"WFWorkflowActionIdentifier": @"com.apple.NanoSettings.NPRFSetTheaterModeIntent",
+            @"WFWorkflowActionIdentifier": @(spec->intentIdentifier),
             @"WFWorkflowActionParameters": params
         } ],
         @"WFWorkflowTypes": @[ @"Watch" ]
@@ -11495,7 +11527,7 @@ static NSString *rc_handle_watch_theater_command(NSString *cleanCmd) {
     NSError *plistErr = nil;
     NSData *wfData = [NSPropertyListSerialization dataWithPropertyList:wfPlist format:NSPropertyListBinaryFormat_v1_0 options:0 error:&plistErr];
     if (!wfData) {
-        return [NSString stringWithFormat:@"Error: Failed to encode Watch Theater Mode workflow (%@)\n", plistErr.localizedDescription ?: @"unknown"];
+        return [NSString stringWithFormat:@"Error: Failed to encode %s workflow (%@)\n", spec->label, plistErr.localizedDescription ?: @"unknown"];
     }
 
     id desc = [(id<RCWFWorkflowDataRunDescriptor>)[descCls alloc] initWithWorkflowData:wfData];
@@ -11508,7 +11540,7 @@ static NSString *rc_handle_watch_theater_command(NSString *cleanCmd) {
         return @"Error: WFWorkflowRunnerClient initWithRunRequest unavailable\n";
     }
     runner = [(id<RCWFWorkflowRunnerClientRun>)runner initWithRunRequest:req];
-    if (!runner) return @"Error: Failed to initialize Watch Theater Mode runner\n";
+    if (!runner) return [NSString stringWithFormat:@"Error: Failed to initialize %s runner\n", spec->label];
 
     RCWFTheaterRunDelegate *del = [[RCWFTheaterRunDelegate alloc] init];
     dispatch_semaphore_t sem = [NSThread isMainThread] ? nil : dispatch_semaphore_create(0);
@@ -11518,20 +11550,20 @@ static NSString *rc_handle_watch_theater_command(NSString *cleanCmd) {
     if ([runner respondsToSelector:@selector(setDelegate:)]) [(id<RCWFWorkflowRunnerClientRun>)runner setDelegate:del];
     [(id<RCWFWorkflowRunnerClientRun>)runner start];
 
-    if (!sem) return @"Watch Theater Mode updated\n";
+    if (!sem) return [NSString stringWithFormat:@"%s updated\n", spec->label];
     if (dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(15 * NSEC_PER_SEC))) != 0) {
-        SRLogMin(@"[WatchTheater] Timed out waiting for Watch Theater Mode response");
-        return @"Error: Watch Theater Mode timed out\n";
+        SRLogMin(@"[WatchSetting] Timed out waiting for %s response", spec->label);
+        return [NSString stringWithFormat:@"Error: %s timed out\n", spec->label];
     }
     if (del.runError) {
-        SRLogMin(@"[WatchTheater] Error: %@", del.runError);
-        return [NSString stringWithFormat:@"Error: %@\n", del.runError.localizedDescription ?: @"Watch Theater Mode failed"];
+        SRLogMin(@"[WatchSetting] %s error: %@", spec->label, del.runError);
+        return [NSString stringWithFormat:@"Error: %@\n", del.runError.localizedDescription ?: [NSString stringWithFormat:@"%s failed", spec->label]];
     }
-    if (del.cancelled) return @"Error: Watch Theater Mode cancelled\n";
-    SRLog(@"[WatchTheater] Watch Theater Mode %@", stStr ?: @"toggled");
-    if ([stStr isEqualToString:@"on"]) return @"Watch Theater Mode enabled\n";
-    if ([stStr isEqualToString:@"off"]) return @"Watch Theater Mode disabled\n";
-    return @"Watch Theater Mode toggled\n";
+    if (del.cancelled) return [NSString stringWithFormat:@"Error: %s cancelled\n", spec->label];
+    SRLog(@"[WatchSetting] %s %@", spec->label, stStr ?: @"toggled");
+    if ([stStr isEqualToString:@"on"]) return [NSString stringWithFormat:@"%s enabled\n", spec->label];
+    if ([stStr isEqualToString:@"off"]) return [NSString stringWithFormat:@"%s disabled\n", spec->label];
+    return [NSString stringWithFormat:@"%s toggled\n", spec->label];
 }
 
 static NSString *handle_command(NSString *cmd) {
@@ -11955,8 +11987,12 @@ static NSString *handle_command(NSString *cmd) {
         return rc_handle_timer_command(cleanCmd);
     } else if ([cleanCmd isEqualToString:@"watch faces"] || [cleanCmd isEqualToString:@"watch face"] || [cleanCmd hasPrefix:@"watch face "]) {
         return rc_handle_watch_face_command(cleanCmd);
-    } else if ([cleanCmd isEqualToString:@"watch theater"] || [cleanCmd hasPrefix:@"watch theater "]) {
-        return rc_handle_watch_theater_command(cleanCmd);
+    } else if ([cleanCmd isEqualToString:@"watch theater"] || [cleanCmd hasPrefix:@"watch theater "] ||
+               [cleanCmd isEqualToString:@"watch silent"] || [cleanCmd hasPrefix:@"watch silent "] ||
+               [cleanCmd isEqualToString:@"watch wake"] || [cleanCmd hasPrefix:@"watch wake "] ||
+               [cleanCmd isEqualToString:@"watch water"] || [cleanCmd hasPrefix:@"watch water "] ||
+               [cleanCmd isEqualToString:@"watch alwayson"] || [cleanCmd hasPrefix:@"watch alwayson "]) {
+        return rc_handle_watch_setting_command(cleanCmd);
     } else if ([cleanCmd hasPrefix:@"notify confirm "]) {
         // A button that needed the passcode was pressed and the passcode given (RC's app reports
         // it): its answer goes to the action waiting on that notification
