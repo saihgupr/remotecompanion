@@ -201,11 +201,15 @@ static inline UIFont *RCActionCellTitleFont(void) {
 @property (nonatomic, strong) UIColor *fillColor;
 @property (nonatomic, strong) UIColor *borderColor;
 @property (nonatomic, assign) CGFloat borderWidth;
+@property (nonatomic, assign) BOOL squareTrailingCorners;
+@end
+
+@interface UITableViewCell (RCActionSwipeSync)
+- (void)rc_syncSwipeAppearance;
 @end
 
 @implementation RCActionCardBackgroundView {
-    CAShapeLayer *_fillLayer;
-    CAShapeLayer *_borderLayer;
+    UIView *_cardView;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
@@ -213,34 +217,74 @@ static inline UIFont *RCActionCellTitleFont(void) {
     if (self) {
         self.backgroundColor = [UIColor clearColor];
         self.userInteractionEnabled = NO;
-        _fillLayer = [CAShapeLayer layer];
-        _borderLayer = [CAShapeLayer layer];
-        _borderLayer.fillColor = [UIColor clearColor].CGColor;
-        [self.layer addSublayer:_fillLayer];
-        [self.layer addSublayer:_borderLayer];
+        _cardView = [[UIView alloc] init];
+        _cardView.userInteractionEnabled = NO;
+        _cardView.clipsToBounds = YES;
+        _cardView.layer.cornerRadius = RCActionCellCardCornerRadius;
+        _cardView.layer.cornerCurve = kCACornerCurveContinuous;
+        [self addSubview:_cardView];
     }
     return self;
 }
 
+- (void)applyAppearance {
+    _cardView.backgroundColor = [(self.fillColor ?: [UIColor clearColor]) resolvedColorWithTraitCollection:self.traitCollection];
+    _cardView.layer.borderColor = [(self.borderColor ?: [UIColor clearColor]) resolvedColorWithTraitCollection:self.traitCollection].CGColor;
+    _cardView.layer.borderWidth = self.borderWidth;
+    BOOL isRTL = ([UIView userInterfaceLayoutDirectionForSemanticContentAttribute:self.semanticContentAttribute] == UIUserInterfaceLayoutDirectionRightToLeft);
+    CACornerMask allCorners = kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner | kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner;
+    CACornerMask leadingCorners = isRTL
+        ? (kCALayerMaxXMinYCorner | kCALayerMaxXMaxYCorner)
+        : (kCALayerMinXMinYCorner | kCALayerMinXMaxYCorner);
+    _cardView.layer.maskedCorners = self.squareTrailingCorners ? leadingCorners : allCorners;
+}
+
 - (void)setFillColor:(UIColor *)fillColor {
     _fillColor = fillColor;
-    [self setNeedsLayout];
+    [self applyAppearance];
 }
 
 - (void)setBorderColor:(UIColor *)borderColor {
     _borderColor = borderColor;
-    [self setNeedsLayout];
+    [self applyAppearance];
 }
 
 - (void)setBorderWidth:(CGFloat)borderWidth {
     _borderWidth = borderWidth;
-    [self setNeedsLayout];
+    [self applyAppearance];
+}
+
+- (void)setFrame:(CGRect)frame {
+    [super setFrame:frame];
+    if ([self.superview respondsToSelector:@selector(rc_syncSwipeAppearance)]) {
+        [(UITableViewCell *)self.superview rc_syncSwipeAppearance];
+    }
+}
+
+- (void)setCenter:(CGPoint)center {
+    [super setCenter:center];
+    if ([self.superview respondsToSelector:@selector(rc_syncSwipeAppearance)]) {
+        [(UITableViewCell *)self.superview rc_syncSwipeAppearance];
+    }
+}
+
+- (void)setSquareTrailingCorners:(BOOL)squareTrailingCorners {
+    if (_squareTrailingCorners == squareTrailingCorners) return;
+    _squareTrailingCorners = squareTrailingCorners;
+    [self applyAppearance];
+}
+
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+    [super traitCollectionDidChange:previousTraitCollection];
+    if (@available(iOS 13.0, *)) {
+        if ([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection]) {
+            [self applyAppearance];
+        }
+    }
 }
 
 - (void)layoutSubviews {
     [super layoutSubviews];
-    _fillLayer.frame = self.bounds;
-    _borderLayer.frame = self.bounds;
 
     // The card is as wide as the cell and inset from its top and bottom, the same breath the
     // folded rows' cards keep from their cells, so the open card lines up with its neighbours
@@ -248,20 +292,12 @@ static inline UIFont *RCActionCellTitleFont(void) {
                               self.bounds.size.width,
                               self.bounds.size.height - 2.0 * RCActionCellCardGap);
     if (CGRectGetWidth(card) <= 0 || CGRectGetHeight(card) <= 0) {
-        _fillLayer.path = nil;
-        _borderLayer.path = nil;
+        _cardView.hidden = YES;
         return;
     }
-    UIBezierPath *fillPath = [UIBezierPath bezierPathWithRoundedRect:card cornerRadius:RCActionCellCardCornerRadius];
-    CGRect borderRect = CGRectInset(card, self.borderWidth * 0.5, self.borderWidth * 0.5);
-    UIBezierPath *borderPath = (CGRectGetWidth(borderRect) > 0 && CGRectGetHeight(borderRect) > 0)
-        ? [UIBezierPath bezierPathWithRoundedRect:borderRect cornerRadius:RCActionCellCardCornerRadius]
-        : nil;
-    _fillLayer.path = fillPath.CGPath;
-    _fillLayer.fillColor = [(self.fillColor ?: [UIColor clearColor]) resolvedColorWithTraitCollection:self.traitCollection].CGColor;
-    _borderLayer.path = borderPath.CGPath;
-    _borderLayer.lineWidth = self.borderWidth;
-    _borderLayer.strokeColor = [(self.borderColor ?: [UIColor clearColor]) resolvedColorWithTraitCollection:self.traitCollection].CGColor;
+    _cardView.hidden = NO;
+    _cardView.frame = card;
+    [self applyAppearance];
 }
 
 @end
@@ -289,6 +325,9 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
 // The last touch that landed in the open value editor: its own buttons and menu take their taps,
 // and a tap there must not read as a tap on the row (which would fold it, and the menu with it)
 @property (nonatomic, assign, readonly) BOOL rcTouchInInlinePanel;
+// YES while the cell sits in a trailing swipe wrapper, so its card squares off cleanly where it
+// meets the red delete button
+@property (nonatomic, assign, readonly) BOOL rcSwipingTrailing;
 // Shows the value editor under the row (nil takes it away)
 - (void)rc_showInlinePanel:(UIView *)panel rowContentHeight:(CGFloat)rowContentHeight;
 // Whether a point in the cell's own coordinates lands in the open editor
@@ -297,6 +336,8 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
 - (void)rc_showValueChipText:(NSString *)text;
 // A chip on the open row takes the row's tint, as the card does
 - (void)rc_setValueChipAccented:(BOOL)accented;
+// Keeps the swipe container clipped to the card's own rounded rect so delete aligns with the card
+- (void)rc_syncSwipeAppearance;
 @end
 
 @interface RCActionCell ()
@@ -308,6 +349,8 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
 @property (nonatomic, strong) NSLayoutConstraint *rcValueChipCenterY;
 @property (nonatomic, strong) NSLayoutConstraint *rcValueChipWidth;
 @property (nonatomic, assign) CGFloat rcValueChipWidthValue;
+@property (nonatomic, assign, readwrite) BOOL rcSwipingTrailing;
+@property (nonatomic, assign) CGFloat rcSavedDimmedAlpha;
 - (void)rc_buildValueChipIfNeeded;
 - (void)rc_buildIconTileIfNeeded;
 - (void)rc_showInlineTitleFromLabel:(UILabel *)source;
@@ -322,8 +365,105 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
 
 - (void)prepareForReuse {
     [super prepareForReuse];
+    self.rcSwipingTrailing = NO;
+    self.rcSavedDimmedAlpha = 0.0;
     [self rc_showValueChipText:nil];
     [self rc_showInlinePanel:nil rowContentHeight:70.0];
+}
+
+- (void)didMoveToSuperview {
+    [super didMoveToSuperview];
+    [self rc_syncSwipeAppearance];
+    // UIKit inserts UISwipeActionPullView and shifts the row immediately after reparenting it
+    // into the swipe wrapper without calling setFrame: or layoutSubviews on the cell.
+    __weak typeof(self) weakSelf = self;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [weakSelf rc_syncSwipeAppearance];
+    });
+}
+
+- (void)setFrame:(CGRect)frame {
+    [super setFrame:frame];
+    [self rc_syncSwipeAppearance];
+}
+
+- (void)setCenter:(CGPoint)center {
+    [super setCenter:center];
+    [self rc_syncSwipeAppearance];
+}
+
+- (UIView *)rc_swipeContainerView {
+    UIView *superview = self.superview;
+    if (!superview) return nil;
+    if ([superview isKindOfClass:[UITableView class]] || [NSStringFromClass(superview.class) isEqualToString:@"UITableViewWrapperView"]) {
+        return nil;
+    }
+    if ([NSStringFromClass(superview.class) containsString:@"Swipe"]) return superview;
+    for (UIView *sibling in superview.subviews) {
+        if (sibling != self && [NSStringFromClass(sibling.class) containsString:@"Swipe"]) return superview;
+    }
+    return nil;
+}
+
+- (void)rc_syncSwipeAppearance {
+    UIView *container = [self rc_swipeContainerView];
+    if (!container) {
+        if (self.rcSwipingTrailing) {
+            self.rcSwipingTrailing = NO;
+            if ([self.backgroundView isKindOfClass:[RCActionCardBackgroundView class]]) {
+                ((RCActionCardBackgroundView *)self.backgroundView).squareTrailingCorners = NO;
+            }
+            if ([self.selectedBackgroundView isKindOfClass:[RCActionCardBackgroundView class]]) {
+                ((RCActionCardBackgroundView *)self.selectedBackgroundView).squareTrailingCorners = NO;
+            }
+        }
+        if (self.rcSavedDimmedAlpha > 0.0) {
+            self.alpha = self.rcSavedDimmedAlpha;
+            self.rcSavedDimmedAlpha = 0.0;
+        }
+        return;
+    }
+
+    // InsetGrouped's swipe container defaults to full cell height and rounds only the section's
+    // outer corners. Clip it to this row's own standalone card rect instead so delete matches.
+    if (container.layer.cornerRadius != 0.0) {
+        container.layer.cornerRadius = 0.0;
+    }
+    for (UIView *sibling in container.subviews) {
+        if (sibling != self && [NSStringFromClass(sibling.class) containsString:@"Swipe"] && sibling.layer.cornerRadius != 0.0) {
+            sibling.layer.cornerRadius = 0.0;
+        }
+    }
+    CGRect maskFrame = CGRectMake(0.0, RCActionCellCardGap,
+                                  container.bounds.size.width,
+                                  MAX(0.0, container.bounds.size.height - 2.0 * RCActionCellCardGap));
+    if (!CGRectIsEmpty(maskFrame)) {
+        UIView *mask = container.maskView;
+        if (!mask || mask.tag != 998822) {
+            mask = [[UIView alloc] initWithFrame:maskFrame];
+            mask.tag = 998822;
+            mask.backgroundColor = [UIColor blackColor];
+            mask.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+            mask.layer.cornerRadius = RCActionCellCardCornerRadius;
+            mask.layer.cornerCurve = kCACornerCurveContinuous;
+            mask.layer.maskedCorners = kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner | kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner;
+            container.maskView = mask;
+        } else if (!CGRectEqualToRect(mask.frame, maskFrame)) {
+            mask.frame = maskFrame;
+        }
+    }
+
+    self.rcSwipingTrailing = YES;
+    if (self.alpha < 0.99 && self.rcSavedDimmedAlpha == 0.0) {
+        self.rcSavedDimmedAlpha = self.alpha;
+        self.alpha = 1.0;
+    }
+    if ([self.backgroundView isKindOfClass:[RCActionCardBackgroundView class]]) {
+        ((RCActionCardBackgroundView *)self.backgroundView).squareTrailingCorners = YES;
+    }
+    if ([self.selectedBackgroundView isKindOfClass:[RCActionCardBackgroundView class]]) {
+        ((RCActionCardBackgroundView *)self.selectedBackgroundView).squareTrailingCorners = YES;
+    }
 }
 
 // The editor's own controls keep their touches; this only records where the touch went, so the
@@ -604,6 +744,31 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
             // card opens or closes; the row's centre until that spot has been measured
             CGFloat centerY = self.rcFoldedTitleCenterY > 0 ? self.rcFoldedTitleCenterY : midY;
             inlineTitle.frame = CGRectMake(x, centerY - h / 2.0, maxW, h);
+        }
+    }
+    [self rc_syncSwipeAppearance];
+}
+
+@end
+
+@interface RCActionsTableView : UITableView
+@end
+
+@implementation RCActionsTableView
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    for (UIView *subview in self.subviews) {
+        if (![NSStringFromClass(subview.class) containsString:@"Swipe"]) continue;
+        for (UIView *child in subview.subviews) {
+            if ([child isKindOfClass:[RCActionCell class]]) {
+                [(RCActionCell *)child rc_syncSwipeAppearance];
+            }
+        }
+    }
+    for (UITableViewCell *cell in self.visibleCells) {
+        if ([cell isKindOfClass:[RCActionCell class]] && cell.superview != self) {
+            [(RCActionCell *)cell rc_syncSwipeAppearance];
         }
     }
 }
@@ -1849,6 +2014,14 @@ static void RCSetRunWatching(BOOL watching) {
 // The debugger view is read-only (no adding, moving, editing or deleting)
 - (BOOL)runShown {
     return self.debugRunID != nil;
+}
+
+- (void)loadView {
+    RCActionsTableView *tableView = [[RCActionsTableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
+    tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    tableView.dataSource = self;
+    tableView.delegate = self;
+    self.tableView = tableView;
 }
 
 - (void)viewDidLoad {
@@ -3878,7 +4051,11 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         if (!path) continue;
         BOOL dragged = self.reorderSnapshot && NSLocationInRange(path.row, self.reorderRange);
         BOOL dimmed = (openRow != NSNotFound && path.row != openRow);
-        cell.alpha = dragged ? 0.3 : (dimmed ? RCActionCellDimmedAlpha : 1.0);
+        BOOL swiping = [cell isKindOfClass:[RCActionCell class]] && ((RCActionCell *)cell).rcSwipingTrailing;
+        if (swiping) {
+            ((RCActionCell *)cell).rcSavedDimmedAlpha = dimmed ? RCActionCellDimmedAlpha : 0.0;
+        }
+        cell.alpha = dragged ? 0.3 : (dimmed && !swiping ? RCActionCellDimmedAlpha : 1.0);
         rc_setCellSeparatorHidden(cell, [self inlineEditorHairlineIsHiddenAtRow:path.row]);
     }
 }
@@ -5296,95 +5473,38 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     UIColor *fillColor = [config tweakColorForKey:@"blockBackground" defaultVal:0.12];
     UIColor *selectedFillColor = [config tweakColorForKey:@"selectionHighlight" defaultVal:0.15];
     UIColor *borderColor = [config tweakColorForKey:@"borders" defaultVal:0.14];
-    // The action a run of this trigger is on: green, like a debugger's current line
-    if ([self.runningIndexes containsIndex:indexPath.row]) {
+    BOOL running = [self.runningIndexes containsIndex:indexPath.row];
+    BOOL open = [self inlineEditorIsOpenAtRow:indexPath.row];
+    if (running) {
         fillColor = [[UIColor systemGreenColor] colorWithAlphaComponent:0.22];
+        selectedFillColor = [[UIColor systemGreenColor] colorWithAlphaComponent:0.28];
         borderColor = [UIColor systemGreenColor];
         cell.imageView.tintColor = [UIColor systemGreenColor];
     }
+    CGFloat borderWidth = (running && open) ? 1.5 : 1.0;
 
-    // The row with its value editor open keeps the card's normal fill and border
-    if ([self inlineEditorIsOpenAtRow:indexPath.row]) {
-        BOOL running = [self.runningIndexes containsIndex:indexPath.row];
-        UIColor *cardFill = running ? [[UIColor systemGreenColor] colorWithAlphaComponent:0.22] : fillColor;
-        UIColor *cardFillSelected = running ? [[UIColor systemGreenColor] colorWithAlphaComponent:0.28] : selectedFillColor;
-        UIColor *cardBorder = running ? [UIColor systemGreenColor] : borderColor;
-        CGFloat cardBorderWidth = running ? 1.5 : 1.0;
+    RCActionCardBackgroundView *card = [cell.backgroundView isKindOfClass:[RCActionCardBackgroundView class]]
+        ? (RCActionCardBackgroundView *)cell.backgroundView
+        : [[RCActionCardBackgroundView alloc] initWithFrame:cell.bounds];
+    card.fillColor = fillColor;
+    card.borderColor = borderColor;
+    card.borderWidth = borderWidth;
 
-        RCActionCardBackgroundView *card = [[RCActionCardBackgroundView alloc] initWithFrame:cell.bounds];
-        card.fillColor = cardFill;
-        card.borderColor = cardBorder;
-        card.borderWidth = cardBorderWidth;
+    RCActionCardBackgroundView *selectedCard = [cell.selectedBackgroundView isKindOfClass:[RCActionCardBackgroundView class]]
+        ? (RCActionCardBackgroundView *)cell.selectedBackgroundView
+        : [[RCActionCardBackgroundView alloc] initWithFrame:cell.bounds];
+    selectedCard.fillColor = selectedFillColor;
+    selectedCard.borderColor = borderColor;
+    selectedCard.borderWidth = borderWidth;
 
-        RCActionCardBackgroundView *selectedCard = [[RCActionCardBackgroundView alloc] initWithFrame:cell.bounds];
-        selectedCard.fillColor = cardFillSelected;
-        selectedCard.borderColor = cardBorder;
-        selectedCard.borderWidth = cardBorderWidth;
+    BOOL squareTrailing = [cell isKindOfClass:[RCActionCell class]] && ((RCActionCell *)cell).rcSwipingTrailing;
+    card.squareTrailingCorners = squareTrailing;
+    selectedCard.squareTrailingCorners = squareTrailing;
 
-        cell.backgroundColor = [UIColor clearColor];
-        cell.contentView.backgroundColor = [UIColor clearColor];
-        cell.backgroundView = card;
-        cell.selectedBackgroundView = selectedCard;
-        return;
-    }
-    
-    // Every row stands alone: its own rounded card with a breath between rows, the way the
-    // prototype sequence draws them
-    CGFloat lineWidth = 1.0;
-    CGFloat cornerRadius = RCActionCellCardCornerRadius;
-    CGRect fillRect = CGRectMake(0.0, RCActionCellCardGap,
-                                 cell.bounds.size.width,
-                                 cell.bounds.size.height - 2.0 * RCActionCellCardGap);
-    CGRect borderRect = CGRectInset(fillRect, lineWidth * 0.5, lineWidth * 0.5);
-    if (CGRectGetWidth(fillRect) <= 0 || CGRectGetHeight(fillRect) <= 0) {
-        return;
-    }
-    if (CGRectGetWidth(borderRect) <= 0 || CGRectGetHeight(borderRect) <= 0) {
-        return;
-    }
-    
-    UIBezierPath *fillPath = [UIBezierPath bezierPathWithRoundedRect:fillRect cornerRadius:cornerRadius];
-
-    UIBezierPath *borderPath = [UIBezierPath bezierPathWithRoundedRect:borderRect cornerRadius:cornerRadius];
-    
-    UIView *normalBackgroundView = [[UIView alloc] initWithFrame:cell.bounds];
-    normalBackgroundView.backgroundColor = [UIColor clearColor];
-    
-    CAShapeLayer *normalFillLayer = [CAShapeLayer layer];
-    normalFillLayer.frame = normalBackgroundView.bounds;
-    normalFillLayer.path = fillPath.CGPath;
-    normalFillLayer.fillColor = fillColor.CGColor;
-    [normalBackgroundView.layer addSublayer:normalFillLayer];
-    
-    CAShapeLayer *normalBorderLayer = [CAShapeLayer layer];
-    normalBorderLayer.frame = normalBackgroundView.bounds;
-    normalBorderLayer.path = borderPath.CGPath;
-    normalBorderLayer.fillColor = [UIColor clearColor].CGColor;
-    normalBorderLayer.strokeColor = borderColor.CGColor;
-    normalBorderLayer.lineWidth = lineWidth;
-    [normalBackgroundView.layer addSublayer:normalBorderLayer];
-    
-    UIView *selectedBackgroundView = [[UIView alloc] initWithFrame:cell.bounds];
-    selectedBackgroundView.backgroundColor = [UIColor clearColor];
-    
-    CAShapeLayer *selectedFillLayer = [CAShapeLayer layer];
-    selectedFillLayer.frame = selectedBackgroundView.bounds;
-    selectedFillLayer.path = fillPath.CGPath;
-    selectedFillLayer.fillColor = selectedFillColor.CGColor;
-    [selectedBackgroundView.layer addSublayer:selectedFillLayer];
-    
-    CAShapeLayer *selectedBorderLayer = [CAShapeLayer layer];
-    selectedBorderLayer.frame = selectedBackgroundView.bounds;
-    selectedBorderLayer.path = borderPath.CGPath;
-    selectedBorderLayer.fillColor = [UIColor clearColor].CGColor;
-    selectedBorderLayer.strokeColor = borderColor.CGColor;
-    selectedBorderLayer.lineWidth = lineWidth;
-    [selectedBackgroundView.layer addSublayer:selectedBorderLayer];
-    
     cell.backgroundColor = [UIColor clearColor];
     cell.contentView.backgroundColor = [UIColor clearColor];
-    cell.backgroundView = normalBackgroundView;
-    cell.selectedBackgroundView = selectedBackgroundView;
+    if (cell.backgroundView != card) cell.backgroundView = card;
+    if (cell.selectedBackgroundView != selectedCard) cell.selectedBackgroundView = selectedCard;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
@@ -5820,7 +5940,11 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     BOOL dragged = self.reorderSnapshot && NSLocationInRange(indexPath.row, self.reorderRange);
     NSInteger openRow = [self inlineEditorOpenRow];
     BOOL dimmed = (openRow != NSNotFound && openRow != indexPath.row);
-    cell.alpha = dragged ? 0.3 : (dimmed ? RCActionCellDimmedAlpha : 1.0);
+    BOOL swiping = [cell isKindOfClass:[RCActionCell class]] && ((RCActionCell *)cell).rcSwipingTrailing;
+    if (swiping) {
+        ((RCActionCell *)cell).rcSavedDimmedAlpha = dimmed ? RCActionCellDimmedAlpha : 0.0;
+    }
+    cell.alpha = dragged ? 0.3 : (dimmed && !swiping ? RCActionCellDimmedAlpha : 1.0);
     rc_setCellSeparatorHidden(cell, [self inlineEditorHairlineIsHiddenAtRow:indexPath.row]);
     [self fixColorsForDragOnCell:cell];
 }
@@ -6112,7 +6236,35 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     } completion:^(__unused BOOL finished) { [snapshot removeFromSuperview]; }];
 }
 
+- (void)adjustInlineEditorForRemovedIndexes:(NSIndexSet *)removedIndexes {
+    if (self.inlineEditorIndex == NSNotFound || !removedIndexes.count) return;
+    if ([removedIndexes containsIndex:self.inlineEditorIndex]) {
+        self.inlineEditorIndex = NSNotFound;
+        self.inlineEditorCommand = nil;
+        self.inlineRowItem = nil;
+        self.inlineRowEditor = nil;
+        self.inlineRowCommitting = NO;
+    } else {
+        self.inlineEditorIndex -= [removedIndexes countOfIndexesInRange:NSMakeRange(0, self.inlineEditorIndex)];
+    }
+}
+
 // Swipe Actions
+- (void)tableView:(UITableView *)tableView willBeginEditingRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
+    if ([cell isKindOfClass:[RCActionCell class]]) {
+        [(RCActionCell *)cell rc_syncSwipeAppearance];
+    }
+}
+
+- (void)tableView:(UITableView *)tableView didEndEditingRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
+    if ([cell isKindOfClass:[RCActionCell class]]) {
+        [(RCActionCell *)cell rc_syncSwipeAppearance];
+    }
+    [self updateInlineEditorDimming];
+}
+
 - (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
     if ([self runShown]) return [UISwipeActionsConfiguration configurationWithActions:@[]];
     NSRange rangeToDelete = [self ifBlockRangeForIndex:indexPath.row];
@@ -6128,13 +6280,18 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
                 [self confirmDeleteBlockRange:rangeToDelete actionCount:inside from:sourceView completion:completionHandler];
                 return;
             }
+            NSIndexSet *removed = nil;
             if (rangeToDelete.location != NSNotFound && rangeToDelete.length > 0 && NSMaxRange(rangeToDelete) <= self.actions.count) {
+                removed = [NSIndexSet indexSetWithIndexesInRange:rangeToDelete];
                 [self.actions removeObjectsInRange:rangeToDelete];
             } else if (indexPath.row < self.actions.count) {
+                removed = [NSIndexSet indexSetWithIndex:indexPath.row];
                 [self.actions removeObjectAtIndex:indexPath.row];
             }
+            [self adjustInlineEditorForRemovedIndexes:removed];
             [self saveActions];
             [tableView reloadData];
+            [self updateInlineEditorDimming];
             completionHandler(YES);
         }];
 
@@ -6165,8 +6322,10 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (strongSelf && NSMaxRange(range) <= strongSelf.actions.count) {
             [strongSelf.actions removeObjectsInRange:range];
+            [strongSelf adjustInlineEditorForRemovedIndexes:[NSIndexSet indexSetWithIndexesInRange:range]];
             [strongSelf saveActions];
             [strongSelf.tableView reloadData];
+            [strongSelf updateInlineEditorDimming];
         }
         completion(YES);
     }]];
@@ -6194,8 +6353,10 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         else if (depth == 0 && ([self isElseActionItem:item] || [self isElseIfActionItem:item])) [remove addIndex:i];
     }
     [self.actions removeObjectsAtIndexes:remove];
+    [self adjustInlineEditorForRemovedIndexes:remove];
     [self saveActions];
     [self.tableView reloadData];
+    [self updateInlineEditorDimming];
 }
 
 // Reordering (legacy but kept for logic reference, though drag/drop is primary now)
