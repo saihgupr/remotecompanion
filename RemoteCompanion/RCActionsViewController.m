@@ -367,6 +367,7 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
     [super prepareForReuse];
     self.rcSwipingTrailing = NO;
     self.rcSavedDimmedAlpha = 0.0;
+    self.rcFoldedTitleCenterY = 0.0;
     [self rc_showValueChipText:nil];
     [self rc_showInlinePanel:nil rowContentHeight:70.0];
 }
@@ -2538,17 +2539,43 @@ static void RCSetRunWatching(BOOL watching) {
     [self presentViewController:alert animated:YES completion:nil];
 }
 
+- (NSString *)inlineDefaultCommandForPlaceholder:(NSString *)action {
+    if (![action isKindOfClass:[NSString class]]) return nil;
+    static NSDictionary<NSString *, NSString *> *defaults;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        defaults = @{
+            @"__SET_VOLUME__": @"set-vol 50",
+            @"__SET_RINGER_VOLUME__": @"ringer volume 50",
+            @"__SET_BRIGHTNESS__": @"brightness 50",
+            @"__DELAY__": @"delay 1",
+            @"__CAMERA_PICKER__": @"camera photo",
+            @"__CAMERA_VIDEO_PICKER__": @"camera video 2x",
+        };
+    });
+    return defaults[action];
+}
+
 - (void)addAction {
+    if (self.inlineEditorIndex != NSNotFound) [self commitInlineRowEditor];
 
     RCActionPickerViewController *picker = [[RCActionPickerViewController alloc] init];
     __weak typeof(self) weakSelf = self;
     BOOL (^staysOpen)(NSString *) = ^BOOL(NSString *action) {
-        // Placeholders this screen answers with a screen of its own (Exit Repeat is added as it is)
-        return [action hasPrefix:@"__"] && [action hasSuffix:@"__"] && ![action isEqualToString:@"__EXIT_REPEAT__"];
+        // Placeholders this screen answers with a screen of its own (Exit Repeat and inline-edited
+        // actions add straight into the sequence instead)
+        return [action hasPrefix:@"__"] && [action hasSuffix:@"__"]
+            && ![action isEqualToString:@"__EXIT_REPEAT__"]
+            && ![weakSelf inlineDefaultCommandForPlaceholder:action];
     };
     picker.staysOpenFor = staysOpen;
     picker.onActionSelected = ^(NSString *action) {
         if (!staysOpen(action)) weakSelf.addingNav = nil; // the picker closes itself
+        NSString *inlineDefault = [weakSelf inlineDefaultCommandForPlaceholder:action];
+        if (inlineDefault) {
+            [weakSelf appendInlineActionWithCommand:inlineDefault];
+            return;
+        }
         if ([action isEqualToString:@"__SHORTCUT_PICKER__"]) {
             // Present Shortcut Picker
             RCShortcutPickerViewController *vc = [[RCShortcutPickerViewController alloc] init];
@@ -2675,8 +2702,6 @@ static void RCSetRunWatching(BOOL watching) {
                     [self.tableView reloadData];
                 }];
             });
-        } else if ([action isEqualToString:@"__DELAY__"]) {
-            [self presentDelayForIndex:NSNotFound current:nil after:0];
         } else if ([action isEqualToString:@"__APP_QUICK_SHORTCUT__"]) {
             RCAppPickerViewController *appPicker = [[RCAppPickerViewController alloc] init];
             appPicker.title = @"App Quick Action";
@@ -2803,8 +2828,6 @@ static void RCSetRunWatching(BOOL watching) {
                     [weakSelf storeCommand:cmd atIndex:NSNotFound];
                 }];
             });
-        } else if ([self levelPrefixForCommand:action]) {
-            [self presentLevelActionForCommand:action index:NSNotFound after:0];
         } else {
             [self.actions addObject:action];
             [self saveActions];
@@ -3798,10 +3821,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     return YES;
 }
 
-// The row's editor, opened in place under it: the row's card, tinted and outlined, while the
-// rest of the sequence steps back. A choice saves each tap straight away; a number or a text row
-// saves when it folds.
-- (void)expandInlineRowEditorForItem:(RCInlineRowItem *)item command:(NSString *)command index:(NSInteger)index {
+- (RCInlineRowEditor *)prepareInlineRowEditorForItem:(RCInlineRowItem *)item command:(NSString *)command index:(NSInteger)index {
     if (item.kind == RCInlineRowKindNumber) item.allowsRound = [self roundAvailableAtIndex:index];
     RCInlineRowEditor *panel = [[RCInlineRowEditor alloc] initWithItem:item style:RCInlineRowEditorStyleCompact otherActions:self.actions];
     __weak typeof(self) weakSelf = self;
@@ -3812,6 +3832,52 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     self.inlineRowItem = item;
     self.inlineRowEditor = panel;
     self.inlineEditorRowHeight = 70.0;
+    return panel;
+}
+
+// Newly added inline-editable items enter the sequence already expanded instead of popping up a
+// modal sheet first
+- (void)appendInlineActionWithCommand:(NSString *)command {
+    if (!command.length) return;
+    NSInteger index = (NSInteger)self.actions.count;
+    [self.actions addObject:command];
+    [self saveActions];
+
+    RCInlineRowItem *item = [self inlineRowItemForCommand:command];
+    if (!item) {
+        [self.tableView reloadData];
+        return;
+    }
+    RCInlineRowEditor *panel = [self prepareInlineRowEditorForItem:item command:command index:index];
+    [self.tableView reloadData];
+    [self.tableView layoutIfNeeded];
+
+    NSIndexPath *path = [NSIndexPath indexPathForRow:index inSection:0];
+    if ([[NSUserDefaults standardUserDefaults] boolForKey:@"RCWrapLongNamesEnabled"]) {
+        UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:path];
+        if (cell) {
+            CGFloat wrapped = RCWrappedCellHeight(cell, self.tableView.bounds.size.width, 70.0);
+            if (fabs(wrapped - self.inlineEditorRowHeight) > 0.5) {
+                self.inlineEditorRowHeight = wrapped;
+                if ([cell isKindOfClass:[RCActionCell class]]) {
+                    [(RCActionCell *)cell rc_showInlinePanel:panel rowContentHeight:wrapped];
+                }
+                [self.tableView beginUpdates];
+                [self.tableView endUpdates];
+            }
+        }
+    }
+    [self updateInlineEditorDimming];
+    if (index < [self.tableView numberOfRowsInSection:0]) {
+        [self.tableView scrollToRowAtIndexPath:path atScrollPosition:UITableViewScrollPositionNone animated:NO];
+    }
+}
+
+// The row's editor, opened in place under it: the row's card, tinted and outlined, while the
+// rest of the sequence steps back. A choice saves each tap straight away; a number or a text row
+// saves when it folds.
+- (void)expandInlineRowEditorForItem:(RCInlineRowItem *)item command:(NSString *)command index:(NSInteger)index {
+    RCInlineRowEditor *panel = [self prepareInlineRowEditorForItem:item command:command index:index];
     if ([[NSUserDefaults standardUserDefaults] boolForKey:@"RCWrapLongNamesEnabled"]) {
         UITableViewCell *oldCell = [self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:index inSection:0]];
         if (oldCell) self.inlineEditorRowHeight = RCWrappedCellHeight(oldCell, self.tableView.bounds.size.width, 70.0);

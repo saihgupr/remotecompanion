@@ -263,8 +263,8 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
         @[
             @{ @"name": @"Volume Up", @"command": @"volume up", @"icon": @"speaker.wave.3.fill" },
             @{ @"name": @"Volume Down", @"command": @"volume down", @"icon": @"speaker.wave.1.fill" },
-            @{ @"name": @"Set Volume...", @"command": @"__SET_VOLUME__", @"icon": @"slider.horizontal.3" },
-            @{ @"name": @"Set Ringer Volume...", @"command": @"__SET_RINGER_VOLUME__", @"icon": @"bell.fill" },
+            @{ @"name": @"Set Volume", @"command": @"__SET_VOLUME__", @"icon": @"slider.horizontal.3" },
+            @{ @"name": @"Set Ringer Volume", @"command": @"__SET_RINGER_VOLUME__", @"icon": @"bell.fill" },
             @{ @"name": @"Mute", @"command": @"mute toggle", @"icon": @"speaker.slash.fill" },
             @{ @"name": @"Noise Control", @"command": @"anc on", @"icon": @"ear" },
             @{ @"name": @"Silent Mode", @"command": @"ringer toggle", @"icon": @"bell.slash.fill" },
@@ -275,8 +275,8 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
         @[
             @{ @"name": @"Screenshot", @"command": @"screenshot", @"icon": @"camera.viewfinder" },
             @{ @"name": @"Screen Recording", @"command": @"screenrecord toggle", @"icon": @"record.circle.fill" },
-            @{ @"name": @"Open Camera...", @"command": @"__CAMERA_PICKER__", @"icon": @"camera.fill" },
-            @{ @"name": @"Open Video Camera...", @"command": @"__CAMERA_VIDEO_PICKER__", @"icon": @"video.fill" },
+            @{ @"name": @"Open Camera", @"command": @"__CAMERA_PICKER__", @"icon": @"camera.fill" },
+            @{ @"name": @"Open Video Camera", @"command": @"__CAMERA_VIDEO_PICKER__", @"icon": @"video.fill" },
             @{ @"name": @"Camera Shutter / Snap", @"command": @"camera shutter", @"icon": @"camera.circle.fill" },
             @{ @"name": @"Camera Record Toggle", @"command": @"camera record", @"icon": @"video.circle.fill" }
         ],
@@ -302,7 +302,7 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
         // Device Controls
         @[
             @{ @"name": @"Appearance", @"command": @"appearance toggle", @"icon": @"circle.lefthalf.fill" },
-            @{ @"name": @"Set Brightness...", @"command": @"__SET_BRIGHTNESS__", @"icon": @"sun.max.fill" },
+            @{ @"name": @"Set Brightness", @"command": @"__SET_BRIGHTNESS__", @"icon": @"sun.max.fill" },
             @{ @"name": @"Flashlight", @"command": @"flashlight toggle", @"icon": @"flashlight.on.fill" },
             @{ @"name": @"Rotation Lock", @"command": @"rotate toggle", @"icon": @"lock.rotation" },
             @{ @"name": @"Lock Device", @"command": @"lock", @"icon": @"lock.fill" },
@@ -637,20 +637,26 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
 static BOOL RCPickerActionOpensMore(NSDictionary *action) {
     if (action[@"children"]) return YES;
     NSString *command = action[@"command"];
-    static NSSet *more;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        more = [NSSet setWithArray:@[@"__SET_VOLUME__", @"__SET_RINGER_VOLUME__", @"__SET_BRIGHTNESS__", @"__SET_FLASHLIGHT__",
-                                     @"__BT_CONNECT__", @"__BT_DISCONNECT__", @"__AIRPLAY_CONNECT__", @"__FOCUS__",
-                                     @"__SHORTCUT_PICKER__", @"__OPEN_APP__", @"__KILL_APP__", @"__LUA_SCRIPT__", @"__TOAST__", @"__NOTIFICATION__", @"__CLEAR_NOTIFICATIONS__", @"__TIMER__",
-                                     @"__IF_CONDITION__", @"__REPEAT__", @"__REPEAT_WHILE__", @"__WAIT_UNTIL__", @"__DELAY__",
-                                     @"__STOP_TRIGGER__", @"__CUSTOM__", @"__HA_PICKER__", @"__KM_TRIGGER__", @"__MQTT_PUBLISH__",
-                                     @"__CAMERA_PICKER__", @"__CAMERA_VIDEO_PICKER__", @"__TAP__", @"__HOLD__", @"__SWIPE__",
-                                     @"__UNLOCK_DEVICE__", @"__LOCK_TOGGLE__"]];
-    });
     if (![command isKindOfClass:[NSString class]]) return NO;
+    // Inline-editable items add straight into the sequence expanded rather than opening a modal
+    static NSSet *inlineDirect;
+    static dispatch_once_t inlineOnce;
+    dispatch_once(&inlineOnce, ^{
+        inlineDirect = [NSSet setWithArray:@[@"__SET_VOLUME__", @"__SET_RINGER_VOLUME__", @"__SET_BRIGHTNESS__",
+                                             @"__DELAY__", @"__EXIT_REPEAT__"]];
+    });
+    if ([inlineDirect containsObject:command]) return NO;
     // Any other placeholder opens something too; a plain command is added as it is
-    return [more containsObject:command] || ([command hasPrefix:@"__"] && [command hasSuffix:@"__"]);
+    return ([command hasPrefix:@"__"] && [command hasSuffix:@"__"]);
+}
+
+- (BOOL)actionOpensMore:(NSDictionary *)action {
+    NSString *command = action[@"command"];
+    if ([command isKindOfClass:[NSString class]] &&
+        ([command isEqualToString:@"__CAMERA_PICKER__"] || [command isEqualToString:@"__CAMERA_VIDEO_PICKER__"])) {
+        return self.remoteClientId.length > 0;
+    }
+    return RCPickerActionOpensMore(action) || [RCAddOnCatalog commandAsksForDetails:command];
 }
 
 - (NSInteger)numberOfSectionsInCollectionView:(UICollectionView *)collectionView {
@@ -671,7 +677,7 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
         UIImage *custom = [action[@"image"] isKindOfClass:[UIImage class]] ? action[@"image"] : nil;
         if ([action[@"command"] isEqualToString:@"__SET_VARIABLE__"]) custom = RCVariableMenuIconActionSized(22);
         [row setName:action[@"name"] icon:icon image:custom];
-        row.opensMore = RCPickerActionOpensMore(action) || [RCAddOnCatalog commandAsksForDetails:action[@"command"]];
+        row.opensMore = [self actionOpensMore:action];
         NSInteger count = [collectionView numberOfItemsInSection:indexPath.section];
         [row setFirst:indexPath.item == 0 last:indexPath.item == count - 1];
         return row;
@@ -683,7 +689,7 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
     UIImage *custom = [action[@"image"] isKindOfClass:[UIImage class]] ? action[@"image"] : nil;   // an add-on's own picture
     if ([action[@"command"] isEqualToString:@"__SET_VARIABLE__"]) custom = RCVariableMenuIconActionSized(22);
     [cell setName:action[@"name"] icon:icon image:custom];
-    cell.opensMore = RCPickerActionOpensMore(action) || [RCAddOnCatalog commandAsksForDetails:action[@"command"]];
+    cell.opensMore = [self actionOpensMore:action];
     return cell;
 }
 
@@ -855,12 +861,12 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
         return;
     }
 
-    if ([command isEqualToString:@"__CAMERA_PICKER__"]) {
+    if ([command isEqualToString:@"__CAMERA_PICKER__"] && self.remoteClientId.length > 0) {
         [self handleCameraPicker:NO];
         return;
     }
 
-    if ([command isEqualToString:@"__CAMERA_VIDEO_PICKER__"]) {
+    if ([command isEqualToString:@"__CAMERA_VIDEO_PICKER__"] && self.remoteClientId.length > 0) {
         [self handleCameraPicker:YES];
         return;
     }
