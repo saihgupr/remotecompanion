@@ -183,9 +183,6 @@ static NSString *rc_build_toast_command(NSString *title, NSString *subtitle, NSS
 static CGFloat const RCActionCellInlineTopGap = 12.0;
 static CGFloat const RCActionCellInlineBottomGap = 14.0;
 static CGFloat const RCActionCellInlineSideInset = 16.0;
-// The card an open row draws around itself and its editor: inset from the rows around it, the same
-// corner as the rest of the sequence, in the row's tint
-static CGFloat const RCActionCellCardInset = 6.0;
 static CGFloat const RCActionCellCardCornerRadius = 12.0;
 // Every row stands alone as its own card, the prototype sequence look: the card is inset this much
 // at the top and bottom of the cell, so a breath shows between rows
@@ -3697,9 +3694,9 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     if (self.inlineRowCommitting) return; // the keyboard going away reports its commit through here
     self.inlineRowCommitting = YES;
     NSInteger index = self.inlineEditorIndex;
-    NSString *command = [self.inlineRowItem command];
     [self.inlineRowEditor endEditing];
     [self.view endEditing:YES];
+    NSString *command = [self.inlineRowItem command];
     RCActionCell *openCell = (index >= 0 && index < (NSInteger)self.actions.count)
         ? (RCActionCell *)[self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:index inSection:0]]
         : nil;
@@ -5494,7 +5491,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     // (not the content view's: the accessory narrows that one, and the panel keeps the card's insets)
     UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
     CGFloat cellWidth = cell ? cell.bounds.size.width : tableView.bounds.size.width - 40.0;
-    CGFloat panelWidth = cellWidth - 2.0 * (RCActionCellCardInset + RCActionCellInlineSideInset);
+    CGFloat panelWidth = cellWidth - 2.0 * RCActionCellInlineSideInset;
     UIView *panel = self.inlineRowEditor;
     CGFloat panelHeight = [(id)panel preferredHeightForWidth:panelWidth];
     return ceil(self.inlineEditorRowHeight + 1.0 / [UIScreen mainScreen].scale + RCActionCellInlineTopGap + panelHeight + RCActionCellCardGap + RCActionCellInlineBottomGap);

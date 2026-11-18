@@ -97,6 +97,18 @@ static NSString *RCInlineRowEditorUnitSuffix(RCInlineRowItem *item) {
 
 #pragma mark - The step buttons and the readout between them
 
+@interface RCInlineRowReadoutControl : UIControl
+@end
+
+@implementation RCInlineRowReadoutControl
+
+- (void)setHighlighted:(BOOL)highlighted {
+    [super setHighlighted:highlighted];
+    self.alpha = highlighted ? 0.55 : 1.0;
+}
+
+@end
+
 @interface RCInlineRowStepperStrip : UIView
 @property (nonatomic, strong, readonly) UILabel *readout;
 @property (nonatomic, strong, readonly) UILabel *unitLabel;
@@ -107,10 +119,14 @@ static NSString *RCInlineRowEditorUnitSuffix(RCInlineRowItem *item) {
 - (void)refresh;
 @end
 
-@interface RCInlineRowStepperStrip ()
+@interface RCInlineRowStepperStrip () <UITextFieldDelegate>
 @property (nonatomic, strong) RCInlineRowItem *item;
 @property (nonatomic, assign) BOOL compact;
+@property (nonatomic, strong) RCInlineRowReadoutControl *valueButton;
+@property (nonatomic, strong) UITextField *field;
 - (void)stepBy:(double)delta;
+- (void)beginTyping;
+- (void)finishTyping;
 @end
 
 @implementation RCInlineRowStepperStrip
@@ -145,11 +161,51 @@ static NSString *RCInlineRowEditorUnitSuffix(RCInlineRowItem *item) {
         valueRow.axis = UILayoutConstraintAxisHorizontal;
         valueRow.alignment = UIStackViewAlignmentLastBaseline;
         valueRow.spacing = 3;
+        valueRow.userInteractionEnabled = NO;
         valueRow.translatesAutoresizingMaskIntoConstraints = NO;
+
+        _valueButton = [[RCInlineRowReadoutControl alloc] init];
+        _valueButton.translatesAutoresizingMaskIntoConstraints = NO;
+        _valueButton.isAccessibilityElement = YES;
+        _valueButton.accessibilityTraits = UIAccessibilityTraitButton;
+        _valueButton.accessibilityHint = @"Double tap to type an exact value";
+        [_valueButton addTarget:self action:@selector(beginTyping) forControlEvents:UIControlEventTouchUpInside];
+        [_valueButton addSubview:valueRow];
+
+        _field = [[UITextField alloc] init];
+        _field.font = RCInlineRowEditorDigitFontSized(compact ? 26 : 34, compact ? UIFontTextStyleTitle2 : UIFontTextStyleTitle1, UIFontWeightSemibold);
+        _field.adjustsFontSizeToFitWidth = YES;
+        _field.minimumFontSize = 14;
+        _field.textColor = [UIColor labelColor];
+        _field.tintColor = [UIColor systemBlueColor];
+        _field.backgroundColor = [UIColor tertiarySystemFillColor];
+        _field.layer.cornerRadius = compact ? 8 : 10;
+        _field.layer.cornerCurve = kCACornerCurveContinuous;
+        _field.clipsToBounds = YES;
+        _field.textAlignment = NSTextAlignmentCenter;
+        _field.keyboardType = item.allowsDecimals ? UIKeyboardTypeDecimalPad : UIKeyboardTypeNumberPad;
+        _field.autocorrectionType = UITextAutocorrectionTypeNo;
+        _field.autocapitalizationType = UITextAutocapitalizationTypeNone;
+        _field.spellCheckingType = UITextSpellCheckingTypeNo;
+        _field.returnKeyType = UIReturnKeyDone;
+        _field.delegate = self;
+        _field.hidden = YES;
+        _field.translatesAutoresizingMaskIntoConstraints = NO;
+        _field.accessibilityLabel = item.caption.length ? [item.caption stringByAppendingString:@" value"] : @"Value";
+        [_field addTarget:self action:@selector(fieldChanged) forControlEvents:UIControlEventEditingChanged];
+
+        UIToolbar *toolbar = [[UIToolbar alloc] initWithFrame:CGRectMake(0, 0, 320, 44)];
+        [toolbar sizeToFit];
+        toolbar.items = @[
+            [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil],
+            [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(finishTyping)],
+        ];
+        _field.inputAccessoryView = toolbar;
 
         [self addSubview:_minusButton];
         [self addSubview:_plusButton];
-        [self addSubview:valueRow];
+        [self addSubview:_valueButton];
+        [self addSubview:_field];
         [NSLayoutConstraint activateConstraints:@[
             [self.heightAnchor constraintGreaterThanOrEqualToConstant:compact ? 56 : 92],
             [_minusButton.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:inset],
@@ -158,12 +214,20 @@ static NSString *RCInlineRowEditorUnitSuffix(RCInlineRowItem *item) {
             [_plusButton.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-inset],
             [_plusButton.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
             [_plusButton.topAnchor constraintGreaterThanOrEqualToAnchor:self.topAnchor constant:inset],
-            [valueRow.centerXAnchor constraintEqualToAnchor:self.centerXAnchor],
-            [valueRow.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
-            [valueRow.topAnchor constraintGreaterThanOrEqualToAnchor:self.topAnchor constant:inset],
-            [valueRow.bottomAnchor constraintLessThanOrEqualToAnchor:self.bottomAnchor constant:-inset],
-            [valueRow.leadingAnchor constraintGreaterThanOrEqualToAnchor:_minusButton.trailingAnchor constant:10],
-            [valueRow.trailingAnchor constraintLessThanOrEqualToAnchor:_plusButton.leadingAnchor constant:-10],
+            [_valueButton.leadingAnchor constraintEqualToAnchor:_minusButton.trailingAnchor constant:6],
+            [_valueButton.trailingAnchor constraintEqualToAnchor:_plusButton.leadingAnchor constant:-6],
+            [_valueButton.topAnchor constraintEqualToAnchor:self.topAnchor],
+            [_valueButton.bottomAnchor constraintEqualToAnchor:self.bottomAnchor],
+            [valueRow.centerXAnchor constraintEqualToAnchor:_valueButton.centerXAnchor],
+            [valueRow.centerYAnchor constraintEqualToAnchor:_valueButton.centerYAnchor],
+            [valueRow.topAnchor constraintGreaterThanOrEqualToAnchor:_valueButton.topAnchor constant:inset],
+            [valueRow.bottomAnchor constraintLessThanOrEqualToAnchor:_valueButton.bottomAnchor constant:-inset],
+            [valueRow.leadingAnchor constraintGreaterThanOrEqualToAnchor:_valueButton.leadingAnchor constant:4],
+            [valueRow.trailingAnchor constraintLessThanOrEqualToAnchor:_valueButton.trailingAnchor constant:-4],
+            [_field.leadingAnchor constraintEqualToAnchor:_minusButton.trailingAnchor constant:10],
+            [_field.trailingAnchor constraintEqualToAnchor:_plusButton.leadingAnchor constant:-10],
+            [_field.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
+            [_field.heightAnchor constraintEqualToConstant:compact ? 38 : 48],
         ]];
         [self refresh];
     }
@@ -185,6 +249,48 @@ static NSString *RCInlineRowEditorUnitSuffix(RCInlineRowItem *item) {
     return button;
 }
 
+- (void)beginTyping {
+    if (self.item.variableName.length) {
+        self.field.text = @"";
+        self.field.placeholder = [self.item editableNumberText];
+    } else {
+        self.field.text = [self.item numberText];
+        self.field.placeholder = nil;
+    }
+    self.valueButton.hidden = YES;
+    self.field.hidden = NO;
+    [self.field becomeFirstResponder];
+}
+
+- (void)finishTyping {
+    [self.field resignFirstResponder];
+}
+
+- (void)fieldChanged {
+    [self.item applyEditableNumberText:self.field.text];
+    RCInlineRowNotifyValueChanged(self.item);
+    if (self.onChange) self.onChange();
+}
+
+- (BOOL)textFieldShouldReturn:(UITextField *)textField {
+    [textField resignFirstResponder];
+    return NO;
+}
+
+- (void)textFieldDidEndEditing:(UITextField *)textField {
+    // Clamp typed values into [min, max] when editing ends so out-of-range inputs snap cleanly
+    // instead of being discarded on fold.
+    if (!self.item.variableName.length) {
+        double maxVal = MAX(self.item.minimumValue, self.item.maximumValue);
+        self.item.numberValue = MAX(self.item.minimumValue, MIN(maxVal, self.item.numberValue));
+    }
+    self.field.hidden = YES;
+    self.valueButton.hidden = NO;
+    [self refresh];
+    RCInlineRowNotifyValueChanged(self.item);
+    if (self.onChange) self.onChange();
+}
+
 - (void)stepDown {
     [self stepBy:-self.item.step];
 }
@@ -194,6 +300,7 @@ static NSString *RCInlineRowEditorUnitSuffix(RCInlineRowItem *item) {
 }
 
 - (void)stepBy:(double)delta {
+    if (self.field.isFirstResponder) [self.field resignFirstResponder];
     double value = self.item.numberValue + delta;
     self.item.variableName = nil;
     self.item.numberValue = MAX(self.item.minimumValue, MIN(MAX(self.item.minimumValue, self.item.maximumValue), value));
@@ -218,6 +325,7 @@ static NSString *RCInlineRowEditorUnitSuffix(RCInlineRowItem *item) {
         self.minusButton.enabled = self.item.numberValue > self.item.minimumValue;
         self.plusButton.enabled = self.item.numberValue < self.item.maximumValue;
     }
+    self.valueButton.accessibilityLabel = [self.item displayValue];
     self.minusButton.alpha = self.minusButton.enabled ? 1.0 : 0.35;
     self.plusButton.alpha = self.plusButton.enabled ? 1.0 : 0.35;
 }
@@ -531,14 +639,14 @@ static NSString *RCInlineRowEditorUnitSuffix(RCInlineRowItem *item) {
             self.stepper.onChange = ^{ [weakSelf refresh]; [weakSelf reportChange]; };
             [stack addArrangedSubview:self.stepper];
 
-            self.exactRow = [[RCInlineRowExactField alloc] initWithItem:item compact:[self isCompact]];
-            self.exactRow.onChange = ^{ [weakSelf refresh]; [weakSelf reportChange]; };
-            self.exactRow.onCommit = ^{ [weakSelf reportCommit]; };
-            [stack addArrangedSubview:self.exactRow];
-
             if (![self isCompact]) {
+                self.exactRow = [[RCInlineRowExactField alloc] initWithItem:item compact:NO];
+                self.exactRow.onChange = ^{ [weakSelf refresh]; [weakSelf reportChange]; };
+                self.exactRow.onCommit = ^{ [weakSelf reportCommit]; };
+                [stack addArrangedSubview:self.exactRow];
+
                 NSString *step = [NSString stringWithFormat:@"%g", item.step];
-                [stack addArrangedSubview:RCInlineRowEditorNote([NSString stringWithFormat:@"Steps by %@%@. Type an exact value, or use + for a variable.", step, RCInlineRowEditorUnitSuffix(item)])];
+                [stack addArrangedSubview:RCInlineRowEditorNote([NSString stringWithFormat:@"Steps by %@%@. Tap the number or type an exact value, or use + for a variable.", step, RCInlineRowEditorUnitSuffix(item)])];
             }
         } else if (item.kind == RCInlineRowKindChoice) {
             [stack addArrangedSubview:[self choiceEditor]];
@@ -801,6 +909,7 @@ static NSString *RCInlineRowEditorUnitSuffix(RCInlineRowItem *item) {
         self.textField.text = text;
     } else {
         self.item.variableName = name;
+        [self endEditing:YES];
         [self refresh];
     }
     RCInlineRowEditorImpact();
