@@ -2524,6 +2524,7 @@ static void rc_note_action_sequence_edit(NSDictionary *config) {
 }
 
 static void rc_watch_face_refresh_observer(NSDictionary *config);
+static void rc_watch_sync_observing(NSDictionary *config);
 
 static void load_trigger_config() {
     @autoreleasepool {
@@ -2569,6 +2570,7 @@ static void load_trigger_config() {
                 // A triple press binding may have changed: tell iOS whether its own shortcut is on
                 dispatch_async(dispatch_get_main_queue(), ^{ RC_RefreshAXTriplePress(); });
                 rc_watch_face_refresh_observer(newConfig);
+                rc_watch_sync_observing(newConfig);
             } else {
                 SRLogMin(@"Failed to parse config at %@", path);
             }
@@ -7124,6 +7126,26 @@ static void rc_airplane_mode_start_observing(void) {
                                     CFNotificationSuspensionBehaviorDeliverImmediately);
 }
 
+// The Watch app pairs the watch, without it nothing here can work.
+static BOOL rc_watch_features_available(void) {
+    static BOOL available;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        if ([[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad) return;
+        if ([[NSFileManager defaultManager] fileExistsAtPath:@"/Applications/Bridge.app"]) {
+            available = YES;
+            return;
+        }
+        Class workspaceClass = objc_getClass("LSApplicationWorkspace");
+        SEL defaultSel = NSSelectorFromString(@"defaultWorkspace");
+        id workspace = [workspaceClass respondsToSelector:defaultSel] ? ((id (*)(id, SEL))objc_msgSend)(workspaceClass, defaultSel) : nil;
+        SEL installedSel = NSSelectorFromString(@"applicationIsInstalled:");
+        if (![workspace respondsToSelector:installedSel]) return;
+        available = ((BOOL (*)(id, SEL, id))objc_msgSend)(workspace, installedSel, @"com.apple.Bridge");
+    });
+    return available;
+}
+
 @protocol RCIDSDevice <NSObject>
 @optional
 - (BOOL)isDefaultPairedDevice;
@@ -7146,9 +7168,13 @@ static id g_watchIDSService = nil;
 static RCWatchIDSObserver *g_watchIDSObserver = nil;
 static BOOL g_watchConnected = NO;
 static BOOL g_watchReady = NO;
+static BOOL g_watchStartAttempted = NO;
 static uint64_t g_watchDebounceGen = 0;
 
+static void rc_watch_start_observing(void);
+
 static id rc_watch_default_ids_device(void) {
+    if (!g_watchStartAttempted) rc_watch_start_observing();
     if (!g_watchIDSService || ![g_watchIDSService respondsToSelector:@selector(devices)]) return nil;
     NSArray *devices = [(id<RCIDSService>)g_watchIDSService devices];
     if (![devices isKindOfClass:[NSArray class]] || devices.count == 0) return nil;
@@ -7198,6 +7224,9 @@ static void rc_watch_schedule_update(NSString *source) {
 @end
 
 static void rc_watch_start_observing(void) {
+    BOOL attempted = g_watchStartAttempted;
+    g_watchStartAttempted = YES;
+    if (attempted || !rc_watch_features_available()) return;
     dlopen("/System/Library/PrivateFrameworks/IDS.framework/IDS", RTLD_NOW);
     Class svcCls = objc_getClass("IDSService");
     if (!svcCls) {
@@ -7231,6 +7260,17 @@ static void rc_watch_start_observing(void) {
         BOOL conn = [dev respondsToSelector:@selector(isConnected)] ? [(id<RCIDSDevice>)dev isConnected] : NO;
         SRLogMin(@"⌚ [RCWatch] Watch state initialized: nearby=%d connected=%d (status=%@)", nearby, conn, g_watchConnected ? @"CONNECTED" : @"NOT_CONNECTED");
     });
+}
+
+static BOOL rc_watch_connection_trigger_configured(NSDictionary *config) {
+    NSDictionary *triggers = [config isKindOfClass:[NSDictionary class]] ? config[@"triggers"] : nil;
+    if (![triggers isKindOfClass:[NSDictionary class]]) return NO;
+    return triggers[@"trigger_watch_connect"] != nil || triggers[@"trigger_watch_disconnect"] != nil;
+}
+
+static void rc_watch_sync_observing(NSDictionary *config) {
+    if (!rc_watch_features_available() || !rc_watch_connection_trigger_configured(config)) return;
+    rc_watch_start_observing();
 }
 
 // Orientation triggers: the screen turning to landscape or back to portrait. SpringBoard says when
@@ -7825,9 +7865,6 @@ static void register_system_event_observers() {
     initialize_power_state();
     rc_carplay_start_observing();
     rc_airplane_mode_start_observing();
-    rc_watch_start_observing();
-    load_trigger_config();
-    rc_watch_face_refresh_observer(g_triggerConfig);
     rc_orientation_start_observing();
     rc_physical_orientation_start_observing();
 
@@ -15916,6 +15953,7 @@ static void start_web_server() {
                                         @"audiostream": @(is_audiostream_installed()),
                                         @"audiostream_running": @(is_audiostreamerd_running()),
                                         @"home_button": @(rc_has_home_button()),
+                                        @"watch": @(rc_watch_features_available()),
                                         @"multi_timer": @([[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:(NSOperatingSystemVersion){17, 0, 0}]),
                                         @"ios17": @([[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:(NSOperatingSystemVersion){17, 0, 0}]),
                                         // Whether one is saved - never the passcode itself

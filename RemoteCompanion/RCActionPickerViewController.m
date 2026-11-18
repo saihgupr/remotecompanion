@@ -468,6 +468,20 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
         ]
     ];
 
+    // Watch actions only make sense where the Apple Watch app is installed, so leave the
+    // Apple Watch section out (both arrays, so they stay aligned)
+    if (![RCConfigManager watchFeaturesAvailable]) {
+        NSUInteger watchIndex = [_sectionTitles indexOfObject:@"Apple Watch"];
+        if (watchIndex != NSNotFound && watchIndex < _sections.count) {
+            NSMutableArray *titles = [_sectionTitles mutableCopy];
+            NSMutableArray *sections = [_sections mutableCopy];
+            [titles removeObjectAtIndex:watchIndex];
+            [sections removeObjectAtIndex:watchIndex];
+            _sectionTitles = titles;
+            _sections = sections;
+        }
+    }
+
     // The vibration settings as this iOS version's Settings shows them: iOS 17's one Haptics
     // menu in place of the two switches, or the switches by their name for this version
     NSMutableArray *sections = [NSMutableArray array];
