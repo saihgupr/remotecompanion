@@ -121,6 +121,7 @@ static NSString *const kRCAOBuiltinPrefixes[] = {
     @"volume ",
     @"volume down ",
     @"volume up ",
+    @"watch face ",
     @"webui "
 };
 
@@ -204,6 +205,8 @@ static NSString *const kRCAOBuiltinCommands[] = {
     @"vol up",
     @"volume down",
     @"volume up",
+    @"watch face",
+    @"watch faces",
     @"wi status",
     @"wifi off",
     @"wifi on",

@@ -4273,6 +4273,14 @@ function nameForCmd(cmd) {
   if (lowCmd.startsWith('focus on '))     return `Turn On ${cmd.slice(9)}`;
   if (lowCmd.startsWith('focus toggle ')) return `Toggle ${cmd.slice(13)}`;
   if (lowCmd.startsWith('airplay connect ')) return `AirPlay Connect ${cmd.slice(16)}`;
+  if (lowCmd.startsWith('watch face ')) {
+    let val = cmd.slice(11).trim();
+    if (val.toLowerCase() === 'next') return 'Next Watch Face';
+    if (val.toLowerCase() === 'prev' || val.toLowerCase() === 'previous') return 'Previous Watch Face';
+    const hash = val.indexOf(' # ');
+    if (hash >= 0) val = val.slice(hash + 3);
+    return val ? `Watch Face: ${val}` : 'Switch Watch Face';
+  }
   // "... saved" without a saved passcode only wakes the screen to the passcode screen
   const unlockKind = /^(unlock|lock[- ]toggle) saved$/.test(lowCmd) && 'unlock_passcode_saved' in serverCapabilities && !serverCapabilities.unlock_passcode_saved ? '(Ask for Passcode)' : '(Saved Passcode)';
   if (lowCmd.startsWith('unlock '))       return `Unlock Device ${unlockKind}`;
@@ -4512,6 +4520,7 @@ function iconForCmd(cmd) {
   if (lowCmd.startsWith('bt connect '))   return { icon:'link',            cls:'icon-indigo' };
   if (lowCmd.startsWith('focus '))        return { icon:'moon_circle_fill', cls:'icon-indigo' };
   if (lowCmd.startsWith('airplay connect ')) return { icon:'airplayvideo',     cls:'icon-blue' };
+  if (lowCmd.startsWith('watch face')) return { icon:'timer', cls:'icon-blue' };
   if (lowCmd.startsWith('unlock '))          return { icon:'lock_open_fill',    cls:'icon-dark' };
   if (lowCmd.startsWith('lock-toggle ') || lowCmd.startsWith('lock toggle ') || lowCmd === 'lock-toggle' || lowCmd === 'lock toggle') return { icon:'lock_fill', cls:'icon-dark' };
   if (lowCmd.startsWith('set-vol '))      return { icon:'slider_horizontal_3',  cls:'icon-blue' };
@@ -4597,6 +4606,9 @@ const ACTION_SECTIONS = [
     { name:'Low Power Mode',    cmd:'low power toggle',icon:'battery_25', is_toggle:true },
     { name:'Auto-Lock (Display Sleep)', cmd:'autolock toggle', icon:'timer', is_toggle:true, keywords:'display sleep timeout screen time off autolock' },
     { name:'Timer…',            cmd:'__TIMER__',     icon:'timer', needs_input:true, keywords:'timer countdown clock alarm watch nap reminder start stop pause resume' },
+  ]},
+  { title:'Apple Watch', actions:[
+    { name:'Switch Watch Face…', cmd:'__WATCH_FACE__', icon:'timer', needs_input:true, keywords:'watch face switch change cycle next prev' },
   ]},
   { title:'Connectivity', actions:[
     { name:'Wi-Fi',             cmd:'wifi toggle',  icon:'wifi', is_toggle:true },
@@ -7855,6 +7867,8 @@ function selectPickerAction(act) {
     showDialog('Connect AirPlay', 'AirPlay Receiver name:', '', 'Add', val => {
       if (val) addActionToCurrent(`airplay connect ${val}`);
     });
+  } else if (c === '__WATCH_FACE__') {
+    promptWatchFacePicker();
   } else if (c === '__IF_CONDITION__') {
     condPickerNewType = 'if';
     openCondPicker(null);
@@ -7930,6 +7944,55 @@ function selectPickerAction(act) {
   } else {
     addActionToCurrent(c);
   }
+}
+
+async function promptWatchFacePicker() {
+  const buttons = [
+    { header: 'Cycle' },
+    { label: 'Next Watch Face', action() { addActionToCurrent('watch face next'); } },
+    { label: 'Previous Watch Face', action() { addActionToCurrent('watch face prev'); } },
+  ];
+  try {
+    const res = await sendCommand('watch faces');
+    if (res && res.ok) {
+      const text = await res.text();
+      const lines = text.split('\n').map(l => l.trimEnd()).filter(Boolean);
+      const faces = [];
+      for (const line of lines) {
+        if (line.startsWith('Error:') || line.startsWith('No Watch faces')) continue;
+        const isCurrent = line.startsWith('* ');
+        let raw = line.slice(2).trim();
+        let name = raw, target = raw;
+        const open = raw.lastIndexOf(' [');
+        if (open >= 0 && raw.endsWith(']')) {
+          name = raw.slice(0, open).trim();
+          const uid = raw.slice(open + 2, -1);
+          target = `${uid} # ${name}`;
+        }
+        if (name) faces.push({ name, target, isCurrent });
+      }
+      if (faces.length) {
+        buttons.push({ header: 'Watch Faces' });
+        for (const f of faces) {
+          buttons.push({
+            label: f.isCurrent ? `${f.name} (Current)` : f.name,
+            action() { addActionToCurrent(`watch face ${f.target}`); }
+          });
+        }
+      }
+    }
+  } catch (e) {}
+  buttons.push({ header: 'Other' });
+  buttons.push({
+    label: 'Enter Name…',
+    action() {
+      showDialog('Switch Watch Face', 'Watch face name or 1-based index:', '', 'Add', val => {
+        const name = (val || '').trim();
+        if (name) addActionToCurrent(`watch face ${name}`);
+      });
+    }
+  });
+  showSheet('Switch Watch Face', buttons);
 }
 
 function promptCameraPicker(isVideo) {
@@ -10573,6 +10636,7 @@ const BANNER_PLACEHOLDERS = {
   '__BT_CONNECT__': ['bt connect ', 'bluetooth connect '],
   '__BT_DISCONNECT__': ['bt disconnect ', 'bluetooth disconnect '],
   '__AIRPLAY_CONNECT__': ['airplay connect '],
+  '__WATCH_FACE__': ['watch face '],
   '__FOCUS__': ['focus on ', 'focus toggle ', 'focus off'],
   '__PLAY_GESTURE__': ['gesture play ', 'gesture play-latest'],
   '__OPEN_APP__': ['uiopen '],

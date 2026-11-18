@@ -20,4 +20,8 @@ killall -9 nfcd 2>/dev/null || /var/jb/usr/bin/killall -9 nfcd 2>/dev/null
 killall -9 companionfindlocallyd 2>/dev/null || /var/jb/usr/bin/killall -9 companionfindlocallyd 2>/dev/null
 launchctl kickstart -p system/com.apple.companionfindlocallyd 2>/dev/null || true
 
+# Same for bulletindistributord, which loads RCWatchNotify
+killall -9 bulletindistributord 2>/dev/null || /var/jb/usr/bin/killall -9 bulletindistributord 2>/dev/null
+launchctl kickstart -p system/com.apple.bulletindistributord 2>/dev/null || true
+
 exit 0

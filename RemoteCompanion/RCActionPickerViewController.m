@@ -215,7 +215,7 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
     
     RCConfigManager *cm = [RCConfigManager sharedManager];
     
-    _sectionTitles = @[@"Media", @"Sound", @"Capture", @"Apps & Navigation", @"Device Controls", @"Connectivity", @"System", @"Integrations", @"Scripting & Logic"];
+    _sectionTitles = @[@"Media", @"Sound", @"Capture", @"Apps & Navigation", @"Device Controls", @"Apple Watch", @"Connectivity", @"System", @"Integrations", @"Scripting & Logic"];
     
     _sections = @[
         // Media
@@ -317,6 +317,10 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
             @{ @"name": @"Timer...", @"command": @"__TIMER__", @"icon": @"timer", @"keywords": @"timer countdown clock alarm watch nap reminder start stop pause resume" },
             @{ @"name": @"NFC Scanner", @"command": @"nfc scanner toggle", @"icon": @"wave.3.right" },
             @{ @"name": @"Button Triggers", @"command": @"button triggers pause 15", @"icon": @"pause.circle" }
+        ],
+        // Apple Watch
+        @[
+            @{ @"name": @"Switch Watch Face...", @"command": @"__WATCH_FACE__", @"icon": ([UIImage systemImageNamed:@"applewatch.watchface"] ? @"applewatch.watchface" : @"applewatch"), @"keywords": @"watch face switch change cycle next prev" }
         ],
         // Connectivity
         @[
@@ -453,7 +457,7 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
             @{ @"name": @"Stop Trigger...", @"command": @"__STOP_TRIGGER__", @"icon": @"stop.circle" },
             @{ @"name": @"Terminal Command", @"command": @"__CUSTOM__", @"icon": @"terminal.fill" },
             @{ @"name": @"Toast...", @"command": @"__TOAST__", @"icon": @"text.bubble.fill" },
-            @{ @"name": @"Notification...", @"command": @"__NOTIFICATION__", @"icon": @"bell.badge.fill" },
+            @{ @"name": @"Notification...", @"command": @"__NOTIFICATION__", @"icon": @"bell.badge.fill", @"keywords": @"notify alert banner apple watch only" },
             @{ @"name": @"Clear Notifications...", @"command": @"__CLEAR_NOTIFICATIONS__", @"icon": @"bell.slash.fill" },
             @{ @"name": @"Haptic Feedback", @"command": @"haptic", @"icon": @"hand.tap.fill" }
         ]
@@ -501,7 +505,7 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
             remotePlaceholders = [NSSet setWithArray:@[
                 @"__UNLOCK_DEVICE__", @"__LOCK_TOGGLE__", @"__TAP__", @"__HOLD__", @"__SWIPE__",
                 @"__PLAY_GESTURE__", @"__RECORD_GESTURE__", @"__AIRPLAY_CONNECT__",
-                @"__BT_CONNECT__", @"__BT_DISCONNECT__", @"__FOCUS__", @"__HA_PICKER__",
+                @"__BT_CONNECT__", @"__BT_DISCONNECT__", @"__WATCH_FACE__", @"__FOCUS__", @"__HA_PICKER__",
                 @"__KM_TRIGGER__", @"__MQTT_PUBLISH__", @"__CAMERA_PICKER__", @"__CAMERA_VIDEO_PICKER__", @"__SET_ORIENTATION__"
             ]];
         });
@@ -646,7 +650,7 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         more = [NSSet setWithArray:@[@"__SET_VOLUME__", @"__SET_RINGER_VOLUME__", @"__SET_BRIGHTNESS__", @"__SET_FLASHLIGHT__",
-                                     @"__BT_CONNECT__", @"__BT_DISCONNECT__", @"__AIRPLAY_CONNECT__", @"__FOCUS__",
+                                     @"__BT_CONNECT__", @"__BT_DISCONNECT__", @"__AIRPLAY_CONNECT__", @"__WATCH_FACE__", @"__FOCUS__",
                                      @"__SHORTCUT_PICKER__", @"__OPEN_APP__", @"__KILL_APP__", @"__LUA_SCRIPT__", @"__TOAST__", @"__NOTIFICATION__", @"__CLEAR_NOTIFICATIONS__", @"__TIMER__",
                                      @"__IF_CONDITION__", @"__REPEAT__", @"__REPEAT_WHILE__", @"__WAIT_UNTIL__", @"__DELAY__",
                                      @"__STOP_TRIGGER__", @"__CUSTOM__", @"__HA_PICKER__", @"__KM_TRIGGER__", @"__MQTT_PUBLISH__",
@@ -812,6 +816,11 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
     // Existing special handlers
     if ([command isEqualToString:@"__AIRPLAY_CONNECT__"]) {
         [self handleAirPlayConnect];
+        return;
+    }
+
+    if ([command isEqualToString:@"__WATCH_FACE__"]) {
+        [self handleWatchFace];
         return;
     }
     
@@ -1192,6 +1201,10 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
 
 - (void)handleAirPlayConnect {
     [self pushDevicePickerWithKind:RCDevicePickerKindAirPlay title:@"Connect AirPlay" commandPrefix:@"airplay connect"];
+}
+
+- (void)handleWatchFace {
+    [self pushDevicePickerWithKind:RCDevicePickerKindWatchFace title:@"Switch Watch Face" commandPrefix:@"watch face"];
 }
 
 - (void)handleBluetoothConnect {

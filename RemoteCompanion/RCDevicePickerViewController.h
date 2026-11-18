@@ -3,6 +3,7 @@
 typedef NS_ENUM(NSInteger, RCDevicePickerKind) {
     RCDevicePickerKindBluetooth, // the phone's paired devices
     RCDevicePickerKindAirPlay,   // the AirPlay outputs reachable right now
+    RCDevicePickerKindWatchFace, // faces on the paired Apple Watch
 };
 
 // A searchable list of Bluetooth or AirPlay devices fetched from the tweak, with an icon per

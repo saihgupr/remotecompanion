@@ -2082,6 +2082,16 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
             result = [NSString stringWithFormat:@"Connect %@", val];
         } else if ([cmd hasPrefix:@"airplay disconnect"]) {
             result = @"Disconnect Airplay";
+        } else if ([cmd hasPrefix:@"watch face "]) {
+            NSString *val = [[originalCmd substringFromIndex:11] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            NSString *lowVal = [val lowercaseString];
+            if ([lowVal isEqualToString:@"next"]) result = @"Next Watch Face";
+            else if ([lowVal isEqualToString:@"prev"] || [lowVal isEqualToString:@"previous"]) result = @"Previous Watch Face";
+            else {
+                NSRange hash = [val rangeOfString:@" # "];
+                if (hash.location != NSNotFound) val = [val substringFromIndex:NSMaxRange(hash)];
+                result = val.length ? [NSString stringWithFormat:@"Watch Face: %@", val] : @"Switch Watch Face";
+            }
         } else if ([cmd hasPrefix:@"set-vol "]) {
             result = [NSString stringWithFormat:@"Set Volume %@", [cmd substringFromIndex:8]];
         } else if ([cmd hasPrefix:@"ringer volume "]) {
@@ -2385,6 +2395,7 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
     if ([cmd hasPrefix:@"bt connect "] || [cmd hasPrefix:@"bluetooth connect "]) return @"link";
     if ([cmd hasPrefix:@"bt disconnect "] || [cmd hasPrefix:@"bluetooth disconnect "]) return @"xmark.circle";
     if ([cmd hasPrefix:@"airplay connect "]) return @"airplayaudio";
+    if ([cmd hasPrefix:@"watch face"]) return ([UIImage systemImageNamed:@"applewatch.watchface"] ? @"applewatch.watchface" : @"applewatch");
     if ([cmd hasPrefix:@"focus "]) return @"moon.circle";
     if ([cmd hasPrefix:@"shortcut:"]) return @"wand.and.stars";
     if ([cmd hasPrefix:@"set-vol "]) return @"slider.horizontal.3";

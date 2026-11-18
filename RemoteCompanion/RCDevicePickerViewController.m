@@ -27,6 +27,9 @@ static NSString *RCDeviceIconName(NSString *name, RCDevicePickerKind kind) {
             if ([UIImage systemImageNamed:rule[1]]) return rule[1];
         }
     }
+    if (kind == RCDevicePickerKindWatchFace) {
+        return [UIImage systemImageNamed:@"applewatch.watchface"] ? @"applewatch.watchface" : @"applewatch";
+    }
     return kind == RCDevicePickerKindAirPlay ? @"airplayaudio" : @"dot.radiowaves.left.and.right";
 }
 
@@ -68,7 +71,7 @@ static NSString *RCDeviceIconName(NSString *name, RCDevicePickerKind kind) {
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
-    self.searchController.searchBar.placeholder = @"Search Devices";
+    self.searchController.searchBar.placeholder = self.kind == RCDevicePickerKindWatchFace ? @"Search Faces" : @"Search Devices";
     self.navigationItem.searchController = self.searchController;
     self.navigationItem.hidesSearchBarWhenScrolling = NO;
     self.definesPresentationContext = YES;
@@ -90,7 +93,9 @@ static NSString *RCDeviceIconName(NSString *name, RCDevicePickerKind kind) {
     self.loading = YES;
     self.errorText = nil;
     [self.tableView reloadData];
-    NSString *command = self.kind == RCDevicePickerKindAirPlay ? @"airplay list" : @"bluetooth list";
+    NSString *command = @"bluetooth list";
+    if (self.kind == RCDevicePickerKindAirPlay) command = @"airplay list";
+    else if (self.kind == RCDevicePickerKindWatchFace) command = @"watch faces";
     __weak typeof(self) weakSelf = self;
     [[RCServerClient sharedClient] executeCommand:command completion:^(NSString *output, NSError *error) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
@@ -115,16 +120,16 @@ static NSString *RCDeviceIconName(NSString *name, RCDevicePickerKind kind) {
     for (NSString *line in [output componentsSeparatedByString:@"\n"]) {
         NSString *text = line;
         BOOL current = NO;
-        if (self.kind == RCDevicePickerKindAirPlay && [text hasPrefix:@"* "]) {
+        if ((self.kind == RCDevicePickerKindAirPlay || self.kind == RCDevicePickerKindWatchFace) && [text hasPrefix:@"* "]) {
             current = YES;
             text = [text substringFromIndex:2];
         }
         text = [text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        if (text.length == 0 || [text hasPrefix:@"Error:"] || [text hasPrefix:@"No AirPlay devices found"] || [text hasPrefix:@"No paired Bluetooth devices found"]) continue;
+        if (text.length == 0 || [text hasPrefix:@"Error:"] || [text hasPrefix:@"No AirPlay devices found"] || [text hasPrefix:@"No paired Bluetooth devices found"] || [text hasPrefix:@"No Watch faces found"]) continue;
 
         NSString *name = text;
         NSString *target = text;
-        if (self.kind == RCDevicePickerKindAirPlay) {
+        if (self.kind == RCDevicePickerKindAirPlay || self.kind == RCDevicePickerKindWatchFace) {
             NSRange open = [text rangeOfString:@" [" options:NSBackwardsSearch];
             if (open.location != NSNotFound && [text hasSuffix:@"]"]) {
                 name = [[text substringToIndex:open.location] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
@@ -132,16 +137,26 @@ static NSString *RCDeviceIconName(NSString *name, RCDevicePickerKind kind) {
                 target = [NSString stringWithFormat:@"%@ # %@", uid, name];
             }
         }
-        if ([seen containsObject:name.lowercaseString]) continue;
-        [seen addObject:name.lowercaseString];
+        NSString *dedupeKey = (self.kind == RCDevicePickerKindWatchFace) ? target.lowercaseString : name.lowercaseString;
+        if ([seen containsObject:dedupeKey]) continue;
+        [seen addObject:dedupeKey];
         [devices addObject:@{ @"name": name, @"target": target, @"current": @(current) }];
     }
-    [devices sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
-        return [a[@"name"] localizedCaseInsensitiveCompare:b[@"name"]];
-    }];
+    if (self.kind != RCDevicePickerKindWatchFace) {
+        [devices sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+            return [a[@"name"] localizedCaseInsensitiveCompare:b[@"name"]];
+        }];
+    }
     // Editing an action whose device isn't listed (unpaired, or not reachable now): keep it visible
-    if (self.currentDevice.length && ![seen containsObject:self.currentDevice.lowercaseString]) {
-        [devices insertObject:@{ @"name": self.currentDevice, @"target": self.currentDevice, @"missing": @YES } atIndex:0];
+    if (self.currentDevice.length &&
+        !(self.kind == RCDevicePickerKindWatchFace && ([self.currentDevice caseInsensitiveCompare:@"next"] == NSOrderedSame || [self.currentDevice caseInsensitiveCompare:@"prev"] == NSOrderedSame || [self.currentDevice caseInsensitiveCompare:@"previous"] == NSOrderedSame))) {
+        BOOL foundCurrent = NO;
+        for (NSDictionary *d in devices) {
+            if ([d[@"name"] caseInsensitiveCompare:self.currentDevice] == NSOrderedSame) { foundCurrent = YES; break; }
+        }
+        if (!foundCurrent) {
+            [devices insertObject:@{ @"name": self.currentDevice, @"target": self.currentDevice, @"missing": @YES } atIndex:0];
+        }
     }
     return devices;
 }
@@ -163,6 +178,13 @@ static NSString *RCDeviceIconName(NSString *name, RCDevicePickerKind kind) {
 - (NSArray<NSString *> *)extraRows {
     if ([self searchText].length) return @[];
     NSMutableArray *rows = [NSMutableArray array];
+    if (self.kind == RCDevicePickerKindWatchFace) {
+        [rows addObject:@"Next Watch Face"];
+        [rows addObject:@"Previous Watch Face"];
+        [rows addObject:@"Other Name…"];
+        if (!self.loading && (self.errorText || self.devices.count == 0)) [rows addObject:@"Try Again"];
+        return rows;
+    }
     if (!self.loading && (self.kind == RCDevicePickerKindAirPlay || self.errorText || self.devices.count == 0)) {
         [rows addObject:self.kind == RCDevicePickerKindAirPlay ? @"Scan Again" : @"Try Again"];
     }
@@ -184,12 +206,14 @@ static NSString *RCDeviceIconName(NSString *name, RCDevicePickerKind kind) {
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    if (section != 0) return nil;
+    if (section != 0) return self.kind == RCDevicePickerKindWatchFace ? @"Cycle" : nil;
+    if (self.kind == RCDevicePickerKindWatchFace) return @"Watch Faces";
     return self.kind == RCDevicePickerKindAirPlay ? @"Available Outputs" : @"Paired Devices";
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section != 0 || self.loading || self.errorText) return nil;
+    if (self.kind == RCDevicePickerKindWatchFace) return @"Switches the active face on your paired Apple Watch.";
     return self.kind == RCDevicePickerKindAirPlay ? @"Only outputs reachable right now are listed." : nil;
 }
 
@@ -207,9 +231,19 @@ static NSString *RCDeviceIconName(NSString *name, RCDevicePickerKind kind) {
     if (indexPath.section == 1) {
         NSString *title = [self extraRows][indexPath.row];
         cell.textLabel.text = title;
-        cell.textLabel.textColor = self.view.tintColor;
-        cell.imageView.image = [UIImage systemImageNamed:[title isEqualToString:@"Other Name…"] ? @"pencil" : @"arrow.clockwise"];
-        cell.imageView.tintColor = self.view.tintColor;
+        BOOL isNext = [title isEqualToString:@"Next Watch Face"];
+        BOOL isPrev = [title isEqualToString:@"Previous Watch Face"];
+        if (isNext || isPrev) {
+            cell.imageView.image = [UIImage systemImageNamed:isNext ? @"forward.fill" : @"backward.fill"];
+            cell.imageView.tintColor = self.view.tintColor;
+            BOOL ticked = self.currentDevice.length && ((isNext && [self.currentDevice caseInsensitiveCompare:@"next"] == NSOrderedSame) ||
+                                                        (isPrev && ([self.currentDevice caseInsensitiveCompare:@"prev"] == NSOrderedSame || [self.currentDevice caseInsensitiveCompare:@"previous"] == NSOrderedSame)));
+            cell.accessoryType = ticked ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+        } else {
+            cell.textLabel.textColor = self.view.tintColor;
+            cell.imageView.image = [UIImage systemImageNamed:[title isEqualToString:@"Other Name…"] ? @"pencil" : @"arrow.clockwise"];
+            cell.imageView.tintColor = self.view.tintColor;
+        }
         return cell;
     }
 
@@ -218,16 +252,18 @@ static NSString *RCDeviceIconName(NSString *name, RCDevicePickerKind kind) {
         cell.textLabel.textColor = [UIColor secondaryLabelColor];
         cell.textLabel.numberOfLines = 0;
         if (self.loading) {
-            cell.textLabel.text = self.kind == RCDevicePickerKindAirPlay ? @"Scanning for devices…" : @"Loading paired devices…";
+            if (self.kind == RCDevicePickerKindWatchFace) cell.textLabel.text = @"Loading Watch faces…";
+            else cell.textLabel.text = self.kind == RCDevicePickerKindAirPlay ? @"Scanning for devices…" : @"Loading paired devices…";
             UIActivityIndicatorView *spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
             [spinner startAnimating];
             cell.accessoryView = spinner;
         } else if (self.errorText) {
             cell.textLabel.text = self.errorText;
         } else if ([self searchText].length) {
-            cell.textLabel.text = @"No matching devices";
+            cell.textLabel.text = self.kind == RCDevicePickerKindWatchFace ? @"No matching faces" : @"No matching devices";
         } else {
-            cell.textLabel.text = self.kind == RCDevicePickerKindAirPlay ? @"No AirPlay devices found" : @"No paired devices found";
+            if (self.kind == RCDevicePickerKindWatchFace) cell.textLabel.text = @"No Watch faces found";
+            else cell.textLabel.text = self.kind == RCDevicePickerKindAirPlay ? @"No AirPlay devices found" : @"No paired devices found";
         }
         return cell;
     }
@@ -236,7 +272,7 @@ static NSString *RCDeviceIconName(NSString *name, RCDevicePickerKind kind) {
     cell.textLabel.text = device[@"name"];
     cell.imageView.image = [UIImage systemImageNamed:RCDeviceIconName(device[@"name"], self.kind)];
     if ([device[@"missing"] boolValue]) cell.detailTextLabel.text = @"Not Found";
-    else if ([device[@"current"] boolValue]) cell.detailTextLabel.text = @"Current Output";
+    else if ([device[@"current"] boolValue]) cell.detailTextLabel.text = self.kind == RCDevicePickerKindWatchFace ? @"Current Face" : @"Current Output";
     BOOL ticked = self.currentDevice.length && [device[@"name"] caseInsensitiveCompare:self.currentDevice] == NSOrderedSame;
     cell.accessoryType = ticked ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
     return cell;
@@ -249,7 +285,10 @@ static NSString *RCDeviceIconName(NSString *name, RCDevicePickerKind kind) {
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     if (indexPath.section == 1) {
-        if ([[self extraRows][indexPath.row] isEqualToString:@"Other Name…"]) [self promptForName];
+        NSString *row = [self extraRows][indexPath.row];
+        if ([row isEqualToString:@"Next Watch Face"]) [self choose:@{ @"name": @"Next Watch Face", @"target": @"next" }];
+        else if ([row isEqualToString:@"Previous Watch Face"]) [self choose:@{ @"name": @"Previous Watch Face", @"target": @"prev" }];
+        else if ([row isEqualToString:@"Other Name…"]) [self promptForName];
         else [self reload];
         return;
     }
@@ -264,11 +303,12 @@ static NSString *RCDeviceIconName(NSString *name, RCDevicePickerKind kind) {
 
 // A device that isn't paired yet, or one whose name changes: matched by name when the action runs
 - (void)promptForName {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Device Name"
-                                                                   message:@"Matches any paired device whose name contains this text."
+    BOOL isWatchFace = self.kind == RCDevicePickerKindWatchFace;
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:isWatchFace ? @"Watch Face Name" : @"Device Name"
+                                                                   message:isWatchFace ? @"Matches any face on the paired Apple Watch whose name contains this text." : @"Matches any paired device whose name contains this text."
                                                             preferredStyle:UIAlertControllerStyleAlert];
     [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
-        field.placeholder = @"My Device";
+        field.placeholder = isWatchFace ? @"Infograph" : @"My Device";
         field.text = self.currentDevice;
         field.autocapitalizationType = UITextAutocapitalizationTypeWords;
     }];

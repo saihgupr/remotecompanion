@@ -20,7 +20,7 @@ static NSString *RCTrim(NSString *s) {
     c.title = @""; c.message = @""; c.buttons = @[];
     if (![self isNotifyCommand:command]) return c;
     NSString *args = RCTrim([command substringFromIndex:7]);
-    static NSRegularExpression *removeOption, *tapOption, *imageOption, *imageURLOption, *buttonOption, *waitOption;
+    static NSRegularExpression *removeOption, *tapOption, *imageOption, *imageURLOption, *buttonOption, *waitOption, *watchOnlyOption, *watchAlsoOption;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         removeOption = [NSRegularExpression regularExpressionWithPattern:@"(^|\\s)--remove-after\\s+(\\d+(\\.\\d+)?)$" options:0 error:nil];
@@ -29,6 +29,8 @@ static NSString *RCTrim(NSString *s) {
         imageURLOption = [NSRegularExpression regularExpressionWithPattern:@"(^|\\s)--image-url\\s+(?:\"([^\"]*)\"|(\\S+))$" options:0 error:nil];
         waitOption = [NSRegularExpression regularExpressionWithPattern:@"(^|\\s)--wait\\s+(\\d+(\\.\\d+)?)$" options:0 error:nil];
         buttonOption = [NSRegularExpression regularExpressionWithPattern:@"(^|\\s)--button\\s+\"([^\"]*)\"$" options:0 error:nil];
+        watchOnlyOption = [NSRegularExpression regularExpressionWithPattern:@"(^|\\s)(?:--watch-only|--watch\\s+(?:only|watch-only))$" options:NSRegularExpressionCaseInsensitive error:nil];
+        watchAlsoOption = [NSRegularExpression regularExpressionWithPattern:@"(^|\\s)--watch(?:\\s+(?:always|also|both))?$" options:NSRegularExpressionCaseInsensitive error:nil];
     });
     NSMutableArray *buttons = [NSMutableArray array];
     // Options come after the text, in any order; read from the end
@@ -40,6 +42,13 @@ static NSString *RCTrim(NSString *s) {
             found = YES;
         }
         NSTextCheckingResult *m;
+        if ((m = [watchOnlyOption firstMatchInString:args options:0 range:NSMakeRange(0, args.length)])) {
+            c.watchMode = RCNotifyWatchOnly;
+            args = RCTrim([args substringToIndex:m.range.location]); found = YES;
+        } else if ((m = [watchAlsoOption firstMatchInString:args options:0 range:NSMakeRange(0, args.length)])) {
+            c.watchMode = RCNotifyWatchAlso;
+            args = RCTrim([args substringToIndex:m.range.location]); found = YES;
+        }
         if ((m = [removeOption firstMatchInString:args options:0 range:NSMakeRange(0, args.length)])) {
             c.removeAfter = (NSInteger)llround([[args substringWithRange:[m rangeAtIndex:2]] doubleValue]);
             args = RCTrim([args substringToIndex:m.range.location]); found = YES;
@@ -109,6 +118,8 @@ static NSString *RCQuotable(NSString *s) {
 - (NSString *)string {
     NSMutableString *cmd = [NSMutableString stringWithFormat:@"notify \"%@\" \"%@\"", RCQuotable(self.title.length ? self.title : @"RemoteCompanion"), RCQuotable(self.message)];
     if (self.urgent) [cmd appendString:@" --urgent"];
+    if (self.watchMode == RCNotifyWatchAlso) [cmd appendString:@" --watch"];
+    else if (self.watchMode == RCNotifyWatchOnly) [cmd appendString:@" --watch only"];
     if (self.removeAfter > 0) [cmd appendFormat:@" --remove-after %ld", (long)self.removeAfter];
     if (self.image.length) [cmd appendFormat:@" --image \"%@\"", RCQuotable(self.image)];
     if (self.imageURL.length) [cmd appendFormat:@" --image-url \"%@\"", RCQuotable(self.imageURL)];
