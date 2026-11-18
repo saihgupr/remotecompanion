@@ -2,14 +2,14 @@
 #import "RCSymbolPickerViewController.h"
 #import "RCConfigManager.h"
 #import "RCActionsViewController.h"
+#import <objc/message.h>
 
-const NSInteger RCControlCenterButtonSlots = 4;
 NSString *const RCControlCenterButtonKeyPrefix = @"trigger_cc_button_";
 static NSString *const kRCDefaultButtonIcon = @"bolt.fill";
 
 @interface RCControlCenterTriggerViewController ()
 @property (nonatomic, copy) NSString *triggerKey; // nil when adding
-@property (nonatomic, assign) NSInteger slot;
+@property (nonatomic, assign) NSInteger nextNumber;
 @property (nonatomic, copy) NSString *buttonName;
 @property (nonatomic, copy) NSString *iconName;
 @end
@@ -23,12 +23,12 @@ static NSString *const kRCDefaultButtonIcon = @"bolt.fill";
         _iconName = kRCDefaultButtonIcon;
         _buttonName = @"";
         if (triggerKey) {
-            NSDictionary *data = [[RCConfigManager sharedManager] triggerDataForKey:triggerKey];
+            RCConfigManager *config = [RCConfigManager sharedManager];
+            NSDictionary *data = [config triggerDataForKey:triggerKey];
             if ([data[@"icon"] length]) _iconName = data[@"icon"];
-            _buttonName = data[@"name"] ?: @"";
-            _slot = [[triggerKey substringFromIndex:MIN(triggerKey.length, RCControlCenterButtonKeyPrefix.length)] integerValue];
+            _buttonName = [config customNameForTrigger:triggerKey] ?: @"";
         } else {
-            _slot = [self firstFreeSlot];
+            _nextNumber = [self nextButtonNumber];
         }
     }
     return self;
@@ -38,22 +38,32 @@ static NSString *const kRCDefaultButtonIcon = @"bolt.fill";
     return [self initWithTriggerKey:nil];
 }
 
-#pragma mark - Slots
+#pragma mark - Button Keys
 
-- (NSString *)keyForSlot:(NSInteger)slot {
-    return [NSString stringWithFormat:@"%@%ld", RCControlCenterButtonKeyPrefix, (long)slot];
+- (NSString *)keyForNumber:(NSInteger)number {
+    return [NSString stringWithFormat:@"%@%ld", RCControlCenterButtonKeyPrefix, (long)number];
 }
 
-- (BOOL)slotIsFree:(NSInteger)slot {
-    return [self keyForSlot:slot].length && ![[RCConfigManager sharedManager] triggerDataForKey:[self keyForSlot:slot]];
-}
-
-// 0 when all are taken
-- (NSInteger)firstFreeSlot {
-    for (NSInteger slot = 1; slot <= RCControlCenterButtonSlots; slot++) {
-        if ([self slotIsFree:slot]) return slot;
+- (NSInteger)nextButtonNumber {
+    NSInteger maxNum = 0;
+    RCConfigManager *config = [RCConfigManager sharedManager];
+    for (NSString *key in [config allConfiguredTriggerKeys]) {
+        if (![key hasPrefix:RCControlCenterButtonKeyPrefix]) continue;
+        NSInteger n = [[key substringFromIndex:RCControlCenterButtonKeyPrefix.length] integerValue];
+        if (n > maxNum) maxNum = n;
     }
-    return 0;
+    NSInteger candidate = maxNum + 1;
+    while ([config triggerDataForKey:[self keyForNumber:candidate]]) {
+        candidate++;
+    }
+    return candidate;
+}
+
+- (NSString *)defaultPlaceholderName {
+    if (self.triggerKey) {
+        return [[RCConfigManager sharedManager] defaultNameForTrigger:self.triggerKey];
+    }
+    return [NSString stringWithFormat:@"Control Center Button %ld", (long)self.nextNumber];
 }
 
 #pragma mark - View
@@ -87,36 +97,29 @@ static NSString *const kRCDefaultButtonIcon = @"bolt.fill";
 #pragma mark - Table
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    return 2;
+    return 1;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    return section == 0 ? 2 : 1;
+    return 2;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    return section == 0 ? @"Button" : @"Control Center";
+    return @"Button";
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    if (section == 0) return @"Tapping the button in Control Center runs this trigger's actions.";
-    if (![RCConfigManager controlCenterSupportInstalled]) return @"CCSupport isn't installed, and it's what puts the button in Control Center. Install it from Havoc or your package manager, then add the button in Settings > Control Center.";
-    return @"Add the button in Settings > Control Center, under the name RemoteCompanion Button, with the number above.";
+    if (![RCConfigManager controlCenterSupportInstalled]) {
+        return @"CCSupport isn't installed, and it's what puts the button in Control Center. Install it from Havoc or your package manager, then add the button in Settings > Control Center.";
+    }
+    return @"Tapping the button in Control Center runs this trigger's actions. Once saved, add it under this name in Settings > Control Center.";
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:nil];
-    if (indexPath.section == 1) {
-        cell.textLabel.text = @"Button Number";
-        cell.detailTextLabel.text = self.slot ? [NSString stringWithFormat:@"%ld", (long)self.slot] : @"None free";
-        // A trigger keeps its number; a new one picks from those left
-        cell.accessoryType = self.triggerKey ? UITableViewCellAccessoryNone : UITableViewCellAccessoryDisclosureIndicator;
-        cell.selectionStyle = self.triggerKey ? UITableViewCellSelectionStyleNone : UITableViewCellSelectionStyleDefault;
-        return cell;
-    }
     if (indexPath.row == 0) {
         cell.textLabel.text = @"Name";
-        cell.detailTextLabel.text = self.buttonName.length ? self.buttonName : [NSString stringWithFormat:@"Control Center Button %ld", (long)self.slot];
+        cell.detailTextLabel.text = self.buttonName.length ? self.buttonName : [self defaultPlaceholderName];
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         return cell;
     }
@@ -130,9 +133,7 @@ static NSString *const kRCDefaultButtonIcon = @"bolt.fill";
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    if (indexPath.section == 1) {
-        if (!self.triggerKey) [self chooseSlot];
-    } else if (indexPath.row == 0) {
+    if (indexPath.row == 0) {
         [self editName];
     } else {
         [self chooseIcon];
@@ -141,7 +142,7 @@ static NSString *const kRCDefaultButtonIcon = @"bolt.fill";
 
 - (void)editName {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Name" message:nil preferredStyle:UIAlertControllerStyleAlert];
-    NSString *placeholder = [NSString stringWithFormat:@"Control Center Button %ld", (long)self.slot];
+    NSString *placeholder = [self defaultPlaceholderName];
     [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
         field.text = self.buttonName;
         field.placeholder = placeholder;
@@ -168,40 +169,23 @@ static NSString *const kRCDefaultButtonIcon = @"bolt.fill";
     [self.navigationController pushViewController:picker animated:YES];
 }
 
-- (void)chooseSlot {
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Button Number" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
-    for (NSInteger slot = 1; slot <= RCControlCenterButtonSlots; slot++) {
-        if (![self slotIsFree:slot]) continue;
-        [sheet addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"%ld", (long)slot] style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-            self.slot = slot;
-            [self.tableView reloadData];
-        }]];
-    }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    sheet.popoverPresentationController.sourceView = self.tableView;
-    sheet.popoverPresentationController.sourceRect = [self.tableView rectForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:1]];
-    [self presentViewController:sheet animated:YES completion:nil];
-}
-
 #pragma mark - Save
 
 - (void)save {
     RCConfigManager *config = [RCConfigManager sharedManager];
-    if (!self.slot) {
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"No Buttons Left"
-                                                                       message:[NSString stringWithFormat:@"All %ld Control Center buttons are in use. Delete one to add another.", (long)RCControlCenterButtonSlots]
-                                                                preferredStyle:UIAlertControllerStyleAlert];
-        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
-        [self presentViewController:alert animated:YES completion:nil];
-        return;
-    }
-
-    NSString *key = self.triggerKey ?: [self keyForSlot:self.slot];
-    NSString *name = self.buttonName.length ? self.buttonName : [NSString stringWithFormat:@"Control Center Button %ld", (long)self.slot];
+    NSString *key = self.triggerKey ?: [self keyForNumber:[self nextButtonNumber]];
+    NSString *trimmed = [self.buttonName stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    NSString *defaultName = [NSString stringWithFormat:@"Control Center Button %@", [key substringFromIndex:RCControlCenterButtonKeyPrefix.length]];
+    NSString *name = trimmed.length ? trimmed : defaultName;
 
     if (self.triggerKey) {
         NSMutableDictionary *data = [[config triggerDataForKey:key] mutableCopy] ?: [NSMutableDictionary dictionary];
         data[@"name"] = name;
+        if (trimmed.length) {
+            data[@"customName"] = trimmed;
+        } else {
+            [data removeObjectForKey:@"customName"];
+        }
         data[@"icon"] = self.iconName;
         if (!data[@"actions"]) data[@"actions"] = @[];
         if (!data[@"enabled"]) data[@"enabled"] = @YES;
@@ -211,12 +195,23 @@ static NSString *const kRCDefaultButtonIcon = @"bolt.fill";
         if (index != NSNotFound && index > 0 && [vcs[index - 1] isKindOfClass:[RCActionsViewController class]]) {
             RCActionsViewController *actionsVC = vcs[index - 1];
             actionsVC.title = name;
+            SEL wrapSel = NSSelectorFromString(@"updateWrappedTitle");
+            if ([actionsVC respondsToSelector:wrapSel]) {
+                ((void (*)(id, SEL))objc_msgSend)(actionsVC, wrapSel);
+            }
         }
         [self.navigationController popViewControllerAnimated:YES];
         return;
     }
 
-    [config updateTrigger:key withData:@{ @"name": name, @"icon": self.iconName, @"enabled": @YES, @"actions": @[] }];
+    NSMutableDictionary *data = [@{
+        @"name": name,
+        @"icon": self.iconName,
+        @"enabled": @YES,
+        @"actions": @[]
+    } mutableCopy];
+    if (trimmed.length) data[@"customName"] = trimmed;
+    [config updateTrigger:key withData:data];
     RCActionsViewController *vc = [[RCActionsViewController alloc] initWithTriggerKey:key];
     NSMutableArray *vcs = [self.navigationController.viewControllers mutableCopy];
     [vcs removeLastObject];

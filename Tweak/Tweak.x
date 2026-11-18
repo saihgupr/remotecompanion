@@ -2521,6 +2521,41 @@ static void rc_note_action_sequence_edit(NSDictionary *config) {
     dispatch_async(dispatch_get_main_queue(), ^{ rc_fire_sequence_edited_trigger(); });
 }
 
+static NSDictionary *g_ccButtonsSnapshot = nil;
+
+// Captures the Control Center button triggers (name, customName, icon) so any add, remove,
+// rename, or icon edit tells CCSupport and active RCCCButton instances to refresh live.
+static NSDictionary *rc_cc_buttons_snapshot(NSDictionary *config) {
+    NSDictionary *triggers = [config[@"triggers"] isKindOfClass:[NSDictionary class]] ? config[@"triggers"] : nil;
+    NSMutableDictionary *snapshot = [NSMutableDictionary dictionary];
+    for (id rawKey in triggers) {
+        if (![rawKey isKindOfClass:[NSString class]]) continue;
+        NSString *key = rawKey;
+        if (![key hasPrefix:@"trigger_cc_button_"]) continue;
+        NSDictionary *trigger = [triggers[key] isKindOfClass:[NSDictionary class]] ? triggers[key] : nil;
+        if (!trigger) continue;
+        NSString *name = [trigger[@"name"] isKindOfClass:[NSString class]] ? trigger[@"name"] : @"";
+        NSString *customName = [trigger[@"customName"] isKindOfClass:[NSString class]] ? trigger[@"customName"] : @"";
+        NSString *icon = [trigger[@"icon"] isKindOfClass:[NSString class]] ? trigger[@"icon"] : @"";
+        snapshot[key] = @{ @"name": name, @"customName": customName, @"icon": icon };
+    }
+    return [snapshot copy];
+}
+
+static void rc_note_cc_buttons_change(NSDictionary *config) {
+    NSDictionary *current = rc_cc_buttons_snapshot(config);
+    BOOL changed = NO;
+    @synchronized (rc_trigger_config_lock()) {
+        changed = g_ccButtonsSnapshot && ![g_ccButtonsSnapshot isEqualToDictionary:current];
+        g_ccButtonsSnapshot = current;
+    }
+    if (!changed) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        notify_post("com.opa334.ccsupport/ReloadProviders");
+        [[NSNotificationCenter defaultCenter] postNotificationName:@"com.saihgupr.remotecompanion.ccbutton.refresh" object:nil];
+    });
+}
+
 static void load_trigger_config() {
     @autoreleasepool {
         // Find the config file
@@ -2562,6 +2597,7 @@ static void load_trigger_config() {
                       (unsigned long)[newConfig[@"triggers"] count]);
                 // Another editor (the app or the web UI) may have changed an action sequence
                 rc_note_action_sequence_edit(newConfig);
+                rc_note_cc_buttons_change(newConfig);
                 // A triple press binding may have changed: tell iOS whether its own shortcut is on
                 dispatch_async(dispatch_get_main_queue(), ^{ RC_RefreshAXTriplePress(); });
             } else {
@@ -6773,30 +6809,18 @@ static void rc_schedule_audio_output_check(void) {
     });
 }
 
-// Control Center Button triggers: the module for slot N (Tweak/rc-ccmodule) posts
-// com.saihgupr.remotecompanion.ccbutton.N when it's tapped, and that runs trigger_cc_button_N
-#define RC_CC_BUTTON_SLOTS 4
-static void handle_cc_button_notification(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
-    NSString *notification = (__bridge NSString *)name;
-    NSRange dot = [notification rangeOfString:@"." options:NSBackwardsSearch];
-    if (!notification.length || dot.location == NSNotFound) return;
-    NSString *key = [@"trigger_cc_button_" stringByAppendingString:[notification substringFromIndex:dot.location + 1]];
-    SRLogMin(@"🎛️ [RCSystem] Control Center button: %@", key);
-    dispatch_async(dispatch_get_main_queue(), ^{
-        RCExecuteTrigger(key);
-    });
-}
-
+// Control Center Button triggers: RCCCButton (Tweak/rc-ccmodule) runs inside SpringBoard and
+// posts com.saihgupr.remotecompanion.ccbutton.tap with userInfo[@"triggerKey"] when tapped.
 static void rc_cc_button_start_observing(void) {
-    for (int slot = 1; slot <= RC_CC_BUTTON_SLOTS; slot++) {
-        NSString *name = [NSString stringWithFormat:@"com.saihgupr.remotecompanion.ccbutton.%d", slot];
-        CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),
-                                        NULL,
-                                        handle_cc_button_notification,
-                                        (__bridge CFStringRef)name,
-                                        NULL,
-                                        CFNotificationSuspensionBehaviorDeliverImmediately);
-    }
+    [[NSNotificationCenter defaultCenter] addObserverForName:@"com.saihgupr.remotecompanion.ccbutton.tap"
+                                                      object:nil
+                                                       queue:[NSOperationQueue mainQueue]
+                                                  usingBlock:^(NSNotification *note) {
+        NSString *key = note.userInfo[@"triggerKey"];
+        if (![key isKindOfClass:[NSString class]] || ![key hasPrefix:@"trigger_cc_button_"]) return;
+        SRLogMin(@"🎛️ [RCSystem] Control Center button: %@", key);
+        RCExecuteTrigger(key);
+    }];
 }
 
 static void handle_wifi_notification(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
@@ -15193,6 +15217,7 @@ static void start_web_server() {
                                                     rc_set_trigger_config([incoming copy]);
                                                     rc_note_action_sequence_edit(incoming);
                                                     save_trigger_config();
+                                                    rc_note_cc_buttons_change(incoming);
                                                     responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: 12\r\n\r\n{\"ok\": true}", cors];
                                                 }
                                             } else {
