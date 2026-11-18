@@ -170,6 +170,9 @@ static NSHashTable *siriInteractions = nil;
 @interface SBScreenEdgePanGestureRecognizer : UIScreenEdgePanGestureRecognizer
 @end
 
+@interface SBCoverSheetScreenEdgePanGestureRecognizer : SBScreenEdgePanGestureRecognizer
+@end
+
 
 @interface NCNotificationContent : NSObject
 @property (nonatomic, copy, readonly) NSString *title;
@@ -310,6 +313,11 @@ extern Boolean MRMediaRemoteSendCommandToApp(MRMediaRemoteCommand command, NSDic
 // hold the list still. It only observes: firing stays in the sendEvent path
 // so trigger behavior is unchanged.
 @interface SRBottomUpGestureRecognizer : UIGestureRecognizer
+@property (nonatomic, copy) NSString *zoneTriggerKey;
+@property (nonatomic, assign) CGPoint startPoint;
+@end
+
+@interface SRTopDownGestureRecognizer : UIGestureRecognizer
 @property (nonatomic, copy) NSString *zoneTriggerKey;
 @property (nonatomic, assign) CGPoint startPoint;
 @end
@@ -2343,6 +2351,9 @@ static NSString *get_human_name_for_trigger(NSString *key, NSDictionary *trigger
             @"trigger_statusbar_swipe_left": @"Status Bar Swipe Left",
             @"trigger_statusbar_swipe_right": @"Status Bar Swipe Right",
             @"trigger_statusbar_double_tap": @"Status Bar Double Tap",
+            @"trigger_statusbar_swipe_down_left": @"Top Swipe Down (Left)",
+            @"trigger_statusbar_swipe_down_center": @"Top Swipe Down (Center)",
+            @"trigger_statusbar_swipe_down_right": @"Top Swipe Down (Right)",
             @"trigger_home_triple_click": @"Home Button (Triple Click)",
             @"trigger_home_quadruple_click": @"Home Button (Quadruple Click)",
             @"trigger_home_double_click": @"Home Button (Double Click)",
@@ -2829,6 +2840,7 @@ static float get_flash_brightness() {
 // Forward declarations for gesture management functions
 static BOOL should_register_edge_gestures();
 static BOOL should_register_bottom_up_gestures();
+static BOOL should_register_top_down_gestures();
 static void register_edge_gestures();
 static void update_edge_gestures();
 static void start_schedule_timer();
@@ -6634,6 +6646,22 @@ NSTimeInterval RCNFCScreenOffWindow() {
 
 static NSString *g_lastKnownSSID = nil;
 
+// A `wifi off` or `wifi toggle` to off we issued ourselves drops the radio, which looks exactly
+// like the network going away. The user's wifi_disconnect_<SSID> trigger is about the network,
+// not about our own command, so it is skipped for a few seconds after we turn the radio off.
+// Without this, an action that turns WiFi off can be undone by the disconnect trigger it caused
+// (a `wifi on` in that trigger's actions ran about a second later).
+static NSTimeInterval g_rcIntentionalWifiOffUntil = 0;
+
+static BOOL RCWifiOffWasIntentional(void) {
+    return g_rcIntentionalWifiOffUntil > 0 &&
+           [NSDate timeIntervalSince1970] < g_rcIntentionalWifiOffUntil;
+}
+
+static void RCNoteIntentionalWifiOff(void) {
+    g_rcIntentionalWifiOffUntil = [NSDate timeIntervalSince1970] + 5.0;
+}
+
 static void handle_wifi_transition() {
     SBWiFiManager *wifiManager = [objc_getClass("SBWiFiManager") sharedInstance];
     NSString *currentSSID = [wifiManager currentNetworkName];
@@ -6647,9 +6675,13 @@ static void handle_wifi_transition() {
         RCExecuteTrigger(triggerKey);
     } else if (!currentSSID && g_lastKnownSSID) {
         // Disconnected from previous network
-        NSString *triggerKey = [NSString stringWithFormat:@"wifi_disconnect_%@", g_lastKnownSSID];
-        SRLog(@"[RCWiFi] Disconnection trigger: %@", triggerKey);
-        RCExecuteTrigger(triggerKey);
+        if (RCWifiOffWasIntentional()) {
+            SRLog(@"[RCWiFi] Disconnection trigger skipped: the radio was turned off by RemoteCompanion");
+        } else {
+            NSString *triggerKey = [NSString stringWithFormat:@"wifi_disconnect_%@", g_lastKnownSSID];
+            SRLog(@"[RCWiFi] Disconnection trigger: %@", triggerKey);
+            RCExecuteTrigger(triggerKey);
+        }
     }
     
     g_lastKnownSSID = [currentSSID copy];
@@ -13143,6 +13175,7 @@ static NSString *handle_command(NSString *cmd) {
             // closed while WiFi is still up (remote `rc wifi off` over WiFi SSH
             // would otherwise kill its own transport before the reply arrives).
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                RCNoteIntentionalWifiOff();
                 [manager setWiFiEnabled:NO];
                 SRLog(@"WiFi disabled");
             });
@@ -13156,6 +13189,7 @@ static NSString *handle_command(NSString *cmd) {
             if (current) {
                 // Turning OFF: same deferred-shutoff treatment as `wifi off`.
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                    RCNoteIntentionalWifiOff();
                     [manager setWiFiEnabled:NO];
                     SRLog(@"WiFi toggled: %d -> %d", current, !current);
                 });
@@ -19010,6 +19044,12 @@ static BOOL g_statusBarSwipeHapticFired = NO;
 static BOOL g_statusBarSwipeTriggered = NO;
 static NSTimeInterval g_lastStatusBarDoubleTapTime = 0;
 
+// Top Swipe Down (3-Zone) State, mirroring the bottom swipe up zones
+static NSString *g_pendingTopSwipeDownTrigger = nil;
+static NSString *g_lastTopSwipeDownTrigger = nil;
+static BOOL g_topSwipeDownTriggered = NO;
+static NSTimeInterval g_lastTopSwipeDownTriggerTime = 0;
+
 // Bottom Bar Extended State
 static NSTimeInterval g_lastBottomSwipeTriggerTime = 0;
 
@@ -19065,6 +19105,8 @@ static BOOL RC_GestureScrollSuppressionWanted(void) {
         @"trigger_statusbar_swipe_left", @"trigger_statusbar_swipe_right",
         @"trigger_statusbar_left_hold", @"trigger_statusbar_center_hold",
         @"trigger_statusbar_right_hold", @"trigger_statusbar_double_tap",
+        @"trigger_statusbar_swipe_down_left", @"trigger_statusbar_swipe_down_center",
+        @"trigger_statusbar_swipe_down_right",
         @"trigger_bottombar_swipe_left", @"trigger_bottombar_swipe_right",
         @"trigger_bottom_swipe_up_left", @"trigger_bottom_swipe_up_center",
         @"trigger_bottom_swipe_up_right",
@@ -19398,6 +19440,12 @@ static inline NSString *RC_BottomSwipeTriggerForProgress(CGFloat progress) {
     return @"trigger_bottom_swipe_up_center";
 }
 
+static inline NSString *RC_TopSwipeDownTriggerForProgress(CGFloat progress) {
+    if (progress < 0.33) return @"trigger_statusbar_swipe_down_left";
+    if (progress > 0.67) return @"trigger_statusbar_swipe_down_right";
+    return @"trigger_statusbar_swipe_down_center";
+}
+
 // Physical (window-space) delta -> logical delta as the user sees it.
 // Derived from 90-degree rotations of a fixed portrait frame:
 //   LandscapeLeft (home left, clockwise):  user_dx = -dy_p, user_dy = +dx_p
@@ -19505,6 +19553,79 @@ static inline BOOL rc_is_two_finger_top_active(void) {
            RC_TriggerIsActionable(@"trigger_statusbar_two_finger_swipe_down");
 }
 
+static NSString *get_top_swipe_down_trigger_for_touch(CGPoint loc, UIInterfaceOrientation orientation, BOOL *outInTopRegion) {
+    CGFloat S = 0, L = 0;
+    RC_ScreenSL(&S, &L);
+    BOOL inTop = RC_InTopRegion(loc, orientation, S, L);
+    if (outInTopRegion) {
+        *outInTopRegion = inTop;
+    }
+    if (!inTop) {
+        return nil;
+    }
+    CGFloat progress = RC_ProgressAlongEdge(loc, orientation, S, L);
+    return RC_TopSwipeDownTriggerForProgress(progress);
+}
+
+static BOOL rc_is_top_swipe_down_zone_enabled(NSString *triggerKey) {
+    if (!triggerKey.length) return NO;
+    if (!g_triggerConfig) {
+        load_trigger_config();
+    }
+    if (!g_triggerConfig || !RC_MasterEnabled()) {
+        return NO;
+    }
+    NSDictionary *triggers = g_triggerConfig[@"triggers"];
+    NSDictionary *trigger = [triggers isKindOfClass:[NSDictionary class]] ? triggers[triggerKey] : nil;
+    if (![trigger isKindOfClass:[NSDictionary class]] || ![trigger[@"enabled"] boolValue]) {
+        return NO;
+    }
+    return !RC_IsTriggerExcludedForForegroundApp(triggerKey);
+}
+
+static inline BOOL rc_is_top_swipe_down_active(void) {
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    if (g_statusBarTouchActive && g_pendingTopSwipeDownTrigger &&
+        rc_is_top_swipe_down_zone_enabled(g_pendingTopSwipeDownTrigger)) {
+        return YES;
+    }
+    if ((g_topSwipeDownTriggered || (now - g_lastTopSwipeDownTriggerTime < 0.8)) &&
+        g_lastTopSwipeDownTrigger && rc_is_top_swipe_down_zone_enabled(g_lastTopSwipeDownTrigger)) {
+        return YES;
+    }
+    return NO;
+}
+
+static BOOL should_suppress_top_edge_gesture(CGPoint loc, UIInterfaceOrientation orientation, BOOL allowActiveOrCooldown) {
+    if (!g_triggerConfig) {
+        load_trigger_config();
+    }
+    if (!g_triggerConfig || !RC_MasterEnabled()) {
+        return NO;
+    }
+    if (allowActiveOrCooldown && (rc_is_two_finger_top_active() || rc_is_top_swipe_down_active())) {
+        return YES;
+    }
+    BOOL inTop = NO;
+    NSString *triggerKey = get_top_swipe_down_trigger_for_touch(loc, orientation, &inTop);
+    if (!inTop || !triggerKey) {
+        return NO;
+    }
+    return rc_is_top_swipe_down_zone_enabled(triggerKey);
+}
+
+static void rc_fire_top_swipe_down_if_enabled(NSString *phase) {
+    if (!g_pendingTopSwipeDownTrigger) return;
+    if (!rc_is_top_swipe_down_zone_enabled(g_pendingTopSwipeDownTrigger)) return;
+    g_topSwipeDownTriggered = YES;
+    g_lastTopSwipeDownTrigger = g_pendingTopSwipeDownTrigger;
+    g_lastTopSwipeDownTriggerTime = [[NSDate date] timeIntervalSince1970];
+    RCTriggerHapticFor(g_pendingTopSwipeDownTrigger);
+    if (RC_TriggerIsActionable(g_pendingTopSwipeDownTrigger)) RC_FreezeGestureScrolling();
+    RCExecuteTrigger(g_pendingTopSwipeDownTrigger);
+    SRLog(@"[RCTop] %@ FIRED %@!", g_pendingTopSwipeDownTrigger, phase);
+}
+
 // Stop a top-edge swipe the first finger started before the second one landed. Turning a
 // recognizer off and on cancels it, and the panel it was pulling slides back.
 static void rc_cancel_edge_recognizers(NSHashTable<UIGestureRecognizer *> *table) {
@@ -19591,9 +19712,11 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                     g_statusBarHoldTimer = nil;
                 }
                 g_pendingStatusBarTrigger = nil;
+                g_pendingTopSwipeDownTrigger = nil;
                 g_statusBarTouchActive = NO;
                 g_statusBarSwipeTriggered = NO;
                 g_statusBarHoldTriggered = NO;
+                g_topSwipeDownTriggered = NO;
                 g_twoFingerTopActive = YES;
                 g_twoFingerTopTriggered = NO;
                 g_twoFingerTopStartX = loc.x; // only this finger's moves reach SpringBoard
@@ -19629,9 +19752,11 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                     g_statusBarHoldTimer = nil;
                 }
                 g_pendingStatusBarTrigger = nil;
+                g_pendingTopSwipeDownTrigger = nil;
                 g_statusBarTouchActive = NO;
                 g_statusBarSwipeTriggered = NO;
                 g_statusBarHoldTriggered = NO;
+                g_topSwipeDownTriggered = NO;
                 g_twoFingerTopActive = YES;
                 g_twoFingerTopTriggered = NO;
                 g_twoFingerTopStartX = (p0.x + p1.x) / 2.0;
@@ -19682,6 +19807,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
             }
 
             if (inTopRegion && !g_twoFingerTopActive) {
+                g_lastBottomSwipeTriggerTime = 0;
                 RC_SnapshotGestureOffsets();
                 g_statusBarSwipeStartX = loc.x;
                 g_statusBarSwipeStartY = loc.y;
@@ -19689,6 +19815,8 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                 g_statusBarSwipeHapticFired = NO;
                 g_statusBarSwipeTriggered = NO;
                 g_statusBarHoldTriggered = NO;
+                g_topSwipeDownTriggered = NO;
+                g_pendingTopSwipeDownTrigger = nil;
                 
                 if (touch.tapCount == 2) {
                     if (g_statusBarHoldTimer) {
@@ -19696,6 +19824,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                         g_statusBarHoldTimer = nil;
                     }
                     g_pendingStatusBarTrigger = nil;
+                    g_pendingTopSwipeDownTrigger = nil;
                     
                     load_trigger_config();
                     BOOL enabled = RC_MasterEnabled() && 
@@ -19719,8 +19848,9 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                     // Zone along UI-top, left-to-right as the user sees it (central helper).
                     CGFloat progress = RC_ProgressAlongEdge(loc, touchOrientation, S, L);
                     g_pendingStatusBarTrigger = RC_StatusHoldTriggerForProgress(progress);
+                    g_pendingTopSwipeDownTrigger = RC_TopSwipeDownTriggerForProgress(progress);
                     
-                    SRLog(@"[RCStatus] Top Region Touch at progress=%.2f -> Key: %@", progress, g_pendingStatusBarTrigger);
+                    SRLog(@"[RCStatus] Top Region Touch at progress=%.2f -> Key: %@ / %@", progress, g_pendingStatusBarTrigger, g_pendingTopSwipeDownTrigger);
                     
                     // Cancel any existing timer
                     if (g_statusBarHoldTimer) {
@@ -19757,6 +19887,8 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
             
             // Bottom bar region = bottom 25pts
             if (inBottomRegion && !g_twoFingerBottomActive) {
+                g_lastTopSwipeDownTriggerTime = 0;
+                g_lastTopSwipeDownTrigger = nil;
                 RC_SnapshotGestureOffsets();
                 g_bottomBarSwipeStartX = loc.x;
                 g_bottomBarSwipeStartY = loc.y;
@@ -19884,6 +20016,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                 CGFloat abs_udy = fabs(user_dy);
                 BOOL isHoz = (abs_udx > abs_udy * 1.8);
                 BOOL isVertUp = (user_dy < -15 && abs_udy > abs_udx * 1.5);
+                BOOL isVertDown = (user_dy > 15 && abs_udy > abs_udx * 1.5);
                 if (g_bottomBarTouchActive) {
                     g_bottomBarUserDX = user_dx;
                     g_bottomBarUserDY = user_dy;
@@ -19897,7 +20030,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                         g_pendingStatusBarTrigger = nil;
                     }
                     
-                    if (isHoz && abs_udx > 15 && !g_statusBarSwipeHapticFired) {
+                    if (isHoz && abs_udx > 15 && !g_statusBarSwipeHapticFired && !g_topSwipeDownTriggered) {
                         NSString *trigger = (user_dx > 0) ? @"trigger_statusbar_swipe_right" : @"trigger_statusbar_swipe_left";
                         load_trigger_config();
                         if (RC_MasterEnabled() && [g_triggerConfig[@"triggers"][trigger][@"enabled"] boolValue] &&
@@ -19908,10 +20041,20 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                         g_statusBarSwipeHapticFired = YES;
                     }
                     
-                    if (!g_statusBarSwipeTriggered && isHoz && abs_udx > 50) {
+                    if (!g_statusBarSwipeTriggered && !g_topSwipeDownTriggered && isHoz && abs_udx > 50) {
                         NSString *trigger = (user_dx > 0) ? @"trigger_statusbar_swipe_right" : @"trigger_statusbar_swipe_left";
                         RCExecuteTrigger(trigger);
                         g_statusBarSwipeTriggered = YES;
+                    }
+
+                    // Top Swipe Down (3-Zone) during Move, mirroring Bottom Swipe Up (3-Zone)
+                    if (!g_statusBarSwipeTriggered && !g_topSwipeDownTriggered && isVertDown && abs_udy > 10) {
+                        if (g_pendingTopSwipeDownTrigger && RC_TriggerIsActionable(g_pendingTopSwipeDownTrigger)) {
+                            RC_FreezeGestureScrolling();
+                        }
+                    }
+                    if (!g_statusBarSwipeTriggered && !g_topSwipeDownTriggered && isVertDown && abs_udy > 45) {
+                        rc_fire_top_swipe_down_if_enabled(@"during move");
                     }
                 }
                 
@@ -19968,8 +20111,11 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                     }
                     g_pendingStatusBarTrigger = nil;
 
-                    if (g_statusBarTouchActive && !g_statusBarHoldTriggered && !g_statusBarSwipeTriggered) {
-                        if (isHoz && abs_udx > 40) {
+                    if (g_statusBarTouchActive && !g_statusBarHoldTriggered && !g_statusBarSwipeTriggered && !g_topSwipeDownTriggered) {
+                        if (isVertDown && abs_udy > 35) {
+                            rc_fire_top_swipe_down_if_enabled(@"on ended");
+                        }
+                        if (!g_topSwipeDownTriggered && isHoz && abs_udx > 40) {
                             NSString *trigger = (user_dx > 0) ? @"trigger_statusbar_swipe_right" : @"trigger_statusbar_swipe_left";
                             RCExecuteTrigger(trigger);
                         }
@@ -19998,6 +20144,8 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                     g_statusBarTouchActive = NO;
                     g_bottomBarTouchActive = NO;
                     g_statusBarHoldTriggered = NO;
+                    g_topSwipeDownTriggered = NO;
+                    g_pendingTopSwipeDownTrigger = nil;
                     g_bottomBarSwipeUpTriggered = NO;
                     g_pendingBottomBarSwipeUpTrigger = nil;
                     g_rcLatchedTouchOrientationValid = NO;
@@ -20013,6 +20161,8 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
             g_statusBarHoldTriggered = NO;
             g_pendingStatusBarTrigger = nil;
             g_statusBarTouchActive = NO;
+            g_topSwipeDownTriggered = NO;
+            g_pendingTopSwipeDownTrigger = nil;
             g_bottomBarTouchActive = NO;
             g_bottomBarHapticFired = NO;
             g_bottomBarSwipeUpTriggered = NO;
@@ -20191,12 +20341,98 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
 
 @end
 
+@implementation SRTopDownGestureRecognizer
+
+- (void)reset {
+    [super reset];
+    self.zoneTriggerKey = nil;
+    self.startPoint = CGPointZero;
+}
+
+- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    [super touchesBegan:touches withEvent:event];
+    if (!should_register_top_down_gestures()) {
+        self.state = UIGestureRecognizerStateFailed;
+        return;
+    }
+    UITouch *touch = [touches anyObject];
+    CGPoint loc = [touch locationInView:nil];
+    UIInterfaceOrientation orientation = get_current_interface_orientation();
+    BOOL inTop = NO;
+    NSString *key = get_top_swipe_down_trigger_for_touch(loc, orientation, &inTop);
+    if (!inTop || !key || !RC_TriggerIsActionable(key)) {
+        if (inTop && RC_TriggerIsActionable(@"trigger_statusbar_two_finger_swipe_down")) {
+            self.zoneTriggerKey = @"trigger_statusbar_two_finger_swipe_down";
+            self.startPoint = loc;
+            return;
+        }
+        self.state = UIGestureRecognizerStateFailed;
+        return;
+    }
+    self.zoneTriggerKey = key;
+    self.startPoint = loc;
+}
+
+- (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    [super touchesMoved:touches withEvent:event];
+    if (self.state == UIGestureRecognizerStateFailed ||
+        self.state == UIGestureRecognizerStateRecognized) {
+        return;
+    }
+    UITouch *touch = [touches anyObject];
+    CGPoint loc = [touch locationInView:nil];
+    UIInterfaceOrientation orientation = get_current_interface_orientation();
+    CGFloat dx = 0, dy = 0;
+    RC_UserDeltaForOrientation(loc.x - self.startPoint.x, loc.y - self.startPoint.y,
+                               orientation, &dx, &dy);
+    CGFloat ax = fabs(dx), ay = fabs(dy);
+    if ([self.zoneTriggerKey isEqualToString:@"trigger_statusbar_two_finger_swipe_down"] && (ax > 8 || ay > 8)) {
+        CGFloat S = 0, L = 0;
+        RC_ScreenSL(&S, &L);
+        CGPoint other = CGPointZero;
+        if (!([event allTouches].count >= 2 || rc_hid_second_top_finger(loc, orientation, S, L, &other))) {
+            self.state = UIGestureRecognizerStateFailed;
+            return;
+        }
+    }
+    // Contradicting motion (sideways or upward beyond slop): not ours.
+    if ((ax > 25 && ax > ay * 1.5) || dy < -18) {
+        self.state = UIGestureRecognizerStateFailed;
+        return;
+    }
+    // Downward intent past the threshold: claim the touch so the system
+    // cancels app delivery, mirroring SRBottomUpGestureRecognizer.
+    if (dy > 25 && ay > ax * 1.0) {
+        if (self.zoneTriggerKey && RC_TriggerIsActionable(self.zoneTriggerKey)) {
+            RC_FreezeGestureScrolling();
+        }
+        self.state = UIGestureRecognizerStateRecognized;
+    }
+}
+
+- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    [super touchesEnded:touches withEvent:event];
+    if (self.state == UIGestureRecognizerStatePossible) {
+        self.state = UIGestureRecognizerStateFailed;
+    }
+}
+
+- (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    [super touchesCancelled:touches withEvent:event];
+    if (self.state == UIGestureRecognizerStatePossible) {
+        self.state = UIGestureRecognizerStateFailed;
+    }
+}
+
+@end
+
 // --- SYSTEM GESTURE MANAGER HOOK ---
 
 @interface SRGestureHelper : NSObject
 + (instancetype)sharedInstance;
 - (void)handleEdgeGesture:(SREdgeGestureRecognizer *)gesture;
 - (void)handleBottomUpGesture:(SRBottomUpGestureRecognizer *)gesture;
+- (void)handleTopDownGesture:(SRTopDownGestureRecognizer *)gesture;
 @end
 
 @implementation SRGestureHelper
@@ -20286,11 +20522,21 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
         }
     }
 }
+
+- (void)handleTopDownGesture:(SRTopDownGestureRecognizer *)gesture {
+    if (gesture.state == UIGestureRecognizerStateRecognized) {
+        SRLogMin(@"[RCTop] System top-down recognized, app touches cancelled");
+        if (gesture.zoneTriggerKey && RC_TriggerIsActionable(gesture.zoneTriggerKey)) {
+            RC_FreezeGestureScrolling();
+        }
+    }
+}
 @end
 
 static SREdgeGestureRecognizer *leftEdgeRecognizer;
 static SREdgeGestureRecognizer *rightEdgeRecognizer;
 static SRBottomUpGestureRecognizer *bottomUpRecognizer;
+static SRTopDownGestureRecognizer *topDownRecognizer;
 static SBSystemGestureManager *g_gestureManager = nil;
 
 // Helper: Check if any edge gestures are enabled
@@ -20325,6 +20571,16 @@ static BOOL should_register_bottom_up_gestures() {
             RC_TriggerIsActionable(@"trigger_bottom_swipe_up_center") ||
             RC_TriggerIsActionable(@"trigger_bottom_swipe_up_right") ||
             RC_TriggerIsActionable(@"trigger_bottom_two_finger_swipe_up"));
+}
+
+static BOOL should_register_top_down_gestures() {
+    if ([g_triggerConfig[@"freezeListsDuringGestures"] isEqual:@NO]) return NO;
+    if (!g_triggerConfig) return NO;
+    if (![g_triggerConfig[@"masterEnabled"] boolValue]) return NO;
+    return (RC_TriggerIsActionable(@"trigger_statusbar_swipe_down_left") ||
+            RC_TriggerIsActionable(@"trigger_statusbar_swipe_down_center") ||
+            RC_TriggerIsActionable(@"trigger_statusbar_swipe_down_right") ||
+            RC_TriggerIsActionable(@"trigger_statusbar_two_finger_swipe_down"));
 }
 
 // Register gesture recognizers
@@ -20369,6 +20625,14 @@ static void register_edge_gestures() {
         [g_gestureManager addGestureRecognizer:bottomUpRecognizer withType:122];
         SRLog(@"Registered BOTTOM-UP gesture recognizer");
     }
+
+    if (!topDownRecognizer) {
+        topDownRecognizer = [[SRTopDownGestureRecognizer alloc] initWithTarget:[SRGestureHelper sharedInstance] action:@selector(handleTopDownGesture:)];
+        topDownRecognizer.cancelsTouchesInView = YES; // Cancel app touches on recognition
+        topDownRecognizer.delaysTouchesBegan = NO;   // Don't add lag
+        [g_gestureManager addGestureRecognizer:topDownRecognizer withType:123];
+        SRLog(@"Registered TOP-DOWN gesture recognizer");
+    }
 }
 
 // Turn the recognizers on or off to match the config. They're registered with
@@ -20397,6 +20661,16 @@ static void update_edge_gestures() {
             SRLog(@"Bottom-up gesture %@", bottomWanted ? @"on" : @"off");
         }
         if (bottomUpRecognizer) bottomUpRecognizer.enabled = bottomWanted;
+
+        BOOL topWanted = should_register_top_down_gestures();
+        if ((wanted || bottomWanted || topWanted) && !topDownRecognizer) {
+            SRLog(@"Top-down gesture enabled - registering...");
+            register_edge_gestures();
+        }
+        if (topDownRecognizer && topDownRecognizer.enabled != topWanted) {
+            SRLog(@"Top-down gesture %@", topWanted ? @"on" : @"off");
+        }
+        if (topDownRecognizer) topDownRecognizer.enabled = topWanted;
     } @catch (NSException *e) {
         SRLogMin(@"ERROR in update_edge_gestures: %@", e);
     }
@@ -20514,8 +20788,31 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
 %end
 
 // =========================================================================
-// SYSTEM GESTURE & CONTROL CENTER SUPPRESSION (BOTTOM EDGE SWIPE TRIGGERS)
+// SYSTEM GESTURE, LOCK MENU & CONTROL CENTER SUPPRESSION (EDGE SWIPE TRIGGERS)
 // =========================================================================
+
+static NSUInteger g_rcCCPullEdge = 0;
+
+static BOOL rc_should_suppress_edge_recognizer(UIGestureRecognizer *recognizer, CGPoint loc, UIInterfaceOrientation orientation, BOOL isMove) {
+    UIRectEdge edges = 0;
+    BOOL hasEdges = [recognizer respondsToSelector:@selector(edges)];
+    if (hasEdges) edges = [(UIScreenEdgePanGestureRecognizer *)recognizer edges];
+    if ((!hasEdges || (edges & UIRectEdgeBottom) || edges == 0) &&
+        should_suppress_bottom_edge_gesture(loc, orientation)) {
+        return YES;
+    }
+    BOOL explicitTop = hasEdges && (edges & UIRectEdgeTop);
+    if ((explicitTop || !hasEdges || edges == 0) &&
+        should_suppress_top_edge_gesture(loc, orientation, explicitTop || (isMove && g_statusBarTouchActive))) {
+        return YES;
+    }
+    return NO;
+}
+
+static inline BOOL rc_is_top_gesture_suppressing_cc(void) {
+    if (g_rcCCPullEdge == UIRectEdgeBottom) return NO;
+    return rc_is_two_finger_top_active() || rc_is_top_swipe_down_active();
+}
 
 %hook UIScreenEdgePanGestureRecognizer
 
@@ -20523,11 +20820,9 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
     if (touch && [touch isKindOfClass:[UITouch class]]) {
         CGPoint loc = [touch locationInView:nil];
         UIInterfaceOrientation orientation = get_current_interface_orientation();
-        if (should_suppress_bottom_edge_gesture(loc, orientation)) {
-            if (![self respondsToSelector:@selector(edges)] || ([self edges] & UIRectEdgeBottom) || [self edges] == 0) {
-                SRLog(@"[RCBottom] UIScreenEdgePanGestureRecognizer _shouldReceiveTouch: NO at (%.1f, %.1f)", loc.x, loc.y);
-                return NO;
-            }
+        if (rc_should_suppress_edge_recognizer(self, loc, orientation, NO)) {
+            SRLog(@"[RCEdge] UIScreenEdgePanGestureRecognizer _shouldReceiveTouch: NO at (%.1f, %.1f)", loc.x, loc.y);
+            return NO;
         }
     }
     return %orig;
@@ -20538,12 +20833,10 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
     if (touch && [touch isKindOfClass:[UITouch class]]) {
         CGPoint loc = [touch locationInView:nil];
         UIInterfaceOrientation orientation = get_current_interface_orientation();
-        if (should_suppress_bottom_edge_gesture(loc, orientation)) {
-            if (![self respondsToSelector:@selector(edges)] || ([self edges] & UIRectEdgeBottom) || [self edges] == 0) {
-                SRLog(@"[RCBottom] UIScreenEdgePanGestureRecognizer touchesBegan: setting state to Failed at (%.1f, %.1f)", loc.x, loc.y);
-                self.state = UIGestureRecognizerStateFailed;
-                return;
-            }
+        if (rc_should_suppress_edge_recognizer(self, loc, orientation, NO)) {
+            SRLog(@"[RCEdge] UIScreenEdgePanGestureRecognizer touchesBegan: setting state to Failed at (%.1f, %.1f)", loc.x, loc.y);
+            self.state = UIGestureRecognizerStateFailed;
+            return;
         }
     }
     %orig;
@@ -20554,11 +20847,9 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
     if (touch && [touch isKindOfClass:[UITouch class]]) {
         CGPoint loc = [touch locationInView:nil];
         UIInterfaceOrientation orientation = get_current_interface_orientation();
-        if (should_suppress_bottom_edge_gesture(loc, orientation)) {
-            if (![self respondsToSelector:@selector(edges)] || ([self edges] & UIRectEdgeBottom) || [self edges] == 0) {
-                self.state = UIGestureRecognizerStateFailed;
-                return;
-            }
+        if (rc_should_suppress_edge_recognizer(self, loc, orientation, YES)) {
+            self.state = UIGestureRecognizerStateFailed;
+            return;
         }
     }
     %orig;
@@ -20572,11 +20863,9 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
     if (touch && [touch isKindOfClass:[UITouch class]]) {
         CGPoint loc = [touch locationInView:nil];
         UIInterfaceOrientation orientation = get_current_interface_orientation();
-        if (should_suppress_bottom_edge_gesture(loc, orientation)) {
-            if (![self respondsToSelector:@selector(edges)] || ([self edges] & UIRectEdgeBottom) || [self edges] == 0) {
-                SRLog(@"[RCBottom] _UIScreenEdgePanGestureRecognizer _shouldReceiveTouch: NO at (%.1f, %.1f)", loc.x, loc.y);
-                return NO;
-            }
+        if (rc_should_suppress_edge_recognizer(self, loc, orientation, NO)) {
+            SRLog(@"[RCEdge] _UIScreenEdgePanGestureRecognizer _shouldReceiveTouch: NO at (%.1f, %.1f)", loc.x, loc.y);
+            return NO;
         }
     }
     return %orig;
@@ -20587,12 +20876,10 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
     if (touch && [touch isKindOfClass:[UITouch class]]) {
         CGPoint loc = [touch locationInView:nil];
         UIInterfaceOrientation orientation = get_current_interface_orientation();
-        if (should_suppress_bottom_edge_gesture(loc, orientation)) {
-            if (![self respondsToSelector:@selector(edges)] || ([self edges] & UIRectEdgeBottom) || [self edges] == 0) {
-                SRLog(@"[RCBottom] _UIScreenEdgePanGestureRecognizer touchesBegan: setting state to Failed at (%.1f, %.1f)", loc.x, loc.y);
-                self.state = UIGestureRecognizerStateFailed;
-                return;
-            }
+        if (rc_should_suppress_edge_recognizer(self, loc, orientation, NO)) {
+            SRLog(@"[RCEdge] _UIScreenEdgePanGestureRecognizer touchesBegan: setting state to Failed at (%.1f, %.1f)", loc.x, loc.y);
+            self.state = UIGestureRecognizerStateFailed;
+            return;
         }
     }
     %orig;
@@ -20603,11 +20890,9 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
     if (touch && [touch isKindOfClass:[UITouch class]]) {
         CGPoint loc = [touch locationInView:nil];
         UIInterfaceOrientation orientation = get_current_interface_orientation();
-        if (should_suppress_bottom_edge_gesture(loc, orientation)) {
-            if (![self respondsToSelector:@selector(edges)] || ([self edges] & UIRectEdgeBottom) || [self edges] == 0) {
-                self.state = UIGestureRecognizerStateFailed;
-                return;
-            }
+        if (rc_should_suppress_edge_recognizer(self, loc, orientation, YES)) {
+            self.state = UIGestureRecognizerStateFailed;
+            return;
         }
     }
     %orig;
@@ -20621,11 +20906,9 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
     if (touch && [touch isKindOfClass:[UITouch class]]) {
         CGPoint loc = [touch locationInView:nil];
         UIInterfaceOrientation orientation = get_current_interface_orientation();
-        if (should_suppress_bottom_edge_gesture(loc, orientation)) {
-            if (![self respondsToSelector:@selector(edges)] || ([self edges] & UIRectEdgeBottom) || [self edges] == 0) {
-                SRLog(@"[RCBottom] SBScreenEdgePanGestureRecognizer _shouldReceiveTouch: NO at (%.1f, %.1f)", loc.x, loc.y);
-                return NO;
-            }
+        if (rc_should_suppress_edge_recognizer(self, loc, orientation, NO)) {
+            SRLog(@"[RCEdge] SBScreenEdgePanGestureRecognizer _shouldReceiveTouch: NO at (%.1f, %.1f)", loc.x, loc.y);
+            return NO;
         }
     }
     return %orig;
@@ -20636,12 +20919,10 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
     if (touch && [touch isKindOfClass:[UITouch class]]) {
         CGPoint loc = [touch locationInView:nil];
         UIInterfaceOrientation orientation = get_current_interface_orientation();
-        if (should_suppress_bottom_edge_gesture(loc, orientation)) {
-            if (![self respondsToSelector:@selector(edges)] || ([self edges] & UIRectEdgeBottom) || [self edges] == 0) {
-                SRLog(@"[RCBottom] SBScreenEdgePanGestureRecognizer touchesBegan: setting state to Failed at (%.1f, %.1f)", loc.x, loc.y);
-                self.state = UIGestureRecognizerStateFailed;
-                return;
-            }
+        if (rc_should_suppress_edge_recognizer(self, loc, orientation, NO)) {
+            SRLog(@"[RCEdge] SBScreenEdgePanGestureRecognizer touchesBegan: setting state to Failed at (%.1f, %.1f)", loc.x, loc.y);
+            self.state = UIGestureRecognizerStateFailed;
+            return;
         }
     }
     %orig;
@@ -20652,11 +20933,9 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
     if (touch && [touch isKindOfClass:[UITouch class]]) {
         CGPoint loc = [touch locationInView:nil];
         UIInterfaceOrientation orientation = get_current_interface_orientation();
-        if (should_suppress_bottom_edge_gesture(loc, orientation)) {
-            if (![self respondsToSelector:@selector(edges)] || ([self edges] & UIRectEdgeBottom) || [self edges] == 0) {
-                self.state = UIGestureRecognizerStateFailed;
-                return;
-            }
+        if (rc_should_suppress_edge_recognizer(self, loc, orientation, YES)) {
+            self.state = UIGestureRecognizerStateFailed;
+            return;
         }
     }
     %orig;
@@ -20670,15 +20949,17 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
     if (touch && [touch isKindOfClass:[UITouch class]]) {
         CGPoint loc = [touch locationInView:nil];
         UIInterfaceOrientation orientation = get_current_interface_orientation();
-        if (should_suppress_bottom_edge_gesture(loc, orientation)) {
-            NSUInteger edge = 0;
-            if ([self respondsToSelector:@selector(edge)]) {
-                edge = [self edge];
-            }
-            if (edge == 4 || edge == 0) {
-                SRLog(@"[RCBottom] SBGrabberTongue _shouldReceiveTouch: NO at (%.1f, %.1f)", loc.x, loc.y);
-                return NO;
-            }
+        NSUInteger edge = 0;
+        if ([self respondsToSelector:@selector(edge)]) {
+            edge = [self edge];
+        }
+        if ((edge == UIRectEdgeBottom || edge == 0) && should_suppress_bottom_edge_gesture(loc, orientation)) {
+            SRLog(@"[RCBottom] SBGrabberTongue _shouldReceiveTouch: NO at (%.1f, %.1f)", loc.x, loc.y);
+            return NO;
+        }
+        if ((edge == UIRectEdgeTop || edge == 0) && should_suppress_top_edge_gesture(loc, orientation, edge == UIRectEdgeTop)) {
+            SRLog(@"[RCTop] SBGrabberTongue _shouldReceiveTouch: NO at (%.1f, %.1f)", loc.x, loc.y);
+            return NO;
         }
     }
     return %orig;
@@ -20689,11 +20970,14 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
     if ([self respondsToSelector:@selector(edge)]) {
         edge = [self edge];
     }
-    if (edge == 4 || edge == 0) {
-        if (rc_is_bottom_gesture_active()) {
-            SRLog(@"[RCBottom] SBGrabberTongue _shouldAllowPulling: NO");
-            return NO;
-        }
+    if ((edge == UIRectEdgeBottom || edge == 0) && rc_is_bottom_gesture_active()) {
+        SRLog(@"[RCBottom] SBGrabberTongue _shouldAllowPulling: NO");
+        return NO;
+    }
+    if ((edge == UIRectEdgeTop && (rc_is_top_swipe_down_active() || rc_is_two_finger_top_active())) ||
+        (edge == 0 && g_statusBarTouchActive && rc_is_top_swipe_down_active())) {
+        SRLog(@"[RCTop] SBGrabberTongue _shouldAllowPulling: NO");
+        return NO;
     }
     return %orig;
 }
@@ -20703,15 +20987,21 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
 %hook SBControlCenterController
 
 - (BOOL)grabberTongue:(id)tongue shouldReceiveTouch:(UITouch *)touch {
+    NSUInteger edge = [tongue respondsToSelector:@selector(edge)] ? [tongue edge] : 0;
+    g_rcCCPullEdge = edge;
     if (touch && [touch isKindOfClass:[UITouch class]]) {
         CGPoint loc = [touch locationInView:nil];
         UIInterfaceOrientation orientation = get_current_interface_orientation();
-        if (should_suppress_bottom_edge_gesture(loc, orientation)) {
+        if ((edge == UIRectEdgeBottom || edge == 0) && should_suppress_bottom_edge_gesture(loc, orientation)) {
             SRLog(@"[RCBottom] SBControlCenterController grabberTongue:shouldReceiveTouch: NO at (%.1f, %.1f)", loc.x, loc.y);
             return NO;
         }
+        if ((edge == UIRectEdgeTop || edge == 0) && should_suppress_top_edge_gesture(loc, orientation, edge == UIRectEdgeTop)) {
+            SRLog(@"[RCTop] SBControlCenterController grabberTongue:shouldReceiveTouch: NO at (%.1f, %.1f)", loc.x, loc.y);
+            return NO;
+        }
     }
-    if (rc_is_two_finger_top_active()) {
+    if (edge != UIRectEdgeBottom && rc_is_two_finger_top_active()) {
         SRLogMin(@"[RCMultiFinger] Control Center grabber: touch refused during a two-finger top slide");
         return NO;
     }
@@ -20719,21 +21009,25 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
 }
 
 - (BOOL)grabberTongue:(id)tongue shouldAllowPullingForScreenEdge:(NSUInteger)edge {
-    if (edge == 4 || edge == 0) {
+    g_rcCCPullEdge = edge;
+    if (edge == UIRectEdgeBottom || edge == 0) {
         if (rc_is_bottom_gesture_active()) {
             SRLog(@"[RCBottom] SBControlCenterController grabberTongue:shouldAllowPullingForScreenEdge: NO for bottom edge");
             return NO;
         }
     }
-    if (edge == UIRectEdgeTop && rc_is_two_finger_top_active()) {
-        SRLogMin(@"[RCMultiFinger] Control Center grabber: top pull refused during a two-finger top slide");
+    if (edge == UIRectEdgeTop && (rc_is_two_finger_top_active() || rc_is_top_swipe_down_active())) {
+        SRLogMin(@"[RCMultiFinger] Control Center grabber: top pull refused during a top slide");
         return NO;
     }
     return %orig;
 }
 
 - (void)grabberTongueBeganPulling:(id)tongue withDistance:(double)dist andVelocity:(double)vel {
-    if (rc_is_bottom_gesture_active() || rc_is_two_finger_top_active()) {
+    if ([tongue respondsToSelector:@selector(edge)]) {
+        g_rcCCPullEdge = [tongue edge];
+    }
+    if (rc_is_bottom_gesture_active() || rc_is_top_gesture_suppressing_cc()) {
         SRLog(@"[RCBottom] SBControlCenterController suppressing grabberTongueBeganPulling");
         return;
     }
@@ -20746,8 +21040,8 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
         SRLog(@"[RCBottom] SBControlCenterController suppressing _presentControlCenterGestureBeganWithReason: %@", reason);
         return;
     }
-    if (rc_is_two_finger_top_active()) {
-        SRLogMin(@"[RCMultiFinger] Control Center pull not started during a two-finger top slide");
+    if (rc_is_top_gesture_suppressing_cc()) {
+        SRLogMin(@"[RCMultiFinger] Control Center pull not started during a top slide");
         return;
     }
     g_rcCCPullStarted = YES;
@@ -20759,7 +21053,7 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
     if (rc_is_bottom_gesture_active()) {
         return;
     }
-    if (rc_is_two_finger_top_active()) {
+    if (rc_is_top_gesture_suppressing_cc()) {
         // Hold a pull iOS already started shut; one it never started gets nothing
         if (g_rcCCPullStarted) %orig(0, 0);
         return;
@@ -20775,10 +21069,10 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
     }
     BOOL started = g_rcCCPullStarted;
     g_rcCCPullStarted = NO;
-    if (rc_is_two_finger_top_active()) {
+    if (rc_is_top_gesture_suppressing_cc()) {
         if (!started) return;
         // End a pull iOS already started as a flick back up, so Control Center closes
-        SRLogMin(@"[RCMultiFinger] Control Center pull closed for a two-finger top slide");
+        SRLogMin(@"[RCMultiFinger] Control Center pull closed for a top slide");
         %orig(-2000, comp);
         return;
     }
@@ -20787,7 +21081,7 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
 
 - (void)presentAnimated:(BOOL)animated {
     if (rc_cc_intentional_open_active()) { %orig; return; }
-    if (rc_is_bottom_gesture_active() || rc_is_two_finger_top_active()) {
+    if (rc_is_bottom_gesture_active() || rc_is_top_gesture_suppressing_cc()) {
         SRLog(@"[RCBottom] Suppressed Control Center presentAnimated within trigger window");
         return;
     }
@@ -20796,7 +21090,7 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
 
 - (void)presentAnimated:(BOOL)animated completion:(id)completion {
     if (rc_cc_intentional_open_active()) { %orig; return; }
-    if (rc_is_bottom_gesture_active() || rc_is_two_finger_top_active()) {
+    if (rc_is_bottom_gesture_active() || rc_is_top_gesture_suppressing_cc()) {
         SRLog(@"[RCBottom] Suppressed Control Center presentAnimated:completion: within trigger window");
         return;
     }
@@ -20805,7 +21099,7 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
 
 - (BOOL)_canPresent {
     if (rc_cc_intentional_open_active()) return %orig;
-    if (rc_is_bottom_gesture_active() || (rc_is_two_finger_top_active() && !g_rcCCPullStarted)) {
+    if (rc_is_bottom_gesture_active() || (rc_is_top_gesture_suppressing_cc() && !g_rcCCPullStarted)) {
         return NO;
     }
     return %orig;
@@ -20840,11 +21134,60 @@ static BOOL RC_ShouldKeepBottomBarSideSwipe(void) {
 
 %hook SBCoverSheetScreenEdgePanGestureRecognizer
 
+- (BOOL)_shouldReceiveTouch:(UITouch *)touch withEvent:(UIEvent *)event {
+    if (touch && [touch isKindOfClass:[UITouch class]]) {
+        CGPoint loc = [touch locationInView:nil];
+        UIInterfaceOrientation orientation = get_current_interface_orientation();
+        if (rc_should_suppress_edge_recognizer(self, loc, orientation, NO)) {
+            SRLog(@"[RCTop] SBCoverSheetScreenEdgePanGestureRecognizer _shouldReceiveTouch: NO at (%.1f, %.1f)", loc.x, loc.y);
+            return NO;
+        }
+    }
+    return %orig;
+}
+
+- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    UITouch *touch = [touches anyObject];
+    if (touch && [touch isKindOfClass:[UITouch class]]) {
+        CGPoint loc = [touch locationInView:nil];
+        UIInterfaceOrientation orientation = get_current_interface_orientation();
+        if (rc_should_suppress_edge_recognizer(self, loc, orientation, NO)) {
+            SRLog(@"[RCTop] SBCoverSheetScreenEdgePanGestureRecognizer touchesBegan: Failed at (%.1f, %.1f)", loc.x, loc.y);
+            self.state = UIGestureRecognizerStateFailed;
+            return;
+        }
+    }
+    %orig;
+}
+
+- (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    UITouch *touch = [touches anyObject];
+    if (touch && [touch isKindOfClass:[UITouch class]]) {
+        CGPoint loc = [touch locationInView:nil];
+        UIInterfaceOrientation orientation = get_current_interface_orientation();
+        if (rc_should_suppress_edge_recognizer(self, loc, orientation, YES)) {
+            self.state = UIGestureRecognizerStateFailed;
+            return;
+        }
+    }
+    %orig;
+}
+
 - (void)setState:(UIGestureRecognizerState)state {
-    if (state == UIGestureRecognizerStateBegan && RC_ShouldKeepBottomBarSideSwipe()) {
-        SRLog(@"[RCBottom] Cover sheet edge gesture stopped: sideways swipe kept for the Bottom Bar trigger");
-        %orig(UIGestureRecognizerStateFailed);
-        return;
+    if (state == UIGestureRecognizerStateBegan) {
+        if (RC_ShouldKeepBottomBarSideSwipe()) {
+            SRLog(@"[RCBottom] Cover sheet edge gesture stopped: sideways swipe kept for the Bottom Bar trigger");
+            %orig(UIGestureRecognizerStateFailed);
+            return;
+        }
+        BOOL hasEdges = [self respondsToSelector:@selector(edges)];
+        UIRectEdge edges = hasEdges ? [(UIScreenEdgePanGestureRecognizer *)self edges] : 0;
+        if ((hasEdges && (edges & UIRectEdgeTop) && (rc_is_top_swipe_down_active() || rc_is_two_finger_top_active())) ||
+            ((!hasEdges || edges == 0) && g_statusBarTouchActive && rc_is_top_swipe_down_active())) {
+            SRLog(@"[RCTop] Cover sheet edge gesture stopped for top swipe down");
+            %orig(UIGestureRecognizerStateFailed);
+            return;
+        }
     }
     %orig;
 }
@@ -20868,27 +21211,30 @@ static BOOL RC_ShouldKeepBottomBarSideSwipe(void) {
 }
 
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)recognizer shouldReceiveTouch:(UITouch *)touch {
+    if (recognizer == leftEdgeRecognizer || recognizer == rightEdgeRecognizer ||
+        recognizer == bottomUpRecognizer || recognizer == topDownRecognizer) {
+        return %orig;
+    }
     if (rc_is_two_finger_top_active() && rc_recognizer_is_top_edge(recognizer)) {
         SRLog(@"[RCMultiFinger] SBSystemGestureManager shouldReceiveTouch: NO for top-edge recognizer %@", recognizer);
         return NO;
     }
-    if (touch && [touch isKindOfClass:[UITouch class]]) {
+    if (touch && [touch isKindOfClass:[UITouch class]] && [recognizer respondsToSelector:@selector(edges)]) {
         CGPoint loc = [touch locationInView:nil];
         UIInterfaceOrientation orientation = get_current_interface_orientation();
-        if (should_suppress_bottom_edge_gesture(loc, orientation)) {
-            if ([recognizer respondsToSelector:@selector(edges)]) {
-                UIRectEdge edges = [(UIScreenEdgePanGestureRecognizer *)recognizer edges];
-                if ((edges & UIRectEdgeBottom) || edges == 0) {
-                    SRLog(@"[RCBottom] SBSystemGestureManager shouldReceiveTouch: NO for recognizer %@", recognizer);
-                    return NO;
-                }
-            }
+        if (rc_should_suppress_edge_recognizer(recognizer, loc, orientation, NO)) {
+            SRLog(@"[RCEdge] SBSystemGestureManager shouldReceiveTouch: NO for recognizer %@", recognizer);
+            return NO;
         }
     }
     return %orig;
 }
 
 - (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)recognizer {
+    if (recognizer == leftEdgeRecognizer || recognizer == rightEdgeRecognizer ||
+        recognizer == bottomUpRecognizer || recognizer == topDownRecognizer) {
+        return %orig;
+    }
     if (rc_is_two_finger_top_active() && rc_recognizer_is_top_edge(recognizer)) {
         SRLog(@"[RCMultiFinger] SBSystemGestureManager gestureRecognizerShouldBegin: NO for top-edge recognizer %@", recognizer);
         return NO;
@@ -20900,6 +21246,11 @@ static BOOL RC_ShouldKeepBottomBarSideSwipe(void) {
                 SRLog(@"[RCBottom] SBSystemGestureManager gestureRecognizerShouldBegin: NO for recognizer %@", recognizer);
                 return NO;
             }
+        }
+        if (((edges & UIRectEdgeTop) && rc_is_top_swipe_down_active()) ||
+            (edges == 0 && g_statusBarTouchActive && rc_is_top_swipe_down_active())) {
+            SRLog(@"[RCTop] SBSystemGestureManager gestureRecognizerShouldBegin: NO for recognizer %@", recognizer);
+            return NO;
         }
     }
     return %orig;
