@@ -3759,7 +3759,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     item.prefix = prefix;
     item.minimumValue = 0;
     item.maximumValue = delay ? 86400 : 100;
-    item.step = delay ? 0.5 : 1;
+    item.step = 1;
     item.decimals = delay ? 2 : 0;
     item.allowsDecimals = delay;
     item.allowsRound = YES;

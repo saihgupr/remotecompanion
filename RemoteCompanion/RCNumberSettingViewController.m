@@ -102,8 +102,8 @@
         self.unit.text = @"s";
         self.unit.font = [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
         self.unit.textColor = [UIColor secondaryLabelColor];
-        self.minusButton = [self stepButtonNamed:@"minus" label:@"Decrease by half a second"];
-        self.plusButton = [self stepButtonNamed:@"plus" label:@"Increase by half a second"];
+        self.minusButton = [self stepButtonNamed:@"minus" label:@"Decrease by one second"];
+        self.plusButton = [self stepButtonNamed:@"plus" label:@"Increase by one second"];
         [self.minusButton addTarget:self action:@selector(stepDown) forControlEvents:UIControlEventTouchUpInside];
         [self.plusButton addTarget:self action:@selector(stepUp) forControlEvents:UIControlEventTouchUpInside];
     } else {
@@ -240,11 +240,11 @@
 }
 
 - (void)stepDown {
-    [self stepBy:-0.5];
+    [self stepBy:-1];
 }
 
 - (void)stepUp {
-    [self stepBy:0.5];
+    [self stepBy:1];
 }
 
 - (void)stepBy:(double)delta {
