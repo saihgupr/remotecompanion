@@ -158,6 +158,9 @@ static NSString *RCDeviceIconName(NSString *name, RCDevicePickerKind kind) {
             [devices insertObject:@{ @"name": self.currentDevice, @"target": self.currentDevice, @"missing": @YES } atIndex:0];
         }
     }
+    if (self.kind == RCDevicePickerKindWatchFace && self.includeAnyOption) {
+        [devices insertObject:@{ @"name": @"Any Watch Face", @"target": @"__ANY__" } atIndex:0];
+    }
     return devices;
 }
 

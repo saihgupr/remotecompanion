@@ -26,6 +26,7 @@
 #import "RCTriggersGrid.h"
 #import "RCTriggerIcons.h"
 #import "RCServerClient.h"
+#import "RCDevicePickerViewController.h"
 
 #define kSimulateNotificationPrefix "com.pizzaman.rc.simulate."
 
@@ -311,6 +312,12 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     if ([triggerKey containsString:@"statusbar"]) return @"hand.draw"; // Status bar / screen gestures
     if ([triggerKey containsString:@"home"]) return @"circle.circle"; // Home button
     if ([triggerKey containsString:@"ringer"]) return @"bell.fill";
+    if ([triggerKey isEqualToString:@"trigger_watch_face"] || [triggerKey hasPrefix:@"trigger_watch_face_"]) {
+        if (@available(iOS 14.0, *)) {
+            if ([UIImage systemImageNamed:@"applewatch.watchface"]) return @"applewatch.watchface";
+        }
+        return @"applewatch";
+    }
     if ([triggerKey isEqualToString:@"trigger_watch_connect"]) {
         if (@available(iOS 14.0, *)) return @"applewatch.radiowaves.left.and.right";
         return @"applewatch";
@@ -740,8 +747,11 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     addSection(@[@"trigger_ringer_mute", @"trigger_ringer_unmute", @"trigger_ringer_toggle"], @"Ringer Switch", YES);
     // Apple Watch Section (Only show if added)
     NSMutableArray *watchKeys = [NSMutableArray array];
-    for (NSString *key in @[@"trigger_watch_ping", @"trigger_watch_ping_hold", @"trigger_watch_connect", @"trigger_watch_disconnect"]) {
+    for (NSString *key in @[@"trigger_watch_ping", @"trigger_watch_ping_hold", @"trigger_watch_connect", @"trigger_watch_disconnect", @"trigger_watch_face"]) {
         if ([[RCConfigManager sharedManager] triggerDataForKey:key]) [watchKeys addObject:key];
+    }
+    for (NSString *key in [[RCConfigManager sharedManager] allConfiguredTriggerKeys]) {
+        if ([key hasPrefix:@"trigger_watch_face_"]) [watchKeys addObject:key];
     }
     addSection(watchKeys, @"Apple Watch", YES);
     // Device State Section (Only show if configured, hide if empty)
@@ -1032,6 +1042,34 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
         @{ @"title": @"Scheduled Trigger", @"icon": @"calendar.badge.clock", @"section": @"Time", @"handler": ^{ push([[RCScheduledTriggerViewController alloc] init]); } },
         @{ @"title": @"Battery Level", @"icon": [UIImage systemImageNamed:@"battery.50"] ? @"battery.50" : @"battery.25", @"section": @"Device", @"handler": ^{ push([[RCBatteryTriggerViewController alloc] init]); } },
         @{ @"title": @"Focus", @"icon": @"moon.fill", @"section": @"Device", @"handler": ^{ push([[RCFocusTriggerViewController alloc] init]); } },
+        @{ @"title": @"Watch Face", @"icon": ([UIImage systemImageNamed:@"applewatch.watchface"] ? @"applewatch.watchface" : @"applewatch"), @"section": @"Apple Watch", @"handler": ^{
+            RCDevicePickerViewController *vc = [[RCDevicePickerViewController alloc] initWithKind:RCDevicePickerKindWatchFace title:@"Watch Face Trigger"];
+            vc.includeAnyOption = YES;
+            vc.onDeviceSelected = ^(NSDictionary *device) {
+                __strong typeof(weakSelf) self = weakSelf;
+                if (!self) return;
+                NSString *target = device[@"target"] ?: @"";
+                NSString *name = device[@"name"] ?: @"Watch Face";
+                NSString *triggerKey = @"trigger_watch_face";
+                NSString *triggerName = @"Watch Face: Any";
+                if (![target isEqualToString:@"__ANY__"]) {
+                    NSRange hash = [target rangeOfString:@" # "];
+                    NSString *uuid = (hash.location != NSNotFound) ? [target substringToIndex:hash.location] : target;
+                    triggerKey = [NSString stringWithFormat:@"trigger_watch_face_%@", uuid];
+                    triggerName = [NSString stringWithFormat:@"Watch Face: %@", name];
+                }
+                RCConfigManager *cm = [RCConfigManager sharedManager];
+                if (![cm triggerDataForKey:triggerKey]) {
+                    [cm updateTrigger:triggerKey withData:@{ @"name": triggerName, @"enabled": @YES, @"actions": @[] }];
+                }
+                RCActionsViewController *actionsVC = [[RCActionsViewController alloc] initWithTriggerKey:triggerKey];
+                NSMutableArray *vcs = [self.navigationController.viewControllers mutableCopy];
+                [vcs removeLastObject];
+                [vcs addObject:actionsVC];
+                [self.navigationController setViewControllers:vcs animated:YES];
+            };
+            push(vc);
+        } },
     ] mutableCopy];
     if ([RCConfigManager supportsControlCenterButtons]) {
         [items addObject:@{ @"title": @"Control Center Button", @"icon": @"switch.2", @"section": @"Device", @"handler": ^{ push([[RCControlCenterTriggerViewController alloc] init]); } }];

@@ -1156,7 +1156,7 @@ static NSString *RCActionCommand(id item) {
 // topic) can have a name of their own; the built-in ones (Power Double Click...) keep theirs, so
 // they always say what they are
 + (BOOL)canRenameTrigger:(NSString *)triggerKey {
-    for (NSString *prefix in @[@"nfc_", @"wifi_", @"bt_", @"output_", @"app_launch_", @"app_exit_", @"notif_", @"notify_", @"sched_", @"mqtt_", @"notiftap_", @"notifbtn_", @"trigger_cc_button_"]) {
+    for (NSString *prefix in @[@"nfc_", @"wifi_", @"bt_", @"output_", @"app_launch_", @"app_exit_", @"notif_", @"notify_", @"sched_", @"mqtt_", @"notiftap_", @"notifbtn_", @"trigger_cc_button_", @"trigger_watch_face_"]) {
         if ([triggerKey hasPrefix:prefix]) return YES;
     }
     return NO;
@@ -1252,6 +1252,7 @@ static NSString *RCActionCommand(id item) {
         @"trigger_watch_ping_hold": @"Ping iPhone (Hold)",
         @"trigger_watch_connect": @"Watch Connected",
         @"trigger_watch_disconnect": @"Watch Disconnected",
+        @"trigger_watch_face": @"Watch Face: Any",
         @"trigger_bottombar_swipe_left": @"Bottom Bar Swipe Left",
         @"trigger_bottombar_swipe_right": @"Bottom Bar Swipe Right",
         @"trigger_bottom_swipe_up_left": @"Bottom Swipe Up (Left)",
@@ -1259,6 +1260,10 @@ static NSString *RCActionCommand(id item) {
         @"trigger_bottom_swipe_up_right": @"Bottom Swipe Up (Right)"
     };
     
+    if ([triggerKey hasPrefix:@"trigger_watch_face_"]) {
+        return _config[@"triggers"][triggerKey][@"name"] ?: @"Watch Face Changed";
+    }
+
     if ([triggerKey hasPrefix:@"trigger_device_focus_"]) {
         return _config[@"triggers"][triggerKey][@"name"] ?: triggerKey;
     }

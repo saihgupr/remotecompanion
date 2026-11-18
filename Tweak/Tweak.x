@@ -2469,6 +2469,8 @@ static void rc_note_action_sequence_edit(NSDictionary *config) {
     dispatch_async(dispatch_get_main_queue(), ^{ rc_fire_sequence_edited_trigger(); });
 }
 
+static void rc_watch_face_refresh_observer(NSDictionary *config);
+
 static void load_trigger_config() {
     @autoreleasepool {
         // Find the config file
@@ -2512,6 +2514,7 @@ static void load_trigger_config() {
                 rc_note_action_sequence_edit(newConfig);
                 // A triple press binding may have changed: tell iOS whether its own shortcut is on
                 dispatch_async(dispatch_get_main_queue(), ^{ RC_RefreshAXTriplePress(); });
+                rc_watch_face_refresh_observer(newConfig);
             } else {
                 SRLogMin(@"Failed to parse config at %@", path);
             }
@@ -7675,6 +7678,8 @@ static void register_system_event_observers() {
     initialize_power_state();
     rc_carplay_start_observing();
     rc_watch_start_observing();
+    load_trigger_config();
+    rc_watch_face_refresh_observer(g_triggerConfig);
     rc_orientation_start_observing();
     rc_physical_orientation_start_observing();
 
@@ -11320,6 +11325,8 @@ static NSString *rc_handle_unlock_passcode_command(NSString *cmd) {
 - (id)faceForUUID:(NSUUID *)uuid;
 - (void)setSelectedFace:(id)face suppressingCallbackToObserver:(id)observer;
 - (void)setSelectedFaceIndex:(NSUInteger)index suppressingCallbackToObserver:(id)observer;
+- (void)addObserver:(id)observer;
+- (void)removeObserver:(id)observer;
 @end
 
 @protocol RCNTKCompanionFaceCollectionsManager <NSObject>
@@ -11395,6 +11402,134 @@ static id rc_watch_face_collection(NSString **errorOut) {
         return nil;
     }
     return collection;
+}
+
+@interface RCWatchFaceObserver : NSObject
+@end
+
+static RCWatchFaceObserver *g_watchFaceObserver = nil;
+static id g_watchFaceObservedCollection = nil;
+static id g_watchFaceNotifToken = nil;
+static NSString *g_watchFaceLastUUID = nil;
+static BOOL g_watchFaceObserving = NO;
+
+static BOOL rc_watch_face_has_configured_trigger(NSDictionary *config) {
+    NSDictionary *triggers = [config isKindOfClass:[NSDictionary class]] ? config[@"triggers"] : nil;
+    if (![triggers isKindOfClass:[NSDictionary class]]) return NO;
+    for (NSString *key in triggers) {
+        if ([key isEqualToString:@"trigger_watch_face"] || [key hasPrefix:@"trigger_watch_face_"]) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+static void rc_watch_face_handle_collection_change(id collection, BOOL seedOnly, NSString *source) {
+    if (!collection) return;
+    if ([collection respondsToSelector:@selector(hasLoaded)] && ![(id<RCNTKFaceCollection>)collection hasLoaded]) return;
+    NSUUID *selUUID = [collection respondsToSelector:@selector(selectedUUID)] ? [(id<RCNTKFaceCollection>)collection selectedUUID] : nil;
+    NSString *uuidStr = selUUID.UUIDString;
+    if (!uuidStr.length) return;
+    if (seedOnly || !g_watchFaceLastUUID) {
+        g_watchFaceLastUUID = uuidStr;
+        SRLog(@"⌚ [RCWatchFace] Seeded current Watch face UUID (%@): %@", source, uuidStr);
+        return;
+    }
+    if ([uuidStr isEqualToString:g_watchFaceLastUUID]) return;
+    g_watchFaceLastUUID = uuidStr;
+    id face = [collection respondsToSelector:@selector(faceForUUID:)] ? [(id<RCNTKFaceCollection>)collection faceForUUID:selUUID] : nil;
+    if (!face && [collection respondsToSelector:@selector(selectedFace)]) face = [(id<RCNTKFaceCollection>)collection selectedFace];
+    NSString *faceName = [face respondsToSelector:@selector(name)] ? [(id<RCNTKFace>)face name] : nil;
+    SRLogMin(@"⌚ [RCWatchFace] Watch face changed (%@): %@ (%@)", source, faceName ?: @"?", uuidStr);
+    RCExecuteTrigger([@"trigger_watch_face_" stringByAppendingString:uuidStr]);
+    RCExecuteTrigger(@"trigger_watch_face");
+}
+
+static id rc_watch_face_current_collection_nonblocking(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        dlopen("/System/Library/PrivateFrameworks/NanoRegistry.framework/NanoRegistry", RTLD_NOW);
+        dlopen("/System/Library/PrivateFrameworks/ClockKit.framework/ClockKit", RTLD_NOW);
+        dlopen("/System/Library/PrivateFrameworks/NanoTimeKitCompanion.framework/NanoTimeKitCompanion", RTLD_NOW);
+    });
+    Class nrCls = objc_getClass("NRPairedDeviceRegistry");
+    Class mgrCls = objc_getClass("NTKCompanionFaceCollectionsManager");
+    if (!nrCls || !mgrCls || ![nrCls respondsToSelector:@selector(sharedInstance)] || ![mgrCls respondsToSelector:@selector(sharedInstance)]) return nil;
+    id nr = [(id)nrCls sharedInstance];
+    NSArray *paired = [nr respondsToSelector:@selector(getPairedDevices)] ? [(id)nr getPairedDevices] : nil;
+    if (![paired isKindOfClass:[NSArray class]] || paired.count == 0) return nil;
+    id mgr = [(id)mgrCls sharedInstance];
+    NSArray *cols = [mgr respondsToSelector:@selector(sharedLibraryFaceCollectionsForAllDevices)] ? [(id)mgr sharedLibraryFaceCollectionsForAllDevices] : nil;
+    if ([cols isKindOfClass:[NSArray class]] && cols.count > 0) return cols.firstObject;
+    if ([mgr respondsToSelector:@selector(sharedFaceCollectionForDevice:forCollectionIdentifier:)]) {
+        id activeDevice = [nr respondsToSelector:@selector(getActivePairedDevice)] ? [(id)nr getActivePairedDevice] : paired.firstObject;
+        if (activeDevice) return [(id)mgr sharedFaceCollectionForDevice:activeDevice forCollectionIdentifier:@"LibraryFaces"];
+    }
+    return nil;
+}
+
+static void rc_watch_face_attach_collection(id collection) {
+    if (!collection || collection == g_watchFaceObservedCollection) return;
+    if (g_watchFaceObservedCollection && g_watchFaceObserver && [g_watchFaceObservedCollection respondsToSelector:@selector(removeObserver:)]) {
+        [(id<RCNTKFaceCollection>)g_watchFaceObservedCollection removeObserver:g_watchFaceObserver];
+    }
+    g_watchFaceObservedCollection = collection;
+    if ([collection respondsToSelector:@selector(addObserver:)]) {
+        [(id<RCNTKFaceCollection>)collection addObserver:g_watchFaceObserver];
+    }
+    rc_watch_face_handle_collection_change(collection, g_watchFaceLastUUID == nil, @"attach");
+}
+
+@implementation RCWatchFaceObserver
+- (void)faceCollectionDidLoad:(id)collection {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (g_watchFaceObserving) rc_watch_face_handle_collection_change(collection, g_watchFaceLastUUID == nil, @"faceCollectionDidLoad");
+    });
+}
+- (void)faceCollection:(id)collection didSelectFace:(id)face atIndex:(NSUInteger)index {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (g_watchFaceObserving) rc_watch_face_handle_collection_change(collection, NO, @"didSelectFace");
+    });
+}
+@end
+
+static void rc_watch_face_refresh_observer(NSDictionary *config) {
+    BOOL shouldObserve = rc_watch_face_has_configured_trigger(config);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (shouldObserve == g_watchFaceObserving) return;
+        g_watchFaceObserving = shouldObserve;
+        if (shouldObserve) {
+            if (!g_watchFaceObserver) g_watchFaceObserver = [RCWatchFaceObserver new];
+            id collection = rc_watch_face_current_collection_nonblocking();
+            rc_watch_face_attach_collection(collection);
+            if (!g_watchFaceNotifToken) {
+                g_watchFaceNotifToken = [[NSNotificationCenter defaultCenter] addObserverForName:@"NTKCompanionFaceCollectionsDidChangeNotification"
+                                                                                          object:nil
+                                                                                           queue:[NSOperationQueue mainQueue]
+                                                                                      usingBlock:^(NSNotification *note) {
+                    if (!g_watchFaceObserving) return;
+                    id col = rc_watch_face_current_collection_nonblocking();
+                    if (col && col != g_watchFaceObservedCollection) {
+                        rc_watch_face_attach_collection(col);
+                    } else if (col) {
+                        rc_watch_face_handle_collection_change(col, NO, @"NTKCompanionFaceCollectionsDidChangeNotification");
+                    }
+                }];
+            }
+            SRLogMin(@"⌚ [RCWatchFace] Armed Watch face change observer");
+        } else {
+            if (g_watchFaceObservedCollection && g_watchFaceObserver && [g_watchFaceObservedCollection respondsToSelector:@selector(removeObserver:)]) {
+                [(id<RCNTKFaceCollection>)g_watchFaceObservedCollection removeObserver:g_watchFaceObserver];
+            }
+            g_watchFaceObservedCollection = nil;
+            if (g_watchFaceNotifToken) {
+                [[NSNotificationCenter defaultCenter] removeObserver:g_watchFaceNotifToken];
+                g_watchFaceNotifToken = nil;
+            }
+            g_watchFaceLastUUID = nil;
+            SRLogMin(@"⌚ [RCWatchFace] Disarmed Watch face change observer (no triggers configured)");
+        }
+    });
 }
 
 static NSString *rc_handle_watch_face_command(NSString *cleanCmd) {

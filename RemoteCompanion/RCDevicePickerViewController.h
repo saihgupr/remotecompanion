@@ -15,6 +15,8 @@ typedef NS_ENUM(NSInteger, RCDevicePickerKind) {
 
 // The device name the action uses now: shown ticked (or listed as "Not Found")
 @property (nonatomic, copy) NSString *currentDevice;
+// Watch Face trigger picker: include "Any Watch Face" (__ANY__) at the top
+@property (nonatomic, assign) BOOL includeAnyOption;
 // device: @{ @"name": ..., @"target": ... } - target is what goes after "bt connect " /
 // "airplay connect " ("UID # Name" for AirPlay when the UID is known). The caller closes
 // the picker.
