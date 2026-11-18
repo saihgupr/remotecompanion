@@ -39,7 +39,9 @@
 #import <CoreLocation/CoreLocation.h>
 #import <CoreMotion/CoreMotion.h>
 #import <objc/message.h>
+#import <QuartzCore/QuartzCore.h>
 #import "RCQuickActions.h"
+#import "RCTwoFingerGestures.h"
 
 @interface CLLocationManager (RemoteCompanionPrivate)
 + (BOOL)locationServicesEnabled;
@@ -2041,7 +2043,8 @@ static BOOL RC_TriggersPaused(void) {
 static BOOL RC_IsButtonTrigger(NSString *key) {
     if ([key isEqualToString:@"shake"]) return YES;
     for (NSString *prefix in @[@"volume_", @"power_", @"touchid_", @"trigger_home_", @"trigger_ringer_",
-                               @"trigger_statusbar_", @"trigger_edge_", @"trigger_bottombar_", @"trigger_bottom_swipe_"]) {
+                               @"trigger_statusbar_", @"trigger_edge_", @"trigger_bottombar_", @"trigger_bottom_swipe_",
+                               @"trigger_bottom_two_finger_", @"trigger_two_finger_"]) {
         if ([key hasPrefix:prefix]) return YES;
     }
     return NO;
@@ -2087,11 +2090,39 @@ static NSObject *rc_trigger_config_lock(void) {
     return lock;
 }
 
+static volatile uint32_t g_twoFingerConfiguredMask = 0;
+
+static uint32_t rc_two_finger_mask_for_config(NSDictionary *config) {
+    if (![config isKindOfClass:[NSDictionary class]] || ![config[@"masterEnabled"] boolValue]) return 0;
+    NSDictionary *triggers = [config[@"triggers"] isKindOfClass:[NSDictionary class]] ? config[@"triggers"] : nil;
+    if (!triggers) return 0;
+    struct { __unsafe_unretained NSString *key; uint32_t bit; } items[] = {
+        { @"trigger_two_finger_tap",                  RCTFMaskTap },
+        { @"trigger_two_finger_swipe_left",           RCTFMaskSwipeLeft },
+        { @"trigger_two_finger_swipe_right",          RCTFMaskSwipeRight },
+        { @"trigger_two_finger_swipe_up",             RCTFMaskSwipeUp },
+        { @"trigger_two_finger_swipe_down",           RCTFMaskSwipeDown },
+        { @"trigger_two_finger_rotate_cw",            RCTFMaskRotateCW },
+        { @"trigger_two_finger_rotate_ccw",           RCTFMaskRotateCCW },
+        { @"trigger_statusbar_two_finger_swipe_down", RCTFMaskBarTop },
+        { @"trigger_bottom_two_finger_swipe_up",      RCTFMaskBarBottom },
+    };
+    uint32_t mask = 0;
+    for (size_t i = 0; i < sizeof(items) / sizeof(items[0]); i++) {
+        NSDictionary *t = triggers[items[i].key];
+        if (![t isKindOfClass:[NSDictionary class]] || ![t[@"enabled"] boolValue]) continue;
+        NSArray *actions = t[@"actions"];
+        if ([actions isKindOfClass:[NSArray class]] && actions.count > 0) mask |= items[i].bit;
+    }
+    return mask;
+}
+
 static void rc_set_trigger_config(NSDictionary *config) {
     NSDictionary *old;
     @synchronized (rc_trigger_config_lock()) {
         old = g_triggerConfig;
         g_triggerConfig = config;
+        g_twoFingerConfiguredMask = rc_two_finger_mask_for_config(config);
     }
     if (old) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(10 * NSEC_PER_SEC)), dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
@@ -2380,6 +2411,13 @@ static NSString *get_human_name_for_trigger(NSString *key, NSDictionary *trigger
             @"trigger_bottom_swipe_up_right": @"Bottom Swipe Up (Right)",
             @"trigger_statusbar_two_finger_swipe_down": @"2-Finger Top Slide Down",
             @"trigger_bottom_two_finger_swipe_up": @"2-Finger Bottom Slide Up",
+            @"trigger_two_finger_tap": @"2-Finger Tap",
+            @"trigger_two_finger_swipe_left": @"2-Finger Swipe Left",
+            @"trigger_two_finger_swipe_right": @"2-Finger Swipe Right",
+            @"trigger_two_finger_swipe_up": @"2-Finger Swipe Up",
+            @"trigger_two_finger_swipe_down": @"2-Finger Swipe Down",
+            @"trigger_two_finger_rotate_cw": @"2-Finger Rotate Clockwise",
+            @"trigger_two_finger_rotate_ccw": @"2-Finger Rotate Counter-Clockwise",
             @"trigger_device_airplane_on": @"Airplane Mode On",
             @"trigger_device_airplane_off": @"Airplane Mode Off",
             @"trigger_sequence_edited": @"Action Sequence Edited"
@@ -17872,16 +17910,26 @@ extern double IOHIDEventGetFloatValue(IOHIDEventRef event, int field);
 static os_unfair_lock g_hidFingerLock = OS_UNFAIR_LOCK_INIT;
 static uint32_t g_hidFingerMask = 0;
 static double g_hidFingerX[32], g_hidFingerY[32];
+static volatile double g_rcCachedScreenS = 0;
+static volatile double g_rcCachedScreenL = 0;
+static volatile UIInterfaceOrientation g_rcCachedOrientation = UIInterfaceOrientationPortrait;
+static RCTFState g_twoFingerHIDState = {0};
+
+static void rc_two_finger_hid_process(uint32_t mask, const double *xs, const double *ys, double now);
 
 static void rc_track_hid_fingers(IOHIDEventRef event) {
     CFArrayRef children = IOHIDEventGetChildren(event);
     if (!children) return;
+    uint32_t mask = 0;
+    double xs[32], ys[32];
+    BOOL sawRealChild = NO;
     os_unfair_lock_lock(&g_hidFingerLock);
     BOOL anyTouching = NO;
     for (CFIndex i = 0; i < CFArrayGetCount(children); i++) {
         IOHIDEventRef child = (IOHIDEventRef)CFArrayGetValueAtIndex(children, i);
         if (IOHIDEventGetType(child) != 11) continue;
         if (fabs(IOHIDEventGetFloatValue(child, 0xB0014) - 0.04) < 1e-4) continue; // RC's own injected finger
+        sawRealChild = YES;
         uint32_t slot = (uint32_t)IOHIDEventGetIntegerValue(child, 0xB0005) & 31;
         if (IOHIDEventGetIntegerValue(child, 0xB0009) != 0) {
             anyTouching = YES;
@@ -17892,8 +17940,17 @@ static void rc_track_hid_fingers(IOHIDEventRef event) {
             g_hidFingerMask &= ~(1u << slot);
         }
     }
-    if (!anyTouching) g_hidFingerMask = 0; // every finger is up
+    if (sawRealChild && !anyTouching) g_hidFingerMask = 0; // every finger is up
+    mask = g_hidFingerMask;
+    BOOL processMulti = sawRealChild && ((g_twoFingerConfiguredMask & RCTFMaskAnyTrigger) || g_twoFingerHIDState.phase != RCTFPhaseIdle);
+    if (processMulti) {
+        memcpy(xs, g_hidFingerX, sizeof(xs));
+        memcpy(ys, g_hidFingerY, sizeof(ys));
+    }
     os_unfair_lock_unlock(&g_hidFingerLock);
+    if (processMulti) {
+        rc_two_finger_hid_process(mask, xs, ys, CACurrentMediaTime());
+    }
 }
 
 static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientRef service, IOHIDEventRef event) {
@@ -19390,8 +19447,14 @@ static BOOL g_rcLatchedTouchOrientationValid = NO;
 
 static inline void RC_ScreenSL(CGFloat *outS, CGFloat *outL) {
     CGSize screenSize = [[UIScreen mainScreen] bounds].size;
-    if (outS) *outS = MIN(screenSize.width, screenSize.height);
-    if (outL) *outL = MAX(screenSize.width, screenSize.height);
+    CGFloat s = MIN(screenSize.width, screenSize.height);
+    CGFloat l = MAX(screenSize.width, screenSize.height);
+    if (s > 0 && l > 0 && g_rcCachedScreenS <= 0) {
+        g_rcCachedScreenS = s;
+        g_rcCachedScreenL = l;
+    }
+    if (outS) *outS = s;
+    if (outL) *outL = l;
 }
 
 static inline BOOL RC_InTopRegion(CGPoint loc, UIInterfaceOrientation orientation, CGFloat S, CGFloat L) {
@@ -19494,6 +19557,75 @@ static BOOL rc_hid_two_bottom_fingers(UIInterfaceOrientation orientation, CGFloa
         if (RC_InBottomRegionMultiLoose(CGPointMake(xs[slot] * S, ys[slot] * L), orientation, S, L)) near++;
     }
     return near >= 2;
+}
+
+static inline RCTFOrientation rc_tf_orientation(UIInterfaceOrientation orientation) {
+    switch (orientation) {
+        case UIInterfaceOrientationPortraitUpsideDown: return RCTFOrientPortraitUpsideDown;
+        case UIInterfaceOrientationLandscapeLeft:      return RCTFOrientLandscapeLeft;
+        case UIInterfaceOrientationLandscapeRight:     return RCTFOrientLandscapeRight;
+        default:                                     return RCTFOrientPortrait;
+    }
+}
+
+static NSString *rc_two_finger_key_for_trigger(RCTFTrigger trigger) {
+    switch (trigger) {
+        case RCTFTriggerTap:        return @"trigger_two_finger_tap";
+        case RCTFTriggerSwipeLeft:  return @"trigger_two_finger_swipe_left";
+        case RCTFTriggerSwipeRight: return @"trigger_two_finger_swipe_right";
+        case RCTFTriggerSwipeUp:    return @"trigger_two_finger_swipe_up";
+        case RCTFTriggerSwipeDown:  return @"trigger_two_finger_swipe_down";
+        case RCTFTriggerRotateCW:   return @"trigger_two_finger_rotate_cw";
+        case RCTFTriggerRotateCCW:  return @"trigger_two_finger_rotate_ccw";
+        default:                    return nil;
+    }
+}
+
+static void rc_two_finger_hid_process(uint32_t mask, const double *xs, const double *ys, double now) {
+    uint32_t configMask = g_twoFingerConfiguredMask;
+    if (!(configMask & RCTFMaskAnyTrigger) || RCGestureIsBusy() || RC_TriggersPaused()) {
+        RCTFReset(&g_twoFingerHIDState);
+        return;
+    }
+    double S = g_rcCachedScreenS;
+    double L = g_rcCachedScreenL;
+    if (S <= 0 || L <= 0) return;
+
+    UIInterfaceOrientation uiOrient = g_rcCachedOrientation;
+    bool barTopPriority = false;
+    bool barBottomPriority = false;
+    if (RCTFCountBits(mask) == 2 &&
+        (g_twoFingerHIDState.phase == RCTFPhaseIdle || g_twoFingerHIDState.phase == RCTFPhaseOneDown)) {
+        uint8_t s0 = (uint8_t)__builtin_ctz(mask);
+        uint8_t s1 = (uint8_t)__builtin_ctz(mask & ~(1u << s0));
+        CGPoint p0 = CGPointMake(xs[s0] * S, ys[s0] * L);
+        CGPoint p1 = CGPointMake(xs[s1] * S, ys[s1] * L);
+        if (configMask & RCTFMaskBarTop) {
+            barTopPriority =
+                (RC_InTopRegionMulti(p0, uiOrient, S, L) && RC_InTopRegionMultiLoose(p1, uiOrient, S, L)) ||
+                (RC_InTopRegionMulti(p1, uiOrient, S, L) && RC_InTopRegionMultiLoose(p0, uiOrient, S, L));
+        }
+        if (configMask & RCTFMaskBarBottom) {
+            barBottomPriority =
+                (RC_InBottomRegionMulti(p0, uiOrient, S, L) && RC_InBottomRegionMultiLoose(p1, uiOrient, S, L)) ||
+                (RC_InBottomRegionMulti(p1, uiOrient, S, L) && RC_InBottomRegionMultiLoose(p0, uiOrient, S, L));
+        }
+    }
+
+    RCTFTrigger trig = RCTFProcessFrame(&g_twoFingerHIDState, mask, xs, ys, now, S, L,
+                                        rc_tf_orientation(uiOrient), configMask,
+                                        barTopPriority, barBottomPriority);
+    NSString *triggerKey = rc_two_finger_key_for_trigger(trig);
+    if (!triggerKey) return;
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!RC_ScreenIsOn() || rc_ui_locked()) return;
+        if (RCGestureIsBusy()) return;
+        if (RC_IsForegroundAppExcluded()) return;
+        if (!RC_TriggerIsActionable(triggerKey)) return;
+        SRLogMin(@"[RCMultiFinger] %@ FIRED", triggerKey);
+        RCExecuteTrigger(triggerKey);
+    });
 }
 
 // Progress 0..1 along the UI-top / UI-bottom edge, left-to-right as the user sees it.
@@ -20816,6 +20948,7 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
 
 - (void)noteActiveInterfaceOrientationDidChangeToOrientation:(long)orientation willAnimateWithSettings:(id)settings fromOrientation:(long)fromOrientation {
     %orig;
+    g_rcCachedOrientation = (UIInterfaceOrientation)orientation;
     rc_orientation_maybe_changed();
 }
 
@@ -21978,6 +22111,10 @@ static NSTimeInterval s_last_camera_launch_notify = 0;
         
         // Start Background HID Listener immediately (safe for NFC)
         setup_background_hid_listener();
+        dispatch_async(dispatch_get_main_queue(), ^{
+            RC_ScreenSL(NULL, NULL);
+            g_rcCachedOrientation = get_current_interface_orientation();
+        });
         
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             SRLog(@"Delayed Initialization & Gesture Setup...");

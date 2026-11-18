@@ -302,6 +302,9 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
         NSString *icon = [[RCConfigManager sharedManager] triggerDataForKey:triggerKey][@"icon"];
         return [icon isKindOfClass:[NSString class]] && icon.length ? icon : @"switch.2";
     }
+    if ([triggerKey isEqualToString:@"trigger_two_finger_tap"]) return @"hand.tap";
+    if ([triggerKey isEqualToString:@"trigger_two_finger_rotate_cw"]) return @"arrow.clockwise";
+    if ([triggerKey isEqualToString:@"trigger_two_finger_rotate_ccw"]) return @"arrow.counterclockwise";
     if ([triggerKey containsString:@"two_finger"]) return @"hand.draw";
     if ([triggerKey isEqualToString:@"volume_up_then_down"] || [triggerKey isEqualToString:@"volume_down_then_up"]) return @"arrow.up.and.down.circle.fill";
     if ([triggerKey hasPrefix:@"trigger_statusbar_swipe_down"]) return @"chevron.compact.down";
@@ -725,7 +728,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     addSection(@[@"trigger_bottombar_swipe_left", @"trigger_bottombar_swipe_right", @"trigger_bottom_swipe_up_left", @"trigger_bottom_swipe_up_center", @"trigger_bottom_swipe_up_right"], @"Bottom Bar Gestures", YES);
     // Multi-Finger Gestures Section (Only show if added)
     NSMutableArray *multiFingerKeys = [NSMutableArray array];
-    for (NSString *key in @[@"trigger_statusbar_two_finger_swipe_down", @"trigger_bottom_two_finger_swipe_up"]) {
+    for (NSString *key in [RCConfigManager multiFingerTriggerKeys]) {
         if ([[RCConfigManager sharedManager] triggerDataForKey:key]) [multiFingerKeys addObject:key];
     }
     addSection(multiFingerKeys, @"Multi-Finger Gestures", YES);
@@ -1092,7 +1095,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     for (NSString *key in @[@"trigger_bottombar_swipe_left", @"trigger_bottombar_swipe_right", @"trigger_bottom_swipe_up_left", @"trigger_bottom_swipe_up_center", @"trigger_bottom_swipe_up_right"]) {
         addBuiltIn(key, @"Bottom Bar Gestures");
     }
-    for (NSString *key in @[@"trigger_statusbar_two_finger_swipe_down", @"trigger_bottom_two_finger_swipe_up"]) {
+    for (NSString *key in [RCConfigManager multiFingerTriggerKeys]) {
         addBuiltIn(key, @"Multi-Finger Gestures");
     }
     if ([RCConfigManager hasHomeButton]) {

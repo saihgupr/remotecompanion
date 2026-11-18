@@ -48,6 +48,13 @@ static NSDictionary<NSString *, NSDictionary *> *RCPhoneIconSpecs(void) {
             @"trigger_bottom_swipe_up_right":  @{ @"arrowAt": @"R" },
             @"trigger_statusbar_two_finger_swipe_down": @{ @"zone": @"top", @"fingers": @"down" },
             @"trigger_bottom_two_finger_swipe_up":      @{ @"zone": @"bottom", @"fingers": @"up" },
+            @"trigger_two_finger_tap":                  @{ @"twoFingers": @"tap" },
+            @"trigger_two_finger_swipe_left":           @{ @"twoFingers": @"left" },
+            @"trigger_two_finger_swipe_right":          @{ @"twoFingers": @"right" },
+            @"trigger_two_finger_swipe_up":             @{ @"twoFingers": @"up" },
+            @"trigger_two_finger_swipe_down":           @{ @"twoFingers": @"down" },
+            @"trigger_two_finger_rotate_cw":            @{ @"twoFingers": @"cw" },
+            @"trigger_two_finger_rotate_ccw":           @{ @"twoFingers": @"ccw" },
             @"trigger_home_double_click":    @{ @"home": @YES, @"mark": @"2×" },
             @"trigger_home_triple_click":    @{ @"home": @YES, @"mark": @"3×" },
             @"trigger_home_quadruple_click": @{ @"home": @YES, @"mark": @"4×" },
@@ -282,6 +289,56 @@ static UIImage *RCDrawPhoneIcon(NSDictionary *spec, CGFloat side) {
             CGContextFillEllipseInRect(context, R(21.5, y, 6, 6));
             RCDrawFitted(RCSymbol([@"arrow." stringByAppendingString:fingers], 14 * k, UIImageSymbolWeightBlack),
                          down ? R(11, 13, 18, 20) : R(11, 7, 18, 20), kCGBlendModeNormal);
+        }
+        NSString *twoFingers = spec[@"twoFingers"];
+        if (twoFingers) {
+            BOOL isUp = [twoFingers isEqualToString:@"up"];
+            BOOL isTap = [twoFingers isEqualToString:@"tap"];
+            CGFloat fy = isTap ? 22.0 : isUp ? 28.0 : 12.5;
+            CGContextFillEllipseInRect(context, R(15.5 - 2.6, fy - 2.6, 5.2, 5.2));
+            CGContextFillEllipseInRect(context, R(24.5 - 2.6, fy - 2.6, 5.2, 5.2));
+            if (isTap) {
+                for (NSNumber *cxNum in @[@15.5, @24.5]) {
+                    CGFloat cx = cxNum.doubleValue;
+                    UIBezierPath *arc = [UIBezierPath bezierPathWithArcCenter:CGPointMake(cx * k, fy * k)
+                                                                       radius:5.0 * k
+                                                                   startAngle:-145.0 * M_PI / 180.0
+                                                                     endAngle:-35.0 * M_PI / 180.0
+                                                                    clockwise:YES];
+                    arc.lineWidth = 1.6 * k;
+                    arc.lineCapStyle = kCGLineCapRound;
+                    [arc stroke];
+                }
+            } else if ([twoFingers isEqualToString:@"cw"] || [twoFingers isEqualToString:@"ccw"]) {
+                BOOL cw = [twoFingers isEqualToString:@"cw"];
+                CGFloat cx = 20.0, cy = 25.0, r = 4.8;
+                CGFloat startDeg = cw ? 55.0 : 125.0;
+                CGFloat endDeg = cw ? -35.0 : -145.0;
+                CGFloat endRad = endDeg * M_PI / 180.0;
+                UIBezierPath *arc = [UIBezierPath bezierPathWithArcCenter:CGPointMake(cx * k, cy * k)
+                                                                   radius:r * k
+                                                               startAngle:startDeg * M_PI / 180.0
+                                                                 endAngle:endRad
+                                                                clockwise:cw];
+                arc.lineWidth = 2.2 * k;
+                arc.lineCapStyle = kCGLineCapRound;
+                [arc stroke];
+                CGFloat ex = cx + r * cos(endRad), ey = cy + r * sin(endRad);
+                CGFloat tx = cw ? -sin(endRad) : sin(endRad);
+                CGFloat ty = cw ? cos(endRad) : -cos(endRad);
+                CGFloat nx = -ty, ny = tx, head = 3.2;
+                UIBezierPath *arrow = [UIBezierPath bezierPath];
+                [arrow moveToPoint:CGPointMake((ex - tx * head + nx * head * 0.85) * k, (ey - ty * head + ny * head * 0.85) * k)];
+                [arrow addLineToPoint:CGPointMake(ex * k, ey * k)];
+                [arrow addLineToPoint:CGPointMake((ex - tx * head - nx * head * 0.85) * k, (ey - ty * head - ny * head * 0.85) * k)];
+                arrow.lineWidth = 2.2 * k;
+                arrow.lineCapStyle = kCGLineCapRound;
+                arrow.lineJoinStyle = kCGLineJoinRound;
+                [arrow stroke];
+            } else {
+                CGRect box = isUp ? R(11, 8, 18, 14) : R(11, 18, 18, 15);
+                RCDrawFitted(RCSymbol([@"arrow." stringByAppendingString:twoFingers], 13 * k, UIImageSymbolWeightBlack), box, kCGBlendModeNormal);
+            }
         }
 
         // What happens, inside the screen

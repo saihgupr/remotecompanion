@@ -160,7 +160,7 @@ static NSString *RCFitOneLine(NSString *text, UIFont *font, CGFloat width) {
     addSection(@[@"trigger_statusbar_left_hold", @"trigger_statusbar_center_hold", @"trigger_statusbar_right_hold", @"trigger_statusbar_swipe_left", @"trigger_statusbar_swipe_right", @"trigger_statusbar_double_tap", @"trigger_statusbar_swipe_down_left", @"trigger_statusbar_swipe_down_center", @"trigger_statusbar_swipe_down_right"], @"Screen Gestures");
     addSection(@[@"trigger_edge_left_swipe_up", @"trigger_edge_left_swipe_down", @"trigger_edge_right_swipe_up", @"trigger_edge_right_swipe_down"], @"Edge Gestures");
     addSection(@[@"trigger_bottombar_swipe_left", @"trigger_bottombar_swipe_right", @"trigger_bottom_swipe_up_left", @"trigger_bottom_swipe_up_center", @"trigger_bottom_swipe_up_right"], @"Bottom Bar Gestures");
-    addSection(@[@"trigger_statusbar_two_finger_swipe_down", @"trigger_bottom_two_finger_swipe_up"], @"Multi-Finger Gestures");
+    addSection([RCConfigManager multiFingerTriggerKeys], @"Multi-Finger Gestures");
     if ([RCConfigManager hasHomeButton]) {
         addSection(@[@"trigger_home_double_click", @"trigger_home_triple_click", @"trigger_home_quadruple_click", @"trigger_home_hold", @"trigger_home_power", @"touchid_tap", @"touchid_hold"], @"Home Button");
     }

@@ -87,6 +87,7 @@
 + (instancetype)sharedManager;
 
 - (NSArray<NSString *> *)allTriggerKeys;
++ (NSArray<NSString *> *)multiFingerTriggerKeys;
 + (NSArray<NSString *> *)builtInTriggerKeys;
 - (NSArray<NSString *> *)allConfiguredTriggerKeys;
 - (NSString *)displayNameForTrigger:(NSString *)triggerKey;
