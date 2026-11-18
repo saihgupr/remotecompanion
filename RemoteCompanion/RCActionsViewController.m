@@ -391,6 +391,8 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
     ]];
     self.inlinePanelContainer = container;
     [self rc_showInlineTitleFromLabel:self.textLabel];
+    // The open row's icon takes the row's tint
+    if (self.imageView) self.imageView.tintColor = self.tintColor ?: [UIColor systemBlueColor];
 }
 
 // The open row's title: the table lays its own label out for a row as tall as its editor, and that
@@ -3655,8 +3657,8 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     // The row grows in place into its open card, the way the prototype sequence expands: the panel
     // fades in as the card grows, and the rows around step back in the same movement
     [cell rc_setValueChipAccented:NO];
-    [self applySectionCardStyleToCell:cell atIndexPath:path];
     [cell rc_showInlinePanel:panel rowContentHeight:self.inlineEditorRowHeight];
+    [self applySectionCardStyleToCell:cell atIndexPath:path];
     cell.inlinePanelContainer.alpha = 0.0;
     void (^changes)(void) = ^{
         [self.tableView beginUpdates];

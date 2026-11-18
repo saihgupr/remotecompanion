@@ -5,9 +5,6 @@
 #import "RCExcludedAppsViewController.h"
 #import "RCConfigManager+AppExclusions.h"
 #import "RCActionTile.h"
-#import "RCDelayPrototypeGalleryViewController.h"
-#import "RCFunctionsMenuPrototypeGalleryViewController.h"
-#import "RCActionRowPrototypeGalleryViewController.h"
 
 @interface RCAdvancedSettingsViewController ()
 @property (nonatomic, strong) UITableView *tableView;
@@ -23,7 +20,6 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
     RCAdvancedSettingsSectionLayout,
     RCAdvancedSettingsSectionButtons,
     RCAdvancedSettingsSectionSecurity,
-    RCAdvancedSettingsSectionPrototype,
     RCAdvancedSettingsSectionCount,
 };
 
@@ -117,7 +113,6 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
     else if (section == RCAdvancedSettingsSectionOptions) title = @"Options";
     else if (section == RCAdvancedSettingsSectionLayout) title = @"Layout";
     else if (section == RCAdvancedSettingsSectionButtons) title = @"Buttons";
-    else if (section == RCAdvancedSettingsSectionPrototype) title = @"Prototype";
     else title = @"Security";
     
     UIView *headerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, tableView.bounds.size.width, 40)];
@@ -148,8 +143,6 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
         return @"Compact shows a grid of tiles instead of a list. Triggers per Row applies to Triggers in Compact.";
     } else if (section == RCAdvancedSettingsSectionButtons) {
         return @"How long a press waits for the next one before it counts. A shorter time responds sooner and needs quicker presses.";
-    } else if (section == RCAdvancedSettingsSectionPrototype) {
-        return @"Design prototypes: the Delay editor, and the action picker with its rows and value panels. Nothing here changes your actions.";
     } else if (section == RCAdvancedSettingsSectionSecurity) {
         return @"Lets scripts, terminals and other tools call the root helper directly. Any app on this device can then get root, so leave it off unless you need it.";
     }
@@ -162,7 +155,6 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
     if (section == RCAdvancedSettingsSectionButtons) return (NSInteger)[self timingRows].count;
     if (section == RCAdvancedSettingsSectionLayout) return (NSInteger)RCLayoutScreens().count;
     if (section == RCAdvancedSettingsSectionSecurity) return 1;
-    if (section == RCAdvancedSettingsSectionPrototype) return 3;
     return 5; // Excluded Apps, Wrap Long Names, Logging, Freeze Lists During Gestures, Only Unlock Out of Pocket
 }
 
@@ -274,12 +266,6 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
         [directRootSwitch addTarget:self action:@selector(directRootToggleChanged:) forControlEvents:UIControlEventValueChanged];
         cell.accessoryView = directRootSwitch;
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
-    } else if (indexPath.section == RCAdvancedSettingsSectionPrototype) {
-        if (indexPath.row == 0) cell.textLabel.text = @"Delay styles (prototype)";
-        else if (indexPath.row == 1) cell.textLabel.text = @"Functions menu (prototype)";
-        else cell.textLabel.text = @"Action rows (prototype)";
-        cell.textLabel.textColor = [UIColor systemBlueColor];
-        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     }
     
     return cell;
@@ -302,12 +288,6 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
         void (^set)(double) = row[@"set"];
         [self chooseTimingNamed:row[@"title"] message:row[@"message"] values:row[@"values"] defaultValue:[row[@"default"] doubleValue]
                         current:get() from:[tableView cellForRowAtIndexPath:indexPath] apply:set];
-    } else if (indexPath.section == RCAdvancedSettingsSectionPrototype) {
-        UIViewController *prototype = nil;
-        if (indexPath.row == 0) prototype = [[RCDelayPrototypeGalleryViewController alloc] init];
-        else if (indexPath.row == 1) prototype = [RCFunctionsMenuPrototypeGalleryViewController galleryViewController];
-        else prototype = [RCActionRowPrototypeGalleryViewController prototypeGallery];
-        [self.navigationController pushViewController:prototype animated:YES];
     }
 }
 
