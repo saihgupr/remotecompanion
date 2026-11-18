@@ -379,6 +379,25 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
     }
 }
 
++ (NSArray<NSString *> *)multiFingerTriggerKeys {
+    static NSArray<NSString *> *keys;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        keys = @[
+            @"trigger_two_finger_tap",
+            @"trigger_two_finger_swipe_left",
+            @"trigger_two_finger_swipe_right",
+            @"trigger_two_finger_swipe_up",
+            @"trigger_two_finger_swipe_down",
+            @"trigger_two_finger_rotate_cw",
+            @"trigger_two_finger_rotate_ccw",
+            @"trigger_statusbar_two_finger_swipe_down",
+            @"trigger_bottom_two_finger_swipe_up",
+        ];
+    });
+    return keys;
+}
+
 // Every trigger the app can add that is not made for a tag, network, device, app,
 // notification, time or topic. Older versions listed these all the time; now one only
 // appears once it has been added.
@@ -386,7 +405,7 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
     static NSArray<NSString *> *keys;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        keys = @[
+        NSMutableArray *list = [@[
             // Volume Buttons
             @"volume_up_hold", @"volume_down_hold", @"volume_both_press",
             @"volume_up_then_down", @"volume_down_then_up",
@@ -396,14 +415,12 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
             // Status Bar
             @"trigger_statusbar_left_hold", @"trigger_statusbar_center_hold", @"trigger_statusbar_right_hold",
             @"trigger_statusbar_swipe_left", @"trigger_statusbar_swipe_right", @"trigger_statusbar_double_tap",
-            @"trigger_statusbar_two_finger_swipe_down",
             // Edge Gestures
             @"trigger_edge_left_swipe_up", @"trigger_edge_left_swipe_down",
             @"trigger_edge_right_swipe_up", @"trigger_edge_right_swipe_down",
             // Bottom Bar Gestures
             @"trigger_bottombar_swipe_left", @"trigger_bottombar_swipe_right",
             @"trigger_bottom_swipe_up_left", @"trigger_bottom_swipe_up_center", @"trigger_bottom_swipe_up_right",
-            @"trigger_bottom_two_finger_swipe_up",
             // Home Button
             @"trigger_home_double_click", @"trigger_home_triple_click", @"trigger_home_quadruple_click",
             @"trigger_home_hold", @"trigger_home_power", @"touchid_tap", @"touchid_hold",
@@ -425,7 +442,9 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
             @"trigger_device_call_incoming", @"trigger_device_call_start", @"trigger_device_call_end",
             // Configuration
             @"trigger_sequence_edited"
-        ];
+        ] mutableCopy];
+        [list addObjectsFromArray:[self multiFingerTriggerKeys]];
+        keys = [list copy];
     });
     return keys;
 }
@@ -1233,6 +1252,13 @@ static NSString *RCActionCommand(id item) {
         @"trigger_statusbar_double_tap": @"Status Bar Double Tap",
         @"trigger_statusbar_two_finger_swipe_down": @"2-Finger Top Slide Down",
         @"trigger_bottom_two_finger_swipe_up": @"2-Finger Bottom Slide Up",
+        @"trigger_two_finger_tap": @"2-Finger Tap",
+        @"trigger_two_finger_swipe_left": @"2-Finger Swipe Left",
+        @"trigger_two_finger_swipe_right": @"2-Finger Swipe Right",
+        @"trigger_two_finger_swipe_up": @"2-Finger Swipe Up",
+        @"trigger_two_finger_swipe_down": @"2-Finger Swipe Down",
+        @"trigger_two_finger_rotate_cw": @"2-Finger Rotate Clockwise",
+        @"trigger_two_finger_rotate_ccw": @"2-Finger Rotate Counter-Clockwise",
         @"trigger_home_triple_click": @"Home Button (Triple Click)",
         @"trigger_home_quadruple_click": @"Home Button (Quadruple Click)",
         @"trigger_home_hold": @"Home Button (Hold)",

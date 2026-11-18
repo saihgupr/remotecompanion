@@ -60,6 +60,7 @@
 - (NSString *)sectionForTrigger:(NSString *)key {
     if ([key hasPrefix:@"volume_"]) return @"Volume Buttons";
     if ([key hasPrefix:@"power_"]) return @"Power Button";
+    if ([key containsString:@"two_finger"]) return @"Multi-Finger Gestures";
     if ([key hasPrefix:@"trigger_statusbar_"]) return @"Screen Gestures";
     if ([key hasPrefix:@"trigger_edge_"]) return @"Edge Gestures";
     if ([key hasPrefix:@"trigger_bottombar_"] || [key hasPrefix:@"trigger_bottom_swipe_"]) return @"Bottom Bar Gestures";
@@ -85,7 +86,7 @@
 }
 
 - (NSArray<NSString *> *)sectionOrder {
-    return @[@"Volume Buttons", @"Power Button", @"Screen Gestures", @"Edge Gestures", @"Bottom Bar Gestures", @"Home Button",
+    return @[@"Volume Buttons", @"Power Button", @"Screen Gestures", @"Edge Gestures", @"Bottom Bar Gestures", @"Multi-Finger Gestures", @"Home Button",
              @"Ringer Switch", @"Apple Watch", @"Device State", @"Physical Orientation", @"Motion Gestures", @"NFC Tags", @"Notifications", @"WiFi Network Triggers",
              @"Bluetooth Device Triggers", @"Audio Output Triggers", @"App Triggers", @"Notification Triggers",
              @"Scheduled Triggers", @"MQTT Triggers", @"Configuration", @"Other"];

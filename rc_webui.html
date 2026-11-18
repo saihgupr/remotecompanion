@@ -3559,7 +3559,7 @@ const TRIGGER_SECTIONS = [
   { title: 'Status Bar',             id: 'statusbar', keys: ['trigger_statusbar_left_hold','trigger_statusbar_center_hold','trigger_statusbar_right_hold','trigger_statusbar_swipe_left','trigger_statusbar_swipe_right','trigger_statusbar_double_tap'] },
   { title: 'Edge Gestures',          id: 'edge',      keys: ['trigger_edge_left_swipe_up','trigger_edge_left_swipe_down','trigger_edge_right_swipe_up','trigger_edge_right_swipe_down'] },
   { title: 'Bottom Bar Gestures',    id: 'bottombar', keys: ['trigger_bottombar_swipe_left','trigger_bottombar_swipe_right','trigger_bottom_swipe_up_left','trigger_bottom_swipe_up_center','trigger_bottom_swipe_up_right'] },
-  { title: 'Multi-Finger Gestures',  id: 'multifinger', keys: ['trigger_statusbar_two_finger_swipe_down','trigger_bottom_two_finger_swipe_up'] },
+  { title: 'Multi-Finger Gestures',  id: 'multifinger', keys: ['trigger_two_finger_tap','trigger_two_finger_swipe_left','trigger_two_finger_swipe_right','trigger_two_finger_swipe_up','trigger_two_finger_swipe_down','trigger_two_finger_rotate_cw','trigger_two_finger_rotate_ccw','trigger_statusbar_two_finger_swipe_down','trigger_bottom_two_finger_swipe_up'] },
   { title: 'Home Button',            id: 'home',      keys: ['trigger_home_double_click','trigger_home_triple_click','trigger_home_quadruple_click','trigger_home_hold','trigger_home_power','touchid_tap','touchid_hold'] },
   { title: 'Ringer Switch',          id: 'ringer',    keys: ['trigger_ringer_mute','trigger_ringer_unmute','trigger_ringer_toggle'] },
   { title: 'Apple Watch',            id: 'watch',     keys: ['trigger_watch_ping','trigger_watch_ping_hold'] },
@@ -3600,6 +3600,10 @@ const TRIGGER_NAMES = {
   trigger_bottombar_swipe_left:'Bottom Bar Swipe Left', trigger_bottombar_swipe_right:'Bottom Bar Swipe Right',
   trigger_bottom_swipe_up_left:'Bottom Swipe Up (Left)', trigger_bottom_swipe_up_center:'Bottom Swipe Up (Center)', trigger_bottom_swipe_up_right:'Bottom Swipe Up (Right)',
   trigger_statusbar_two_finger_swipe_down:'2-Finger Top Slide Down', trigger_bottom_two_finger_swipe_up:'2-Finger Bottom Slide Up',
+  trigger_two_finger_tap:'2-Finger Tap',
+  trigger_two_finger_swipe_left:'2-Finger Swipe Left', trigger_two_finger_swipe_right:'2-Finger Swipe Right',
+  trigger_two_finger_swipe_up:'2-Finger Swipe Up', trigger_two_finger_swipe_down:'2-Finger Swipe Down',
+  trigger_two_finger_rotate_cw:'2-Finger Rotate Clockwise', trigger_two_finger_rotate_ccw:'2-Finger Rotate Counter-Clockwise',
   trigger_device_lock: 'Device Locked', trigger_device_unlock: 'Device Unlocked',
   trigger_power_connect: 'Power Connected', trigger_power_disconnect: 'Power Disconnected',
   trigger_device_rotated_landscape: 'Rotated to Landscape', trigger_device_rotated_portrait: 'Rotated to Portrait',
@@ -3707,6 +3711,13 @@ const PHONE_ICONS = (() => {
     trigger_bottom_swipe_up_right: { arrowAt: 'R' },
     trigger_statusbar_two_finger_swipe_down: { zone: 'top', fingers: 'down' },
     trigger_bottom_two_finger_swipe_up: { zone: 'bottom', fingers: 'up' },
+    trigger_two_finger_tap: { twoFingers: 'tap' },
+    trigger_two_finger_swipe_left: { twoFingers: 'left' },
+    trigger_two_finger_swipe_right: { twoFingers: 'right' },
+    trigger_two_finger_swipe_up: { twoFingers: 'up' },
+    trigger_two_finger_swipe_down: { twoFingers: 'down' },
+    trigger_two_finger_rotate_cw: { twoFingers: 'cw' },
+    trigger_two_finger_rotate_ccw: { twoFingers: 'ccw' },
     trigger_home_double_click: { home: true, mark: '2×' },
     trigger_home_triple_click: { home: true, mark: '3×' },
     trigger_home_quadruple_click: { home: true, mark: '4×' },
@@ -3760,6 +3771,30 @@ function phoneIconSVG(spec) {
       const fy = down ? 7 : 33;
       parts.push(`<circle cx="15.5" cy="${fy}" r="3" fill="currentColor"/><circle cx="24.5" cy="${fy}" r="3" fill="currentColor"/>`);
       parts.push(svgArrow(20, down ? 23 : 17, spec.fingers, 14, 2.6));
+    }
+    if (spec.twoFingers) {
+      const tf = spec.twoFingers;
+      const isUp = tf === 'up', isTap = tf === 'tap';
+      const fy = isTap ? 22 : isUp ? 28 : 12.5;
+      parts.push(`<circle cx="15.5" cy="${fy}" r="2.6" fill="currentColor"/><circle cx="24.5" cy="${fy}" r="2.6" fill="currentColor"/>`);
+      if (isTap) {
+        [15.5, 24.5].forEach(cx => {
+          parts.push(`<path d="M${(cx - 4.1).toFixed(1)} 19.1 A5 5 0 0 1 ${(cx + 4.1).toFixed(1)} 19.1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>`);
+        });
+      } else if (tf === 'cw' || tf === 'ccw') {
+        const cw = tf === 'cw', cx = 20, cy = 25, r = 4.8;
+        const sRad = (cw ? 55 : 125) * Math.PI / 180;
+        const eRad = (cw ? -35 : -145) * Math.PI / 180;
+        const sx = cx + r * Math.cos(sRad), sy = cy + r * Math.sin(sRad);
+        const ex = cx + r * Math.cos(eRad), ey = cy + r * Math.sin(eRad);
+        const tx = cw ? -Math.sin(eRad) : Math.sin(eRad), ty = cw ? Math.cos(eRad) : -Math.cos(eRad);
+        const nx = -ty, ny = tx, head = 3.2;
+        const x1 = ex - tx * head + nx * head * 0.85, y1 = ey - ty * head + ny * head * 0.85;
+        const x2 = ex - tx * head - nx * head * 0.85, y2 = ey - ty * head - ny * head * 0.85;
+        parts.push(`<path d="M${sx.toFixed(1)} ${sy.toFixed(1)} A${r} ${r} 0 1 ${cw ? 1 : 0} ${ex.toFixed(1)} ${ey.toFixed(1)} M${x1.toFixed(1)} ${y1.toFixed(1)} L${ex.toFixed(1)} ${ey.toFixed(1)} L${x2.toFixed(1)} ${y2.toFixed(1)}" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>`);
+      } else {
+        parts.push(svgArrow(20, isUp ? 15 : 25, tf, 12, 2.6));
+      }
     }
     const mark = spec.mark;
     if (mark) {
@@ -3849,6 +3884,8 @@ function iconForKey(key) {
   if (key.startsWith('addon_')) { const e = addOnTriggerEvents().find(x => x.key === key); return { icon: symbolId(e && e.icon), iconUrl: e && e.iconUrl, cls: e && e.iconUrl ? 'icon-image' : 'icon-purple' }; }
   if (key.startsWith('sched_'))      return { icon:'clock_fill',                    cls:'icon-orange' };
   if (key.startsWith('mqtt_sub_') || key.startsWith('mqtt_')) return { icon:'antenna_radiowaves_left_right', cls:'icon-blue' };
+  if (key.startsWith('trigger_two_finger_rotate_')) return { icon:'rotate_right', cls:'icon-gray' };
+  if (key.startsWith('trigger_two_finger_swipe_')) return { icon:'hand_draw', cls:'icon-gray' };
   return { icon:'hand_tap', cls:'icon-gray' };
 }
 
@@ -11056,7 +11093,7 @@ const BUILT_IN_TRIGGER_GROUPS = [
   { title: 'Status Bar', keys: ['trigger_statusbar_left_hold','trigger_statusbar_center_hold','trigger_statusbar_right_hold','trigger_statusbar_swipe_left','trigger_statusbar_swipe_right','trigger_statusbar_double_tap'] },
   { title: 'Edge Gestures', keys: ['trigger_edge_left_swipe_up','trigger_edge_left_swipe_down','trigger_edge_right_swipe_up','trigger_edge_right_swipe_down'] },
   { title: 'Bottom Bar Gestures', keys: ['trigger_bottombar_swipe_left','trigger_bottombar_swipe_right','trigger_bottom_swipe_up_left','trigger_bottom_swipe_up_center','trigger_bottom_swipe_up_right'] },
-  { title: 'Multi-Finger Gestures', keys: ['trigger_statusbar_two_finger_swipe_down','trigger_bottom_two_finger_swipe_up'] },
+  { title: 'Multi-Finger Gestures', keys: ['trigger_two_finger_tap','trigger_two_finger_swipe_left','trigger_two_finger_swipe_right','trigger_two_finger_swipe_up','trigger_two_finger_swipe_down','trigger_two_finger_rotate_cw','trigger_two_finger_rotate_ccw','trigger_statusbar_two_finger_swipe_down','trigger_bottom_two_finger_swipe_up'] },
   { title: 'Home Button', keys: ['trigger_home_double_click','trigger_home_triple_click','trigger_home_quadruple_click','trigger_home_hold','trigger_home_power','touchid_tap','touchid_hold'] },
   { title: 'Ringer Switch', keys: ['trigger_ringer_mute','trigger_ringer_unmute','trigger_ringer_toggle'] },
   { title: 'Motion Gestures', keys: ['shake'] },
