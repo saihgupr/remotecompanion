@@ -11018,6 +11018,7 @@ static NSArray *RCCommandHelpSections(void) {
             @[@"toast \"Title\" [\"Subtitle\"] [\"Symbol\"]", @"Show a HUD toast"],
             @[@"notify \"Title\" [\"Body\"] [--urgent] [--watch [only]]", @"Post a notification"],
             @[@"clear-notifications", @"Dismiss notifications"],
+            @[@"watch theater [on|off|toggle]", @"Set or toggle Apple Watch Theater Mode"],
             @[@"watch face [<name|uuid|next|prev|status|list>]", @"Switch or inspect Apple Watch face"],
         ]},
         @{@"title": @"Connectivity", @"rows": @[
@@ -11400,6 +11401,137 @@ static NSString *rc_handle_watch_face_command(NSString *cleanCmd) {
         result = [NSString stringWithFormat:@"Watch face set to %@\n", chosenName];
     });
     return result ?: @"Error: Watch face operation failed\n";
+}
+
+@protocol RCWFWorkflowDataRunDescriptor <NSObject>
+- (instancetype)initWithWorkflowData:(NSData *)data;
+@end
+
+@protocol RCWFWorkflowRunRequest <NSObject>
+- (instancetype)initWithDescriptor:(id)descriptor input:(id)input presentationMode:(NSUInteger)presentationMode;
+- (void)setAllowsDialogNotifications:(BOOL)allows;
+- (void)setDonateInteraction:(BOOL)donate;
+@end
+
+@protocol RCWFWorkflowRunnerClientRun <NSObject>
+- (instancetype)initWithRunRequest:(id)request;
+- (void)setDelegate:(id)delegate;
+- (void)start;
+@end
+
+@interface RCWFTheaterRunDelegate : NSObject
+@property (nonatomic, strong) id retainedSelf;
+@property (nonatomic, strong) id retainedClient;
+@property (nonatomic, strong) dispatch_semaphore_t semaphore;
+@property (nonatomic, strong) NSError *runError;
+@property (nonatomic, assign) BOOL cancelled;
+@property (nonatomic, assign) BOOL finished;
+- (void)workflowRunnerClient:(id)client didFinishRunningWorkflowWithOutput:(id)output error:(NSError *)error cancelled:(BOOL)cancelled;
+- (void)workflowRunnerClient:(id)client didFinishRunningWorkflowWithError:(NSError *)error cancelled:(BOOL)cancelled;
+@end
+
+@implementation RCWFTheaterRunDelegate
+- (void)rc_finishWithError:(NSError *)error cancelled:(BOOL)cancelled {
+    dispatch_semaphore_t sem = nil;
+    @synchronized (self) {
+        if (self.finished) return;
+        self.finished = YES;
+        self.runError = error;
+        self.cancelled = cancelled;
+        sem = self.semaphore;
+        self.retainedClient = nil;
+        self.retainedSelf = nil;
+    }
+    if (sem) dispatch_semaphore_signal(sem);
+}
+- (void)workflowRunnerClient:(id)client didFinishRunningWorkflowWithOutput:(id)output error:(NSError *)error cancelled:(BOOL)cancelled {
+    [self rc_finishWithError:error cancelled:cancelled];
+}
+- (void)workflowRunnerClient:(id)client didFinishRunningWorkflowWithError:(NSError *)error cancelled:(BOOL)cancelled {
+    [self rc_finishWithError:error cancelled:cancelled];
+}
+@end
+
+static NSString *rc_handle_watch_theater_command(NSString *cleanCmd) {
+    NSString *arg = cleanCmd.length > 13 ? [[[cleanCmd substringFromIndex:13] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString] : @"";
+    NSString *opStr = @"toggle";
+    NSString *stStr = nil;
+    if ([arg isEqualToString:@"on"] || [arg isEqualToString:@"1"] || [arg isEqualToString:@"true"]) {
+        opStr = @"set";
+        stStr = @"on";
+    } else if ([arg isEqualToString:@"off"] || [arg isEqualToString:@"0"] || [arg isEqualToString:@"false"]) {
+        opStr = @"set";
+        stStr = @"off";
+    } else if (arg.length > 0 && ![arg isEqualToString:@"toggle"]) {
+        return @"Usage: watch theater [on|off|toggle]\n";
+    }
+
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        dlopen("/System/Library/PrivateFrameworks/WorkflowKit.framework/WorkflowKit", RTLD_NOW);
+        dlopen("/System/Library/PrivateFrameworks/VoiceShortcutClient.framework/VoiceShortcutClient", RTLD_NOW);
+    });
+
+    Class descCls = objc_getClass("WFWorkflowDataRunDescriptor");
+    Class reqCls = objc_getClass("WFWorkflowRunRequest");
+    Class clientCls = objc_getClass("WFWorkflowRunnerClient");
+    if (!descCls || !reqCls || !clientCls) {
+        return @"Error: Apple Watch Theater Mode runner unavailable on this iOS\n";
+    }
+
+    NSMutableDictionary *params = [@{ @"operation": opStr, @"ShowWhenRun": @NO } mutableCopy];
+    if (stStr) params[@"state"] = stStr;
+    NSDictionary *wfPlist = @{
+        @"WFWorkflowMinimumClientVersionString": @"900",
+        @"WFWorkflowMinimumClientVersion": @900,
+        @"WFWorkflowClientVersion": @"1146.16.2.2",
+        @"WFWorkflowIcon": @{ @"WFWorkflowIconStartColor": @4282601983U, @"WFWorkflowIconGlyphNumber": @59511 },
+        @"WFWorkflowActions": @[ @{
+            @"WFWorkflowActionIdentifier": @"com.apple.NanoSettings.NPRFSetTheaterModeIntent",
+            @"WFWorkflowActionParameters": params
+        } ],
+        @"WFWorkflowTypes": @[ @"Watch" ]
+    };
+    NSError *plistErr = nil;
+    NSData *wfData = [NSPropertyListSerialization dataWithPropertyList:wfPlist format:NSPropertyListBinaryFormat_v1_0 options:0 error:&plistErr];
+    if (!wfData) {
+        return [NSString stringWithFormat:@"Error: Failed to encode Watch Theater Mode workflow (%@)\n", plistErr.localizedDescription ?: @"unknown"];
+    }
+
+    id desc = [(id<RCWFWorkflowDataRunDescriptor>)[descCls alloc] initWithWorkflowData:wfData];
+    id req = [(id<RCWFWorkflowRunRequest>)[reqCls alloc] initWithDescriptor:desc input:nil presentationMode:3];
+    if ([req respondsToSelector:@selector(setAllowsDialogNotifications:)]) [(id<RCWFWorkflowRunRequest>)req setAllowsDialogNotifications:NO];
+    if ([req respondsToSelector:@selector(setDonateInteraction:)]) [(id<RCWFWorkflowRunRequest>)req setDonateInteraction:NO];
+
+    id runner = [clientCls alloc];
+    if (![runner respondsToSelector:@selector(initWithRunRequest:)]) {
+        return @"Error: WFWorkflowRunnerClient initWithRunRequest unavailable\n";
+    }
+    runner = [(id<RCWFWorkflowRunnerClientRun>)runner initWithRunRequest:req];
+    if (!runner) return @"Error: Failed to initialize Watch Theater Mode runner\n";
+
+    RCWFTheaterRunDelegate *del = [[RCWFTheaterRunDelegate alloc] init];
+    dispatch_semaphore_t sem = [NSThread isMainThread] ? nil : dispatch_semaphore_create(0);
+    del.semaphore = sem;
+    del.retainedSelf = del;
+    del.retainedClient = runner;
+    if ([runner respondsToSelector:@selector(setDelegate:)]) [(id<RCWFWorkflowRunnerClientRun>)runner setDelegate:del];
+    [(id<RCWFWorkflowRunnerClientRun>)runner start];
+
+    if (!sem) return @"Watch Theater Mode updated\n";
+    if (dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(15 * NSEC_PER_SEC))) != 0) {
+        SRLogMin(@"[WatchTheater] Timed out waiting for Watch Theater Mode response");
+        return @"Error: Watch Theater Mode timed out\n";
+    }
+    if (del.runError) {
+        SRLogMin(@"[WatchTheater] Error: %@", del.runError);
+        return [NSString stringWithFormat:@"Error: %@\n", del.runError.localizedDescription ?: @"Watch Theater Mode failed"];
+    }
+    if (del.cancelled) return @"Error: Watch Theater Mode cancelled\n";
+    SRLog(@"[WatchTheater] Watch Theater Mode %@", stStr ?: @"toggled");
+    if ([stStr isEqualToString:@"on"]) return @"Watch Theater Mode enabled\n";
+    if ([stStr isEqualToString:@"off"]) return @"Watch Theater Mode disabled\n";
+    return @"Watch Theater Mode toggled\n";
 }
 
 static NSString *handle_command(NSString *cmd) {
@@ -11823,6 +11955,8 @@ static NSString *handle_command(NSString *cmd) {
         return rc_handle_timer_command(cleanCmd);
     } else if ([cleanCmd isEqualToString:@"watch faces"] || [cleanCmd isEqualToString:@"watch face"] || [cleanCmd hasPrefix:@"watch face "]) {
         return rc_handle_watch_face_command(cleanCmd);
+    } else if ([cleanCmd isEqualToString:@"watch theater"] || [cleanCmd hasPrefix:@"watch theater "]) {
+        return rc_handle_watch_theater_command(cleanCmd);
     } else if ([cleanCmd hasPrefix:@"notify confirm "]) {
         // A button that needed the passcode was pressed and the passcode given (RC's app reports
         // it): its answer goes to the action waiting on that notification

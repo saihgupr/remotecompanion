@@ -320,6 +320,7 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
         ],
         // Apple Watch
         @[
+            @{ @"name": @"Theater Mode", @"command": @"watch theater toggle", @"icon": ([UIImage systemImageNamed:@"theatermasks.fill"] ? @"theatermasks.fill" : @"applewatch"), @"keywords": @"watch theater theatre cinema mode silent display toggle" },
             @{ @"name": @"Switch Watch Face...", @"command": @"__WATCH_FACE__", @"icon": ([UIImage systemImageNamed:@"applewatch.watchface"] ? @"applewatch.watchface" : @"applewatch"), @"keywords": @"watch face switch change cycle next prev" }
         ],
         // Connectivity

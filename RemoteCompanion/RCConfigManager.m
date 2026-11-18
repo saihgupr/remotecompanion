@@ -1893,6 +1893,10 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         @"autolock 5m": @"Auto-Lock 5 Minutes",
         @"autolock never": @"Auto-Lock Never (Off)",
         @"autolock off": @"Auto-Lock Never (Off)",
+        @"watch theater": @"Watch Theater Mode Toggle",
+        @"watch theater on": @"Watch Theater Mode On",
+        @"watch theater off": @"Watch Theater Mode Off",
+        @"watch theater toggle": @"Watch Theater Mode Toggle",
         @"mute toggle": @"Mute Toggle",
         @"mute on": @"Mute On",
         @"mute off": @"Mute Off",
@@ -2395,6 +2399,10 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
     if ([cmd hasPrefix:@"bt connect "] || [cmd hasPrefix:@"bluetooth connect "]) return @"link";
     if ([cmd hasPrefix:@"bt disconnect "] || [cmd hasPrefix:@"bluetooth disconnect "]) return @"xmark.circle";
     if ([cmd hasPrefix:@"airplay connect "]) return @"airplayaudio";
+    if ([cmd isEqualToString:@"watch theater"] || [cmd hasPrefix:@"watch theater "]) {
+        if ([cmd hasSuffix:@" off"]) return ([UIImage systemImageNamed:@"theatermasks"] ? @"theatermasks" : @"applewatch");
+        return ([UIImage systemImageNamed:@"theatermasks.fill"] ? @"theatermasks.fill" : @"applewatch");
+    }
     if ([cmd hasPrefix:@"watch face"]) return ([UIImage systemImageNamed:@"applewatch.watchface"] ? @"applewatch.watchface" : @"applewatch");
     if ([cmd hasPrefix:@"focus "]) return @"moon.circle";
     if ([cmd hasPrefix:@"shortcut:"]) return @"wand.and.stars";
@@ -2515,6 +2523,10 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         @"low power mode on": @"battery.25",
         @"low power mode off": @"battery.100",
         @"low power mode toggle": @"battery.25",
+        @"watch theater": ([UIImage systemImageNamed:@"theatermasks.fill"] ? @"theatermasks.fill" : @"applewatch"),
+        @"watch theater on": ([UIImage systemImageNamed:@"theatermasks.fill"] ? @"theatermasks.fill" : @"applewatch"),
+        @"watch theater off": ([UIImage systemImageNamed:@"theatermasks"] ? @"theatermasks" : @"applewatch"),
+        @"watch theater toggle": ([UIImage systemImageNamed:@"theatermasks.fill"] ? @"theatermasks.fill" : @"applewatch"),
         @"anc on": @"ear.badge.checkmark",
         @"anc off": @"ear",
         @"anc transparency": @"waveform.circle.fill",
@@ -2729,6 +2741,17 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
                 @"display time off": @"never",
                 @"autolock off": @"never",
                 @"auto-lock off": @"never"
+            }
+        },
+        @{
+            @"key": @"watch_theater",
+            @"name": @"Watch Theater Mode",
+            @"icon": ([UIImage systemImageNamed:@"theatermasks.fill"] ? @"theatermasks.fill" : @"applewatch"),
+            @"prefixes": @[@"watch theater "],
+            @"suffixes": @[@"on", @"off", @"toggle"],
+            @"displaySuffixes": @[@"On", @"Off", @"Toggle"],
+            @"exactMatches": @{
+                @"watch theater": @"toggle"
             }
         },
         @{
