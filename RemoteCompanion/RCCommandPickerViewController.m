@@ -19,6 +19,7 @@ static NSArray<NSArray *> *RCValueCommandSections(void) {
                 @{ @"title": @"Airplane Mode", @"command": @"airplane status", @"icon": @"airplane" },
                 @{ @"title": @"Location Services", @"command": @"location status", @"icon": @"location.fill" },
                 @{ @"title": @"CarPlay", @"command": @"carplay status", @"icon": @"car.fill" },
+                @{ @"title": @"Apple Watch", @"command": @"watch status", @"icon": @"applewatch" },
             ]],
             @[@"Sound", @[
                 @{ @"title": @"Ringer", @"command": @"ringer status", @"icon": @"bell.fill" },

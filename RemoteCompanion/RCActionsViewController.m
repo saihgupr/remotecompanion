@@ -2674,6 +2674,16 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             ]
         },
         @{
+            @"key": @"watch",
+            @"title": @"Apple Watch",
+            @"icon": @"applewatch",
+            @"section": @"Connectivity",
+            @"values": @[
+                @{ @"value": @"CONNECTED", @"title": @"Connected" },
+                @{ @"value": @"NOT_CONNECTED", @"title": @"Not Connected" }
+            ]
+        },
+        @{
             @"key": @"cellular",
             @"title": @"Cellular Data",
             @"icon": @"antenna.radiowaves.left.and.right",

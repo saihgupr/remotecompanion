@@ -214,6 +214,7 @@ static NSString *const kRCAOBuiltinCommands[] = {
     @"watch face",
     @"watch faces",
     @"watch silent",
+    @"watch status",
     @"watch theater",
     @"watch wake",
     @"watch water",

@@ -3562,7 +3562,7 @@ const TRIGGER_SECTIONS = [
   { title: 'Multi-Finger Gestures',  id: 'multifinger', keys: ['trigger_statusbar_two_finger_swipe_down','trigger_bottom_two_finger_swipe_up'] },
   { title: 'Home Button',            id: 'home',      keys: ['trigger_home_double_click','trigger_home_triple_click','trigger_home_quadruple_click','trigger_home_hold','trigger_home_power','touchid_tap','touchid_hold'] },
   { title: 'Ringer Switch',          id: 'ringer',    keys: ['trigger_ringer_mute','trigger_ringer_unmute','trigger_ringer_toggle'] },
-  { title: 'Apple Watch',            id: 'watch',     keys: ['trigger_watch_ping','trigger_watch_ping_hold'] },
+  { title: 'Apple Watch',            id: 'watch',     keys: ['trigger_watch_ping','trigger_watch_ping_hold','trigger_watch_connect','trigger_watch_disconnect'] },
   { title: 'Device State',           id: 'status',    keys: [], prefix: 'trigger_device_', prefix2: 'trigger_media_', deletable: true },
   { title: 'Physical Orientation',   id: 'orientation', keys: ['trigger_device_orientation_portrait_up','trigger_device_orientation_landscape_left','trigger_device_orientation_landscape_right','trigger_device_orientation_portrait_upside_down'] },
   { title: 'Motion Gestures',        id: 'motion',    keys: ['shake'] },
@@ -3597,6 +3597,7 @@ const TRIGGER_NAMES = {
   trigger_edge_right_swipe_up:'Right Edge Swipe Up', trigger_edge_right_swipe_down:'Right Edge Swipe Down',
   trigger_ringer_mute:'Ringer Muted', trigger_ringer_unmute:'Ringer Unmuted', trigger_ringer_toggle:'Ringer Toggled',
   trigger_watch_ping:'Ping iPhone', trigger_watch_ping_hold:'Ping iPhone (Hold)',
+  trigger_watch_connect:'Watch Connected', trigger_watch_disconnect:'Watch Disconnected',
   trigger_bottombar_swipe_left:'Bottom Bar Swipe Left', trigger_bottombar_swipe_right:'Bottom Bar Swipe Right',
   trigger_bottom_swipe_up_left:'Bottom Swipe Up (Left)', trigger_bottom_swipe_up_center:'Bottom Swipe Up (Center)', trigger_bottom_swipe_up_right:'Bottom Swipe Up (Right)',
   trigger_statusbar_two_finger_swipe_down:'2-Finger Top Slide Down', trigger_bottom_two_finger_swipe_up:'2-Finger Bottom Slide Up',
@@ -3652,6 +3653,8 @@ const TRIGGER_ICONS = {
   trigger_ringer_toggle: { icon:'bell_badge_fill', cls:'icon-orange' },
   trigger_watch_ping:      { icon:'dot_radiowaves_left_right', cls:'icon-blue' },
   trigger_watch_ping_hold: { icon:'dot_radiowaves_left_right', cls:'icon-blue' },
+  trigger_watch_connect:   { icon:'dot_radiowaves_left_right', cls:'icon-green' },
+  trigger_watch_disconnect:{ icon:'dot_radiowaves_left_right', cls:'icon-orange' },
   trigger_device_lock:   { icon:'lock_fill',       cls:'icon-red' },
   trigger_device_unlock: { icon:'lock_open_fill',  cls:'icon-green' },
   trigger_power_connect:    { icon:'bolt_fill',       cls:'icon-green' },
@@ -4704,6 +4707,7 @@ const CONDITION_DEFS = [
   { key:'variable', title:'Variable', icon:'function', section:'Variables' },
   { key:'bt_device', title:'Bluetooth Device Connected', icon:'headphones', section:'Connectivity', freeText:true, hint:'Device name:' },
   { key:'carplay',    title:'CarPlay', icon:'car_fill', section:'Connectivity', values:[{value:'CONNECTED',title:'Connected'},{value:'NOT_CONNECTED',title:'Not Connected'}] },
+  { key:'watch',      title:'Apple Watch', icon:'timer', section:'Connectivity', values:[{value:'CONNECTED',title:'Connected'},{value:'NOT_CONNECTED',title:'Not Connected'}] },
   { key:'cellular',   title:'Cellular Data', icon:'antenna_radiowaves_left_right', section:'Connectivity', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
   { key:'location',   title:'Location Services', icon:'location_fill', section:'Connectivity', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
   { key:'airplane',   title:'Airplane Mode', icon:'airplane', section:'Connectivity', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
@@ -8880,7 +8884,8 @@ const VALUE_COMMANDS = [
   ['Levels', [['Battery Level', 'battery', 'battery_100', true], ['Volume', 'volume', 'speaker_2_fill', true]]],
   ['Connectivity', [['Wi-Fi', 'wifi status', 'wifi'], ['Bluetooth', 'bt status', 'antenna_radiowaves_left_right'],
     ['Cellular Data', 'cell status', 'antenna_radiowaves_left_right'], ['Airplane Mode', 'airplane status', 'airplane'],
-    ['Location Services', 'location status', 'location_fill'], ['CarPlay', 'carplay status', 'car_fill']]],
+    ['Location Services', 'location status', 'location_fill'], ['CarPlay', 'carplay status', 'car_fill'],
+    ['Apple Watch', 'watch status', 'timer']]],
   ['Sound', [['Ringer', 'ringer status', 'bell_fill'], ['Silent Vibrate', 'vibration silent-status', 'iphone'],
     ['Haptics', 'haptics status', 'hand_draw'], ['Media Playing', 'is-playing', 'play_fill']]],
   ['Device', [['Lock State', 'lock status', 'lock_fill'], ['Low Power Mode', 'low power status', 'battery_25'],
@@ -11052,16 +11057,6 @@ function promptAudioOutputName(mode) {
       saveConfig();
     }
     renderAll();
-    openActionsPanel(key);
-  });
-}
-
-// ── Action Sequence Edited Trigger Setup ─────────────────────────────────────
-// Runs when any trigger's actions change. A debounce waits for the edits to stop, so a run of
-// changes runs the sequence once. Changes to this trigger's own actions count too.
-const SEQUENCE_DEBOUNCE_OPTIONS = [0, 5, 10, 15, 30, 60, 120, 300];
-function sequenceDebounceLabel(seconds) {
-  if (!seconds) return 'Off';
   if (seconds < 60) return `${seconds} Seconds`;
   return `${seconds / 60} Minute${seconds >= 120 ? 's' : ''}`;
 }
@@ -11149,7 +11144,7 @@ const BUILT_IN_TRIGGER_GROUPS = [
   { title: 'Physical Orientation', keys: ['trigger_device_orientation_portrait_up','trigger_device_orientation_landscape_left','trigger_device_orientation_landscape_right','trigger_device_orientation_portrait_upside_down'] },
   { title: 'Media', keys: ['trigger_media_play','trigger_media_pause','trigger_media_track_change'] },
   { title: 'Calls', keys: ['trigger_device_call_incoming','trigger_device_call_start','trigger_device_call_end'] },
-  { title: 'Apple Watch', keys: ['trigger_watch_ping','trigger_watch_ping_hold'] },
+  { title: 'Apple Watch', keys: ['trigger_watch_ping','trigger_watch_ping_hold','trigger_watch_connect','trigger_watch_disconnect'] },
 ];
 
 function addBuiltInTrigger(key) {

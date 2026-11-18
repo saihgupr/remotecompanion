@@ -311,6 +311,14 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     if ([triggerKey containsString:@"statusbar"]) return @"hand.draw"; // Status bar / screen gestures
     if ([triggerKey containsString:@"home"]) return @"circle.circle"; // Home button
     if ([triggerKey containsString:@"ringer"]) return @"bell.fill";
+    if ([triggerKey isEqualToString:@"trigger_watch_connect"]) {
+        if (@available(iOS 14.0, *)) return @"applewatch.radiowaves.left.and.right";
+        return @"applewatch";
+    }
+    if ([triggerKey isEqualToString:@"trigger_watch_disconnect"]) {
+        if (@available(iOS 15.0, *)) return @"applewatch.slash";
+        return @"applewatch";
+    }
     if ([triggerKey hasPrefix:@"trigger_watch_ping"]) {
         if (@available(iOS 14.0, *)) return @"applewatch.radiowaves.left.and.right";
         return @"bell.fill";
@@ -732,7 +740,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     addSection(@[@"trigger_ringer_mute", @"trigger_ringer_unmute", @"trigger_ringer_toggle"], @"Ringer Switch", YES);
     // Apple Watch Section (Only show if added)
     NSMutableArray *watchKeys = [NSMutableArray array];
-    for (NSString *key in @[@"trigger_watch_ping", @"trigger_watch_ping_hold"]) {
+    for (NSString *key in @[@"trigger_watch_ping", @"trigger_watch_ping_hold", @"trigger_watch_connect", @"trigger_watch_disconnect"]) {
         if ([[RCConfigManager sharedManager] triggerDataForKey:key]) [watchKeys addObject:key];
     }
     addSection(watchKeys, @"Apple Watch", YES);
@@ -1111,7 +1119,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     for (NSString *key in @[@"trigger_device_call_incoming", @"trigger_device_call_start", @"trigger_device_call_end"]) {
         addBuiltIn(key, @"Calls");
     }
-    for (NSString *key in @[@"trigger_watch_ping", @"trigger_watch_ping_hold"]) {
+    for (NSString *key in @[@"trigger_watch_ping", @"trigger_watch_ping_hold", @"trigger_watch_connect", @"trigger_watch_disconnect"]) {
         addBuiltIn(key, @"Apple Watch");
     }
 

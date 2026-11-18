@@ -165,7 +165,7 @@ static NSString *RCFitOneLine(NSString *text, UIFont *font, CGFloat width) {
         addSection(@[@"trigger_home_double_click", @"trigger_home_triple_click", @"trigger_home_quadruple_click", @"trigger_home_hold", @"trigger_home_power", @"touchid_tap", @"touchid_hold"], @"Home Button");
     }
     addSection(@[@"trigger_ringer_mute", @"trigger_ringer_unmute", @"trigger_ringer_toggle"], @"Ringer Switch");
-    addSection(@[@"trigger_watch_ping", @"trigger_watch_ping_hold"], @"Apple Watch");
+    addSection(@[@"trigger_watch_ping", @"trigger_watch_ping_hold", @"trigger_watch_connect", @"trigger_watch_disconnect"], @"Apple Watch");
 
     // Device State, ordered as on the Triggers screen: Focus, Battery, then the
     // single-instance device triggers in their fixed order.

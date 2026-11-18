@@ -4142,6 +4142,7 @@ static NSString *rc_normalized_name(NSString *name) {
 }
 
 static BOOL rc_carplay_connected(void);
+static BOOL rc_watch_connected(void);
 
 // If conditions answered by reading the state directly rather than through a status
 // command. Sets *handled for the keys it knows. expected is already uppercased.
@@ -4163,6 +4164,8 @@ static BOOL rc_condition_direct_match(NSString *key, NSString *expected, BOOL *h
         actual = (device.torchMode == AVCaptureTorchModeOn) ? @"ON" : @"OFF";
     } else if ([key isEqualToString:@"carplay"]) {
         actual = rc_carplay_connected() ? @"CONNECTED" : @"NOT_CONNECTED";
+    } else if ([key isEqualToString:@"watch"]) {
+        actual = rc_watch_connected() ? @"CONNECTED" : @"NOT_CONNECTED";
     } else if ([key isEqualToString:@"charging"]) {
         UIDevice *device = [UIDevice currentDevice];
         device.batteryMonitoringEnabled = YES;
@@ -6971,6 +6974,115 @@ static void rc_carplay_start_observing(void) {
     });
 }
 
+@protocol RCIDSDevice <NSObject>
+@optional
+- (BOOL)isDefaultPairedDevice;
+- (BOOL)isNearby;
+- (BOOL)isConnected;
+- (NSString *)name;
+@end
+
+@protocol RCIDSService <NSObject>
+@optional
+- (instancetype)initWithService:(NSString *)service;
+- (NSArray *)devices;
+- (void)addDelegate:(id)delegate queue:(dispatch_queue_t)queue;
+@end
+
+@interface RCWatchIDSObserver : NSObject
+@end
+
+static id g_watchIDSService = nil;
+static RCWatchIDSObserver *g_watchIDSObserver = nil;
+static BOOL g_watchConnected = NO;
+static BOOL g_watchReady = NO;
+static uint64_t g_watchDebounceGen = 0;
+
+static id rc_watch_default_ids_device(void) {
+    if (!g_watchIDSService || ![g_watchIDSService respondsToSelector:@selector(devices)]) return nil;
+    NSArray *devices = [(id<RCIDSService>)g_watchIDSService devices];
+    if (![devices isKindOfClass:[NSArray class]] || devices.count == 0) return nil;
+    for (id dev in devices) {
+        if ([dev respondsToSelector:@selector(isDefaultPairedDevice)] && [(id<RCIDSDevice>)dev isDefaultPairedDevice]) {
+            return dev;
+        }
+    }
+    return devices.count == 1 ? devices.firstObject : nil;
+}
+
+static BOOL rc_watch_connected(void) {
+    id dev = rc_watch_default_ids_device();
+    if (!dev) return NO;
+    if ([dev respondsToSelector:@selector(isNearby)]) {
+        return [(id<RCIDSDevice>)dev isNearby];
+    }
+    if ([dev respondsToSelector:@selector(isConnected)]) {
+        return [(id<RCIDSDevice>)dev isConnected];
+    }
+    return NO;
+}
+
+static void rc_watch_schedule_update(NSString *source) {
+    if (!g_watchReady) return;
+    uint64_t gen = ++g_watchDebounceGen;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (gen != g_watchDebounceGen) return;
+        BOOL connected = rc_watch_connected();
+        if (connected == g_watchConnected) return;
+        g_watchConnected = connected;
+        SRLogMin(@"⌚ [RCWatch] Transition detected (%@): WATCH %@", source, connected ? @"CONNECTED" : @"DISCONNECTED");
+        RCExecuteTrigger(connected ? @"trigger_watch_connect" : @"trigger_watch_disconnect");
+    });
+}
+
+@implementation RCWatchIDSObserver
+- (void)service:(id)service devicesChanged:(NSArray *)devices {
+    dispatch_async(dispatch_get_main_queue(), ^{ rc_watch_schedule_update(@"devicesChanged"); });
+}
+- (void)service:(id)service nearbyDevicesChanged:(NSArray *)nearbyDevices {
+    dispatch_async(dispatch_get_main_queue(), ^{ rc_watch_schedule_update(@"nearbyDevicesChanged"); });
+}
+- (void)service:(id)service connectedDevicesChanged:(NSArray *)connectedDevices {
+    dispatch_async(dispatch_get_main_queue(), ^{ rc_watch_schedule_update(@"connectedDevicesChanged"); });
+}
+@end
+
+static void rc_watch_start_observing(void) {
+    dlopen("/System/Library/PrivateFrameworks/IDS.framework/IDS", RTLD_NOW);
+    Class svcCls = objc_getClass("IDSService");
+    if (!svcCls) {
+        SRLogMin(@"⌚ [RCWatch] IDSService not found - no Watch connection triggers");
+        return;
+    }
+    for (NSString *serviceName in @[
+        @"com.apple.private.alloy.springboard.notificationsync",
+        @"com.apple.private.alloy.bulletinboard",
+        @"com.apple.private.alloy.nearby"
+    ]) {
+        id svc = [(id<RCIDSService>)[svcCls alloc] initWithService:serviceName];
+        NSArray *devs = [svc respondsToSelector:@selector(devices)] ? [(id<RCIDSService>)svc devices] : nil;
+        if (svc && devs.count > 0) {
+            g_watchIDSService = svc;
+            SRLog(@"⌚ [RCWatch] Using IDSService %@ (%lu devices)", serviceName, (unsigned long)devs.count);
+            break;
+        }
+        if (!g_watchIDSService && svc) g_watchIDSService = svc;
+    }
+    if (!g_watchIDSService) return;
+    g_watchIDSObserver = [RCWatchIDSObserver new];
+    if ([g_watchIDSService respondsToSelector:@selector(addDelegate:queue:)]) {
+        [(id<RCIDSService>)g_watchIDSService addDelegate:g_watchIDSObserver queue:dispatch_get_main_queue()];
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        g_watchConnected = rc_watch_connected();
+        g_watchReady = YES;
+        id dev = rc_watch_default_ids_device();
+        BOOL nearby = [dev respondsToSelector:@selector(isNearby)] ? [(id<RCIDSDevice>)dev isNearby] : NO;
+        BOOL conn = [dev respondsToSelector:@selector(isConnected)] ? [(id<RCIDSDevice>)dev isConnected] : NO;
+        SRLogMin(@"⌚ [RCWatch] Watch state initialized: nearby=%d connected=%d (status=%@)", nearby, conn, g_watchConnected ? @"CONNECTED" : @"NOT_CONNECTED");
+    });
+}
+
 // Orientation triggers: the screen turning to landscape or back to portrait. SpringBoard says when
 // its active orientation changes (only on a rotation, so nothing runs while the phone is still);
 // the check waits half a second for it to settle, so a quick turn and back fires nothing.
@@ -7562,6 +7674,7 @@ static void register_system_event_observers() {
     rc_calls_start_observing();
     initialize_power_state();
     rc_carplay_start_observing();
+    rc_watch_start_observing();
     rc_orientation_start_observing();
     rc_physical_orientation_start_observing();
 
@@ -11033,6 +11146,7 @@ static NSArray *RCCommandHelpSections(void) {
             @[@"airplane [on|off|toggle|status]", @"Airplane Mode"],
             @[@"bluetooth connect|disconnect <name>", @"Manage paired devices"],
             @[@"carplay status", @"CarPlay connection state"],
+            @[@"watch status", @"Apple Watch connection state"],
             @[@"battery status", @"Battery level and charging state"],
         ]},
         @{@"title": @"Automation", @"rows": @[
@@ -13732,6 +13846,8 @@ static NSString *handle_command(NSString *cmd) {
         return [NSString stringWithFormat:@"Haptics: %@\n", ring ? (silent ? @"ALWAYS" : @"RING_ONLY") : (silent ? @"SILENT_ONLY" : @"NEVER")];
     } else if ([cleanCmd isEqualToString:@"carplay"] || [cleanCmd isEqualToString:@"carplay status"]) {
         return rc_carplay_connected() ? @"CarPlay: CONNECTED\n" : @"CarPlay: NOT_CONNECTED\n";
+    } else if ([cleanCmd isEqualToString:@"watch"] || [cleanCmd isEqualToString:@"watch status"]) {
+        return rc_watch_connected() ? @"Watch: CONNECTED\n" : @"Watch: NOT_CONNECTED\n";
     } else if ([cleanCmd isEqualToString:@"ringer"] || [cleanCmd hasPrefix:@"ringer "]) {
         NSString *sub = cleanCmd.length > 7 ? [cleanCmd substringFromIndex:7] : @"status";
         // Ringtone & alerts volume, separate from the media volume (set-vol)
@@ -15250,7 +15366,7 @@ static void start_web_server() {
                                 // The answers of the status commands Set Variable's command list offers, for
                                 // the Web UI to show next to them. Only these: they report, they change nothing.
                                 NSArray *commands = @[@"battery", @"volume", @"wifi status", @"bt status", @"cell status", @"airplane status",
-                                                      @"location status", @"carplay status", @"ringer status", @"vibration silent-status",
+                                                      @"location status", @"carplay status", @"watch status", @"ringer status", @"vibration silent-status",
                                                       @"haptics status", @"is-playing", @"lock status", @"low power status", @"flashlight status",
                                                       @"dnd status", @"focus status", @"screenrecord status", @"timer status", @"proximity status",
                                                       @"orientation status", @"appearance status", @"autolock status"];

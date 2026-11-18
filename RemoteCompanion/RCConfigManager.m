@@ -411,6 +411,7 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
             @"trigger_ringer_mute", @"trigger_ringer_unmute", @"trigger_ringer_toggle",
             // Apple Watch
             @"trigger_watch_ping", @"trigger_watch_ping_hold",
+            @"trigger_watch_connect", @"trigger_watch_disconnect",
             // Motion Gestures
             @"shake",
             // Device State
@@ -1249,6 +1250,8 @@ static NSString *RCActionCommand(id item) {
         @"trigger_ringer_toggle": @"Ringer Toggled (Any Change)",
         @"trigger_watch_ping": @"Ping iPhone",
         @"trigger_watch_ping_hold": @"Ping iPhone (Hold)",
+        @"trigger_watch_connect": @"Watch Connected",
+        @"trigger_watch_disconnect": @"Watch Disconnected",
         @"trigger_bottombar_swipe_left": @"Bottom Bar Swipe Left",
         @"trigger_bottombar_swipe_right": @"Bottom Bar Swipe Right",
         @"trigger_bottom_swipe_up_left": @"Bottom Swipe Up (Left)",

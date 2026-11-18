@@ -58,6 +58,8 @@ static NSDictionary<NSString *, NSDictionary *> *RCPhoneIconSpecs(void) {
             // No phone button: the watch (tall like the phone, so it's as big), with a clock for a hold
             @"trigger_watch_ping":           @{ @"symbol": @"applewatch", @"tall": @YES },
             @"trigger_watch_ping_hold":      @{ @"symbol": @"applewatch", @"tall": @YES, @"mark": hold },
+            @"trigger_watch_connect":        @{ @"symbol": @"applewatch", @"tall": @YES },
+            @"trigger_watch_disconnect":     @{ @"symbol": ([UIImage systemImageNamed:@"applewatch.slash"] ? @"applewatch.slash" : @"applewatch"), @"tall": @YES },
             // Physical orientation: the phone turned the way it is held, so all four are told
             // apart even with rotation lock on
             @"trigger_device_orientation_portrait_up": @{ @"orientation": @"portraitUp" },
