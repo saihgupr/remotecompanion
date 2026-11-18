@@ -6038,6 +6038,55 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     }
 }
 
+- (UIView *)reorderSnapshotViewForRange:(NSRange)range areaOut:(CGRect *)areaOut {
+    CGRect visible = CGRectMake(0, self.tableView.contentOffset.y, self.tableView.bounds.size.width, self.tableView.bounds.size.height);
+    CGRect area = CGRectNull;
+    NSMutableArray<UITableViewCell *> *cells = [NSMutableArray array];
+    NSMutableArray<NSValue *> *frames = [NSMutableArray array];
+
+    for (NSUInteger row = range.location; row < NSMaxRange(range); row++) {
+        UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:row inSection:0]];
+        if (!cell) continue;
+        CGRect cardRect = CGRectInset(cell.bounds, 0.0, RCActionCellCardGap);
+        if (CGRectGetWidth(cardRect) <= 0 || CGRectGetHeight(cardRect) <= 0) continue;
+        CGRect cardInTable = [cell convertRect:cardRect toView:self.tableView];
+        if (!CGRectIntersectsRect(cardInTable, visible)) continue;
+        area = CGRectIsNull(area) ? cardInTable : CGRectUnion(area, cardInTable);
+        [cells addObject:cell];
+        [frames addObject:[NSValue valueWithCGRect:cardInTable]];
+    }
+    if (CGRectIsNull(area) || !cells.count) return nil;
+
+    // Snapshot each standalone card rather than the table background so margins and corners stay clear
+    UIView *container = [[UIView alloc] initWithFrame:area];
+    container.backgroundColor = [UIColor clearColor];
+    for (NSUInteger i = 0; i < cells.count; i++) {
+        UITableViewCell *cell = cells[i];
+        CGRect cardInTable = frames[i].CGRectValue;
+        CGRect cardRect = CGRectInset(cell.bounds, 0.0, RCActionCellCardGap);
+        UIView *cardSnap = [cell resizableSnapshotViewFromRect:cardRect afterScreenUpdates:NO withCapInsets:UIEdgeInsetsZero];
+        if (!cardSnap) continue;
+
+        UIView *holder = [[UIView alloc] initWithFrame:CGRectOffset(cardInTable, -area.origin.x, -area.origin.y)];
+        holder.backgroundColor = [UIColor clearColor];
+        holder.layer.shadowColor = [UIColor blackColor].CGColor;
+        holder.layer.shadowOpacity = 0.35;
+        holder.layer.shadowRadius = 10;
+        holder.layer.shadowOffset = CGSizeMake(0, 4);
+        holder.layer.shadowPath = [UIBezierPath bezierPathWithRoundedRect:holder.bounds cornerRadius:RCActionCellCardCornerRadius].CGPath;
+
+        cardSnap.frame = holder.bounds;
+        cardSnap.layer.cornerRadius = RCActionCellCardCornerRadius;
+        cardSnap.layer.cornerCurve = kCACornerCurveContinuous;
+        cardSnap.clipsToBounds = YES;
+        [holder addSubview:cardSnap];
+        [container addSubview:holder];
+    }
+    if (!container.subviews.count) return nil;
+    if (areaOut) *areaOut = area;
+    return container;
+}
+
 - (void)beginReorderAtPoint:(CGPoint)point {
     if (self.reorderSnapshot) return;
     // Picking a row up folds an open value editor first, keeping what it shows
@@ -6049,19 +6098,9 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     self.reorderRange = range;
     self.reorderGap = range.location;
 
-    // A picture of the rows (as far as they're on screen), taken by the page itself
-    CGRect first = [self.tableView rectForRowAtIndexPath:[NSIndexPath indexPathForRow:range.location inSection:0]];
-    CGRect last = [self.tableView rectForRowAtIndexPath:[NSIndexPath indexPathForRow:NSMaxRange(range) - 1 inSection:0]];
-    CGRect visible = CGRectMake(0, self.tableView.contentOffset.y, self.tableView.bounds.size.width, self.tableView.bounds.size.height);
-    CGRect area = CGRectIntersection(CGRectUnion(first, last), visible);
-    if (CGRectIsEmpty(area)) area = first;
-    UIView *snapshot = [self.tableView resizableSnapshotViewFromRect:area afterScreenUpdates:NO withCapInsets:UIEdgeInsetsZero];
+    CGRect area = CGRectZero;
+    UIView *snapshot = [self reorderSnapshotViewForRange:range areaOut:&area];
     if (!snapshot) return;
-    snapshot.frame = area;
-    snapshot.layer.shadowColor = [UIColor blackColor].CGColor;
-    snapshot.layer.shadowOpacity = 0.35;
-    snapshot.layer.shadowRadius = 10;
-    snapshot.layer.shadowOffset = CGSizeMake(0, 4);
     [self.tableView addSubview:snapshot];
     self.reorderSnapshot = snapshot;
     // Held above the finger and a little to the right, so the line where it lands (at the finger)
@@ -6228,10 +6267,13 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         return;
     }
     // Back where it came from
-    CGRect home = [self.tableView rectForRowAtIndexPath:[NSIndexPath indexPathForRow:range.location inSection:0]];
+    NSIndexPath *homePath = [NSIndexPath indexPathForRow:range.location inSection:0];
+    CGRect home = [self.tableView rectForRowAtIndexPath:homePath];
+    UITableViewCell *homeCell = [self.tableView cellForRowAtIndexPath:homePath];
+    CGFloat homeX = homeCell ? homeCell.frame.origin.x : (self.tableView.bounds.size.width - snapshot.frame.size.width) * 0.5;
     [UIView animateWithDuration:0.2 animations:^{
         snapshot.transform = CGAffineTransformIdentity;
-        snapshot.frame = CGRectMake(snapshot.frame.origin.x, home.origin.y, snapshot.frame.size.width, snapshot.frame.size.height);
+        snapshot.frame = CGRectMake(homeX, home.origin.y + RCActionCellCardGap, snapshot.frame.size.width, snapshot.frame.size.height);
         snapshot.alpha = 0;
     } completion:^(__unused BOOL finished) { [snapshot removeFromSuperview]; }];
 }
