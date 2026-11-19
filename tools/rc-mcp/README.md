@@ -8,6 +8,7 @@ The assistant looks at screenshots with a grid labelled in screen points, reads 
 - RemoteCompanion 4.6 for `look`, `read_text`, `tap_text` and `wait_text`. The touch, app and `rc_command` tools also work on 4.5.
 - SSH to the phone as `mobile`, with a key (no password prompt).
 - RemoteCompanion's Web UI server, which runs on the phone, for the trigger and config tools. `rc_state` falls back to `rc-client` status commands when the Web UI cannot answer.
+- `curl` on the phone for the config and backup tools, which reach the Web UI over SSH. It is in Procursus; if it is missing those tools fail with `command not found: curl` and everything else still works. `sudo apt-get install curl`.
 - Python 3.8 or later and `ssh` on your computer. No other packages.
 
 ## Set up
