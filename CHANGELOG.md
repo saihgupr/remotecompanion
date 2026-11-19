@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [4.7.0] - 2026-11-19
 
 ### Added
 - **Long Press App Icon trigger**: New Trigger > Apps adds Long Press App Icon, which fires when an app's icon is long pressed on the Home Screen. It takes one app or several, and the trigger is named after them, like "Long Press Safari, Notes". The icon still opens its normal Haptic Touch menu and can still be dragged, since the trigger only watches. In the configuration it is `app_hold_<bundleId>`, with the other apps of a multi-app trigger in its `apps` list.
