@@ -35,6 +35,7 @@ RemoteCompanion_FILES += RCWebUIAccessViewController.m
 RemoteCompanion_FILES += RCRunningViewController.m
 RemoteCompanion_FILES += RCRunHistoryViewController.m
 RemoteCompanion_FILES += RCVariablesViewController.m RCVariableIcon.m RCSetVariableViewController.m RCVariableConditionViewController.m RCNumberSettingViewController.m RCSymbolPickerViewController.m RCCommandPickerViewController.m RCTimeRangeViewController.m
+RemoteCompanion_FILES += RCInlineRowItem.m RCInlineRowChip.m RCInlineRowEditor.m RCInlineRowSequenceView.m
 RemoteCompanion_FILES += RCAddOnCatalog.m RCAddOnsViewController.m RCAddOnDetailViewController.m RCAddOnActionsViewController.m RCAddOnOptionsViewController.m RCAddOnExpandCell.m RCAddOnTriggersViewController.m RCAddOnListViewController.m
 RemoteCompanion_FILES += RCSequenceEditedTriggerViewController.m
 
