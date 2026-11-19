@@ -30,6 +30,7 @@ All notable changes to this project will be documented in this file.
 - **Action Sequence Edited trigger**: fires when any trigger's action sequence changes, including this trigger's own, from the app or the Web UI. Add, remove, reorder or edit an action and it runs, with an optional debounce (15 seconds by default, Off, 5, 10, 30 seconds, 1, 2 or 5 minutes) that waits until the edits stop so a run of changes runs the sequence once.
 
 ### Changed
+- **Action summaries without brackets**: SSH and Remote rows show the computer or client name plainly, like "SSH Mac Mini: ..." and "Remote iPad: ...", instead of putting it in square brackets.
 - **Set Variable tile selection**: the chosen kind in the Set Variable and Variable condition editors, in the app and the Web UI, is shown by its blue icon, title and border; the blue fill behind the tile is gone.
 - **Watch features hide without the Watch app**: the Watch actions and triggers only appear on iPhones with the Apple Watch app installed, so a phone that has none does not show rows that cannot work.
 - **Timer editor redesign**: the Timer screen now opens on its own look instead of a stock settings table. A large duration readout sits at the top, the action is a row of pills, and the hour, minute and second wheels run straight into the duration expression field, all drawn with the same panels, borders and accent as the rest of the app.
