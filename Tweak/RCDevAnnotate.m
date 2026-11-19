@@ -16,6 +16,31 @@
 extern void SRLog(NSString *format, ...);
 extern void SRLogMin(NSString *format, ...);
 
+// MediaRemote: pause and resume whatever this phone is playing while the note is open.
+typedef enum {
+    kRCMediaPlay = 0,
+    kRCMediaPause = 2
+} RCMediaCommand;
+
+extern void MRMediaRemoteSendCommand(RCMediaCommand command, NSDictionary *options);
+extern void MRMediaRemoteGetNowPlayingApplicationIsPlaying(dispatch_queue_t queue, void (^completion)(Boolean isPlaying));
+
+static void rc_dev_pause_phone_media(void) {
+    MRMediaRemoteGetNowPlayingApplicationIsPlaying(dispatch_get_main_queue(), ^(Boolean isPlaying) {
+        if (isPlaying) {
+            MRMediaRemoteSendCommand(kRCMediaPause, nil);
+        }
+    });
+}
+
+static void rc_dev_resume_phone_media(void) {
+    MRMediaRemoteGetNowPlayingApplicationIsPlaying(dispatch_get_main_queue(), ^(Boolean isPlaying) {
+        if (!isPlaying) {
+            MRMediaRemoteSendCommand(kRCMediaPlay, nil);
+        }
+    });
+}
+
 static void rc_dev_main_sync(dispatch_block_t block) {
     if (!block) return;
     if ([NSThread isMainThread]) {
@@ -1463,6 +1488,7 @@ NSString *RCDevAnnotateCommand(NSString *cmd,
         });
         if (musicPaused) {
             musicPaused = NO;
+            rc_dev_resume_phone_media();
             rc_dev_run_ssh_quiet(targetHost, rc_dev_music_resume_script());
         }
         @synchronized (rc_dev_state_lock()) {
@@ -1528,6 +1554,7 @@ NSString *RCDevAnnotateCommand(NSString *cmd,
 
         if ([components[@"pauseMusic"] boolValue]) {
             musicPaused = YES;
+            rc_dev_pause_phone_media();
             rc_dev_run_ssh_quiet(targetHost, rc_dev_music_pause_script());
         }
 
