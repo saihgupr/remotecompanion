@@ -4,14 +4,17 @@
 #import <math.h>
 #import <signal.h>
 #import <stdio.h>
+#import <string.h>
 #import <unistd.h>
 
 @interface RCDictationRunner : NSObject
 @property (nonatomic, strong) NSObject *lock;
 @property (nonatomic, strong) AVAudioEngine *engine;
 @property (nonatomic, strong) SFSpeechRecognizer *recognizer;
+@property (nonatomic, strong) NSOperationQueue *recognitionQueue;
 @property (nonatomic, strong) SFSpeechAudioBufferRecognitionRequest *request;
 @property (nonatomic, strong) SFSpeechRecognitionTask *task;
+@property (nonatomic, strong) id interruptionObserver;
 @property (nonatomic, strong) dispatch_semaphore_t finalSemaphore;
 @property (nonatomic, strong) dispatch_semaphore_t exitSemaphore;
 @property (nonatomic, copy) NSString *latestText;
@@ -20,6 +23,8 @@
 @property (nonatomic, assign) BOOL didFallbackToServer;
 @property (nonatomic, assign) BOOL stopping;
 @property (nonatomic, assign) BOOL stopped;
+@property (nonatomic, assign) BOOL diagMode;
+@property (nonatomic, assign) BOOL done;
 @property (nonatomic, assign) CFAbsoluteTime lastLevelSentAt;
 @property (nonatomic, assign) int exitCode;
 @end
@@ -124,20 +129,33 @@
         if (error) {
             BOOL shouldFallback = NO;
             BOOL alreadyStopping = NO;
+            SFSpeechRecognitionTask *oldTask = nil;
             @synchronized (strongSelf.lock) {
                 alreadyStopping = strongSelf.stopping;
                 if (onDevice && !strongSelf.hasEmittedText && !strongSelf.didFallbackToServer && !alreadyStopping) {
                     strongSelf.didFallbackToServer = YES;
                     shouldFallback = YES;
+                    oldTask = strongSelf.task;
+                    strongSelf.task = nil;
                 }
             }
+            NSString *desc = error.localizedDescription ?: @"Speech recognition error";
+            NSString *fullErr = [NSString stringWithFormat:@"[%@ %ld] %@", error.domain ?: @"Speech", (long)error.code, desc];
             if (shouldFallback) {
+                if (strongSelf.diagMode) {
+                    [strongSelf emitJSON:@{
+                        @"type": @"diag",
+                        @"event": @"fallback_to_server",
+                        @"error": fullErr
+                    }];
+                }
                 [req endAudio];
+                [oldTask cancel];
                 [strongSelf startRecognitionTaskOnDevice:NO];
                 return;
             }
             if (!alreadyStopping) {
-                [strongSelf emitError:error.localizedDescription ?: @"Speech recognition error"];
+                [strongSelf emitError:fullErr];
                 strongSelf.exitCode = 1;
                 [strongSelf stopAndWaitForFinal:NO];
             } else {
@@ -147,7 +165,9 @@
     }];
 
     @synchronized (self.lock) {
-        self.task = task;
+        if (self.request == req) {
+            self.task = task;
+        }
     }
 }
 
@@ -169,11 +189,23 @@
         return NO;
     }
 
+    self.recognitionQueue = [[NSOperationQueue alloc] init];
+    self.recognitionQueue.maxConcurrentOperationCount = 1;
+    self.recognitionQueue.qualityOfService = NSQualityOfServiceUserInitiated;
+    self.recognizer.queue = self.recognitionQueue;
+
     NSError *sessionErr = nil;
     AVAudioSession *session = [AVAudioSession sharedInstance];
-    if (![session setCategory:AVAudioSessionCategoryRecord
-                         mode:AVAudioSessionModeMeasurement
-                      options:AVAudioSessionCategoryOptionDuckOthers
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    AVAudioSessionCategoryOptions playAndRecordOpts =
+        AVAudioSessionCategoryOptionDuckOthers |
+        AVAudioSessionCategoryOptionDefaultToSpeaker |
+        AVAudioSessionCategoryOptionAllowBluetooth;
+#pragma clang diagnostic pop
+    if (![session setCategory:AVAudioSessionCategoryPlayAndRecord
+                         mode:AVAudioSessionModeDefault
+                      options:playAndRecordOpts
                         error:&sessionErr]) {
         sessionErr = nil;
         if (![session setCategory:AVAudioSessionCategoryRecord
@@ -191,6 +223,34 @@
         return NO;
     }
 
+    __weak typeof(self) weakSelf = self;
+    self.interruptionObserver = [[NSNotificationCenter defaultCenter]
+        addObserverForName:AVAudioSessionInterruptionNotification
+                    object:session
+                     queue:nil
+                usingBlock:^(NSNotification *note) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        NSNumber *typeNum = note.userInfo[AVAudioSessionInterruptionTypeKey];
+        AVAudioSessionInterruptionType itype = (AVAudioSessionInterruptionType)[typeNum unsignedIntegerValue];
+        BOOL alreadyStopping = NO;
+        @synchronized (strongSelf.lock) {
+            alreadyStopping = strongSelf.stopping;
+        }
+        if (strongSelf.diagMode) {
+            [strongSelf emitJSON:@{
+                @"type": @"diag",
+                @"event": (itype == AVAudioSessionInterruptionTypeBegan) ? @"audio_interruption_began" : @"audio_interruption_ended",
+                @"stopping": @(alreadyStopping)
+            }];
+        }
+        if (itype == AVAudioSessionInterruptionTypeBegan && !alreadyStopping) {
+            [strongSelf emitError:@"Audio session interrupted"];
+            strongSelf.exitCode = 1;
+            [strongSelf stopAndWaitForFinal:NO];
+        }
+    }];
+
     self.engine = [[AVAudioEngine alloc] init];
     AVAudioInputNode *inputNode = self.engine.inputNode;
     AVAudioFormat *format = [inputNode outputFormatForBus:0];
@@ -207,8 +267,7 @@
     }
     [self startRecognitionTaskOnDevice:preferOnDevice];
 
-    __weak typeof(self) weakSelf = self;
-    [inputNode installTapOnBus:0 bufferSize:1024 format:format block:^(AVAudioPCMBuffer *buffer, AVAudioTime *when) {
+    [inputNode installTapOnBus:0 bufferSize:1024 format:nil block:^(AVAudioPCMBuffer *buffer, AVAudioTime *when) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf) return;
 
@@ -224,7 +283,7 @@
         CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
         BOOL emitLevel = NO;
         @synchronized (strongSelf.lock) {
-            if (now - strongSelf.lastLevelSentAt >= 0.125) {
+            if (now - strongSelf.lastLevelSentAt >= 0.08) {
                 strongSelf.lastLevelSentAt = now;
                 emitLevel = YES;
             }
@@ -233,13 +292,26 @@
             const float *samples = buffer.floatChannelData[0];
             AVAudioFrameCount count = buffer.frameLength;
             double sum = 0.0;
+            double peak = 0.0;
             for (AVAudioFrameCount i = 0; i < count; i++) {
                 double s = samples[i];
+                double a = fabs(s);
+                if (a > peak) peak = a;
                 sum += s * s;
             }
             double rms = sqrt(sum / (double)count);
-            double scaled = fmin(1.0, fmax(0.0, rms * 6.0));
-            [strongSelf emitJSON:@{ @"type": @"level", @"v": @(round(scaled * 100.0) / 100.0) }];
+            double db = (rms > 1e-6) ? 20.0 * log10(rms) : -120.0;
+            double scaled = fmin(1.0, fmax(0.0, (db + 55.0) / 43.0));
+            if (strongSelf.diagMode) {
+                [strongSelf emitJSON:@{
+                    @"type": @"level",
+                    @"v": @(round(scaled * 100.0) / 100.0),
+                    @"rms": @(round(rms * 1000000.0) / 1000000.0),
+                    @"peak": @(round(peak * 1000000.0) / 1000000.0)
+                }];
+            } else {
+                [strongSelf emitJSON:@{ @"type": @"level", @"v": @(round(scaled * 100.0) / 100.0) }];
+            }
         }
     }];
 
@@ -253,7 +325,30 @@
         return NO;
     }
 
-    [self emitJSON:@{ @"type": @"ready" }];
+    NSMutableDictionary *readyObj = [@{
+        @"type": @"ready",
+        @"onDevice": @(preferOnDevice),
+        @"locale": self.recognizer.locale.localeIdentifier ?: @"",
+        @"sampleRate": @(format.sampleRate)
+    } mutableCopy];
+    if (self.diagMode) {
+        NSMutableArray<NSString *> *portNames = [NSMutableArray array];
+        for (AVAudioSessionPortDescription *desc in session.currentRoute.inputs) {
+            if (desc.portName.length > 0) {
+                [portNames addObject:desc.portName];
+            } else if (desc.portType.length > 0) {
+                [portNames addObject:desc.portType];
+            }
+        }
+        BOOL supportsOnDevice = NO;
+        if (@available(iOS 13.0, *)) {
+            supportsOnDevice = self.recognizer.supportsOnDeviceRecognition;
+        }
+        readyObj[@"route"] = portNames.count > 0 ? [portNames componentsJoinedByString:@","] : @"none";
+        readyObj[@"supportsOnDevice"] = @(supportsOnDevice);
+        readyObj[@"isAvailable"] = @(self.recognizer.isAvailable);
+    }
+    [self emitJSON:readyObj];
     return YES;
 }
 
@@ -261,6 +356,7 @@
     SFSpeechAudioBufferRecognitionRequest *req = nil;
     SFSpeechRecognitionTask *task = nil;
     AVAudioEngine *engine = nil;
+    id observer = nil;
     @synchronized (self.lock) {
         if (self.stopped) return;
         if (self.stopping && waitForFinal) return;
@@ -269,6 +365,12 @@
         req = self.request;
         task = self.task;
         engine = self.engine;
+        observer = self.interruptionObserver;
+        self.interruptionObserver = nil;
+    }
+
+    if (observer) {
+        [[NSNotificationCenter defaultCenter] removeObserver:observer];
     }
 
     if (engine) {
@@ -282,7 +384,7 @@
     }
 
     if (waitForFinal && task) {
-        dispatch_semaphore_wait(self.finalSemaphore, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)));
+        dispatch_semaphore_wait(self.finalSemaphore, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)));
         NSString *fallbackText = nil;
         BOOL needFallbackFinal = NO;
         @synchronized (self.lock) {
@@ -303,7 +405,11 @@
     [[AVAudioSession sharedInstance] setActive:NO
                                    withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation
                                          error:nil];
+    @synchronized (self.lock) {
+        self.done = YES;
+    }
     dispatch_semaphore_signal(self.exitSemaphore);
+    CFRunLoopStop(CFRunLoopGetMain());
 }
 
 @end
@@ -314,6 +420,11 @@ int main(int argc, char *argv[]) {
         setvbuf(stdout, NULL, _IONBF, 0);
 
         RCDictationRunner *runner = [[RCDictationRunner alloc] init];
+        for (int i = 1; i < argc; i++) {
+            if (strcmp(argv[i], "--diag") == 0) {
+                runner.diagMode = YES;
+            }
+        }
 
         signal(SIGTERM, SIG_IGN);
         signal(SIGINT, SIG_IGN);
@@ -345,8 +456,16 @@ int main(int argc, char *argv[]) {
             [runner stopAndWaitForFinal:YES];
         });
 
-        // Hard 120s safety timeout so dictation can never leak or drain battery.
-        dispatch_semaphore_wait(runner.exitSemaphore, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(120.0 * NSEC_PER_SEC)));
+        // Hard 120s safety timeout while keeping the main run loop active for system callbacks.
+        CFAbsoluteTime deadline = CFAbsoluteTimeGetCurrent() + 120.0;
+        while (CFAbsoluteTimeGetCurrent() < deadline) {
+            BOOL isDone = NO;
+            @synchronized (runner.lock) {
+                isDone = runner.done;
+            }
+            if (isDone) break;
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.1, false);
+        }
         [runner stopAndWaitForFinal:YES];
         return runner.exitCode;
     }

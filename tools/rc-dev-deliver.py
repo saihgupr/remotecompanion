@@ -515,10 +515,10 @@ def main():
     try:
         payload = json.load(sys.stdin)
     except Exception as exc:
-        print(json.dumps({"ok": False, "error": f"Invalid input JSON: {exc}"}))
+        print(json.dumps({"ok": False, "error": f"Invalid input JSON: {exc}"}), flush=True)
         return 1
     result = deliver(payload)
-    print(json.dumps(result))
+    print(json.dumps(result), flush=True)
     return 0 if result.get("ok") else 1
 
 

@@ -10,5 +10,9 @@
 	<string>Dictate instructions while annotating a screenshot in Developer Mode.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Transcribe voice instructions while annotating a screenshot in Developer Mode.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 </dict>
 </plist>

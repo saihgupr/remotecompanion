@@ -8,7 +8,6 @@
 #import <objc/message.h>
 #import <errno.h>
 #import <fcntl.h>
-#import <poll.h>
 #import <signal.h>
 #import <spawn.h>
 #import <sys/wait.h>
@@ -50,6 +49,41 @@ static int rc_dev_posix_spawn(pid_t *pid,
     int ret = posix_spawn(pid, path, file_actions, &attr, argv, envp);
     posix_spawnattr_destroy(&attr);
     return ret;
+}
+
+static void rc_dev_move_fd_above_stdio(int *fd) {
+    if (!fd || *fd < 0 || *fd > STDERR_FILENO) return;
+    int moved = fcntl(*fd, F_DUPFD_CLOEXEC, 3);
+    if (moved >= 0) {
+        close(*fd);
+        *fd = moved;
+    }
+}
+
+static BOOL rc_dev_drain_fd(int *fd, NSMutableData *outData) {
+    if (!fd || *fd < 0) return NO;
+    BOOL readAny = NO;
+    char buf[4096];
+    while (true) {
+        ssize_t n = read(*fd, buf, sizeof(buf));
+        if (n > 0) {
+            [outData appendBytes:buf length:(NSUInteger)n];
+            readAny = YES;
+        } else if (n == 0) {
+            close(*fd);
+            *fd = -1;
+            break;
+        } else if (errno == EINTR) {
+            continue;
+        } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            break;
+        } else {
+            close(*fd);
+            *fd = -1;
+            break;
+        }
+    }
+    return readAny;
 }
 
 static BOOL rc_dev_is_locked(void) {
@@ -196,6 +230,8 @@ static CGFloat rc_dev_bottom_inset(UIWindowScene *scene, BOOL landscape) {
     // Dictation subprocess state
     BOOL _dictating;
     BOOL _flushingFinalDictation;
+    BOOL _loggedFirstPartial;
+    NSString *_dictationErrorHint;
     NSUInteger _dictateGeneration;
     pid_t _dictatePid;
     int _dictateInFd;
@@ -483,7 +519,7 @@ static CGFloat rc_dev_bottom_inset(UIWindowScene *scene, BOOL landscape) {
         _micButton.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.08];
         _micPulseView.transform = CGAffineTransformIdentity;
         _micPulseView.alpha = 0.0;
-        _placeholderLabel.text = @"Type a note…";
+        _placeholderLabel.text = _dictationErrorHint ?: @"Type a note…";
     }
     _placeholderLabel.hidden = (_textView.text.length > 0);
 }
@@ -589,8 +625,11 @@ static CGFloat rc_dev_bottom_inset(UIWindowScene *scene, BOOL landscape) {
 #pragma mark - UITextViewDelegate
 
 - (void)textViewDidBeginEditing:(UITextView *)textView {
+    _dictationErrorHint = nil;
     if (_dictating) {
         [self pauseDictation];
+    } else {
+        [self updateMicAppearance];
     }
 }
 
@@ -615,6 +654,8 @@ static CGFloat rc_dev_bottom_inset(UIWindowScene *scene, BOOL landscape) {
 
 - (void)startDictation {
     if (_ended) return;
+    _loggedFirstPartial = NO;
+    _dictationErrorHint = nil;
     NSString *toolPath = rc_tool_path(@"rc-dictate");
     if (!toolPath) {
         SRLogMin(@"[DevAnnotate] rc-dictate not found");
@@ -641,18 +682,24 @@ static CGFloat rc_dev_bottom_inset(UIWindowScene *scene, BOOL landscape) {
     }
 
     int devNull = open("/dev/null", O_WRONLY);
+    rc_dev_move_fd_above_stdio(&inPipe[0]);
+    rc_dev_move_fd_above_stdio(&inPipe[1]);
+    rc_dev_move_fd_above_stdio(&outPipe[0]);
+    rc_dev_move_fd_above_stdio(&outPipe[1]);
+    rc_dev_move_fd_above_stdio(&devNull);
+
     posix_spawn_file_actions_t actions;
     posix_spawn_file_actions_init(&actions);
     posix_spawn_file_actions_adddup2(&actions, inPipe[0], STDIN_FILENO);
     posix_spawn_file_actions_adddup2(&actions, outPipe[1], STDOUT_FILENO);
     if (devNull >= 0) {
         posix_spawn_file_actions_adddup2(&actions, devNull, STDERR_FILENO);
-        posix_spawn_file_actions_addclose(&actions, devNull);
+        if (devNull > STDERR_FILENO) posix_spawn_file_actions_addclose(&actions, devNull);
     }
-    posix_spawn_file_actions_addclose(&actions, inPipe[0]);
-    posix_spawn_file_actions_addclose(&actions, inPipe[1]);
-    posix_spawn_file_actions_addclose(&actions, outPipe[0]);
-    posix_spawn_file_actions_addclose(&actions, outPipe[1]);
+    if (inPipe[0] > STDERR_FILENO) posix_spawn_file_actions_addclose(&actions, inPipe[0]);
+    if (inPipe[1] > STDERR_FILENO) posix_spawn_file_actions_addclose(&actions, inPipe[1]);
+    if (outPipe[0] > STDERR_FILENO) posix_spawn_file_actions_addclose(&actions, outPipe[0]);
+    if (outPipe[1] > STDERR_FILENO) posix_spawn_file_actions_addclose(&actions, outPipe[1]);
 
     extern char **environ;
     char *argv[] = { (char *)toolPath.fileSystemRepresentation, NULL };
@@ -694,8 +741,10 @@ static CGFloat rc_dev_bottom_inset(UIWindowScene *scene, BOOL landscape) {
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         NSMutableData *buf = [NSMutableData data];
         char chunk[2048];
-        ssize_t n;
-        while ((n = read(readFd, chunk, sizeof(chunk))) > 0) {
+        while (true) {
+            ssize_t n = read(readFd, chunk, sizeof(chunk));
+            if (n < 0 && errno == EINTR) continue;
+            if (n <= 0) break;
             [buf appendBytes:chunk length:(NSUInteger)n];
             while (true) {
                 const uint8_t *bytes = buf.bytes;
@@ -748,18 +797,26 @@ static CGFloat rc_dev_bottom_inset(UIWindowScene *scene, BOOL landscape) {
     if (_ended && !_flushingFinalDictation) return;
 
     NSString *type = [event[@"type"] description] ?: @"";
-    if ([type isEqualToString:@"level"]) {
+    if ([type isEqualToString:@"ready"]) {
+        SRLogMin(@"[DevAnnotate] Dictation ready (onDevice=%@ locale=%@)", event[@"onDevice"], event[@"locale"]);
+    } else if ([type isEqualToString:@"level"]) {
         if (!_dictating) return;
-        double v = [event[@"v"] doubleValue];
-        CGFloat scale = 1.0 + (CGFloat)MIN(1.0, MAX(0.0, v)) * 0.35;
-        CGFloat alpha = 0.25 + (CGFloat)MIN(1.0, MAX(0.0, v)) * 0.55;
-        [UIView animateWithDuration:0.11 animations:^{
+        double clamped = MIN(1.0, MAX(0.0, [event[@"v"] doubleValue]));
+        CGFloat scale = 1.0 + (CGFloat)clamped * 0.42;
+        CGFloat alpha = 0.22 + (CGFloat)clamped * 0.58;
+        UIColor *micBg = [UIColor colorWithRed:1.0 green:59.0/255.0 blue:48.0/255.0 alpha:(CGFloat)(0.22 + clamped * 0.36)];
+        [UIView animateWithDuration:0.08 animations:^{
             self->_micPulseView.transform = CGAffineTransformMakeScale(scale, scale);
             self->_micPulseView.alpha = alpha;
+            self->_micButton.backgroundColor = micBg;
         }];
     } else if ([type isEqualToString:@"partial"] || [type isEqualToString:@"final"]) {
         if (_textView.isFirstResponder) return;
         NSString *speech = [event[@"text"] isKindOfClass:[NSString class]] ? event[@"text"] : @"";
+        if (!_loggedFirstPartial && speech.length > 0) {
+            _loggedFirstPartial = YES;
+            SRLogMin(@"[DevAnnotate] Dictation received speech (%lu chars)", (unsigned long)speech.length);
+        }
         _currentDictationSegment = speech;
         NSString *combined = [self joinPrefix:_committedPrefix withSpeech:speech];
         _textView.text = combined;
@@ -775,6 +832,7 @@ static CGFloat rc_dev_bottom_inset(UIWindowScene *scene, BOOL landscape) {
     } else if ([type isEqualToString:@"error"]) {
         NSString *msg = [event[@"message"] description] ?: @"Dictation error";
         SRLogMin(@"[DevAnnotate] Dictation error: %@", msg);
+        _dictationErrorHint = @"Mic unavailable — tap to type";
         [self pauseDictation];
     }
 }
@@ -805,12 +863,6 @@ static CGFloat rc_dev_bottom_inset(UIWindowScene *scene, BOOL landscape) {
                     curPid = _dictatePid;
                 }
                 if (curPid <= 0) {
-                    pid = -1;
-                    break;
-                }
-                int st = 0;
-                pid_t wp = waitpid(pid, &st, WNOHANG);
-                if (wp == pid || (wp < 0 && errno == ECHILD)) {
                     pid = -1;
                     break;
                 }
@@ -871,7 +923,7 @@ static CGFloat rc_dev_bottom_inset(UIWindowScene *scene, BOOL landscape) {
         _dictating = NO;
         [self updateMicAppearance];
         _flushingFinalDictation = YES;
-        [self stopDictationWaitSeconds:0.35];
+        [self stopDictationWaitSeconds:0.65];
         _flushingFinalDictation = NO;
     } else {
         [self stopDictationWaitSeconds:0.0];
@@ -879,6 +931,7 @@ static CGFloat rc_dev_bottom_inset(UIWindowScene *scene, BOOL landscape) {
     NSString *finalText = [_textView.text ?: @"" stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     CGRect finalRect = _hasSelection ? _selectedRect : CGRectZero;
     CGSize overlaySize = _overlayView.bounds.size;
+    SRLogMin(@"[DevAnnotate] Sending (textLen=%lu, hasRect=%d)", (unsigned long)finalText.length, !CGRectIsEmpty(finalRect));
 
     [self prepareForDismiss];
     void (^cb)(BOOL, CGRect, CGSize, NSString *) = self.onFinish;
@@ -1062,15 +1115,20 @@ static void rc_dev_deliver_over_ssh(NSDictionary *targetHost,
         return;
     }
 
+    rc_dev_move_fd_above_stdio(&inPipe[0]);
+    rc_dev_move_fd_above_stdio(&inPipe[1]);
+    rc_dev_move_fd_above_stdio(&outPipe[0]);
+    rc_dev_move_fd_above_stdio(&outPipe[1]);
+
     posix_spawn_file_actions_t actions;
     posix_spawn_file_actions_init(&actions);
     posix_spawn_file_actions_adddup2(&actions, inPipe[0], STDIN_FILENO);
     posix_spawn_file_actions_adddup2(&actions, outPipe[1], STDOUT_FILENO);
     posix_spawn_file_actions_adddup2(&actions, outPipe[1], STDERR_FILENO);
-    posix_spawn_file_actions_addclose(&actions, inPipe[0]);
-    posix_spawn_file_actions_addclose(&actions, inPipe[1]);
-    posix_spawn_file_actions_addclose(&actions, outPipe[0]);
-    posix_spawn_file_actions_addclose(&actions, outPipe[1]);
+    if (inPipe[0] > STDERR_FILENO) posix_spawn_file_actions_addclose(&actions, inPipe[0]);
+    if (inPipe[1] > STDERR_FILENO) posix_spawn_file_actions_addclose(&actions, inPipe[1]);
+    if (outPipe[0] > STDERR_FILENO) posix_spawn_file_actions_addclose(&actions, outPipe[0]);
+    if (outPipe[1] > STDERR_FILENO) posix_spawn_file_actions_addclose(&actions, outPipe[1]);
 
     NSString *basePath = @"/var/jb/usr/local/bin:/var/jb/usr/bin:/var/jb/bin:/var/jb/usr/sbin:/var/jb/sbin:/usr/bin:/bin:/usr/sbin:/sbin";
     extern char **environ;
@@ -1139,42 +1197,43 @@ static void rc_dev_deliver_over_ssh(NSDictionary *targetHost,
         close(writeFd);
     });
 
+    int readFd = outPipe[0];
+    int flags = fcntl(readFd, F_GETFL);
+    if (flags >= 0) fcntl(readFd, F_SETFL, flags | O_NONBLOCK);
+
     NSMutableData *outData = [NSMutableData data];
     CFAbsoluteTime deadline = CFAbsoluteTimeGetCurrent() + 20.0;
-    BOOL timedOut = NO;
-    char buf[2048];
-    while (true) {
-        double remaining = deadline - CFAbsoluteTimeGetCurrent();
-        if (remaining <= 0) {
-            timedOut = YES;
-            break;
-        }
-        int timeoutMs = (int)fmax(1.0, fmin(remaining * 1000.0, 500.0));
-        struct pollfd pfd = { .fd = outPipe[0], .events = POLLIN };
-        int pr = poll(&pfd, 1, timeoutMs);
-        if (pr > 0) {
-            if (pfd.revents & (POLLIN | POLLHUP)) {
-                ssize_t n = read(outPipe[0], buf, sizeof(buf));
-                if (n > 0) {
-                    [outData appendBytes:buf length:(NSUInteger)n];
-                } else if (n == 0) {
-                    break;
-                } else if (errno != EINTR) {
-                    break;
-                }
-            } else if (pfd.revents & (POLLERR | POLLNVAL)) {
-                break;
-            }
-        } else if (pr < 0 && errno != EINTR) {
-            break;
-        }
-    }
-    close(outPipe[0]);
-
+    BOOL exited = NO;
     int status = 0;
-    if (timedOut) {
+    // Read without poll(), which SpringBoard's sandbox refuses on pipes.
+    while (readFd >= 0) {
+        if (CFAbsoluteTimeGetCurrent() >= deadline) break;
+        if (rc_dev_drain_fd(&readFd, outData)) continue;
+        if (!exited && waitpid(pid, &status, WNOHANG) == pid) {
+            exited = YES;
+            rc_dev_drain_fd(&readFd, outData);
+            break;
+        }
+        usleep(20000);
+    }
+    if (readFd >= 0) {
+        close(readFd);
+        readFd = -1;
+    }
+
+    while (!exited) {
+        pid_t r = waitpid(pid, &status, WNOHANG);
+        if (r == pid) {
+            exited = YES;
+            break;
+        }
+        if (r < 0 && errno != EINTR) break;
+        if (CFAbsoluteTimeGetCurrent() >= deadline) break;
+        usleep(20000);
+    }
+
+    if (!exited) {
         kill(pid, SIGTERM);
-        BOOL exited = NO;
         for (int i = 0; i < 20 && !exited; i++) {
             if (waitpid(pid, &status, WNOHANG) == pid) exited = YES;
             else usleep(20000);
@@ -1188,15 +1247,24 @@ static void rc_dev_deliver_over_ssh(NSDictionary *targetHost,
         return;
     }
 
-    while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
     int exitCode = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 
     NSString *outStr = [[NSString alloc] initWithData:outData encoding:NSUTF8StringEncoding] ?: @"";
     NSDictionary *res = rc_dev_parse_last_json_line(outStr);
     if (res && [res[@"ok"] boolValue]) {
         NSString *detail = [res[@"detail"] isKindOfClass:[NSString class]] ? res[@"detail"] : nil;
-        SRLog(@"[DevAnnotate] Delivered to %@ (%@)", editorDisplay, detail ?: @"ok");
-        notify([NSString stringWithFormat:@"Sent to %@", editorDisplay], detail, @"checkmark.circle.fill");
+        BOOL autoSend = components[@"autoSend"] ? [components[@"autoSend"] boolValue] : YES;
+        NSString *title = [NSString stringWithFormat:@"%@ %@", autoSend ? @"Sent to" : @"Pasted to", editorDisplay];
+        NSString *subtitle = nil;
+        if (detail.length > 0 && ![detail isEqualToString:editorDisplay]) {
+            if ([preset[@"strategy"] isEqualToString:@"opencode_api"] && autoSend) {
+                subtitle = [NSString stringWithFormat:@"Session: %@", detail];
+            } else {
+                subtitle = detail;
+            }
+        }
+        SRLogMin(@"[DevAnnotate] %@ (%@)", title, subtitle ?: @"ok");
+        notify(title, subtitle, @"checkmark.circle.fill");
     } else {
         NSString *errMsg = [res[@"error"] isKindOfClass:[NSString class]] ? res[@"error"] : nil;
         if (!errMsg.length) {
