@@ -6488,7 +6488,8 @@ function saveRestDialog() {
 
 // ── Developer Annotate & Send Modal ──
 const DEV_EDITOR_PRESETS = [
-  { id:'opencode', name:'OpenCode', supportsProjectDir:true, subtitle:"Uses OpenCode's local API when Auto-Send is on (queues directly into the active session). Pastes into the composer when Auto-Send is off." }
+  { id:'opencode', name:'OpenCode', supportsProjectDir:true, subtitle:"Uses OpenCode's local API when Auto-Send is on (queues directly into the active session). Pastes into the composer when Auto-Send is off." },
+  { id:'antigravity', name:'Antigravity IDE', supportsProjectDir:true, subtitle:"Uses the RemoteCompanion Antigravity Bridge extension to focus the project window's Agent chat panel, paste the screenshot, and insert or send your note." }
 ];
 
 function isDevAnnotateCmd(cmd) {

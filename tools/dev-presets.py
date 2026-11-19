@@ -11,7 +11,7 @@ import os
 import sys
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
-VALID_STRATEGIES = {"opencode_api", "clipboard_paste"}
+VALID_STRATEGIES = {"opencode_api", "antigravity_ext", "clipboard_paste"}
 
 
 def _objc_escape(s):

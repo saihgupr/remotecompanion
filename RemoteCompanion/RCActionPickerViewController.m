@@ -520,7 +520,7 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
             @{ @"name": @"Annotate & Send to Editor...",
                @"command": @"__DEV_ANNOTATE__",
                @"icon": @"viewfinder",
-               @"keywords": @"developer dev annotate screenshot red rectangle box dictate voice mic ai editor opencode" }
+               @"keywords": @"developer dev annotate screenshot red rectangle box dictate voice mic ai editor opencode antigravity" }
         ]];
     }
     _sectionTitles = titles;

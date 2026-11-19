@@ -10,5 +10,16 @@
     "submitKey": "return",
     "supportsProjectDir": true,
     "subtitle": "Uses OpenCode's local API when Auto-Send is on (queues directly into the active session). Pastes into the composer when Auto-Send is off."
+  },
+  {
+    "id": "antigravity",
+    "name": "Antigravity IDE",
+    "strategy": "antigravity_ext",
+    "bundleId": "com.google.antigravity-ide",
+    "appName": "Antigravity IDE",
+    "imagePasteDelayMs": 450,
+    "submitKey": "return",
+    "supportsProjectDir": true,
+    "subtitle": "Uses the RemoteCompanion Antigravity Bridge extension to focus the project window's Agent chat panel, paste the screenshot, and insert or send your note."
   }
 ]
