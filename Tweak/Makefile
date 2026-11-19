@@ -29,6 +29,7 @@ RemoteCommand_FILES += RCTestKit.x
 RemoteCommand_FILES += RCGestures.m
 RemoteCommand_FILES += RCScreen.m
 RemoteCommand_FILES += RCScreenSelect.m
+RemoteCommand_FILES += RCDevAnnotate.m
 RemoteCommand_FILES += RCAddOns.m
 # Shared with the app: the one toast pill (editor preview uses the same file)
 RemoteCommand_FILES += ../RemoteCompanion/RCToastPill.m
@@ -36,6 +37,7 @@ RemoteCommand_FILES += ../RemoteCompanion/RCToastPill.m
 RemoteCommand_FILES += ../RemoteCompanion/RCNotifyCommand.m
 RemoteCommand_FILES += ../RemoteCompanion/RCClearNotificationsCommand.m
 RemoteCommand_FILES += ../RemoteCompanion/RCTimerCommand.m
+RemoteCommand_FILES += ../RemoteCompanion/RCDevAnnotateAction.m
 RemoteCommand_CFLAGS = -fobjc-arc -Ilua -I../RemoteCompanion -DLUA_USE_IOS -Wno-unused-function -Wno-unused-variable
 RemoteCommand_FRAMEWORKS = UIKit CoreNFC IOKit QuartzCore CoreLocation Security CoreMotion
 RemoteCommand_PRIVATE_FRAMEWORKS = AppSupport MediaRemote MobileCoreServices FrontBoardServices BackBoardServices MediaPlayer DoNotDisturb BiometricKit AccessibilityUtilities
@@ -75,5 +77,6 @@ SUBPROJECTS += rc-root
 SUBPROJECTS += rc-client
 SUBPROJECTS += rc-notify
 SUBPROJECTS += rc-ocr
+SUBPROJECTS += rc-dictate
 SUBPROJECTS += rc-ccmodule
 include $(THEOS_MAKE_PATH)/aggregate.mk

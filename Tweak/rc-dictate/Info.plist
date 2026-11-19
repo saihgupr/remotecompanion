@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>com.saihgupr.remotecompanion.dictate</string>
+	<key>CFBundleName</key>
+	<string>rc-dictate</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Dictate instructions while annotating a screenshot in Developer Mode.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Transcribe voice instructions while annotating a screenshot in Developer Mode.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
+</dict>
+</plist>

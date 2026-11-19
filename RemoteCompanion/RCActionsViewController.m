@@ -17,6 +17,8 @@
 #import "RCRemoteActionEditorViewController.h"
 #import "RCHTTPRequestEditorViewController.h"
 #import "RCHTTPAction.h"
+#import "RCDevAnnotateAction.h"
+#import "RCDevAnnotateEditorViewController.h"
 #import "RCShortcutPickerViewController.h"
 #import "RCAppPickerViewController.h"
 #import "RCConditionPickerViewController.h"
@@ -5079,6 +5081,9 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     } else if ([currentAction isEqualToString:@"http-request"] || [currentAction hasPrefix:@"http-request "]) {
         [self promptEditHTTPRequestActionAtIndex:indexPath.row];
         return;
+    } else if ([RCDevAnnotateAction isDevAnnotateCommand:currentAction]) {
+        [self promptEditDevAnnotateActionAtIndex:indexPath.row];
+        return;
     } else if ([currentAction hasPrefix:@"ssh-run "]) {
         [self promptEditSSHRunActionAtIndex:indexPath.row];
         return;
@@ -5113,6 +5118,33 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     if (![action isKindOfClass:[NSString class]]) return;
 
     RCHTTPRequestEditorViewController *editor = [[RCHTTPRequestEditorViewController alloc] initWithActionString:action];
+    __weak typeof(self) weakSelf = self;
+    editor.onSave = ^(NSString *newAction) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        id existing = strongSelf.actions[index];
+        if ([existing isKindOfClass:[NSDictionary class]]) {
+            NSMutableDictionary *dict = [(NSDictionary *)existing mutableCopy];
+            dict[@"command"] = newAction;
+            strongSelf.actions[index] = dict;
+        } else {
+            strongSelf.actions[index] = newAction;
+        }
+        [strongSelf saveActions];
+        [strongSelf.tableView reloadData];
+        [strongSelf.navigationController popViewControllerAnimated:YES];
+    };
+    [self.navigationController pushViewController:editor animated:YES];
+}
+
+- (void)promptEditDevAnnotateActionAtIndex:(NSInteger)index {
+    if (index < 0 || index >= (NSInteger)self.actions.count) return;
+
+    id actionData = self.actions[index];
+    NSString *action = [actionData isKindOfClass:[NSDictionary class]] ? ((NSDictionary *)actionData)[@"command"] : actionData;
+    if (![RCDevAnnotateAction isDevAnnotateCommand:action]) return;
+
+    RCDevAnnotateEditorViewController *editor = [[RCDevAnnotateEditorViewController alloc] initWithActionString:action];
     __weak typeof(self) weakSelf = self;
     editor.onSave = ^(NSString *newAction) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
@@ -5911,6 +5943,12 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
                 NSString *url = components[@"url"] ?: @"";
                 cell.textLabel.text = url.length ? url : action;
                 subtitle = [NSString stringWithFormat:@"REST API Call · %@", method];
+            } else if ([RCDevAnnotateAction isDevAnnotateCommand:action]) {
+                NSDictionary *comp = [RCDevAnnotateAction componentsFromActionString:action];
+                NSDictionary *host = comp[@"hostId"] ? [[RCConfigManager sharedManager] sshHostForId:comp[@"hostId"]] : nil;
+                NSString *hostName = host[@"name"] ?: host[@"host"];
+                cell.textLabel.text = [RCDevAnnotateAction displayTitleForActionString:action];
+                subtitle = [RCDevAnnotateAction displaySubtitleForActionString:action hostName:hostName];
             } else if ([action hasPrefix:@"ssh-run "]) {
                 NSString *payload = [action substringFromIndex:8];
                 NSRange firstSpace = [payload rangeOfString:@" "];

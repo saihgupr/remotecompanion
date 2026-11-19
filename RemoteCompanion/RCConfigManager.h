@@ -55,6 +55,9 @@
 // scripts, terminals and other tools call it directly. Off by default (Settings > Advanced
 // Settings > Security).
 @property (nonatomic, assign) BOOL allowDirectRootHelper;
+// Unlocks Developer Mode actions in the action picker (Settings > Advanced Settings > Developer).
+// Off by default.
+@property (nonatomic, assign) BOOL developerMode;
 @property (nonatomic, assign) BOOL haEnabled;
 @property (nonatomic, copy) NSString *haUrl;
 @property (nonatomic, copy) NSString *haToken;

@@ -1,6 +1,7 @@
 #include <poll.h>
 #import <Foundation/Foundation.h>
 #import "RCScreen.h"
+#import "RCDevAnnotate.h"
 #import <UIKit/UIKit.h>
 #import <netinet/in.h>
 #import <sys/socket.h>
@@ -5104,6 +5105,7 @@ static BOOL rc_command_needs_token(NSString *cmd, int depth) {
            [trimmed hasPrefix:@"backup config"] || [trimmed hasPrefix:@"restore backup"] ||
            [trimmed hasPrefix:@"lua "] || [trimmed hasPrefix:@"lua_eval "] || [trimmed hasPrefix:@"Lua "] ||
            [trimmed hasPrefix:@"ssh-run "] ||
+           [trimmed isEqualToString:@"dev-annotate"] || [trimmed hasPrefix:@"dev-annotate "] ||
            [trimmed hasPrefix:@"rc-run "] ||
            [trimmed hasPrefix:@"tap "] || [trimmed hasPrefix:@"hold "] || [trimmed hasPrefix:@"swipe "] ||
            [trimmed hasPrefix:@"gesture "] ||
@@ -11358,6 +11360,7 @@ static NSArray *RCCommandHelpSections(void) {
             @[@"km url <url>", @"Trigger a Keyboard Maestro URL"],
             @[@"mqtt pub <topic> [payload]", @"Publish an MQTT message"],
             @[@"http-request <json|url>", @"Call a REST API with method, headers and body"],
+            @[@"dev-annotate <json>", @"Annotate screen with voice/text and send to editor"],
             @[@"rc-run <clientId> <command>", @"Run a command on another device's Web UI"],
         ]},
         @{@"title": @"System", @"rows": @[
@@ -14830,6 +14833,25 @@ static NSString *handle_command(NSString *cmd) {
     } else if ([cleanCmd hasPrefix:@"screen "]) {
         return RCScreenCommand(cleanCmd);
 
+    // dev-annotate <json>: Developer Mode annotation overlay + delivery over SSH (RCDevAnnotate.m)
+    } else if ([cleanCmd isEqualToString:@"dev-annotate"] || [cleanCmd hasPrefix:@"dev-annotate "]) {
+        load_trigger_config();
+        if (![g_triggerConfig[@"developerMode"] boolValue]) {
+            return @"Error: Developer Mode is off\n";
+        }
+        NSDictionary *cfgSnapshot = [g_triggerConfig copy];
+        void (^toast)(NSString *, NSString *, NSString *) = ^(NSString *t, NSString *s, NSString *i) {
+            rc_show_hud_toast(t, s, i);
+        };
+        if ([NSThread isMainThread]) {
+            dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                NSString *reply = RCDevAnnotateCommand(cleanCmd, cfgSnapshot, toast);
+                SRLog(@"[DevAnnotate] %@", [reply stringByTrimmingCharactersInSet:[NSCharacterSet newlineCharacterSet]]);
+            });
+            return @"Started: dev-annotate\n";
+        }
+        return RCDevAnnotateCommand(cleanCmd, cfgSnapshot, toast);
+
     // taprecord
     } else if ([cleanCmd isEqualToString:@"taprecord"]) {
         rc_taprecord_start();
@@ -16547,6 +16569,7 @@ static void start_web_server() {
                                     // Automations & Discovery
                                     @{@"command": @"shortcut \"Name\"", @"desc": @"Automation: Run a Siri Shortcut"},
                                     @{@"command": @"http-request {\"method\":\"GET\",\"url\":\"https://…\"}", @"desc": @"Automation: Call a REST API endpoint with optional headers and body"},
+                                    @{@"command": @"dev-annotate {\"editor\":\"opencode\",\"hostId\":\"…\"}", @"desc": @"Developer: Annotate a screenshot with voice/text and send to your editor"},
                                     @{@"command": @"notify clear {\"apps\":[],\"texts\":[]}", @"desc": @"Notifications: Clear notifications by app and/or matching text"},
                                     @{@"command": @"timer <duration|stop|pause|resume|status>", @"desc": @"Device: Start, pause, resume, stop, or inspect the Apple Clock timer"},
                                     @{@"command": @"trigger <ID>", @"desc": @"Automation: Fire a configured RemoteCompanion trigger"}

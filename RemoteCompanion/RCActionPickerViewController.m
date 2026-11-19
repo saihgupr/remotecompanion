@@ -12,6 +12,8 @@
 #import "RCKMMacroPickerViewController.h"
 #import "RCCategoryBar.h"
 #import "RCSSHActionEditorViewController.h"
+#import "RCDevAnnotateAction.h"
+#import "RCDevAnnotateEditorViewController.h"
 #import "RCActionTile.h"
 #import "RCVariableIcon.h"
 
@@ -512,6 +514,15 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
         [titles insertObject:@"Add-ons" atIndex:at];
         [sections insertObject:addOns atIndex:at];
     }
+    if (cm.developerMode) {
+        [titles addObject:@"Developer"];
+        [sections addObject:@[
+            @{ @"name": @"Annotate & Send to Editor...",
+               @"command": @"__DEV_ANNOTATE__",
+               @"icon": @"viewfinder",
+               @"keywords": @"developer dev annotate screenshot red rectangle box dictate voice mic ai editor opencode antigravity claude cursor hex" }
+        ]];
+    }
     _sectionTitles = titles;
     _sections = sections;
 
@@ -881,6 +892,11 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
 
     if ([command isEqualToString:@"__SSH_COMMAND__"]) {
         [self handleSSHCommand];
+        return;
+    }
+
+    if ([command isEqualToString:@"__DEV_ANNOTATE__"]) {
+        [self handleDevAnnotate];
         return;
     }
 
@@ -1477,6 +1493,45 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
         }
         // Dismiss the editor, then the picker itself so Save returns to the
         // main actions sequence like every other action editor.
+        void (^dismissPickerToActions)(void) = ^{
+            UINavigationController *pickerNav = strongSelf.navigationController;
+            [pickerNav.presentingViewController dismissViewControllerAnimated:YES completion:nil];
+        };
+        if (strongSelf.searchController.isActive) {
+            [strongSelf.searchController dismissViewControllerAnimated:NO completion:^{
+                [strongSelf dismissViewControllerAnimated:YES completion:^{
+                    dismissPickerToActions();
+                }];
+            }];
+        } else {
+            [strongSelf dismissViewControllerAnimated:YES completion:^{
+                dismissPickerToActions();
+            }];
+        }
+    };
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:editor];
+    [self presentViewController:nav animated:YES completion:nil];
+}
+
+- (void)handleDevAnnotate {
+    NSArray<NSDictionary *> *hosts = [RCConfigManager sharedManager].sshHosts;
+    if (hosts.count == 0) {
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"No SSH Hosts Configured"
+                                                                       message:@"You must add at least one SSH host before creating an Annotate & Send action.\nGo to Settings > Integrations > SSH Hosts."
+                                                                preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:alert animated:YES completion:nil];
+        return;
+    }
+
+    RCDevAnnotateEditorViewController *editor = [[RCDevAnnotateEditorViewController alloc] initWithActionString:nil];
+    __weak typeof(self) weakSelf = self;
+    editor.onSave = ^(NSString *actionString) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        if (strongSelf.onActionSelected) {
+            strongSelf.onActionSelected(actionString);
+        }
         void (^dismissPickerToActions)(void) = ^{
             UINavigationController *pickerNav = strongSelf.navigationController;
             [pickerNav.presentingViewController dismissViewControllerAnimated:YES completion:nil];
