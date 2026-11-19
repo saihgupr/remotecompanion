@@ -7,9 +7,6 @@
 #import "RCKMSettingsViewController.h"
 #import "RCMQTTSettingsViewController.h"
 #import "RCAdvancedSettingsViewController.h"
-#import "RCDelayPrototypeGalleryViewController.h"
-#import "RCFunctionsMenuPrototypeGalleryViewController.h"
-#import "RCActionRowPrototypeGalleryViewController.h"
 #import "RCExcludedAppsViewController.h"
 #import "RCTestKitViewController.h"
 #import "RCWebUIAccessViewController.h"
@@ -226,16 +223,6 @@ didReceiveNotificationResponse:(UNNotificationResponse *)response
         return;
     }
     
-    if ([destination isEqualToString:@"prototype"] || [destination isEqualToString:@"prototypes"]) {
-        NSString *gallery = [queryParams[@"gallery"] lowercaseString] ?: @"delay";
-        UIViewController *prototype = nil;
-        if ([gallery isEqualToString:@"functions"]) prototype = [RCFunctionsMenuPrototypeGalleryViewController galleryViewController];
-        else if ([gallery isEqualToString:@"rows"]) prototype = [RCActionRowPrototypeGalleryViewController prototypeGallery];
-        else prototype = [[RCDelayPrototypeGalleryViewController alloc] init];
-        if (prototype) [rootNav pushViewController:prototype animated:NO];
-        return;
-    }
-
     if ([destination isEqualToString:@"excluded"] || [destination isEqualToString:@"excludedapps"]) {
         [rootNav presentViewController:settingsNav animated:NO completion:^{
             [settingsNav pushViewController:[[RCAdvancedSettingsViewController alloc] init] animated:NO];

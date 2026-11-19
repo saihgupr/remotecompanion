@@ -34,10 +34,6 @@ RemoteCompanion_FILES += RCRunningViewController.m
 RemoteCompanion_FILES += RCRunHistoryViewController.m
 RemoteCompanion_FILES += RCVariablesViewController.m RCVariableIcon.m RCSetVariableViewController.m RCVariableConditionViewController.m RCNumberSettingViewController.m RCSymbolPickerViewController.m RCCommandPickerViewController.m RCTimeRangeViewController.m
 RemoteCompanion_FILES += RCInlineRowItem.m RCInlineRowChip.m RCInlineRowEditor.m RCInlineRowSequenceView.m
-RemoteCompanion_FILES += RCDelayPrototypeGalleryViewController.m RCDelayPrototypeKit.m
-RemoteCompanion_FILES += RCDelayStepperC2.m RCDelayStepperC3.m RCDelayStepperC4.m RCDelayStepperC5.m RCDelayStepperC6.m
-RemoteCompanion_FILES += RCFunctionsMenuPrototypeKit.m RCFunctionsMenuPrototypeGalleryViewController.m
-RemoteCompanion_FILES += RCFunctionsMenuP1.m RCFunctionsMenuP2.m RCFunctionsMenuP3.m RCFunctionsMenuP4.m RCFunctionsMenuP5.m RCFunctionsMenuP6.m
 RemoteCompanion_FILES += RCAddOnCatalog.m RCAddOnsViewController.m RCAddOnDetailViewController.m RCAddOnActionsViewController.m RCAddOnOptionsViewController.m RCAddOnExpandCell.m RCAddOnTriggersViewController.m
 
 # Reorganized Settings submenus
@@ -55,6 +51,5 @@ RemoteCompanion_FILES += RCHTTPAction.m RCHTTPRequestEditorViewController.m
 RemoteCompanion_FILES += RCClearNotificationsCommand.m RCClearNotificationsEditorViewController.m
 RemoteCompanion_FILES += RCTimerCommand.m RCTimerEditorViewController.m
 RemoteCompanion_FILES += RCConfigManager+AppExclusions.m RCExcludedAppsViewController.m
-RemoteCompanion_FILES += RCActionRowPrototypeGalleryViewController.m
 
 include $(THEOS_MAKE_PATH)/application.mk
