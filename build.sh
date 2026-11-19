@@ -13,6 +13,7 @@ cd "$SCRIPT_DIR"
 # Mac checker; stop when that list no longer matches Tweak.x (a built-in command was added)
 if command -v python3 >/dev/null 2>&1; then
     python3 tools/addon-builtins.py --check
+    python3 tools/dev-presets.py --check
 fi
 
 # Defaults

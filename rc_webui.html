@@ -2650,6 +2650,17 @@
       </div>
     </div>
     <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">How long a press waits for the next one before it counts. A shorter time responds sooner and needs quicker presses.</div>
+
+    <div class="action-list-header">Developer</div>
+    <div class="action-list-card">
+      <div class="settings-row">
+        <span class="settings-label">Developer Mode</span>
+        <div class="settings-btn">
+          <input type="checkbox" class="ios-toggle" id="setting-developer-mode" onchange="config.developerMode=this.checked;saveConfig();renderActionList()">
+        </div>
+      </div>
+    </div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">Unlocks developer actions in the action picker, such as annotating a screenshot and sending it to your editor.</div>
   </div>
 </div>
 
@@ -2961,6 +2972,41 @@
     <div class="dialog-btns">
       <button onclick="closeRestDialog()" style="color: var(--rc-red);">Cancel</button>
       <button onclick="saveRestDialog()" style="font-weight: 600;">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ DEVELOPER ANNOTATE ACTION DIALOG ══════════════════════════════════ -->
+<div class="dialog-backdrop" id="dev-annotate-dialog-backdrop">
+  <div class="dialog-box" style="max-width: 520px; width: 92%;">
+    <div class="dialog-title" id="dev-annotate-dialog-title">Annotate &amp; Send to Editor</div>
+    <div class="dialog-msg" style="padding-bottom: 8px;">Draws a red rectangle over a screenshot, dictates or types a note, and sends it to your Mac over SSH.</div>
+    <div style="margin: 0 16px 12px; text-align:left;">
+      <div style="font-size:12px; font-weight:600; color:var(--rc-label-2); margin:0 0 4px 2px;">Computer (SSH Host)</div>
+      <select class="dialog-input" id="dev-annotate-host" style="width:100%; margin:0 0 10px; height:40px; padding:0 8px; text-align:left;"></select>
+
+      <div style="font-size:12px; font-weight:600; color:var(--rc-label-2); margin:0 0 4px 2px;">Editor</div>
+      <select class="dialog-input" id="dev-annotate-editor" onchange="onDevAnnotateEditorChange()" style="width:100%; margin:0 0 6px; height:40px; padding:0 8px; text-align:left;"></select>
+      <div id="dev-annotate-hint" style="font-size:12px; color:var(--rc-label-2); margin:0 0 10px 2px;"></div>
+
+      <div id="dev-annotate-project-row" style="display:none; margin-bottom:10px;">
+        <div style="font-size:12px; font-weight:600; color:var(--rc-label-2); margin:0 0 4px 2px;">Project Folder <span style="font-weight:400;">(optional, defaults to last viewed)</span></div>
+        <input class="dialog-input" id="dev-annotate-project" type="text" placeholder="Optional (last viewed)" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" style="width:100%; box-sizing:border-box; margin:0; height:40px; text-align:left;">
+      </div>
+
+      <div id="dev-annotate-custom-row" style="display:none; margin-bottom:10px;">
+        <div style="font-size:12px; font-weight:600; color:var(--rc-label-2); margin:0 0 4px 2px;">Custom App</div>
+        <input class="dialog-input" id="dev-annotate-custom" type="text" placeholder="App name or bundle ID" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" style="width:100%; box-sizing:border-box; margin:0; height:40px; text-align:left;">
+      </div>
+
+      <label style="display:flex; align-items:center; justify-content:space-between; padding:6px 2px; font-size:15px; color:var(--rc-label); cursor:pointer;">
+        <span>Auto-Send</span>
+        <input type="checkbox" class="ios-toggle" id="dev-annotate-autosend" checked>
+      </label>
+    </div>
+    <div class="dialog-btns">
+      <button onclick="closeDevAnnotateDialog()" style="color: var(--rc-red);">Cancel</button>
+      <button onclick="saveDevAnnotateDialog()" style="font-weight: 600;">Save</button>
     </div>
   </div>
 </div>
@@ -3873,6 +3919,7 @@ function offIntegrationForCmd(action) {
   if ((cmd === 'mqtt' || cmd.startsWith('mqtt ')) && !config.mqttEnabled) return 'MQTT';
   if ((cmd === 'ha' || cmd.startsWith('ha ')) && !config.haEnabled) return 'Home Assistant';
   if ((cmd === 'km' || cmd.startsWith('km ')) && !config.kmEnabled) return 'Keyboard Maestro';
+  if (isDevAnnotateCmd(cmd) && !config.developerMode) return 'Developer Mode';
   return null;
 }
 
@@ -4358,6 +4405,7 @@ function nameForCmd(cmd) {
   if (lowCmd.startsWith('km ') || lowCmd === 'km') return formatKMCommandName(cmd);
   if (lowCmd.startsWith('mqtt ') || lowCmd === 'mqtt') return formatMQTTCommandName(cmd);
   if (lowCmd.startsWith('http-request')) return formatRESTCommandName(cmd);
+  if (isDevAnnotateCmd(lowCmd)) return formatDevAnnotateName(cmd);
   if (isClearNotifCmd(lowCmd)) return formatClearNotifName(cmd);
   if (isTimerCmd(lowCmd)) return formatTimerName(cmd);
   // Recorded gestures
@@ -4557,6 +4605,7 @@ function iconForCmd(cmd) {
   if (lowCmd.startsWith('ha ') || lowCmd === 'ha') return { icon:'lightbulb_fill', cls:'icon-blue' };
   if (lowCmd.startsWith('km ') || lowCmd === 'km') return { icon:'command', cls:'icon-yellow' };
   if (lowCmd.startsWith('mqtt ') || lowCmd === 'mqtt') return { icon:'dot_radiowaves_left_right', cls:'icon-blue' };
+  if (isDevAnnotateCmd(lowCmd)) return { icon:'camera_viewfinder', cls:'icon-red' };
   if (lowCmd.startsWith('flashlight ')) return { icon:'bolt_fill',       cls:'icon-orange' };
   if (lowCmd.startsWith('toast'))         return { icon:'text_bubble',     cls:'icon-orange' };
   if (isClearNotifCmd(lowCmd))            return { icon:'bell_slash_fill', cls:'icon-red' };
@@ -4698,6 +4747,9 @@ const ACTION_SECTIONS = [
     { name:'Haptic Feedback',   cmd:'haptic',        icon:'hand_raised_fill' },
     { name:'Set Volume…',       cmd:'__SET_VOLUME__',icon:'slider_horizontal_3', needs_input:true },
     { name:'Set Ringer Volume…', cmd:'__SET_RINGER_VOLUME__',icon:'bell_fill', needs_input:true },
+  ]},
+  { title:'Developer', actions:[
+    { name:'Annotate & Send to Editor…', cmd:'__DEV_ANNOTATE__', icon:'camera_viewfinder', needs_input:true, keywords:'developer dev annotate screenshot red rectangle box dictate voice mic ai editor opencode antigravity claude cursor hex' },
   ]},
 ];
 
@@ -6383,6 +6435,139 @@ function saveRestDialog() {
   renderActionList();
 }
 
+// ── Developer Annotate & Send Modal ──
+const DEV_EDITOR_PRESETS = [
+  { id:'opencode',    name:'OpenCode',        subtitle:"Uses OpenCode's local API when Auto-Send is on (queues directly into the active session). Pastes into the composer when Auto-Send is off." },
+  { id:'antigravity', name:'Antigravity IDE', subtitle:'Activates Antigravity IDE and pastes the annotated screenshot and text into the active composer.' },
+  { id:'claude',      name:'Claude',          subtitle:'Activates Claude Desktop and pastes the annotated screenshot and text into the active composer.' },
+  { id:'cursor',      name:'Cursor',          subtitle:'Activates Cursor and pastes the annotated screenshot and text into the active chat.' },
+  { id:'vscode',      name:'VS Code',         subtitle:'Activates VS Code and pastes the annotated screenshot and text into the active chat.' },
+  { id:'active',      name:'Active Window',   subtitle:'Pastes into whichever app is currently focused on your Mac.' },
+  { id:'custom',      name:'Custom App',      subtitle:'Activates a custom macOS app by name or bundle ID and pastes into its active composer.' }
+];
+
+function isDevAnnotateCmd(cmd) {
+  const s = String(cmd || '').trim().toLowerCase();
+  return s === 'dev-annotate' || s.startsWith('dev-annotate ') || s.startsWith('dev-annotate\t');
+}
+
+function parseDevAnnotateCmd(cmd) {
+  const raw = String(cmd || '').trim().replace(/^dev-annotate/i, '').trim();
+  if (!raw) return { hostId:'', editor:'opencode', autoSend:true, projectDir:'', customApp:'' };
+  try {
+    const obj = JSON.parse(raw);
+    if (!obj || typeof obj !== 'object') return { hostId:'', editor:'opencode', autoSend:true, projectDir:'', customApp:'' };
+    return {
+      hostId: String(obj.hostId || '').trim(),
+      editor: String(obj.editor || 'opencode').trim() || 'opencode',
+      autoSend: obj.autoSend === undefined ? true : !!obj.autoSend,
+      projectDir: String(obj.projectDir || '').trim(),
+      customApp: String(obj.customApp || '').trim()
+    };
+  } catch (e) {
+    return { hostId:'', editor:'opencode', autoSend:true, projectDir:'', customApp:'' };
+  }
+}
+
+function formatDevAnnotateName(cmd) {
+  const comp = parseDevAnnotateCmd(cmd);
+  if (comp.editor === 'custom') {
+    return `Annotate \u2192 ${comp.customApp || 'Custom App'}`;
+  }
+  const preset = DEV_EDITOR_PRESETS.find(p => p.id === comp.editor);
+  return `Annotate \u2192 ${preset ? preset.name : comp.editor}`;
+}
+
+let g_editingDevAnnotateIdx = null;
+
+function openDevAnnotateDialog(editIdx = null) {
+  const hosts = Array.isArray(config.sshHosts) ? config.sshHosts : [];
+  if (hosts.length === 0) {
+    showToast('Add an SSH host in Settings > Integrations first');
+    return;
+  }
+  g_editingDevAnnotateIdx = editIdx;
+  const actions = triggerData(currentKey).actions || [];
+  const act = editIdx === null ? '' : actions[editIdx];
+  const cmd = act && typeof act === 'object' ? String(act.command || '') : String(act || '');
+  const comp = editIdx === null
+    ? { hostId: hosts.length === 1 ? (hosts[0].id || '') : '', editor: 'opencode', autoSend: true, projectDir: '', customApp: '' }
+    : parseDevAnnotateCmd(cmd);
+
+  const hostSel = document.getElementById('dev-annotate-host');
+  hostSel.innerHTML = '';
+  hosts.forEach(h => {
+    const opt = document.createElement('option');
+    opt.value = h.id || '';
+    opt.textContent = `${h.name || h.host} (${h.user || ''}@${h.host || ''})`;
+    hostSel.appendChild(opt);
+  });
+  if (comp.hostId && [...hostSel.options].some(o => o.value === comp.hostId)) {
+    hostSel.value = comp.hostId;
+  } else if (hostSel.options.length > 0) {
+    hostSel.selectedIndex = 0;
+  }
+
+  const editorSel = document.getElementById('dev-annotate-editor');
+  editorSel.innerHTML = '';
+  DEV_EDITOR_PRESETS.forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = p.id;
+    opt.textContent = p.name;
+    editorSel.appendChild(opt);
+  });
+  editorSel.value = DEV_EDITOR_PRESETS.some(p => p.id === comp.editor) ? comp.editor : 'opencode';
+
+  document.getElementById('dev-annotate-project').value = comp.projectDir || '';
+  document.getElementById('dev-annotate-custom').value = comp.customApp || '';
+  document.getElementById('dev-annotate-autosend').checked = comp.autoSend !== false;
+  document.getElementById('dev-annotate-dialog-title').textContent = editIdx === null ? 'Annotate & Send to Editor' : 'Edit Annotate & Send';
+  onDevAnnotateEditorChange();
+  document.getElementById('dev-annotate-dialog-backdrop').classList.add('visible');
+}
+
+function onDevAnnotateEditorChange() {
+  const editor = document.getElementById('dev-annotate-editor').value;
+  const preset = DEV_EDITOR_PRESETS.find(p => p.id === editor);
+  document.getElementById('dev-annotate-hint').textContent = preset ? preset.subtitle : '';
+  document.getElementById('dev-annotate-project-row').style.display = (editor === 'opencode') ? '' : 'none';
+  document.getElementById('dev-annotate-custom-row').style.display = (editor === 'custom') ? '' : 'none';
+}
+
+function closeDevAnnotateDialog() {
+  document.getElementById('dev-annotate-dialog-backdrop').classList.remove('visible');
+  g_editingDevAnnotateIdx = null;
+}
+
+function saveDevAnnotateDialog() {
+  const hostId = document.getElementById('dev-annotate-host').value.trim();
+  const editor = document.getElementById('dev-annotate-editor').value || 'opencode';
+  const autoSend = !!document.getElementById('dev-annotate-autosend').checked;
+  const projectDir = document.getElementById('dev-annotate-project').value.trim();
+  const customApp = document.getElementById('dev-annotate-custom').value.trim();
+  if (!hostId) {
+    showToast('Select an SSH host');
+    return;
+  }
+  if (editor === 'custom' && !customApp) {
+    showToast('Enter a custom app name or bundle ID');
+    return;
+  }
+  const obj = { autoSend, editor, hostId };
+  if (editor === 'opencode' && projectDir) obj.projectDir = projectDir;
+  if (editor === 'custom' && customApp) obj.customApp = customApp;
+  const command = 'dev-annotate ' + JSON.stringify(obj);
+  const actions = triggerData(currentKey).actions || [];
+  if (g_editingDevAnnotateIdx !== null && g_editingDevAnnotateIdx < actions.length) {
+    storeCommandAt(actions, g_editingDevAnnotateIdx, command);
+  } else {
+    addActionToCurrent(command);
+  }
+  closeDevAnnotateDialog();
+  saveConfig();
+  renderActionList();
+}
+
 // ── Timer Action ─────────────────────────────────────────────────────────────
 let g_editingTimerIdx = null;
 let g_timerMode = 'start';
@@ -7547,6 +7732,8 @@ function editAction(idx) {
       editKMAction(idx);
     } else if (low.startsWith('http-request')) {
       openRestActionDialog(idx);
+    } else if (isDevAnnotateCmd(low)) {
+      openDevAnnotateDialog(idx);
     } else if (isClearNotifCmd(low)) {
       openClearNotifDialog(idx);
     } else if (isTimerCmd(low)) {
@@ -7703,7 +7890,10 @@ function renderPickerCategoryBar() {
     bar.appendChild(btn);
   };
   mkChip('All', null);
-  ACTION_SECTIONS.forEach(sec => mkChip(sec.title, sec.title));
+  ACTION_SECTIONS.forEach(sec => {
+    if (sec.title === 'Developer' && !config.developerMode) return;
+    mkChip(sec.title, sec.title);
+  });
 }
 
 function selectPickerCategory(title, btnEl) {
@@ -7759,6 +7949,7 @@ function _pickerBackdropClick(e) {
 // Whether an action is offered: integrations only when switched on, tweak-specific
 // actions only when that tweak / app is installed. Shared by the picker and Settings > Banners.
 function pickerActionAvailable(sec, a) {
+  if (sec.title === 'Developer') return !!config.developerMode;
   if (sec.title !== 'Integrations') return true;
   if (a.cmd === '__HA_PICKER__') return !!config.haEnabled;
   if (a.cmd === '__KM_TRIGGER__') return !!config.kmEnabled;
@@ -7970,6 +8161,8 @@ function selectPickerAction(act) {
     promptMQTTActionPicker();
   } else if (c === '__HTTP_REQUEST__') {
     openRestActionDialog(null);
+  } else if (c === '__DEV_ANNOTATE__') {
+    openDevAnnotateDialog(null);
   } else if (c === '__CLEAR_NOTIFICATIONS__') {
     openClearNotifDialog(null);
   } else if (c === '__TIMER__') {
@@ -9674,6 +9867,8 @@ function openAdvancedPanel() {
   if (freezeEl) freezeEl.checked = (config.freezeListsDuringGestures == null) ? true : !!config.freezeListsDuringGestures;
   const onlyUnlockEl = document.getElementById('setting-only-unlock-out-of-pocket');
   if (onlyUnlockEl) onlyUnlockEl.checked = !!config.onlyUnlockOutOfPocket;
+  const devModeEl = document.getElementById('setting-developer-mode');
+  if (devModeEl) devModeEl.checked = !!config.developerMode;
   const wrapEl = document.getElementById('setting-wrap-names');
   if (wrapEl) wrapEl.checked = isWrapLongNamesEnabled();
   syncExperimentalNFCUI();
@@ -10610,7 +10805,7 @@ function editHAAction(idx) {
 // toggle, match, exclude }. "match"/"exclude" patterns ending in " ", ":" or "-"
 // are prefixes; anything else must equal the (lowercased) command.
 // Not offered: entries that don't run an action of their own, and Set Flashlight (covered by Flashlight)
-const BANNER_SKIP = new Set(['__IF_CONDITION__', '__REPEAT__', '__REPEAT_WHILE__', '__EXIT_REPEAT__', '__WAIT_UNTIL__', '__SET_VARIABLE__', '__DELAY__', '__TOAST__', '__SET_FLASHLIGHT__']);
+const BANNER_SKIP = new Set(['__IF_CONDITION__', '__REPEAT__', '__REPEAT_WHILE__', '__EXIT_REPEAT__', '__WAIT_UNTIL__', '__SET_VARIABLE__', '__DELAY__', '__TOAST__', '__SET_FLASHLIGHT__', '__DEV_ANNOTATE__']);
 // The app's names for the same actions, so both UIs share one setting
 const BANNER_ID_ALIASES = { '__SHORTCUT__': '__SHORTCUT_PICKER__', 'queuealbum': 'queue album', 'queueartist': 'queue artist',
   'shuffleall': 'shuffle all songs', 'deletesong': 'delete current song' };

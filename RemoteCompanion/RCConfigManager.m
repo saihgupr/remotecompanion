@@ -1,6 +1,7 @@
 #import "RCConfigManager.h"
 #import "RCScreenActions.h"
 #import "RCHTTPAction.h"
+#import "RCDevAnnotateAction.h"
 #import "RCNotifyCommand.h"
 #import "RCClearNotificationsCommand.h"
 #import "RCTimerCommand.h"
@@ -360,6 +361,12 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
             [self saveConfig];
         }
 
+        // Auto-add developerMode (default to NO: developer actions hidden until enabled)
+        if (_config[@"developerMode"] == nil) {
+            _config[@"developerMode"] = @NO;
+            [self saveConfig];
+        }
+
     } else {
         // Default config: no triggers until one is added from the New Trigger screen
         NSLog(@"[RCConfigManager] Using default config");
@@ -370,6 +377,7 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
             @"freezeListsDuringGestures": @YES,
             @"allowDirectRootHelper": @NO,
             @"onlyUnlockOutOfPocket": @NO,
+            @"developerMode": @NO,
             @"nfcEnabled": @YES,
             @"rootEnabled": @YES,
             @"sshHosts": [NSMutableArray array],
@@ -646,6 +654,15 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
 
 - (void)setAllowDirectRootHelper:(BOOL)allowDirectRootHelper {
     _config[@"allowDirectRootHelper"] = @(allowDirectRootHelper);
+    [self saveConfig];
+}
+
+- (BOOL)developerMode {
+    return [_config[@"developerMode"] boolValue];
+}
+
+- (void)setDeveloperMode:(BOOL)developerMode {
+    _config[@"developerMode"] = @(developerMode);
     [self saveConfig];
 }
 
@@ -1696,6 +1713,7 @@ static NSString *RCActionCommand(id item) {
     if (([cmd hasPrefix:@"mqtt "] || [cmd isEqualToString:@"mqtt"]) && !self.mqttEnabled) return @"MQTT";
     if (([cmd hasPrefix:@"ha "] || [cmd isEqualToString:@"ha"]) && !self.haEnabled) return @"Home Assistant";
     if (([cmd hasPrefix:@"km "] || [cmd isEqualToString:@"km"]) && !self.kmEnabled) return @"Keyboard Maestro";
+    if ([RCDevAnnotateAction isDevAnnotateCommand:cmd] && !self.developerMode) return @"Developer Mode";
     return nil;
 }
 
@@ -2064,6 +2082,8 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
             }];
         } else if ([RCTimerCommand isTimerCommand:originalCmd]) {
             result = [[RCTimerCommand commandWithString:originalCmd] singleLineSummary] ?: @"Timer";
+        } else if ([RCDevAnnotateAction isDevAnnotateCommand:originalCmd]) {
+            result = [RCDevAnnotateAction displayTitleForActionString:originalCmd];
         } else if ([cmd hasPrefix:@"http-request"]) {
             NSDictionary *components = [RCHTTPAction componentsFromActionString:originalCmd];
             if (components) {
@@ -2385,6 +2405,7 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
     NSString *addOnIcon = [RCAddOnCatalog iconForCommand:cmdId];
     if (addOnIcon) return addOnIcon;
     NSString *cmd = [[(NSString *)cmdId stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString];
+    if ([RCDevAnnotateAction isDevAnnotateCommand:cmd]) return @"viewfinder";
     if ([cmd hasPrefix:@"rc-run "]) return @"iphone.radiowaves.left.and.right";
     if ([cmd hasPrefix:@"ssh-run "] || [cmd hasPrefix:@"ssh "]) return @"terminal.fill";
     if ([cmd hasPrefix:@"http-request"]) return @"network";
