@@ -567,8 +567,8 @@ typedef NS_ENUM(NSInteger, RCNESection) { RCNESectionPreview, RCNESectionText, R
     _notify.message = [_messageField.text stringByTrimmingCharactersInSet:space] ?: @"";
     _notify.imageURL = [_imageURLField.text stringByTrimmingCharactersInSet:space] ?: @"";
     _notify.buttons = _buttons;
-    // Its tap ID stays, so an edit keeps its Notification Tap trigger
-    if (!_notify.tapID.length) _notify.tapID = [RCNotifyCommand newID];
+    // A tap ID is added when a Notification Tap trigger picks this notification, not before, so an
+    // untouched notification saves as just notify "Hi"
     if (self.onSave) self.onSave(_notify.string);
     [RCAppDelegate requestNotificationPermission];
     [self close];

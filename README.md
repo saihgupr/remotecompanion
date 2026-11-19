@@ -393,6 +393,31 @@ To run something there, add a **Remote RC: Run Command...** action to any trigge
 </details>
 
 <details>
+<summary><b>SSH Hosts (Running Commands on Another Machine)</b></summary>
+
+### Adding a host
+
+1. In the RemoteCompanion iOS App, go to **Settings &rarr; Integrations &rarr; SSH Hosts** and tap **+**.
+2. Enter a name, the address (an IP or a `.local` name), the port, and the login user.
+3. Pick an auth type:
+   - **Password**: needs the `sshpass` package on the device. Install it once with `sudo apt-get install sshpass`. It ships in Procursus, the default rootless bootstrap.
+   - **Key**: needs a private key file on the device. Put its path in the host editor; `~` is expanded.
+
+### Running a command from a trigger
+
+Add an **SSH: Run Remote Command...** action to any trigger, pick the host, and type the command to run on it. The action is saved as `ssh-run <hostId> <command>`, and the same thing works from a terminal or the Web UI:
+
+```bash
+rc "ssh-run <hostId> uptime"
+```
+
+The device runs `ssh` itself with `StrictHostKeyChecking=no`, `UserKnownHostsFile=/dev/null` and a five second connect timeout. The remote command is single-quoted, so it reaches the other machine untouched.
+
+**If an SSH action does nothing:** it still reports "Executing SSH command on ..." even when the command is dropped, so check the logs (`rc logs`, or the Logs view in the app or Web UI) for `[RCSSH]`. The usual causes are a missing `sshpass` on password hosts (reinstall it with `sudo apt-get install sshpass` after a jailbreak rebuild) and a missing or unreadable key file on key hosts.
+
+</details>
+
+<details>
 <summary><b>MQTT Integration (Pub / Sub)</b></summary>
 
 ### 1. Publishing to MQTT from RemoteCompanion

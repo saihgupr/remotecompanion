@@ -115,8 +115,16 @@ static NSString *RCQuotable(NSString *s) {
     return [(s ?: @"") stringByReplacingOccurrencesOfString:@"\"" withString:@"”"];
 }
 
+- (NSString *)titleAndMessageString {
+    NSString *title = RCQuotable(self.title.length ? self.title : @"RemoteCompanion");
+    // Nothing to say means no second argument, so the command reads notify "Hi" instead of notify "Hi" ""
+    return self.message.length
+        ? [NSString stringWithFormat:@"notify \"%@\" \"%@\"", title, RCQuotable(self.message)]
+        : [NSString stringWithFormat:@"notify \"%@\"", title];
+}
+
 - (NSString *)string {
-    NSMutableString *cmd = [NSMutableString stringWithFormat:@"notify \"%@\" \"%@\"", RCQuotable(self.title.length ? self.title : @"RemoteCompanion"), RCQuotable(self.message)];
+    NSMutableString *cmd = [[self titleAndMessageString] mutableCopy];
     if (self.urgent) [cmd appendString:@" --urgent"];
     if (self.watchMode == RCNotifyWatchAlso) [cmd appendString:@" --watch"];
     else if (self.watchMode == RCNotifyWatchOnly) [cmd appendString:@" --watch only"];

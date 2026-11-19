@@ -2169,6 +2169,8 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
             result = [NSString stringWithFormat:@"Flashlight %@%%", [cmd substringFromIndex:6]];
         } else if ([cmd hasPrefix:@"shortcut:"]) {
             result = [NSString stringWithFormat:@"Run %@", [RCConfigManager shortcutNameForAction:cmd silent:NULL input:NULL]];
+        } else if ([RCNotifyCommand isNotifyCommand:originalCmd]) {
+            result = [[RCNotifyCommand commandWithString:originalCmd] titleAndMessageString];
         } else if ([cmd hasPrefix:@"toast "] || [cmd isEqualToString:@"toast"]) {
             NSString *argString = originalCmd.length > 5 ? [[originalCmd substringFromIndex:5] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] : @"";
             NSString *firstArg = nil;
