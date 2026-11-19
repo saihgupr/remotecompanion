@@ -4543,15 +4543,15 @@ function formatHACommandName(cmd) {
 
   if (subCmd === 'toggle' && parts.length > 1) {
     const eid = parts[1];
-    return `HA Toggle: ${formatEntity(eid) || eid}`;
+    return `Toggle ${formatEntity(eid) || eid}`;
   }
   if (subCmd === 'turn_on' && parts.length > 1) {
     const eid = parts[1];
-    return `HA Turn On: ${formatEntity(eid) || eid}`;
+    return `${formatEntity(eid) || eid} on`;
   }
   if (subCmd === 'turn_off' && parts.length > 1) {
     const eid = parts[1];
-    return `HA Turn Off: ${formatEntity(eid) || eid}`;
+    return `${formatEntity(eid) || eid} off`;
   }
   if (subCmd === 'call' && parts.length > 1) {
     const service = parts[1];
@@ -4627,7 +4627,7 @@ function iconForCmd(cmd) {
   if (map[lowCmd]) return { icon:map[lowCmd], cls:'icon-dark' };
   const toggleInfo = parseToggleCmd(cmd);
   if (toggleInfo) return { icon:toggleInfo.icon, cls:'icon-dark' };
-  if (lowCmd.startsWith('ha ') || lowCmd === 'ha') return { icon:'lightbulb_fill', cls:'icon-blue' };
+  if (lowCmd.startsWith('ha ') || lowCmd === 'ha') return { icon:'house_fill', cls:'icon-blue' };
   if (lowCmd.startsWith('km ') || lowCmd === 'km') return { icon:'command', cls:'icon-yellow' };
   if (lowCmd.startsWith('mqtt ') || lowCmd === 'mqtt') return { icon:'dot_radiowaves_left_right', cls:'icon-blue' };
   if (isDevAnnotateCmd(lowCmd)) return { icon:'camera_viewfinder', cls:'icon-red' };
@@ -4757,7 +4757,7 @@ const ACTION_SECTIONS = [
     { name:'Soft Reboot',       cmd:'ldrestart',     icon:'arrow_clockwise' },
   ]},
   { title:'Integrations', actions:[
-    { name:'Home Assistant: Control Entity…',  cmd:'__HA_PICKER__', icon:'lightbulb_fill', needs_input:true },
+    { name:'Home Assistant: Control Entity…',  cmd:'__HA_PICKER__', icon:'house_fill', needs_input:true },
     { name:'Keyboard Maestro: Trigger Macro…',cmd:'__KM_TRIGGER__', icon:'command', needs_input:true },
     { name:'MQTT: Publish Topic…',            cmd:'__MQTT_PUBLISH__', icon:'dot_radiowaves_left_right', needs_input:true },
     { name:'REST API Call…',                  cmd:'__HTTP_REQUEST__', icon:'network', needs_input:true, keywords:'http rest api request url webhook curl' },

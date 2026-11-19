@@ -2245,13 +2245,13 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
 
             if ([subCmd isEqualToString:@"toggle"] && cleanParts.count > 1) {
                 NSString *eid = cleanParts[1];
-                result = [NSString stringWithFormat:@"HA Toggle: %@", formatEntity(eid)];
+                result = [NSString stringWithFormat:@"Toggle %@", formatEntity(eid)];
             } else if ([subCmd isEqualToString:@"turn_on"] && cleanParts.count > 1) {
                 NSString *eid = cleanParts[1];
-                result = [NSString stringWithFormat:@"HA Turn On: %@", formatEntity(eid)];
+                result = [NSString stringWithFormat:@"%@ on", formatEntity(eid)];
             } else if ([subCmd isEqualToString:@"turn_off"] && cleanParts.count > 1) {
                 NSString *eid = cleanParts[1];
-                result = [NSString stringWithFormat:@"HA Turn Off: %@", formatEntity(eid)];
+                result = [NSString stringWithFormat:@"%@ off", formatEntity(eid)];
             } else if ([subCmd isEqualToString:@"call"] && cleanParts.count > 1) {
                 NSString *service = cleanParts[1];
                 NSString *eid = cleanParts.count > 2 ? cleanParts[2] : @"";
@@ -2464,7 +2464,7 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
     if ([cmd hasPrefix:@"snapper instant"]) return @"bolt.fill";
     if ([cmd hasPrefix:@"snapper close"]) return @"xmark.rectangle.fill";
     if ([cmd hasPrefix:@"snapper"]) return @"crop";
-    if ([cmd hasPrefix:@"ha "] || [cmd isEqualToString:@"ha"]) return @"lightbulb.fill";
+    if ([cmd hasPrefix:@"ha "] || [cmd isEqualToString:@"ha"]) return @"house.fill";
     if ([cmd hasPrefix:@"km "] || [cmd isEqualToString:@"km"]) return @"command";
     if ([cmd hasPrefix:@"mqtt "] || [cmd isEqualToString:@"mqtt"]) return @"dot.radiowaves.left.and.right";
     if ([cmd hasPrefix:@"toast"]) return @"text.bubble.fill";

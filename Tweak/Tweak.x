@@ -9632,6 +9632,97 @@ static NSDictionary *rc_execute_ha_request(NSString *endpointPath, NSString *htt
     return resultDict ?: @{@"ok": @NO, @"error": @"Request timed out"};
 }
 
+static NSString *rc_ha_capitalized_word(NSString *word) {
+    if (word.length == 0) return @"";
+    return [word stringByReplacingCharactersInRange:NSMakeRange(0, 1)
+                                         withString:[[word substringToIndex:1] uppercaseString]];
+}
+
+static NSString *rc_ha_pretty_entity_name(NSString *entityId) {
+    if (![entityId isKindOfClass:[NSString class]] || entityId.length == 0) return nil;
+    NSString *base = entityId;
+    NSRange dot = [base rangeOfString:@"."];
+    if (dot.location != NSNotFound) base = [base substringFromIndex:dot.location + 1];
+    NSMutableArray<NSString *> *words = [NSMutableArray array];
+    for (NSString *word in [base componentsSeparatedByString:@"_"]) {
+        if (word.length == 0) continue;
+        [words addObject:rc_ha_capitalized_word(word)];
+    }
+    return words.count > 0 ? [words componentsJoinedByString:@" "] : nil;
+}
+
+static NSDictionary *rc_ha_changed_state(id data, NSString *entityId) {
+    NSArray *items = nil;
+    if ([data isKindOfClass:[NSArray class]]) items = data;
+    else if ([data isKindOfClass:[NSDictionary class]]) items = @[data];
+    if (items.count == 0) return nil;
+    if ([entityId isKindOfClass:[NSString class]] && entityId.length > 0) {
+        for (id item in items) {
+            if ([item isKindOfClass:[NSDictionary class]] && [item[@"entity_id"] isEqualToString:entityId]) {
+                return item;
+            }
+        }
+    }
+    for (id item in items) {
+        if ([item isKindOfClass:[NSDictionary class]]) return item;
+    }
+    return nil;
+}
+
+// The toast reads like "Bedroom Occupancy on" instead of the raw service call.
+static NSString *rc_ha_toast_message(NSString *domain, NSString *service, NSDictionary *payload, NSDictionary *res) {
+    id rawEntity = payload[@"entity_id"];
+    NSString *entityId = [rawEntity isKindOfClass:[NSString class]] ? rawEntity : nil;
+    if ([rawEntity isKindOfClass:[NSArray class]] && [(NSArray *)rawEntity count] > 0) {
+        id first = [(NSArray *)rawEntity firstObject];
+        if ([first isKindOfClass:[NSString class]]) entityId = first;
+    }
+
+    NSDictionary *changed = rc_ha_changed_state(res[@"data"], entityId);
+    NSString *name = changed[@"attributes"][@"friendly_name"];
+    if (![name isKindOfClass:[NSString class]] || name.length == 0) {
+        name = rc_ha_pretty_entity_name(entityId);
+    }
+
+    if ([domain isEqualToString:@"notify"]) return @"Notification sent";
+
+    NSString *verb = nil;
+    if ([service isEqualToString:@"turn_on"]) verb = [domain isEqualToString:@"script"] ? @"started" : @"on";
+    else if ([service isEqualToString:@"turn_off"]) verb = @"off";
+    else if ([service isEqualToString:@"toggle"]) {
+        NSString *state = changed[@"state"];
+        verb = ([state isKindOfClass:[NSString class]] && state.length > 0) ? state : @"toggled";
+    }
+    else if ([service isEqualToString:@"open_cover"] || [service isEqualToString:@"open"]) verb = @"opened";
+    else if ([service isEqualToString:@"close_cover"] || [service isEqualToString:@"close"]) verb = @"closed";
+    else if ([service isEqualToString:@"lock"]) verb = @"locked";
+    else if ([service isEqualToString:@"unlock"]) verb = @"unlocked";
+    else if ([service isEqualToString:@"media_play"]) verb = @"playing";
+    else if ([service isEqualToString:@"media_pause"]) verb = @"paused";
+    else if ([service isEqualToString:@"media_stop"]) verb = @"stopped";
+    else if ([service isEqualToString:@"media_next_track"]) verb = @"next track";
+    else if ([service isEqualToString:@"media_previous_track"]) verb = @"previous track";
+    else if ([service isEqualToString:@"volume_up"]) verb = @"volume up";
+    else if ([service isEqualToString:@"volume_down"]) verb = @"volume down";
+    else if ([service isEqualToString:@"volume_mute"]) verb = @"muted";
+    else if ([service isEqualToString:@"volume_unmute"]) verb = @"unmuted";
+    else if ([service isEqualToString:@"start"]) verb = @"started";
+    else if ([service isEqualToString:@"stop"]) verb = @"stopped";
+    else if ([service isEqualToString:@"pause"]) verb = @"paused";
+    else if ([service isEqualToString:@"return_to_base"]) verb = @"returning to base";
+    else if ([service isEqualToString:@"trigger"]) verb = @"triggered";
+    else if ([service isEqualToString:@"press"]) verb = @"pressed";
+    else if ([service isEqualToString:@"reload"]) verb = @"reloaded";
+    else if ([service isEqualToString:@"select_option"]) verb = @"changed";
+
+    if ([name isKindOfClass:[NSString class]] && name.length > 0) {
+        if (verb.length > 0) return [NSString stringWithFormat:@"%@ %@", name, verb];
+        NSString *readable = [[service stringByReplacingOccurrencesOfString:@"_" withString:@" "] lowercaseString];
+        return [NSString stringWithFormat:@"%@ \u00b7 %@", name, readable];
+    }
+    return [NSString stringWithFormat:@"Executed %@.%@", domain, service];
+}
+
 static NSString *rc_execute_ha_command(NSString *cmdArgs) {
     if (!g_triggerConfig) load_trigger_config();
     BOOL haEnabled = [g_triggerConfig[@"haEnabled"] boolValue];
@@ -9709,7 +9800,7 @@ static NSString *rc_execute_ha_command(NSString *cmdArgs) {
     NSString *path = [NSString stringWithFormat:@"/api/services/%@/%@", domain, service];
     NSDictionary *res = rc_execute_ha_request(path, @"POST", payload, nil, nil);
     if ([res[@"ok"] boolValue]) {
-        if (rc_own_banner_enabled(@"__HA_PICKER__")) rc_show_hud_toast(@"Home Assistant", [NSString stringWithFormat:@"Executed %@.%@", domain, service], @"house.fill");
+        if (rc_own_banner_enabled(@"__HA_PICKER__")) rc_show_hud_toast(@"Home Assistant", rc_ha_toast_message(domain, service, payload, res), @"house.fill");
         return [NSString stringWithFormat:@"Home Assistant call succeeded: %@.%@\n", domain, service];
     } else {
         return [NSString stringWithFormat:@"Home Assistant call failed: %@\n", res[@"error"] ?: @"Unknown error"];
