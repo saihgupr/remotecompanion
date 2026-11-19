@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleName</key>
-	<string>RemoteCompanion Button @SLOT@</string>
+	<string>RCCCButtonProvider</string>
 	<key>CFBundleDisplayName</key>
-	<string>RemoteCompanion Button @SLOT@</string>
+	<string>RemoteCompanion</string>
 	<key>CFBundleExecutable</key>
-	<string>RCCCButton@SLOT@</string>
+	<string>RCCCButtonProvider</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.saihgupr.remotecompanion.ccbutton@SLOT@</string>
+	<string>com.saihgupr.remotecompanion.ccbuttonprovider</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>English</string>
 	<key>CFBundleInfoDictionaryVersion</key>
@@ -21,37 +21,17 @@
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>MinimumOSVersion</key>
-	<string>11.0</string>
+	<string>14.0</string>
 	<key>UIDeviceFamily</key>
 	<array>
 		<integer>1</integer>
 		<integer>2</integer>
 	</array>
 	<key>NSPrincipalClass</key>
-	<string>RCCCButton@SLOT@</string>
+	<string>RCCCButtonProvider</string>
 	<key>CFBundleSupportedPlatforms</key>
 	<array>
 		<string>iPhoneOS</string>
 	</array>
-	<key>CCSGetModuleSizeAtRuntime</key>
-	<false/>
-	<key>CCSModuleSize</key>
-	<dict>
-		<key>Portrait</key>
-		<dict>
-			<key>Height</key>
-			<integer>1</integer>
-			<key>Width</key>
-			<integer>1</integer>
-		</dict>
-		<key>Landscape</key>
-		<dict>
-			<key>Height</key>
-			<integer>1</integer>
-			<key>Width</key>
-			<integer>1</integer>
-		</dict>
-	</dict>
 </dict>
 </plist>
-

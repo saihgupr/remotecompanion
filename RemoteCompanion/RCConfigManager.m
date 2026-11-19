@@ -1329,8 +1329,6 @@ static NSString *RCActionCommand(id item) {
     }
 
     if ([triggerKey hasPrefix:@"trigger_cc_button_"]) {
-        NSString *name = _config[@"triggers"][triggerKey][@"name"];
-        if (name.length) return name;
         return [NSString stringWithFormat:@"Control Center Button %@", [triggerKey substringFromIndex:18]];
     }
 

@@ -3879,7 +3879,7 @@ function phoneIconSVG(spec) {
 // A created trigger's letter (as in the app): the first of the user's name for it, else of its
 // network, device or topic; none for an unnamed NFC tag or schedule
 function letterForKey(key) {
-  if (!canRenameTrigger(key) || key.startsWith('app_')) return null;
+  if (!canRenameTrigger(key) || key.startsWith('app_') || key.startsWith('trigger_cc_button_')) return null;
   let source = customNameForKey(key);
   if (!source) {
     const name = defaultNameForKey(key);
@@ -3955,7 +3955,7 @@ function iconForKey(key) {
 // Created triggers (a tag, a network, a device, an app, a notification, a time, a topic) can
 // have a name of their own ("customName"); the built-in ones keep theirs, so they always say
 // what they are. As in the app.
-const RENAMEABLE_PREFIXES = ['nfc_', 'wifi_', 'bt_', 'output_', 'app_launch_', 'app_exit_', 'app_hold_', 'notif_', 'notify_', 'sched_', 'mqtt_'];
+const RENAMEABLE_PREFIXES = ['nfc_', 'wifi_', 'bt_', 'output_', 'app_launch_', 'app_exit_', 'app_hold_', 'notif_', 'notify_', 'sched_', 'mqtt_', 'trigger_cc_button_'];
 function canRenameTrigger(key) {
   return RENAMEABLE_PREFIXES.some(prefix => key.startsWith(prefix));
 }
@@ -3963,7 +3963,12 @@ function customNameForKey(key) {
   if (!canRenameTrigger(key)) return null;
   const t = config.triggers[key];
   const name = t && t.customName ? String(t.customName).trim() : '';
-  return name || null;
+  if (name) return name;
+  if (key.startsWith('trigger_cc_button_') && t && t.name) {
+    const raw = String(t.name).trim();
+    if (raw && raw !== defaultNameForKey(key)) return raw;
+  }
+  return null;
 }
 function nameForKey(key) {
   return customNameForKey(key) || defaultNameForKey(key);
@@ -3976,6 +3981,7 @@ function promptRenameTrigger(key) {
   showDialog('Rename Trigger', `Leave empty for its default name, “${defaultNameForKey(key)}”.`, customNameForKey(key) || '', 'Save', val => {
     const name = String(val || '').trim();
     if (name) t.customName = name; else delete t.customName;
+    if (key.startsWith('trigger_cc_button_')) t.name = name || defaultNameForKey(key);
     saveConfig(); renderAll();
     openActionsPanel(key);
   });
@@ -3983,9 +3989,9 @@ function promptRenameTrigger(key) {
 
 function defaultNameForKey(key) {
   if (TRIGGER_NAMES[key]) return TRIGGER_NAMES[key];
+  if (key.startsWith('trigger_cc_button_')) return `Control Center Button ${key.slice(18)}`;
   const t = config.triggers[key];
   if (t && t.name) return t.name;
-  if (key.startsWith('trigger_cc_button_')) return `Control Center Button ${key.slice(18)}`;
   if (key === 'trigger_device_focus_on') return 'Focus On: Any';
   if (key === 'trigger_device_focus_off') return 'Focus Off: Any';
   if (key.startsWith('trigger_device_focus_on_')) return `Focus On: ${key.slice(24)}`;
@@ -11159,30 +11165,32 @@ function saveAppTrigger(kind, names, ids, replacingKey) {
 
 // ── Focus Trigger Setup ─────────────────────────────────────────────────────
 function promptControlCenterTrigger() {
-  const slots = [1, 2, 3, 4];
-  const freeSlots = slots.filter(s => !config.triggers[`trigger_cc_button_${s}`]);
-  if (!freeSlots.length) {
-    showToast('All 4 Control Center buttons are in use.');
-    return;
+  const prefix = 'trigger_cc_button_';
+  let maxNum = 0;
+  for (const key of Object.keys(config.triggers || {})) {
+    if (!key.startsWith(prefix)) continue;
+    const n = parseInt(key.slice(prefix.length), 10);
+    if (Number.isFinite(n) && n > maxNum) maxNum = n;
   }
-  showSheet('Control Center Button Number', freeSlots.map(s => ({
-    label: `Button ${s}`,
-    action: () => {
-      showDialog('Button Name', 'Name:', `Control Center Button ${s}`, 'Next', name => {
-        name = (name || `Control Center Button ${s}`).trim();
-        showDialog('Icon (SF Symbol)', 'Symbol name (e.g. bolt.fill, lightbulb.fill):', 'bolt.fill', 'Add', icon => {
-          icon = (icon || 'bolt.fill').trim();
-          const key = `trigger_cc_button_${s}`;
-          if (!config.triggers[key]) {
-            config.triggers[key] = { enabled: true, actions: [], name, icon };
-            saveConfig();
-          }
-          renderAll();
-          openActionsPanel(key);
-        });
-      });
-    }
-  })));
+  let nextNum = maxNum + 1;
+  while (config.triggers && config.triggers[prefix + nextNum]) nextNum++;
+  const defaultName = `Control Center Button ${nextNum}`;
+  showDialog('Button Name', 'Name:', defaultName, 'Next', rawName => {
+    const trimmed = String(rawName || '').trim();
+    const name = trimmed || defaultName;
+    showDialog('Icon (SF Symbol)', 'Symbol name (e.g. bolt.fill, lightbulb.fill):', 'bolt.fill', 'Add', icon => {
+      icon = (String(icon || '')).trim() || 'bolt.fill';
+      const key = prefix + nextNum;
+      if (!config.triggers[key]) {
+        const data = { enabled: true, actions: [], name, icon };
+        if (trimmed && trimmed !== defaultName) data.customName = trimmed;
+        config.triggers[key] = data;
+        saveConfig();
+      }
+      renderAll();
+      openActionsPanel(key);
+    });
+  });
 }
 
 function promptFocusTrigger() {
