@@ -25,6 +25,7 @@ All notable changes to this project will be documented in this file.
 - **Action Sequence Edited trigger**: fires when any trigger's action sequence changes, including this trigger's own, from the app or the Web UI. Add, remove, reorder or edit an action and it runs, with an optional debounce (15 seconds by default, Off, 5, 10, 30 seconds, 1, 2 or 5 minutes) that waits until the edits stop so a run of changes runs the sequence once.
 
 ### Changed
+- **Set Variable tile selection**: the chosen kind in the Set Variable and Variable condition editors, in the app and the Web UI, is shown by its blue icon, title and border; the blue fill behind the tile is gone.
 - **MCP server: one gesture tool**: tap, hold, swipe, drag, two-finger swipe and pinch are now one `gesture` tool with a `kind`, so the server lists 21 tools instead of 26 and sends about 650 fewer tokens of tool schemas.
 - **Clear Notifications action and CLI**: replaced **Clear RC Notifications** with **Clear Notifications**, letting you target Any App or specific apps (including RemoteCompanion) and add or paste as many case-insensitive text filters as you want. `rc clear notification` (and `rc notify clear`) now accepts `--all`, `--app`, inline filter strings, and line-by-line `.txt` files.
 - **Tighter bar gesture zones**: the status bar and bottom bar gesture areas now cover 25pt from the edge instead of 50pt, so a touch has to land closer to the bar. Two-finger slides keep their wider 75pt landing zone.

@@ -1669,13 +1669,13 @@
       min-height: 64px; padding: 8px 4px; border-radius: 12px; cursor: pointer;
       background: var(--rc-fill); border: 1.5px solid transparent; color: var(--rc-label);
       font-family: inherit; font-size: 12px; font-weight: 500; line-height: 1.15; text-align: center;
-      transition: background 0.12s, border-color 0.12s, transform 0.1s;
+      transition: border-color 0.12s, color 0.12s, transform 0.1s;
     }
     .var-ed-tile i.f7-icons { font-size: 22px; color: var(--rc-blue); }
     .var-ed-grid.compact .var-ed-tile { min-height: 54px; font-size: 11px; }
     .var-ed-grid.compact .var-ed-tile i.f7-icons { font-size: 19px; }
     .var-ed-tile:active { transform: scale(0.96); }
-    .var-ed-tile.selected { background: rgba(var(--rc-blue-rgb), 0.22); border-color: var(--rc-blue); }
+    .var-ed-tile.selected { border-color: var(--rc-blue); color: var(--rc-blue); }
     .var-ed-card { background: var(--rc-fill); border-radius: 12px; overflow: hidden; }
     .var-ed-row { display: flex; align-items: center; gap: 12px; min-height: 46px; padding: 0 12px 0 14px; position: relative; }
     .var-ed-card > .var-ed-row + .var-ed-row::before, .var-ed-card > .var-ed-row + .var-ed-chips::before {
