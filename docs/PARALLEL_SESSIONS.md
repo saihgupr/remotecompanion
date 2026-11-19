@@ -14,7 +14,7 @@ Invoke these from the OpenCode composer:
 | `/lane-status` | Shows the current lane, branch, changes, and build state |
 | `/lane-worker <task>` | Runs the task in a background `lane-worker` subagent inside the current lane |
 | `/lane-review` | Runs the `verifier` subagent over the current lane changes |
-| `/lane-done` | Verifies the lane, commits, rebases onto `alpha-4.5`, and prepares integration |
+| `/lane-done` | Verifies the lane, commits, rebases onto `alpha-4.7`, and prepares integration |
 
 ## Ground rules
 
@@ -22,7 +22,7 @@ Invoke these from the OpenCode composer:
 2. Never run two sessions in the same directory.
 3. Only one lane may deploy or respring the phone at a time.
 4. Only one lane may swap the phone's `rc_triggers.plist` for a preview at a time.
-5. Commit small. Rebase early onto `alpha-4.5`.
+5. Commit small. Rebase early onto `alpha-4.7`.
 6. Use subagents for read-only review inside a lane. Do not let two agents edit
    the same files.
 
@@ -32,7 +32,7 @@ From the main checkout:
 
 ```bash
 git fetch origin
-./tools/new-lane.sh trigger-onboarding alpha-4.5
+./tools/new-lane.sh trigger-onboarding alpha-4.7
 ```
 
 Or from OpenCode:
@@ -54,7 +54,7 @@ Run these inside the lane:
 
 ```bash
 git fetch origin
-git rebase origin/alpha-4.5
+git rebase origin/alpha-4.7
 
 # edit, build
 cd RemoteCompanion
@@ -76,9 +76,9 @@ it. Do not copy `.theos` or `packages` between lanes; each lane builds its own.
 
 ## Integration
 
-1. Rebase the lane onto `origin/alpha-4.5`.
+1. Rebase the lane onto `origin/alpha-4.7`.
 2. Build and run the lane's checks.
-3. Push the branch and open a PR into `alpha-4.5`, or merge locally if that is
+3. Push the branch and open a PR into `alpha-4.7`, or merge locally if that is
    the chosen release flow.
 4. If another lane changed the same file first, rebase the second lane after
    the first lands and resolve the conflict there.
