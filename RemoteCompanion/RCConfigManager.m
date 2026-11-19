@@ -1176,7 +1176,7 @@ static NSString *RCActionCommand(id item) {
 // topic) can have a name of their own; the built-in ones (Power Double Click...) keep theirs, so
 // they always say what they are
 + (BOOL)canRenameTrigger:(NSString *)triggerKey {
-    for (NSString *prefix in @[@"nfc_", @"wifi_", @"bt_", @"output_", @"app_launch_", @"app_exit_", @"notif_", @"notify_", @"sched_", @"mqtt_", @"notiftap_", @"notifbtn_", @"trigger_cc_button_"]) {
+    for (NSString *prefix in @[@"nfc_", @"wifi_", @"bt_", @"output_", @"app_launch_", @"app_exit_", @"app_hold_", @"notif_", @"notify_", @"sched_", @"mqtt_", @"notiftap_", @"notifbtn_", @"trigger_cc_button_"]) {
         if ([triggerKey hasPrefix:prefix]) return YES;
     }
     return NO;
@@ -1317,7 +1317,7 @@ static NSString *RCActionCommand(id item) {
         return [NSString stringWithFormat:@"Control Center Button %@", [triggerKey substringFromIndex:18]];
     }
 
-    if ([triggerKey hasPrefix:@"wifi_"] || [triggerKey hasPrefix:@"bt_"] || [triggerKey hasPrefix:@"app_launch_"] || [triggerKey hasPrefix:@"app_exit_"] || [triggerKey hasPrefix:@"output_"] || [triggerKey hasPrefix:@"notif_"] || [triggerKey hasPrefix:@"notify_"] || [triggerKey hasPrefix:@"sched_"] || [triggerKey hasPrefix:@"mqtt_"] || [triggerKey hasPrefix:@"mqtt_sub_"]) {
+    if ([triggerKey hasPrefix:@"wifi_"] || [triggerKey hasPrefix:@"bt_"] || [triggerKey hasPrefix:@"app_launch_"] || [triggerKey hasPrefix:@"app_exit_"] || [triggerKey hasPrefix:@"app_hold_"] || [triggerKey hasPrefix:@"output_"] || [triggerKey hasPrefix:@"notif_"] || [triggerKey hasPrefix:@"notify_"] || [triggerKey hasPrefix:@"sched_"] || [triggerKey hasPrefix:@"mqtt_"] || [triggerKey hasPrefix:@"mqtt_sub_"]) {
         return _config[@"triggers"][triggerKey][@"name"] ?: triggerKey;
     }
     
@@ -3054,7 +3054,8 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
 
 - (NSString *)saveAppTriggerWithPrefix:(NSString *)prefix names:(NSArray<NSString *> *)names bundleIds:(NSArray<NSString *> *)bundleIds replacing:(NSString *)oldKey {
     if (bundleIds.count == 0) return oldKey;
-    NSString *verb = [prefix isEqualToString:@"app_exit_"] ? @"Exit" : @"Launch";
+    NSDictionary<NSString *, NSString *> *verbs = @{@"app_exit_": @"Exit", @"app_hold_": @"Long Press"};
+    NSString *verb = verbs[prefix] ?: @"Launch";
     NSString *newKey = [prefix stringByAppendingString:bundleIds.firstObject];
     // The name says which apps: "Launch Safari, Notes" (a long one wraps in the lists)
     NSMutableArray<NSString *> *shown = [NSMutableArray array];

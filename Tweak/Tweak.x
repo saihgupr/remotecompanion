@@ -2439,6 +2439,7 @@ static NSString *get_human_name_for_trigger(NSString *key, NSDictionary *trigger
     if ([key hasPrefix:@"bt_disconnect_"]) return [NSString stringWithFormat:@"Bluetooth Disconnected: %@", [key substringFromIndex:14]];
     if ([key hasPrefix:@"app_launch_"]) return [NSString stringWithFormat:@"App Launched: %@", [key substringFromIndex:11]];
     if ([key hasPrefix:@"app_exit_"]) return [NSString stringWithFormat:@"App Exited: %@", [key substringFromIndex:9]];
+    if ([key hasPrefix:@"app_hold_"]) return [NSString stringWithFormat:@"App Icon Held: %@", [key substringFromIndex:9]];
     if ([key hasPrefix:@"output_set_"]) return [NSString stringWithFormat:@"Audio Output Set: %@", [key substringFromIndex:11]];
     if ([key hasPrefix:@"output_unset_"]) return [NSString stringWithFormat:@"Audio Output Unset: %@", [key substringFromIndex:13]];
     if ([key hasPrefix:@"notif_"] || [key hasPrefix:@"notify_"]) return @"Notification Trigger";
@@ -20929,6 +20930,98 @@ static void RC_FireAppTriggers(NSString *prefix, NSString *bundleId) {
     }
     for (NSString *key in keys) RCExecuteTrigger(key);
 }
+
+// Long press on a Home Screen app icon. An icon view gets one recognizer of its own, and any hold
+// recognizer SpringBoard already gives it also feeds us, so Haptic Touch, dragging and jiggle mode
+// keep working. The bundle id under the icon picks app_hold_<bundleId>.
+static char kRCIconHoldObserverKey;
+static char kRCIconHoldViewInstalledKey;
+static char kRCIconHoldOurRecognizerKey;
+static char kRCIconHoldBorrowedKey;
+
+@interface RCIconHoldObserver : NSObject <UIGestureRecognizerDelegate>
+@property (nonatomic, weak) UIView *iconView;
+- (void)handleHold:(UIGestureRecognizer *)recognizer;
+@end
+
+static RCIconHoldObserver *RC_IconHoldObserver(UIView *iconView) {
+    RCIconHoldObserver *observer = objc_getAssociatedObject(iconView, &kRCIconHoldObserverKey);
+    if ([observer isKindOfClass:[RCIconHoldObserver class]]) return observer;
+    observer = [RCIconHoldObserver new];
+    observer.iconView = iconView;
+    objc_setAssociatedObject(iconView, &kRCIconHoldObserverKey, observer, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    return observer;
+}
+
+@implementation RCIconHoldObserver
+
+- (void)handleHold:(UIGestureRecognizer *)recognizer {
+    if (recognizer.state != UIGestureRecognizerStateBegan) return;
+    UIView *iconView = self.iconView;
+    if (!iconView) return;
+    SEL iconSel = NSSelectorFromString(@"icon");
+    if (![iconView respondsToSelector:iconSel]) return;
+    id icon = ((id (*)(id, SEL))objc_msgSend)(iconView, iconSel);
+    if (!icon) return;
+    NSString *bundleId = nil;
+    for (NSString *name in @[@"applicationBundleID", @"bundleIdentifier", @"applicationBundleIdentifier"]) {
+        SEL sel = NSSelectorFromString(name);
+        if (![icon respondsToSelector:sel]) continue;
+        id value = ((id (*)(id, SEL))objc_msgSend)(icon, sel);
+        if ([value isKindOfClass:[NSString class]] && [value length]) {
+            bundleId = value;
+            break;
+        }
+    }
+    if (!bundleId.length) return;
+    // Our recognizer and SpringBoard's can both report the same hold; one run per 2 seconds is enough
+    static NSMutableDictionary<NSString *, NSNumber *> *lastFired;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ lastFired = [NSMutableDictionary dictionary]; });
+    NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
+    if (now - [lastFired[bundleId] doubleValue] < 2.0) return;
+    lastFired[bundleId] = @(now);
+    SRLog(@"[IconHold] %@", bundleId);
+    RC_FireAppTriggers(@"app_hold_", bundleId);
+}
+
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherGestureRecognizer {
+    return YES; // the hold still reaches SpringBoard, so the icon menu and drag behave as before
+}
+
+@end
+
+%hook SBIconView
+
+- (void)addGestureRecognizer:(UIGestureRecognizer *)gestureRecognizer {
+    %orig;
+    if (objc_getAssociatedObject(gestureRecognizer, &kRCIconHoldOurRecognizerKey)) return;
+    if (objc_getAssociatedObject(gestureRecognizer, &kRCIconHoldBorrowedKey)) return;
+    NSString *kind = NSStringFromClass([gestureRecognizer class]);
+    BOOL isHold = [gestureRecognizer isKindOfClass:[UILongPressGestureRecognizer class]] ||
+                  [kind containsString:@"LongPress"] || [kind containsString:@"Force"];
+    if (!isHold) return;
+    objc_setAssociatedObject(gestureRecognizer, &kRCIconHoldBorrowedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    [gestureRecognizer addTarget:RC_IconHoldObserver((UIView *)self) action:@selector(handleHold:)];
+}
+
+- (void)didMoveToWindow {
+    %orig;
+    UIView *iconView = (UIView *)self;
+    if (!iconView.window) return;
+    if (objc_getAssociatedObject(iconView, &kRCIconHoldViewInstalledKey)) return;
+    RCIconHoldObserver *observer = RC_IconHoldObserver(iconView);
+    UILongPressGestureRecognizer *hold = [[UILongPressGestureRecognizer alloc] initWithTarget:observer action:@selector(handleHold:)];
+    hold.minimumPressDuration = 0.5;
+    hold.allowableMovement = 12;
+    hold.cancelsTouchesInView = NO;
+    hold.delegate = observer;
+    objc_setAssociatedObject(hold, &kRCIconHoldOurRecognizerKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(iconView, &kRCIconHoldViewInstalledKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    [iconView addGestureRecognizer:hold];
+}
+
+%end
 
 static NSTimeInterval s_last_camera_app_trigger = 0;
 

@@ -77,7 +77,7 @@
     if ([key hasPrefix:@"wifi_"]) return @"WiFi Network Triggers";
     if ([key hasPrefix:@"bt_"]) return @"Bluetooth Device Triggers";
     if ([key hasPrefix:@"output_"]) return @"Audio Output Triggers";
-    if ([key hasPrefix:@"app_launch_"] || [key hasPrefix:@"app_exit_"]) return @"App Triggers";
+    if ([key hasPrefix:@"app_launch_"] || [key hasPrefix:@"app_exit_"] || [key hasPrefix:@"app_hold_"]) return @"App Triggers";
     if ([key hasPrefix:@"notif_"] || [key hasPrefix:@"notify_"]) return @"Notification Triggers";
     if ([key hasPrefix:@"sched_"]) return @"Scheduled Triggers";
     if ([key hasPrefix:@"mqtt_"]) return @"MQTT Triggers";

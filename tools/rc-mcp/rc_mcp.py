@@ -532,7 +532,7 @@ def sequence_check(sequence, strict=True):
 
 
 # Keys a built-in producer makes. A key from none of these, and from no add-on, is one nothing fires.
-PRODUCERS = ("sched_", "app_launch_", "app_exit_", "addon_", "output_", "output_set_", "trigger_",
+PRODUCERS = ("sched_", "app_launch_", "app_exit_", "app_hold_", "addon_", "output_", "output_set_", "trigger_",
              "nfc_", "wifi_", "bt_", "notif_", "notify_", "notiftap_", "notifbtn_", "mqtt_", "mqtt_sub_",
              "ac_", "watch_")
 PRODUCER_KEYS = ("power_long_press", "power_triple_click", "power_volume_up", "power_double_tap",
@@ -567,6 +567,9 @@ def producer_trouble(phone, key, trigger):
         elif key.startswith("app_launch_") and "." not in key[len("app_launch_"):]:
             return ("'%s' is an app-launch trigger but the rest of the key is not a bundle id, so it would "
                     "never fire." % key)
+        elif key.startswith("app_hold_") and "." not in key[len("app_hold_"):]:
+            return ("'%s' is an app long press trigger but the rest of the key is not a bundle id, so it "
+                    "would never fire." % key)
         elif key.startswith("addon_") and key not in addon_trigger_keys(phone):
             return ("'%s' is an add-on trigger but no installed add-on provides it, so it would never fire." % key)
         return None
