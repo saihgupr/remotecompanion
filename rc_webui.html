@@ -284,7 +284,7 @@
     .row-icon svg { color: #fff; }
     .row-icon { position: relative; }
     /* A created trigger's letter, in the icon square's corner */
-    /* App Launch / App Exit: a green checkmark or red x in a white circle at the top right */
+    /* App Launch / App Exit / App Long Press: a green checkmark or red x in a white circle at the top right */
     .row-icon-app-badge {
       position: absolute; right: 0; top: 0;
       width: 13px; height: 13px; border-radius: 50%;
@@ -3573,6 +3573,7 @@ const TRIGGER_SECTIONS = [
   { title: 'Notification Triggers',  id: 'notif',     keys: [], dynamic: true, prefix: 'notif_', prefix2: 'notify_', deletable: true },
   { title: 'App Launch Triggers',    id: 'app',       keys: [], dynamic: true, prefix: 'app_launch_', deletable: true },
   { title: 'App Exit Triggers',      id: 'appexit',   keys: [], dynamic: true, prefix: 'app_exit_',   deletable: true },
+  { title: 'App Long Press Triggers', id: 'apphold',  keys: [], dynamic: true, prefix: 'app_hold_',   deletable: true },
   { title: 'Add-on Triggers',         id: 'addon',     keys: [], dynamic: true, prefix: 'addon_', deletable: true },
   { title: 'Scheduled Triggers',     id: 'sched',     keys: [], dynamic: true, prefix: 'sched_',      deletable: true },
   { title: 'MQTT Subscription Triggers', id: 'mqtt', keys: [], dynamic: true, prefix: 'mqtt_sub_', prefix2: 'mqtt_', deletable: true },
@@ -3855,7 +3856,7 @@ function triggerIconHTML(key) {
   const { icon } = iconForKey(key);
   const letter = letterForKey(key);
   const exit = key.startsWith('app_exit_');
-  const appBadge = (exit || key.startsWith('app_launch_'))
+  const appBadge = (exit || key.startsWith('app_launch_') || key.startsWith('app_hold_'))
     ? `<span class="row-icon-app-badge ${exit ? 'exit' : 'launch'}"><i class="f7-icons">${exit ? 'xmark_circle_fill' : 'checkmark_circle_fill'}</i></span>` : '';
   return `<i class="f7-icons">${icon}</i>${letter ? `<span class="row-icon-letter">${escapeHtml(letter)}</span>` : ''}${appBadge}`;
 }
@@ -3894,6 +3895,7 @@ function iconForKey(key) {
   if (key.startsWith('bt_'))         return { icon:'bolt_horizontal_fill',          cls:'icon-indigo' };
   if (key.startsWith('app_launch_')) return { icon:'app_badge_fill',                cls:'icon-pink' };
   if (key.startsWith('app_exit_')) return { icon:'app_badge_fill',                cls:'icon-pink' };
+  if (key.startsWith('app_hold_')) return { icon:'app_badge_fill',                cls:'icon-pink' };
   if (key.startsWith('notif_') || key.startsWith('notify_'))      return { icon:'bell_circle_fill',              cls:'icon-red' };
   if (key.startsWith('addon_')) { const e = addOnTriggerEvents().find(x => x.key === key); return { icon: symbolId(e && e.icon), iconUrl: e && e.iconUrl, cls: e && e.iconUrl ? 'icon-image' : 'icon-purple' }; }
   if (key.startsWith('sched_'))      return { icon:'clock_fill',                    cls:'icon-orange' };
@@ -3906,7 +3908,7 @@ function iconForKey(key) {
 // Created triggers (a tag, a network, a device, an app, a notification, a time, a topic) can
 // have a name of their own ("customName"); the built-in ones keep theirs, so they always say
 // what they are. As in the app.
-const RENAMEABLE_PREFIXES = ['nfc_', 'wifi_', 'bt_', 'output_', 'app_launch_', 'app_exit_', 'notif_', 'notify_', 'sched_', 'mqtt_'];
+const RENAMEABLE_PREFIXES = ['nfc_', 'wifi_', 'bt_', 'output_', 'app_launch_', 'app_exit_', 'app_hold_', 'notif_', 'notify_', 'sched_', 'mqtt_'];
 function canRenameTrigger(key) {
   return RENAMEABLE_PREFIXES.some(prefix => key.startsWith(prefix));
 }
@@ -3954,6 +3956,7 @@ function defaultNameForKey(key) {
   if (key.startsWith('bt_'))         return `BT: ${key.slice(3)}`;
   if (key.startsWith('app_launch_')) return `Launch: ${key.slice(11)}`;
   if (key.startsWith('app_exit_')) return `Exit: ${key.slice(9)}`;
+  if (key.startsWith('app_hold_')) return `Long Press: ${key.slice(9)}`;
   if (key.startsWith('notif_') || key.startsWith('notify_')) {
     if (key.startsWith('notify_')) return `Notif: ${key.slice(7)}`;
     return `Notif: ${key.slice(6)}`;
@@ -5245,6 +5248,7 @@ const TRIGGER_CATEGORY_ICONS = {
   'Notification Triggers': 'bell_circle_fill',
   'App Launch Triggers': 'arrow_up_right_square_fill',
   'App Exit Triggers': 'xmark_square_fill',
+  'App Long Press Triggers': 'hand_tap',
   'Scheduled Triggers': 'clock_fill',
   'MQTT Subscription Triggers': 'antenna_radiowaves_left_right',
 };
@@ -5625,7 +5629,7 @@ function openActionsPanel(key) {
   const isNotif = key.startsWith('notif_') || key.startsWith('notify_');
   const isWiFi = key.startsWith('wifi_');
   const isBT = key.startsWith('bt_');
-  const isApp = key.startsWith('app_launch_') || key.startsWith('app_exit_');
+  const isApp = key.startsWith('app_launch_') || key.startsWith('app_exit_') || key.startsWith('app_hold_');
   
   if (isSched || isNotif || isWiFi || isBT || isApp || key === 'trigger_sequence_edited' || canRenameTrigger(key) || canKeepDefault(key)) {
     editBtn.style.display = 'flex';
@@ -5680,7 +5684,7 @@ function triggerSettingsAction(currentKey) {
   const isNotif = currentKey.startsWith('notif_') || currentKey.startsWith('notify_');
   const isWiFi = currentKey.startsWith('wifi_');
   const isBT = currentKey.startsWith('bt_');
-  const isApp = currentKey.startsWith('app_launch_') || currentKey.startsWith('app_exit_');
+  const isApp = currentKey.startsWith('app_launch_') || currentKey.startsWith('app_exit_') || currentKey.startsWith('app_hold_');
   
   if (isSched) return () => promptSchedTrigger(currentKey);
   if (isNotif) return () => promptNotifTrigger(currentKey);
@@ -5693,8 +5697,8 @@ function triggerSettingsAction(currentKey) {
 function promptAppEdit(key) {
   const data = config.triggers[key];
   if (!data) return;
-  const bid = key.replace(/^app_(launch|exit)_/, '');
-  const kind = key.startsWith('app_exit_') ? 'exit' : 'launch';
+  const bid = key.replace(/^app_(launch|exit|hold)_/, '');
+  const kind = key.startsWith('app_exit_') ? 'exit' : (key.startsWith('app_hold_') ? 'hold' : 'launch');
   promptAppLaunchPicker(null, kind, (data.apps && data.apps.length) ? data.apps : [bid], key);
 }
 
@@ -10810,16 +10814,16 @@ let appPickerMulti = false;
 let appPickerChosen = [];        // bundle ids, in the order ticked
 let appPickerReplacingKey = null;
 async function promptAppLaunchPicker(callback, kind, preselected, replacingKey, titleOverride) {
-  appPickerKind = kind === 'exit' ? 'exit' : 'launch';
+  appPickerKind = (kind === 'exit' || kind === 'hold') ? kind : 'launch';
   appPickerMulti = !callback;
   appPickerChosen = (preselected || []).slice();
   appPickerReplacingKey = replacingKey || null;
-  document.getElementById('app-launch-dialog-title').textContent = titleOverride || (appPickerKind === 'exit' ? 'App Exit Trigger' : 'App Launch Trigger');
+  document.getElementById('app-launch-dialog-title').textContent = titleOverride || (appPickerKind === 'exit' ? 'App Exit Trigger' : (appPickerKind === 'hold' ? 'App Long Press Trigger' : 'App Launch Trigger'));
   document.getElementById('app-launch-dialog-msg').textContent = titleOverride
     ? 'Pick the app this condition matches.'
     : (appPickerMulti
-    ? (appPickerKind === 'exit' ? 'Fires when any selected app is switched away from.' : 'Fires when any selected app is opened.')
-    : (appPickerKind === 'exit' ? 'Fires when an app is switched away from.' : 'Fires when an app is opened on the device.'));
+    ? (appPickerKind === 'exit' ? 'Fires when any selected app is switched away from.' : (appPickerKind === 'hold' ? 'Fires when any selected app icon is long pressed.' : 'Fires when any selected app is opened.'))
+    : (appPickerKind === 'exit' ? 'Fires when an app is switched away from.' : (appPickerKind === 'hold' ? 'Fires when an app icon is long pressed.' : 'Fires when an app is opened on the device.')));
   document.getElementById('app-picker-done').style.display = appPickerMulti ? '' : 'none';
   document.getElementById('app-picker-done').disabled = appPickerChosen.length === 0;
   const listEl = document.getElementById('app-picker-list');
@@ -10935,19 +10939,20 @@ function closeAppLaunchDialog() {
   dialogCallback = null;
 }
 
-// Saves an App Launch / App Exit trigger for these apps. Its key is the first app's; two or
-// more apps are kept in an "apps" list. The actions of the trigger it replaces, or of one that
-// already exists for the first app, are kept.
+// Saves an App Launch / App Exit / App Long Press trigger for these apps. Its key is the first
+// app's; two or more apps are kept in an "apps" list. The actions of the trigger it replaces, or
+// of one that already exists for the first app, are kept.
 function saveAppTrigger(kind, names, ids, replacingKey) {
   const exit = kind === 'exit';
-  const prefix = exit ? 'app_exit_' : 'app_launch_';
+  const hold = kind === 'hold';
+  const prefix = exit ? 'app_exit_' : (hold ? 'app_hold_' : 'app_launch_');
   const key = prefix + ids[0];
   const previous = config.triggers[replacingKey || key] || {};
   const data = {
     enabled: previous.enabled !== undefined ? previous.enabled : true,
     actions: previous.actions || [],
     // The name says which apps: "Launch: Safari, Notes"
-    name: `${exit ? 'Exit' : 'Launch'}: ${names.join(', ')}`
+    name: `${exit ? 'Exit' : (hold ? 'Long Press' : 'Launch')}: ${names.join(', ')}`
   };
   if (ids.length > 1) data.apps = ids;
   config.triggers[key] = data;
@@ -11094,6 +11099,7 @@ function showAddTriggerSheet() {
     { label: 'Notification Trigger', action: () => promptNotifTrigger() },
     { label: 'App Launch Trigger', action: () => promptAppLaunchPicker() },
     { label: 'App Exit Trigger', action: () => promptAppLaunchPicker(null, 'exit') },
+    { label: 'Long Press App Icon', action: () => promptAppLaunchPicker(null, 'hold') },
     { label: 'Add-on Trigger', action: () => promptAddOnTrigger() },
     { label: 'Scheduled Trigger', action: () => promptSchedTrigger() },
     { label: 'Battery Level Trigger', action: () => promptBatteryTrigger() },

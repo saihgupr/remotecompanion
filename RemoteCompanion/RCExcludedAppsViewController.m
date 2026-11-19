@@ -245,6 +245,12 @@ static NSString *RCFitOneLine(NSString *text, UIFont *font, CGFloat width) {
     }
     addSection(appExitKeys, @"App Exit Triggers");
 
+    NSMutableArray<NSString *> *appHoldKeys = [NSMutableArray array];
+    for (NSString *key in configuredKeys) {
+        if ([key hasPrefix:@"app_hold_"]) [appHoldKeys addObject:key];
+    }
+    addSection(appHoldKeys, @"App Long Press Triggers");
+
     NSMutableArray<NSString *> *schedKeys = [NSMutableArray array];
     for (NSString *key in configuredKeys) {
         if ([key hasPrefix:@"sched_"]) [schedKeys addObject:key];
