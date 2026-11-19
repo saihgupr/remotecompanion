@@ -22,6 +22,9 @@
 + (BOOL)isNotifyCommand:(NSString *)command;   // a Notification action (not notify clear)
 + (instancetype)commandWithString:(NSString *)command;
 - (NSString *)string;
+// Just notify "Title" or notify "Title" "Message", for the action list, so the tap ID, buttons and
+// the other options stay out of the row
+- (NSString *)titleAndMessageString;
 + (NSString *)newID;
 // The run variable a waiting Notification action sets, when one of these actions waits; else nil
 + (NSString *)responseVariableIn:(NSArray *)actions;
