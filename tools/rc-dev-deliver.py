@@ -367,20 +367,8 @@ def _run_osascript(script, run_cmd):
         raise RuntimeError(msg)
 
 
-def _activate_target_app(bundle_id, app_name, custom_app, run_cmd):
+def _activate_target_app(bundle_id, app_name, run_cmd):
     """Activate the target macOS application and return a display label for it."""
-    custom = custom_app.strip() if isinstance(custom_app, str) else ""
-    if custom:
-        if "." in custom and " " not in custom:
-            try:
-                _run_osascript(f'tell application id "{_escape_applescript(custom)}" to activate', run_cmd)
-                return custom
-            except RuntimeError as err:
-                if "Accessibility" in str(err):
-                    raise
-        _run_osascript(f'tell application "{_escape_applescript(custom)}" to activate', run_cmd)
-        return custom
-
     bid = bundle_id.strip() if isinstance(bundle_id, str) else ""
     name = app_name.strip() if isinstance(app_name, str) else ""
     if bid:
@@ -393,7 +381,7 @@ def _activate_target_app(bundle_id, app_name, custom_app, run_cmd):
     if name:
         _run_osascript(f'tell application "{_escape_applescript(name)}" to activate', run_cmd)
         return name
-    return "Active Window"
+    raise RuntimeError("Missing target application")
 
 
 def _deliver_clipboard_paste(
@@ -401,7 +389,6 @@ def _deliver_clipboard_paste(
     text,
     bundle_id,
     app_name,
-    custom_app,
     auto_send,
     image_paste_delay_ms,
     submit_key,
@@ -409,9 +396,8 @@ def _deliver_clipboard_paste(
     sleep_fn=time.sleep,
 ):
     """Activate the target editor, paste the PNG and text, and optionally submit."""
-    display_target = _activate_target_app(bundle_id, app_name, custom_app, run_cmd)
-    if display_target != "Active Window":
-        sleep_fn(0.25)
+    display_target = _activate_target_app(bundle_id, app_name, run_cmd)
+    sleep_fn(0.25)
 
     escaped_path = _escape_applescript(png_path)
     _run_osascript(
@@ -479,6 +465,9 @@ def deliver(
         auto_send = bool(payload.get("auto_send", True))
         text = payload.get("text") or ""
 
+        if strategy not in ("opencode_api", "clipboard_paste"):
+            return {"ok": False, "error": f"Unsupported delivery strategy: {strategy}"}
+
         if strategy == "opencode_api" and auto_send:
             svc = _discover_opencode_service(reg_paths=reg_paths)
             if not svc:
@@ -498,7 +487,6 @@ def deliver(
             text=text,
             bundle_id=payload.get("bundle_id") or "",
             app_name=payload.get("app_name") or "",
-            custom_app=payload.get("custom_app") or "",
             auto_send=auto_send,
             image_paste_delay_ms=payload.get("image_paste_delay_ms", 450),
             submit_key=payload.get("submit_key") or "return",

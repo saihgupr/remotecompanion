@@ -1044,13 +1044,16 @@ static void rc_dev_deliver_over_ssh(NSDictionary *targetHost,
     }
 
     NSDictionary *preset = [RCDevAnnotateAction presetForId:components[@"editor"]];
+    if (!preset) {
+        notify(@"Send Failed", @"Unsupported editor", @"xmark.circle.fill");
+        return;
+    }
     NSMutableDictionary *payload = [NSMutableDictionary dictionary];
     payload[@"image_b64"] = [pngData base64EncodedStringWithOptions:0] ?: @"";
     payload[@"text"] = text ?: @"";
     payload[@"strategy"] = preset[@"strategy"] ?: @"clipboard_paste";
     payload[@"bundle_id"] = preset[@"bundleId"] ?: @"";
     payload[@"app_name"] = preset[@"appName"] ?: @"";
-    payload[@"custom_app"] = components[@"customApp"] ?: @"";
     payload[@"auto_send"] = components[@"autoSend"] ?: @YES;
     payload[@"delivery"] = preset[@"delivery"] ?: @"queue";
     payload[@"project_dir"] = components[@"projectDir"] ?: @"";
@@ -1285,6 +1288,9 @@ NSString *RCDevAnnotateCommand(NSString *cmd,
 
     NSDictionary *components = [RCDevAnnotateAction componentsFromActionString:cmd];
     if (!components) return @"Error: Invalid dev-annotate action\n";
+    if (![RCDevAnnotateAction presetForId:components[@"editor"]]) {
+        return [NSString stringWithFormat:@"Error: Unsupported editor '%@'\n", components[@"editor"]];
+    }
 
     NSString *hostId = components[@"hostId"] ?: @"";
     if (hostId.length == 0) return @"Error: Missing SSH host\n";

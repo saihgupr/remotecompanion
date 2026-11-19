@@ -108,7 +108,7 @@ class DevAnnotateTests(unittest.TestCase):
         with open(PRESETS_PATH, "r", encoding="utf-8") as f:
             presets = json.load(f)
         ids = [p["id"] for p in presets]
-        self.assertEqual(ids, ["opencode", "antigravity", "claude", "cursor", "vscode", "active", "custom"])
+        self.assertEqual(ids, ["opencode"])
         for p in presets:
             self.assertIn(p["strategy"], ("opencode_api", "clipboard_paste"))
             self.assertTrue(p["name"].strip())
@@ -323,8 +323,8 @@ class DevAnnotateTests(unittest.TestCase):
                     "image_b64": TINY_PNG_B64,
                     "text": "Test",
                     "strategy": "clipboard_paste",
-                    "bundle_id": "com.google.antigravity-ide",
-                    "app_name": "Antigravity IDE",
+                    "bundle_id": "ai.opencode.desktop",
+                    "app_name": "OpenCode",
                     "auto_send": True,
                 },
                 tmp_dir=os.path.join(tmp, "shots"),
@@ -333,6 +333,24 @@ class DevAnnotateTests(unittest.TestCase):
             )
             self.assertFalse(res["ok"])
             self.assertEqual(res["error"], "Enable Accessibility for sshd-keygen-wrapper on Mac")
+
+    def test_clipboard_missing_target_app_returns_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            res = rc_dev_deliver.deliver(
+                {
+                    "image_b64": TINY_PNG_B64,
+                    "text": "Test",
+                    "strategy": "clipboard_paste",
+                    "bundle_id": "",
+                    "app_name": "",
+                    "auto_send": False,
+                },
+                tmp_dir=os.path.join(tmp, "shots"),
+                run_cmd=lambda *a, **kw: (0, "", ""),
+                sleep_fn=lambda _: None,
+            )
+            self.assertFalse(res["ok"])
+            self.assertEqual(res["error"], "Missing target application")
 
     def test_inline_b64_from_generated_header_runs(self):
         with open(HEADER_PATH, "r", encoding="utf-8") as f:

@@ -2994,11 +2994,6 @@
         <input class="dialog-input" id="dev-annotate-project" type="text" placeholder="Optional (last viewed)" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" style="width:100%; box-sizing:border-box; margin:0; height:40px; text-align:left;">
       </div>
 
-      <div id="dev-annotate-custom-row" style="display:none; margin-bottom:10px;">
-        <div style="font-size:12px; font-weight:600; color:var(--rc-label-2); margin:0 0 4px 2px;">Custom App</div>
-        <input class="dialog-input" id="dev-annotate-custom" type="text" placeholder="App name or bundle ID" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" style="width:100%; box-sizing:border-box; margin:0; height:40px; text-align:left;">
-      </div>
-
       <label style="display:flex; align-items:center; justify-content:space-between; padding:6px 2px; font-size:15px; color:var(--rc-label); cursor:pointer;">
         <span>Auto-Send</span>
         <input type="checkbox" class="ios-toggle" id="dev-annotate-autosend" checked>
@@ -4793,7 +4788,7 @@ const ACTION_SECTIONS = [
     { name:'Set Ringer Volume…', cmd:'__SET_RINGER_VOLUME__',icon:'bell_fill', needs_input:true },
   ]},
   { title:'Developer', actions:[
-    { name:'Annotate & Send to Editor…', cmd:'__DEV_ANNOTATE__', icon:'camera_viewfinder', needs_input:true, keywords:'developer dev annotate screenshot red rectangle box dictate voice mic ai editor opencode antigravity claude cursor hex' },
+    { name:'Annotate & Send to Editor…', cmd:'__DEV_ANNOTATE__', icon:'camera_viewfinder', needs_input:true, keywords:'developer dev annotate screenshot red rectangle box dictate voice mic ai editor opencode' },
   ]},
 ];
 
@@ -6493,13 +6488,7 @@ function saveRestDialog() {
 
 // ── Developer Annotate & Send Modal ──
 const DEV_EDITOR_PRESETS = [
-  { id:'opencode',    name:'OpenCode',        subtitle:"Uses OpenCode's local API when Auto-Send is on (queues directly into the active session). Pastes into the composer when Auto-Send is off." },
-  { id:'antigravity', name:'Antigravity IDE', subtitle:'Activates Antigravity IDE and pastes the annotated screenshot and text into the active composer.' },
-  { id:'claude',      name:'Claude',          subtitle:'Activates Claude Desktop and pastes the annotated screenshot and text into the active composer.' },
-  { id:'cursor',      name:'Cursor',          subtitle:'Activates Cursor and pastes the annotated screenshot and text into the active chat.' },
-  { id:'vscode',      name:'VS Code',         subtitle:'Activates VS Code and pastes the annotated screenshot and text into the active chat.' },
-  { id:'active',      name:'Active Window',   subtitle:'Pastes into whichever app is currently focused on your Mac.' },
-  { id:'custom',      name:'Custom App',      subtitle:'Activates a custom macOS app by name or bundle ID and pastes into its active composer.' }
+  { id:'opencode', name:'OpenCode', supportsProjectDir:true, subtitle:"Uses OpenCode's local API when Auto-Send is on (queues directly into the active session). Pastes into the composer when Auto-Send is off." }
 ];
 
 function isDevAnnotateCmd(cmd) {
@@ -6509,27 +6498,23 @@ function isDevAnnotateCmd(cmd) {
 
 function parseDevAnnotateCmd(cmd) {
   const raw = String(cmd || '').trim().replace(/^dev-annotate/i, '').trim();
-  if (!raw) return { hostId:'', editor:'opencode', autoSend:true, projectDir:'', customApp:'' };
+  if (!raw) return { hostId:'', editor:'opencode', autoSend:true, projectDir:'' };
   try {
     const obj = JSON.parse(raw);
-    if (!obj || typeof obj !== 'object') return { hostId:'', editor:'opencode', autoSend:true, projectDir:'', customApp:'' };
+    if (!obj || typeof obj !== 'object') return { hostId:'', editor:'opencode', autoSend:true, projectDir:'' };
     return {
       hostId: String(obj.hostId || '').trim(),
       editor: String(obj.editor || 'opencode').trim() || 'opencode',
       autoSend: obj.autoSend === undefined ? true : !!obj.autoSend,
-      projectDir: String(obj.projectDir || '').trim(),
-      customApp: String(obj.customApp || '').trim()
+      projectDir: String(obj.projectDir || '').trim()
     };
   } catch (e) {
-    return { hostId:'', editor:'opencode', autoSend:true, projectDir:'', customApp:'' };
+    return { hostId:'', editor:'opencode', autoSend:true, projectDir:'' };
   }
 }
 
 function formatDevAnnotateName(cmd) {
   const comp = parseDevAnnotateCmd(cmd);
-  if (comp.editor === 'custom') {
-    return `Annotate \u2192 ${comp.customApp || 'Custom App'}`;
-  }
   const preset = DEV_EDITOR_PRESETS.find(p => p.id === comp.editor);
   return `Annotate \u2192 ${preset ? preset.name : comp.editor}`;
 }
@@ -6547,7 +6532,7 @@ function openDevAnnotateDialog(editIdx = null) {
   const act = editIdx === null ? '' : actions[editIdx];
   const cmd = act && typeof act === 'object' ? String(act.command || '') : String(act || '');
   const comp = editIdx === null
-    ? { hostId: hosts.length === 1 ? (hosts[0].id || '') : '', editor: 'opencode', autoSend: true, projectDir: '', customApp: '' }
+    ? { hostId: hosts.length === 1 ? (hosts[0].id || '') : '', editor: 'opencode', autoSend: true, projectDir: '' }
     : parseDevAnnotateCmd(cmd);
 
   const hostSel = document.getElementById('dev-annotate-host');
@@ -6572,10 +6557,10 @@ function openDevAnnotateDialog(editIdx = null) {
     opt.textContent = p.name;
     editorSel.appendChild(opt);
   });
-  editorSel.value = DEV_EDITOR_PRESETS.some(p => p.id === comp.editor) ? comp.editor : 'opencode';
+  editorSel.value = DEV_EDITOR_PRESETS.some(p => p.id === comp.editor) ? comp.editor : DEV_EDITOR_PRESETS[0].id;
+  editorSel.disabled = (DEV_EDITOR_PRESETS.length <= 1);
 
   document.getElementById('dev-annotate-project').value = comp.projectDir || '';
-  document.getElementById('dev-annotate-custom').value = comp.customApp || '';
   document.getElementById('dev-annotate-autosend').checked = comp.autoSend !== false;
   document.getElementById('dev-annotate-dialog-title').textContent = editIdx === null ? 'Annotate & Send to Editor' : 'Edit Annotate & Send';
   onDevAnnotateEditorChange();
@@ -6586,8 +6571,7 @@ function onDevAnnotateEditorChange() {
   const editor = document.getElementById('dev-annotate-editor').value;
   const preset = DEV_EDITOR_PRESETS.find(p => p.id === editor);
   document.getElementById('dev-annotate-hint').textContent = preset ? preset.subtitle : '';
-  document.getElementById('dev-annotate-project-row').style.display = (editor === 'opencode') ? '' : 'none';
-  document.getElementById('dev-annotate-custom-row').style.display = (editor === 'custom') ? '' : 'none';
+  document.getElementById('dev-annotate-project-row').style.display = (preset && preset.supportsProjectDir) ? '' : 'none';
 }
 
 function closeDevAnnotateDialog() {
@@ -6597,21 +6581,16 @@ function closeDevAnnotateDialog() {
 
 function saveDevAnnotateDialog() {
   const hostId = document.getElementById('dev-annotate-host').value.trim();
-  const editor = document.getElementById('dev-annotate-editor').value || 'opencode';
+  const editor = document.getElementById('dev-annotate-editor').value || DEV_EDITOR_PRESETS[0].id;
+  const preset = DEV_EDITOR_PRESETS.find(p => p.id === editor);
   const autoSend = !!document.getElementById('dev-annotate-autosend').checked;
   const projectDir = document.getElementById('dev-annotate-project').value.trim();
-  const customApp = document.getElementById('dev-annotate-custom').value.trim();
   if (!hostId) {
     showToast('Select an SSH host');
     return;
   }
-  if (editor === 'custom' && !customApp) {
-    showToast('Enter a custom app name or bundle ID');
-    return;
-  }
   const obj = { autoSend, editor, hostId };
-  if (editor === 'opencode' && projectDir) obj.projectDir = projectDir;
-  if (editor === 'custom' && customApp) obj.customApp = customApp;
+  if (preset && preset.supportsProjectDir && projectDir) obj.projectDir = projectDir;
   const command = 'dev-annotate ' + JSON.stringify(obj);
   const actions = triggerData(currentKey).actions || [];
   if (g_editingDevAnnotateIdx !== null && g_editingDevAnnotateIdx < actions.length) {
