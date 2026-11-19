@@ -16,7 +16,7 @@ SERVER = os.path.join(HERE, "rc_mcp.py")
 TIMEOUT = 20
 
 NEW_TOOLS = ["rc_help", "rc_state", "rc_trigger", "rc_config", "rc_sequence", "rc_deeplink",
-             "rc_dev", "rc_testkit", "rc_addon"]
+             "rc_open_page", "rc_dev", "rc_testkit", "rc_addon"]
 
 
 class Server:
@@ -84,7 +84,7 @@ def main():
         # 2. tools/list has the new tools, with the schemas they need
         tools = (server.send("tools/list", {}).get("result") or {}).get("tools") or []
         by_name = {tool["name"]: tool for tool in tools}
-        assert len(tools) == 21, "tools/list should have 21 tools (got %d)" % len(tools)
+        assert len(tools) == 22, "tools/list should have 22 tools (got %d)" % len(tools)
         missing = [name for name in NEW_TOOLS if name not in by_name]
         assert not missing, "tools/list is missing %s" % ", ".join(missing)
         for name in NEW_TOOLS:
@@ -116,6 +116,8 @@ def main():
                 ("rc_dev", {}, "logs, runs, history, file, screenshot"),
                 ("rc_testkit", {"action": "bogus"}, "info, probe"),
                 ("rc_addon", {"action": "validate"}, "validate needs file"),
+                ("rc_open_page", {}, "Give page"),
+                ("rc_open_page", {"page": "wifi", "url": "https://example.com"}, "not both"),
                 ("rc_config", {"action": "set", "value": "x"}, "set needs key")):
             text, failed = server.tool(name, arguments)
             assert failed, "%s%s should fail offline:\n%s" % (name, arguments, text)

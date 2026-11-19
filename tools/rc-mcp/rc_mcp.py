@@ -1067,6 +1067,64 @@ def t_rc_deeplink(args):
     return "\n".join(lines)
 
 
+# Settings pages, by the row label the Settings app shows in its list. The phone's
+# "settings <label>" command opens Settings and taps that row, scrolling to it when needed
+SETTINGS_ROWS = {
+    "wifi": "Wi-Fi",
+    "bluetooth": "Bluetooth",
+    "cellular": "Cellular",
+    "notifications": "Notifications",
+    "sounds": "Sounds & Haptics",
+    "display": "Display & Brightness",
+    "general": "General",
+    "privacy": "Privacy",
+    "battery": "Battery",
+    "accessibility": "Accessibility",
+}
+PAGE_ALIASES = {"wi_fi": "wifi", "bt": "bluetooth", "cell": "cellular", "sound": "sounds"}
+
+
+def settings_row(page):
+    """A page key as the Settings row label to tap, or ToolError naming the keys"""
+    key = "_".join(" ".join(str(page).split()).lower().replace("-", " ").split())
+    if key.startswith("app:"):
+        name = str(page).split(":", 1)[1].strip()
+        if not name:
+            raise ToolError("app: needs the app's name as Settings shows it, e.g. app:Slack.")
+        return name
+    key = PAGE_ALIASES.get(key, key)
+    if key not in SETTINGS_ROWS:
+        raise ToolError("Unknown page '%s'. Known: %s, or app:<name> for an app's own Settings row."
+                        % (page, ", ".join(sorted(SETTINGS_ROWS))))
+    return SETTINGS_ROWS[key]
+
+
+def t_rc_open_page(args):
+    page = str(args.get("page") or "").strip()
+    url = str(args.get("url") or "").strip()
+    if page and url:
+        raise ToolError("Give page or url, not both.")
+    if not page and not url:
+        raise ToolError("Give page (one of: %s, or app:<name>) or url."
+                        % ", ".join(sorted(SETTINGS_ROWS)))
+    if url:
+        if "://" not in url and not url.lower().startswith(("app-prefs:", "prefs:")):
+            raise ToolError("url must be a full URL (with ://) or an App-Prefs:root=... target.")
+        command, shown = "open " + url, url
+    else:
+        row = settings_row(page)
+        command, shown = "settings " + row, "Settings > " + row
+    phone = phone_for(args.get("phone"))
+    require_awake(phone)
+    reply = run(phone, command)
+    _STATE.pop(phone, None)  # the app in front changes
+    ssh(phone, "sleep 0.8", timeout=10)  # the Settings app may be restarting to show the page
+    lines = ["Opened %s." % shown]
+    if reply.strip():
+        lines.append(reply.strip())
+    return "\n".join(lines)
+
+
 def _yes(value):
     return "yes" if value else "no"
 
@@ -1755,6 +1813,16 @@ TOOLS = [
       "key": {"type": "string", "description": "trigger: the trigger's key."},
       "to": {"type": "string", "enum": ["top", "bottom"], "description": "scroll: where to scroll to."},
       "offset": {"type": "number", "description": "scroll: points to scroll to instead of top/bottom."}},
+     []),
+    ("rc_open_page", t_rc_open_page,
+     "Opens a Settings page or any URL on the phone, so debugging needs no taps. page: wifi, bluetooth, "
+     "cellular, notifications, sounds, display, general, privacy, battery, accessibility, or app:<name> for an "
+     "app's own Settings row, with the app's name as Settings shows it (bundle ids can't be looked up here). "
+     "It opens Settings and taps that row, scrolling to it; software update and about are under general. url: "
+     "a full URL or an App-Prefs: target, used verbatim. Give exactly one of page and url. The Settings app "
+     "may restart so the phone shows the page asked for.",
+     {"page": {"type": "string", "description": "A page key (wifi, bluetooth, ..., or app:<name>)."},
+      "url": {"type": "string", "description": "A full URL or an App-Prefs:root=... target, instead of page."}},
      []),
     ("rc_dev", t_rc_dev,
      "Read-only debugging: logs (last 150 lines; lines, grep), runs, history, file (text, else size and "

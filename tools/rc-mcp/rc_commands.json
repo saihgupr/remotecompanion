@@ -77,6 +77,8 @@
   {"command": "battery", "args": "", "description": "The battery level, and whether it is charging", "category": "System", "example": "battery", "status": ""},
   {"command": "app", "args": "", "description": "The bundle id of the app in front", "category": "System", "example": "app", "status": ""},
   {"command": "open <app>", "args": "app name, bundle id or url", "description": "Open an app by name, bundle id or URL", "category": "System", "example": "open settings", "status": "app"},
+  {"command": "open <url>", "args": "url", "description": "Open a URL as it is (an App-Prefs: target is passed through; it does not navigate on iOS 15)", "category": "System", "example": "open https://example.com", "status": "app"},
+  {"command": "settings <page>", "args": "Wi-Fi|Bluetooth|Cellular|Notifications|Sounds & Haptics|Display & Brightness|General|Privacy|Battery|Accessibility, or an app's name", "description": "Open Settings and tap the row with this label, scrolling to it", "category": "System", "example": "settings Wi-Fi", "status": "app"},
   {"command": "uiopen <bundleId>", "args": "bundle id", "description": "Open an app by bundle id", "category": "System", "example": "uiopen com.apple.mobilesafari", "status": "app"},
   {"command": "nav <panel>", "args": "triggers|settings|ha|km|mqtt|add", "description": "Open a RemoteCompanion panel", "category": "System", "example": "nav triggers", "status": ""},
   {"command": "shortcuts list", "args": "", "description": "The Shortcuts on the phone", "category": "System", "example": "shortcuts list", "status": ""},

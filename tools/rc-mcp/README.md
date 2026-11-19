@@ -53,6 +53,7 @@ For a client with a JSON config:
 | `rc_config` | `get`, `backup`, `restore`, `set` |
 | `rc_sequence` | `validate`: check a trigger's actions before saving them |
 | `rc_deeplink` | Open a RemoteCompanion screen with `remotecompanion://` |
+| `rc_open_page` | Open a Settings page by its row label (`wifi`, `bluetooth`, ... or `app:<name>`) or any URL |
 | `rc_dev` | `logs`, `runs`, `history`, `file`, `screenshot`: read-only debugging |
 | `rc_testkit` | The app's Test Kit: `info`, `probe`, `run`, `journal`, `mark`, `suites`, `suite`, `report`, `reports`, `snapshot`, `restore` |
 | `rc_addon` | Add-on development: `list`, `validate`, `parse`, `trace`, `reload`, `enable`, `disable`, `settings`, `set` |
@@ -104,6 +105,13 @@ when you know the key is right.
 
 `rc_deeplink` opens a RemoteCompanion screen (`settings`, `ha`, `trigger?key=...`). It brings the app
 to the front, so it changes what is on screen.
+
+`rc_open_page` opens a Settings page or any URL: `page` takes `wifi`, `bluetooth`, `cellular`,
+`notifications`, `sounds`, `display`, `general`, `privacy`, `battery`, `accessibility`, or `app:<name>`
+for an app's own row, where the name is the app's name as Settings shows it (bundle ids aren't resolved
+here). It opens Settings and taps that row, scrolling to it; software update and about are under
+`general`. `url` takes a full URL or an `App-Prefs:` target as it is, opened with `open`. The Settings
+app may restart so the phone shows the page.
 
 `rc_config set` changes one top-level key (`key`, `value`). It refuses a key that isn't there already
 unless `create: true`, lists the current keys when it refuses, backs the config up first, and reads it
