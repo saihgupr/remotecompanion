@@ -431,11 +431,24 @@ static CGFloat rc_dev_bottom_inset(UIWindowScene *scene, BOOL landscape) {
     _rectLayer.frame = _overlayView.bounds;
 }
 
+- (CGFloat)composerMaxTextHeight {
+    CGFloat overlayH = _overlayView.bounds.size.height;
+    if (overlayH <= 0) overlayH = UIScreen.mainScreen.bounds.size.height;
+    // Long notes get room to breathe: the box grows to nearly half the screen before it scrolls.
+    CGFloat maxTextH = MAX(82.0, round(overlayH * 0.45));
+    if (_keyboardHeight > 0.5) {
+        CGFloat room = overlayH - _keyboardHeight - 90.0;
+        if (room > 34.0) maxTextH = MIN(maxTextH, room);
+    }
+    return maxTextH;
+}
+
 - (CGFloat)composerHeightForTextWidth:(CGFloat)textWidth {
     if (textWidth <= 0) return 48.0;
+    CGFloat maxTextH = [self composerMaxTextHeight];
     CGSize fit = [_textView sizeThatFits:CGSizeMake(textWidth, CGFLOAT_MAX)];
-    CGFloat clampedTextH = MIN(MAX(ceil(fit.height), 34.0), 82.0);
-    _textView.scrollEnabled = (fit.height > 82.0);
+    CGFloat clampedTextH = MIN(MAX(ceil(fit.height), 34.0), maxTextH);
+    _textView.scrollEnabled = (fit.height > maxTextH);
     return MAX(48.0, clampedTextH + 14.0);
 }
 
@@ -487,7 +500,7 @@ static CGFloat rc_dev_bottom_inset(UIWindowScene *scene, BOOL landscape) {
         self->_barContainer.frame = targetFrame;
         self->_blurView.frame = self->_barContainer.bounds;
 
-        CGFloat btnY = round((barH - 34.0) * 0.5);
+        CGFloat btnY = MAX(7.0, barH - 34.0 - 7.0);
         self->_cancelButton.frame = CGRectMake(10.0, btnY, 34.0, 34.0);
         self->_micButton.frame = CGRectMake(50.0, btnY, 34.0, 34.0);
         self->_micPulseView.center = self->_micButton.center;
@@ -1012,6 +1025,123 @@ static NSData *rc_dev_render_annotated_png(UIImage *heldShot, CGRect selectedRec
     return rendered ? UIImagePNGRepresentation(rendered) : nil;
 }
 
+static void rc_dev_run_ssh_quiet(NSDictionary *targetHost, NSString *remoteCmd);
+
+static NSString *rc_dev_music_pause_script(void) {
+    // Only pause what is already playing, and remember it so resume never starts fresh playback.
+    return @"F=/tmp/rc-annotate-music-paused; "
+           @": > \"$F\"; "
+           @"for APP in Music Spotify; do "
+           @"if pgrep -x \"$APP\" >/dev/null 2>&1; then "
+           @"ST=$(osascript -e \"tell application \\\"$APP\\\" to get player state\" 2>/dev/null); "
+           @"if [ \"$ST\" = \"playing\" ]; then "
+           @"osascript -e \"tell application \\\"$APP\\\" to pause\" >/dev/null 2>&1; "
+           @"echo \"$APP\" >> \"$F\"; "
+           @"fi; fi; done; exit 0";
+}
+
+static NSString *rc_dev_music_resume_script(void) {
+    return @"F=/tmp/rc-annotate-music-paused; "
+           @"[ -f \"$F\" ] || exit 0; "
+           @"while IFS= read -r APP; do "
+           @"if [ -n \"$APP\" ] && pgrep -x \"$APP\" >/dev/null 2>&1; then "
+           @"osascript -e \"tell application \\\"$APP\\\" to play\" >/dev/null 2>&1; "
+           @"fi; done < \"$F\"; "
+           @"rm -f \"$F\"; exit 0";
+}
+
+static void rc_dev_run_ssh_quiet(NSDictionary *targetHost, NSString *remoteCmd) {
+    if (![targetHost isKindOfClass:[NSDictionary class]] || remoteCmd.length == 0) return;
+    NSString *host = targetHost[@"host"] ?: @"";
+    if (host.length == 0) return;
+
+    NSString *user = targetHost[@"user"] ?: @"mobile";
+    NSInteger port = [targetHost[@"port"] integerValue] > 0 ? [targetHost[@"port"] integerValue] : 22;
+    NSString *authType = targetHost[@"authType"] ?: @"password";
+    NSString *password = targetHost[@"password"] ?: @"";
+    NSString *keyPath = targetHost[@"keyPath"] ?: @"";
+    NSString *dest = user.length > 0 ? [NSString stringWithFormat:@"%@@%@", user, host] : host;
+    NSString *quotedDest = rc_dev_sh_quote(dest);
+    NSString *quotedCmd = rc_dev_sh_quote(remoteCmd);
+
+    BOOL useSSHPass = NO;
+    NSString *fullCmd = nil;
+    if ([authType isEqualToString:@"key"] && keyPath.length > 0) {
+        fullCmd = [NSString stringWithFormat:
+            @"ssh -i %@ -p %ld -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
+            @"-o ConnectTimeout=8 -o BatchMode=yes %@ %@",
+            rc_dev_sh_quote([keyPath stringByExpandingTildeInPath]), (long)port, quotedDest, quotedCmd];
+    } else if (password.length > 0) {
+        useSSHPass = YES;
+        fullCmd = [NSString stringWithFormat:
+            @"sshpass -e ssh -p %ld -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
+            @"-o ConnectTimeout=8 %@ %@",
+            (long)port, quotedDest, quotedCmd];
+    } else {
+        fullCmd = [NSString stringWithFormat:
+            @"ssh -p %ld -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
+            @"-o ConnectTimeout=8 -o BatchMode=yes %@ %@",
+            (long)port, quotedDest, quotedCmd];
+    }
+
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        @autoreleasepool {
+            const char *sh = rc_dev_shell_path();
+            char *args[] = { (char *)sh, "-c", (char *)[fullCmd UTF8String], NULL };
+
+            extern char **environ;
+            NSMutableArray<NSString *> *envArray = [NSMutableArray array];
+            for (char **env = environ; *env != NULL; env++) {
+                NSString *envStr = [NSString stringWithUTF8String:*env];
+                if (envStr && ![envStr hasPrefix:@"PATH="] && ![envStr hasPrefix:@"SSHPASS="]) {
+                    [envArray addObject:envStr];
+                }
+            }
+            [envArray addObject:@"PATH=/var/jb/usr/local/bin:/var/jb/usr/bin:/var/jb/bin:/var/jb/usr/sbin:/var/jb/sbin:/usr/bin:/bin:/usr/sbin:/sbin"];
+            if (useSSHPass && password.length > 0) {
+                [envArray addObject:[NSString stringWithFormat:@"SSHPASS=%@", password]];
+            }
+
+            char **envp = malloc(sizeof(char *) * (envArray.count + 1));
+            if (!envp) return;
+            for (NSUInteger i = 0; i < envArray.count; i++) {
+                envp[i] = strdup([envArray[i] UTF8String]);
+            }
+            envp[envArray.count] = NULL;
+
+            posix_spawn_file_actions_t actions;
+            posix_spawn_file_actions_init(&actions);
+            int devnull = open("/dev/null", O_RDWR);
+            if (devnull >= 0) {
+                posix_spawn_file_actions_adddup2(&actions, devnull, STDIN_FILENO);
+                posix_spawn_file_actions_adddup2(&actions, devnull, STDOUT_FILENO);
+                posix_spawn_file_actions_adddup2(&actions, devnull, STDERR_FILENO);
+                if (devnull > STDERR_FILENO) posix_spawn_file_actions_addclose(&actions, devnull);
+            }
+
+            pid_t pid = -1;
+            int spawnErr = rc_dev_posix_spawn(&pid, sh, &actions, args, envp);
+            posix_spawn_file_actions_destroy(&actions);
+            if (devnull > STDERR_FILENO) close(devnull);
+
+            for (NSUInteger i = 0; i < envArray.count; i++) {
+                if (envp[i]) {
+                    memset(envp[i], 0, strlen(envp[i]));
+                    free(envp[i]);
+                }
+            }
+            free(envp);
+
+            if (spawnErr != 0 || pid <= 0) {
+                SRLogMin(@"[DevAnnotate] Music ssh spawn failed: %d", spawnErr);
+                return;
+            }
+            int status = 0;
+            while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
+        }
+    });
+}
+
 static NSDictionary *rc_dev_parse_last_json_line(NSString *output) {
     if (!output.length) return nil;
     NSArray<NSString *> *lines = [output componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
@@ -1321,6 +1451,7 @@ NSString *RCDevAnnotateCommand(NSString *cmd,
 
     __block RCDevAnnotateWindow *window = nil;
     __block RCDevAnnotateViewController *vc = nil;
+    __block BOOL musicPaused = NO;
     void (^cleanup)(void) = ^{
         rc_dev_main_sync(^{
             [vc prepareForDismiss];
@@ -1330,6 +1461,10 @@ NSString *RCDevAnnotateCommand(NSString *cmd,
             window = nil;
             vc = nil;
         });
+        if (musicPaused) {
+            musicPaused = NO;
+            rc_dev_run_ssh_quiet(targetHost, rc_dev_music_resume_script());
+        }
         @synchronized (rc_dev_state_lock()) {
             g_devAnnotateActive = NO;
         }
@@ -1389,6 +1524,11 @@ NSString *RCDevAnnotateCommand(NSString *cmd,
         if (!hasScene) {
             cleanup();
             return @"Error: No active display scene\n";
+        }
+
+        if ([components[@"pauseMusic"] boolValue]) {
+            musicPaused = YES;
+            rc_dev_run_ssh_quiet(targetHost, rc_dev_music_pause_script());
         }
 
         dispatch_time_t deadline = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(120.0 * NSEC_PER_SEC));

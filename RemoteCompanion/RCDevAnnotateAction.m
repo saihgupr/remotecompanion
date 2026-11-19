@@ -73,18 +73,26 @@ static NSString *RCDevTrimmed(NSString *text) {
 
     NSString *projectDir = [raw[@"projectDir"] isKindOfClass:[NSString class]] ? RCDevTrimmed(raw[@"projectDir"]) : @"";
 
+    BOOL pauseMusic = NO;
+    id rawPauseMusic = raw[@"pauseMusic"];
+    if ([rawPauseMusic isKindOfClass:[NSNumber class]] || [rawPauseMusic isKindOfClass:[NSString class]]) {
+        pauseMusic = [rawPauseMusic boolValue];
+    }
+
     return @{
         @"hostId": hostId,
         @"editor": editor,
         @"autoSend": @(autoSend),
-        @"projectDir": projectDir
+        @"projectDir": projectDir,
+        @"pauseMusic": @(pauseMusic)
     };
 }
 
 + (NSString *)actionStringWithHostId:(NSString *)hostId
                               editor:(NSString *)editor
                             autoSend:(BOOL)autoSend
-                          projectDir:(nullable NSString *)projectDir {
+                          projectDir:(nullable NSString *)projectDir
+                          pauseMusic:(BOOL)pauseMusic {
     NSString *cleanHost = RCDevTrimmed(hostId ?: @"");
     NSString *cleanEditor = RCDevTrimmed(editor ?: @"");
     if (cleanEditor.length == 0) cleanEditor = @"opencode";
@@ -98,6 +106,10 @@ static NSString *RCDevTrimmed(NSString *text) {
     NSDictionary *preset = [self presetForId:cleanEditor];
     if (cleanProject.length > 0 && [preset[@"supportsProjectDir"] boolValue]) {
         dict[@"projectDir"] = cleanProject;
+    }
+
+    if (pauseMusic) {
+        dict[@"pauseMusic"] = @YES;
     }
 
     NSData *json = [NSJSONSerialization dataWithJSONObject:dict

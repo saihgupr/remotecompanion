@@ -7,11 +7,13 @@
 @property (nonatomic, copy) NSString *editorId;
 @property (nonatomic, copy) NSString *projectDir;
 @property (nonatomic, assign) BOOL autoSend;
+@property (nonatomic, assign) BOOL pauseMusic;
 @property (nonatomic, assign) BOOL editingExisting;
 
 @property (nonatomic, strong) UIBarButtonItem *saveButton;
 @property (nonatomic, strong) UITextField *projectDirField;
 @property (nonatomic, strong) UISwitch *autoSendSwitch;
+@property (nonatomic, strong) UISwitch *pauseMusicSwitch;
 @end
 
 typedef NS_ENUM(NSInteger, RCDevAnnotateSection) {
@@ -36,6 +38,7 @@ typedef NS_ENUM(NSInteger, RCDevAnnotateSection) {
         _editorId = parsedEditor;
         _projectDir = [comp[@"projectDir"] copy] ?: @"";
         _autoSend = comp[@"autoSend"] ? [comp[@"autoSend"] boolValue] : YES;
+        _pauseMusic = comp[@"pauseMusic"] ? [comp[@"pauseMusic"] boolValue] : NO;
     }
     return self;
 }
@@ -91,6 +94,10 @@ typedef NS_ENUM(NSInteger, RCDevAnnotateSection) {
     self.autoSendSwitch = [[UISwitch alloc] init];
     self.autoSendSwitch.on = self.autoSend;
     [self.autoSendSwitch addTarget:self action:@selector(autoSendChanged:) forControlEvents:UIControlEventValueChanged];
+
+    self.pauseMusicSwitch = [[UISwitch alloc] init];
+    self.pauseMusicSwitch.on = self.pauseMusic;
+    [self.pauseMusicSwitch addTarget:self action:@selector(pauseMusicChanged:) forControlEvents:UIControlEventValueChanged];
 }
 
 - (UITextField *)textFieldWithPlaceholder:(NSString *)placeholder {
@@ -136,6 +143,9 @@ typedef NS_ENUM(NSInteger, RCDevAnnotateSection) {
     if (section == RCDevAnnotateSectionEditor) {
         return [self showsProjectFolderRow] ? 2 : 1;
     }
+    if (section == RCDevAnnotateSectionDelivery) {
+        return 2;
+    }
     return 1;
 }
 
@@ -153,7 +163,7 @@ typedef NS_ENUM(NSInteger, RCDevAnnotateSection) {
         NSDictionary *preset = [self selectedPreset];
         return [preset[@"subtitle"] isKindOfClass:[NSString class]] ? preset[@"subtitle"] : nil;
     }
-    return @"On sends the prompt immediately. Off pastes the image and text into the editor without submitting.";
+    return @"On sends the prompt immediately. Off pastes the image and text into the editor without submitting. Pause Music stops Music or Spotify while you annotate, then resumes it.";
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -195,8 +205,8 @@ typedef NS_ENUM(NSInteger, RCDevAnnotateSection) {
     }
 
     UITableViewCell *cell = [self styledCellWithStyle:UITableViewCellStyleDefault cm:cm];
-    cell.textLabel.text = @"Auto-Send";
-    cell.accessoryView = self.autoSendSwitch;
+    cell.accessoryView = indexPath.row == 0 ? self.autoSendSwitch : self.pauseMusicSwitch;
+    cell.textLabel.text = indexPath.row == 0 ? @"Auto-Send" : @"Pause Music";
     cell.selectionStyle = UITableViewCellSelectionStyleNone;
     return cell;
 }
@@ -325,6 +335,10 @@ typedef NS_ENUM(NSInteger, RCDevAnnotateSection) {
     self.autoSend = sender.on;
 }
 
+- (void)pauseMusicChanged:(UISwitch *)sender {
+    self.pauseMusic = sender.on;
+}
+
 - (BOOL)textFieldShouldReturn:(UITextField *)textField {
     [textField resignFirstResponder];
     return YES;
@@ -346,13 +360,15 @@ typedef NS_ENUM(NSInteger, RCDevAnnotateSection) {
     [self.view endEditing:YES];
     self.projectDir = self.projectDirField.text ?: self.projectDir ?: @"";
     self.autoSend = self.autoSendSwitch.on;
+    self.pauseMusic = self.pauseMusicSwitch.on;
 
     if (self.hostId.length == 0) return;
 
     NSString *actionString = [RCDevAnnotateAction actionStringWithHostId:self.hostId
                                                                  editor:self.editorId
                                                                autoSend:self.autoSend
-                                                             projectDir:self.projectDir];
+                                                             projectDir:self.projectDir
+                                                             pauseMusic:self.pauseMusic];
     if (self.onSave) self.onSave(actionString);
 }
 

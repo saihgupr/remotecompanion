@@ -15,7 +15,8 @@ NS_ASSUME_NONNULL_BEGIN
 + (NSString *)actionStringWithHostId:(NSString *)hostId
                               editor:(NSString *)editor
                             autoSend:(BOOL)autoSend
-                          projectDir:(nullable NSString *)projectDir;
+                          projectDir:(nullable NSString *)projectDir
+                          pauseMusic:(BOOL)pauseMusic;
 
 + (NSString *)editorDisplayNameForComponents:(nullable NSDictionary *)components;
 + (NSString *)displayTitleForActionString:(nullable NSString *)action;
