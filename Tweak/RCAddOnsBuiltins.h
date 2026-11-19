@@ -83,6 +83,7 @@ static NSString *const kRCAOBuiltinPrefixes[] = {
     @"screenrecord ",
     @"sd ",
     @"set-vol ",
+    @"settings ",
     @"shortcut ",
     @"shortcut-direct ",
     @"shortcut:",

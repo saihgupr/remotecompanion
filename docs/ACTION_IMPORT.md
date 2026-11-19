@@ -77,6 +77,7 @@ Here is the complete list of valid commands you can write, along with parameters
 | `mute` | Toggle silent/ringer mode | `mute` |
 | `rotate lock` / `rotate unlock` / `rotate toggle` | Turn Orientation Lock on, off, or toggle state | `rotate toggle` |
 | `orientation set <mode>` | Set screen orientation to `portrait`, `landscape left`, `landscape right`, `portrait upside down`, or `auto` | `orientation set landscape left` |
+| `settings <label>` | Open the Settings app on that page, scrolling to its row | `settings Wi-Fi` |
 
 ### Automations & Execution
 | Command Syntax | Description | Example |

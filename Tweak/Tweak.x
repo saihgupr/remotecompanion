@@ -11127,6 +11127,7 @@ static NSArray *RCCommandHelpSections(void) {
         @{@"title": @"Apps & Input", @"rows": @[
             @[@"open <alias|bundleID>", @"Launch an app"],
             @[@"uiopen <bundleID>", @"Launch an app by bundle ID"],
+            @[@"settings <page>", @"Open a Settings page by name, e.g. settings Wi-Fi or settings Sileo"],
             @[@"kill <alias|bundleID>", @"Force close an app"],
             @[@"kill current", @"Force close the front app"],
             @[@"home", @"Press Home"],
@@ -11304,6 +11305,43 @@ static NSString *rc_handle_unlock_passcode_command(NSString *cmd) {
     }
     SRLog(@"Received command: unlock-passcode (unknown)");
     return @"Error: usage: unlock-passcode [set CODE | forget]\n";
+}
+
+// Open a Settings page by the name of its row. iOS 15 ignores the page part of a Settings URL, so
+// this opens Settings and taps the row, scrolling the list while the row is still below the fold.
+static NSString *rc_open_settings_page(NSString *label) {
+    NSString *spec = [label stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (!spec.length) return @"Usage: settings <page name> [> <sub page> ...]\n";
+    // Settings reopens on the page it was left on; quit it so the list starts at the root
+    BKSTerminateApplicationForReasonAndReportWithDescription(@"com.apple.Preferences", 5, false, nil);
+    usleep(600 * 1000);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSURL *url = [NSURL URLWithString:@"App-prefs://"];
+        if (url) [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
+    });
+    usleep(1200 * 1000);
+    __block CGSize size = CGSizeZero;
+    rc_dispatch_sync_main_safe(^{ size = [UIScreen mainScreen].bounds.size; });
+    // A path walks down one row at a time: "General > About"
+    for (NSString *step in [spec componentsSeparatedByString:@">"]) {
+        NSString *wanted = [step stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (!wanted.length) continue;
+        BOOL found = NO;
+        for (int attempt = 0; attempt < 4; attempt++) {
+            NSString *reply = RCScreenCommand([NSString stringWithFormat:@"screen tap %@", wanted]);
+            if ([reply hasPrefix:@"Tapped"]) {
+                found = YES;
+                break;
+            }
+            // A real-touch swipe: the older synthetic one does not always scroll the Settings list
+            RCGestureCommand([NSString stringWithFormat:@"gesture swipe %.0f %.0f %.0f %.0f 0.35",
+                              size.width * 0.5, size.height * 0.78, size.width * 0.5, size.height * 0.30]);
+            usleep(700 * 1000);
+        }
+        if (!found) return [NSString stringWithFormat:@"Could not find %@ in Settings\n", wanted];
+        usleep(900 * 1000);
+    }
+    return [NSString stringWithFormat:@"Opened Settings > %@\n", spec];
 }
 
 static NSString *handle_command(NSString *cmd) {
@@ -13081,12 +13119,17 @@ static NSString *handle_command(NSString *cmd) {
              [service openApplication:bundleId withOptions:nil completion:nil];
         });
         return [NSString stringWithFormat:@"Opened %@", bundleId];
+    } else if ([cleanCmd hasPrefix:@"settings "] || [cleanCmd isEqualToString:@"settings"]) {
+        NSString *page = cleanCmd.length > 9 ? [[cleanCmd substringFromIndex:9] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] : @"";
+        return rc_open_settings_page(page);
     } else if ([cleanCmd hasPrefix:@"open "]) {
         // Open app by name, Bundle ID, or URL scheme
         NSString *appName = [[cleanCmd substringFromIndex:5] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        // A Settings page: "App-Prefs:root=WIFI", "App-Prefs:root=<bundle id>" or the older "prefs:..."
+        BOOL prefsURL = [appName hasPrefix:@"App-Prefs:"] || [appName hasPrefix:@"app-prefs:"] || [appName hasPrefix:@"prefs:"];
         
         // If it looks like a Bundle ID (contains dot), use FBSOpenApplicationService (faster)
-        if ([appName containsString:@"."] && ![appName containsString:@"://"]) {
+        if (!prefsURL && [appName containsString:@"."] && ![appName containsString:@"://"]) {
              NSLog(@"[RemoteCommand] Opening Bundle ID via FBS: %@", appName);
              dispatch_async(dispatch_get_main_queue(), ^{
                  FBSOpenApplicationService *service = [FBSOpenApplicationService serviceWithDefaultShellEndpoint];
@@ -13098,7 +13141,7 @@ static NSString *handle_command(NSString *cmd) {
         NSString *lowerName = [appName lowercaseString];
         NSString *urlString = nil;
         
-        if ([appName containsString:@"://"]) {
+        if (prefsURL || [appName containsString:@"://"]) {
             urlString = appName;
         } else if ([lowerName isEqualToString:@"spotify"]) urlString = @"spotify://";
         else if ([lowerName isEqualToString:@"music"]) urlString = @"music://";
@@ -13120,12 +13163,24 @@ static NSString *handle_command(NSString *cmd) {
         else urlString = [NSString stringWithFormat:@"%@://", lowerName]; // Try app name as scheme
         
         NSLog(@"[RemoteCommand] Opening app: %@ via %@", appName, urlString);
-        dispatch_async(dispatch_get_main_queue(), ^{
+        void (^openBlock)(void) = ^{
             NSURL *url = [NSURL URLWithString:urlString];
-            if (url) {
-                [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
+            if (!url) return;
+            if (prefsURL) {
+                // SpringBoard's own open drops the page part on iOS 15. Hand the URL to the app,
+                // which opens it the way Shortcuts does, and iOS honors the page there.
+                NSMutableCharacterSet *safe = [NSMutableCharacterSet alphanumericCharacterSet];
+                [safe addCharactersInString:@"-._~"];
+                NSString *encoded = [urlString stringByAddingPercentEncodingWithAllowedCharacters:safe];
+                NSURL *relay = encoded.length ? [NSURL URLWithString:[@"remotecompanion://open-url?url=" stringByAppendingString:encoded]] : nil;
+                if (relay) {
+                    [[UIApplication sharedApplication] openURL:relay options:@{} completionHandler:nil];
+                    return;
+                }
             }
-        });
+            [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
+        };
+        dispatch_async(dispatch_get_main_queue(), openBlock);
         return [NSString stringWithFormat:@"Opened %@\n", appName];
     } else if ([cleanCmd isEqualToString:@"bluetooth-on"] || [cleanCmd isEqualToString:@"bt-on"] || [cleanCmd isEqualToString:@"bluetooth on"] || [cleanCmd isEqualToString:@"bt on"]) {
         void *btHandle = dlopen("/System/Library/PrivateFrameworks/BluetoothManager.framework/BluetoothManager", RTLD_NOW);

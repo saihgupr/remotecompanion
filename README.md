@@ -113,6 +113,7 @@ Access the desktop-class automation hub at `http://[DEVICE_IP]:8080` from any co
 - `rc flashlight [on|off|toggle]` - Control the torch.
 - `rc rotate [lock|unlock|toggle]` - Orientation lock control.
 - `rc orientation set <portrait|landscape left|landscape right|portrait upside down|auto>` - Turn the screen to that orientation; it holds while rotation lock is on, otherwise the phone takes over when moved.
+- `rc settings <label>` - Open the Settings app on that page, for example `rc settings Wi-Fi`, `rc settings Bluetooth` or `rc settings Sileo`; it scrolls to find the row.
 - `rc appearance [dark|light|toggle]` - Set light/dark appearance.
 - `rc dnd [on|off|toggle]` - Toggle Do Not Disturb.
 - `rc low power mode [on|off|toggle]` - Toggle battery saver.

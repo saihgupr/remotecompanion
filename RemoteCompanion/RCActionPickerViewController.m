@@ -11,6 +11,7 @@
 #import "RCHAEntityPickerViewController.h"
 #import "RCKMMacroPickerViewController.h"
 #import "RCCategoryBar.h"
+#import "RCSettingsPagePickerViewController.h"
 #import "RCSSHActionEditorViewController.h"
 #import "RCActionTile.h"
 #import "RCVariableIcon.h"
@@ -306,6 +307,7 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
             @{ @"name": @"Flashlight", @"command": @"flashlight toggle", @"icon": @"flashlight.on.fill" },
             @{ @"name": @"Rotation Lock", @"command": @"rotate toggle", @"icon": @"lock.rotation" },
             @{ @"name": @"Set Orientation...", @"command": @"__SET_ORIENTATION__", @"icon": @"rotate.right", @"keywords": @"rotate rotation landscape portrait orientation screen sideways" },
+            @{ @"name": @"Open Settings Page...", @"command": @"__OPEN_SETTINGS_PAGE__", @"icon": @"gear", @"keywords": @"settings preferences page wifi bluetooth sileo app" },
             @{ @"name": @"Lock Device", @"command": @"lock", @"icon": @"lock.fill" },
             @{ @"name": @"Unlock Device...", @"command": @"__UNLOCK_DEVICE__", @"icon": @"lock.open.fill" },
             @{ @"name": @"Lock Toggle...", @"command": @"__LOCK_TOGGLE__", @"icon": @"lock.circle" },
@@ -502,7 +504,7 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
                 @"__UNLOCK_DEVICE__", @"__LOCK_TOGGLE__", @"__TAP__", @"__HOLD__", @"__SWIPE__",
                 @"__PLAY_GESTURE__", @"__RECORD_GESTURE__", @"__AIRPLAY_CONNECT__",
                 @"__BT_CONNECT__", @"__BT_DISCONNECT__", @"__FOCUS__", @"__HA_PICKER__",
-                @"__KM_TRIGGER__", @"__MQTT_PUBLISH__", @"__CAMERA_PICKER__", @"__CAMERA_VIDEO_PICKER__", @"__SET_ORIENTATION__"
+                @"__KM_TRIGGER__", @"__MQTT_PUBLISH__", @"__CAMERA_PICKER__", @"__CAMERA_VIDEO_PICKER__", @"__SET_ORIENTATION__", @"__OPEN_SETTINGS_PAGE__"
             ]];
         });
         NSMutableArray *remoteSections = [NSMutableArray array];
@@ -651,7 +653,7 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
                                      @"__IF_CONDITION__", @"__REPEAT__", @"__REPEAT_WHILE__", @"__WAIT_UNTIL__", @"__DELAY__",
                                      @"__STOP_TRIGGER__", @"__CUSTOM__", @"__HA_PICKER__", @"__KM_TRIGGER__", @"__MQTT_PUBLISH__",
                                      @"__CAMERA_PICKER__", @"__CAMERA_VIDEO_PICKER__", @"__TAP__", @"__HOLD__", @"__SWIPE__",
-                                     @"__UNLOCK_DEVICE__", @"__LOCK_TOGGLE__", @"__SET_ORIENTATION__"]];
+                                     @"__UNLOCK_DEVICE__", @"__LOCK_TOGGLE__", @"__SET_ORIENTATION__", @"__OPEN_SETTINGS_PAGE__"]];
     });
     if (![command isKindOfClass:[NSString class]]) return NO;
     // Any other placeholder opens something too; a plain command is added as it is
@@ -765,6 +767,11 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
 
     if ([command isEqualToString:@"__SET_ORIENTATION__"]) {
         [self handleSetOrientation];
+        return;
+    }
+
+    if ([command isEqualToString:@"__OPEN_SETTINGS_PAGE__"]) {
+        [self handleOpenSettingsPage];
         return;
     }
 
@@ -1271,6 +1278,16 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
     sheet.popoverPresentationController.sourceView = self.view;
     sheet.popoverPresentationController.sourceRect = CGRectMake(self.view.bounds.size.width / 2, self.view.bounds.size.height / 2, 1, 1);
     [self presentViewController:sheet animated:YES completion:nil];
+}
+
+// The Settings app opens on that page: the tweak taps each row of the path in turn
+- (void)handleOpenSettingsPage {
+    RCSettingsPagePickerViewController *picker = [[RCSettingsPagePickerViewController alloc] initWithPath:@[]];
+    __weak typeof(self) weakSelf = self;
+    picker.onSelect = ^(NSString *label) {
+        [weakSelf finishWithFocusCommand:[NSString stringWithFormat:@"settings %@", label]];
+    };
+    [self.navigationController pushViewController:picker animated:YES];
 }
 
 // A new Play Gesture action: its own page, which gesture and how fast

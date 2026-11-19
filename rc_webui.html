@@ -4343,6 +4343,7 @@ function nameForCmd(cmd) {
     const sc = parseShortcutAction(cmd);
     return `Shortcut: ${sc.name}${sc.silent ? ' (Silent)' : ''}`;
   }
+  if (lowCmd.startsWith('settings ')) return `Settings: ${cmd.slice(9).trim()}`;
   if (lowCmd.startsWith('uiopen ')) {
     const bundleId = cmd.slice(7).trim().toLowerCase();
     const app = cachedApps.find(a => (a.bundleId || '').toLowerCase() === bundleId);
@@ -4575,6 +4576,7 @@ function iconForCmd(cmd) {
   if (lowCmd.startsWith('ringer volume ')) return { icon:'bell_fill',       cls:'icon-blue' };
   if (lowCmd.startsWith('brightness '))   return { icon:'sun_max_fill',    cls:'icon-yellow' };
   if (lowCmd.startsWith('orientation set ')) return { icon:'rotate_right', cls:'icon-blue' };
+  if (lowCmd.startsWith('settings ')) return { icon:'gear', cls:'icon-gray' };
   if (lowCmd.startsWith('shortcut:'))     return { icon:'wand_stars',         cls:'icon-indigo' };
   if (lowCmd.startsWith('uiopen '))       return { icon:'app_badge_fill',  cls:'icon-pink' };
   if (lowCmd.startsWith('kill '))         return { icon:'xmark_circle_fill', cls:'icon-red' };
@@ -4645,6 +4647,7 @@ const ACTION_SECTIONS = [
     { name:'Flashlight Intensity…', cmd:'__SET_FLASHLIGHT__', icon:'dial_fill', needs_input:true },
     { name:'Rotation Lock',     cmd:'rotate toggle',     icon:'lock_rotation', is_toggle:true },
     { name:'Set Orientation…',  cmd:'__SET_ORIENTATION__',icon:'rotate_right', needs_input:true, keywords:'rotate rotation landscape portrait orientation upside down screen sideways' },
+    { name:'Open Settings Page…', cmd:'__OPEN_SETTINGS_PAGE__', icon:'gear', needs_input:true, keywords:'settings preferences page wifi bluetooth sileo app' },
     { name:'Button Triggers',   cmd:'button triggers pause 15', icon:'pause_circle', is_toggle:true },
     { name:'Lock Device',       cmd:'lock',          icon:'lock_fill' },
     { name:'Unlock Device',     cmd:'unlock',        icon:'lock_open_fill' },
@@ -7510,6 +7513,12 @@ function editAction(idx) {
         actions[idx] = buildShortcutAction(val, sc.silent, sc.input); // keeps -i and -p
         saveConfig(); renderActionList();
       });
+    } else if (low.startsWith('settings ')) {
+      showDialog('Edit Settings Page', 'Page name as the Settings app shows it:', act.slice(9), 'Save', val => {
+        if (!val || !val.trim()) return;
+        actions[idx] = `settings ${val.trim()}`;
+        saveConfig(); renderActionList();
+      });
     } else if (low.startsWith('uiopen ')) {
       showDialog('Edit Open App', 'Bundle ID:', act.slice(7), 'Save', val => {
         if (!val) return;
@@ -7950,6 +7959,8 @@ function selectPickerAction(act) {
     promptLevelAction('brightness ', null);
   } else if (c === '__SET_ORIENTATION__') {
     promptOrientationPicker();
+  } else if (c === '__OPEN_SETTINGS_PAGE__') {
+    promptSettingsPagePicker();
   } else if (c === '__HA_PICKER__') {
     promptHAActionPicker();
   } else if (c === '__HA_TOGGLE__') {
@@ -8011,6 +8022,18 @@ function promptOrientationPicker() {
     action: () => addActionToCurrent(`${toggleInfo.prefixes[0]}${s}`)
   }));
   showContextMenu({ clientX: Math.max(10, window.innerWidth / 2 - 110), clientY: Math.max(10, window.innerHeight / 3), preventDefault: () => {} }, items);
+}
+
+// The Settings app's own rows, in its order, with Other for an app's page or any name
+const SETTINGS_PAGES = ['Wi-Fi', 'Bluetooth', 'Cellular', 'Notifications', 'Sounds & Haptics',
+  'Display & Brightness', 'General', 'Battery', 'Privacy', 'Accessibility'];
+function promptSettingsPagePicker() {
+  showSheet('Settings Page', [
+    ...SETTINGS_PAGES.map(page => ({ label: page, action: () => addActionToCurrent(`settings ${page}`) })),
+    { label: 'Other…', action: () => showDialog('Settings Page', 'Page name as the Settings app shows it:', '', 'Add', val => {
+      if (val && val.trim()) addActionToCurrent(`settings ${val.trim()}`);
+    }) }
+  ]);
 }
 
 // ── Time Condition Dialog System ──────────────────────────────────────────────
@@ -10627,6 +10650,7 @@ const BANNER_PLACEHOLDERS = {
   '__SET_VOLUME__': ['set-vol '],
   '__SET_BRIGHTNESS__': ['brightness '],
   '__SET_ORIENTATION__': ['orientation set '],
+  '__OPEN_SETTINGS_PAGE__': ['settings '],
   '__CAMERA_PICKER__': ['camera ', 'open camera ', 'camera', 'open camera'],
   '__CAMERA_VIDEO_PICKER__': ['camera video ', 'open camera video ', 'camera video', 'open camera video', 'camera 2x'],
   '__BT_CONNECT__': ['bt connect ', 'bluetooth connect '],

@@ -58,6 +58,14 @@
         RCLog(@"CRASH: %@ - %@", exception.name, exception.reason);
     }
     
+    // Launched by a URL (remotecompanion://open-url?...): openURL: is not called on a cold launch
+    NSURL *launchURL = launchOptions[UIApplicationLaunchOptionsURLKey];
+    if ([launchURL isKindOfClass:[NSURL class]]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self application:application openURL:launchURL options:@{}];
+        });
+    }
+    
     return YES;
 }
 
@@ -141,6 +149,19 @@ didReceiveNotificationResponse:(UNNotificationResponse *)response
         if (item.name && item.value) {
             queryParams[item.name.lowercaseString] = item.value;
         }
+    }
+    
+    // remotecompanion://open-url?url=<encoded target>: the tweak hands a Settings page or any
+    // URL to the app, because iOS honors a Settings page only when an app opens it.
+    if ([destination isEqualToString:@"open-url"] || [destination isEqualToString:@"openurl"]) {
+        NSString *target = queryParams[@"url"];
+        NSURL *targetURL = target.length ? [NSURL URLWithString:target] : nil;
+        if (targetURL) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [[UIApplication sharedApplication] openURL:targetURL options:@{} completionHandler:nil];
+            });
+        }
+        return YES;
     }
     
     dispatch_async(dispatch_get_main_queue(), ^{

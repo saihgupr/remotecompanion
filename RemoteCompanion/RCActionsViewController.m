@@ -19,6 +19,7 @@
 #import "RCHTTPAction.h"
 #import "RCShortcutPickerViewController.h"
 #import "RCAppPickerViewController.h"
+#import "RCSettingsPagePickerViewController.h"
 #import "RCConditionPickerViewController.h"
 #import "RCTextInputViewController.h"
 #import "RCTimeRangeViewController.h"
@@ -774,6 +775,9 @@ static id g_actionClipboard = nil;
     } else if ([lower hasPrefix:@"shortcut:"]) {
         baseText = @"Shortcut: ";
         paramText = [RCConfigManager shortcutNameForAction:cmd silent:NULL input:NULL];
+    } else if ([lower hasPrefix:@"settings "]) {
+        baseText = @"Settings: ";
+        paramText = [cmd substringFromIndex:9];
     } else if ([lower hasPrefix:@"uiopen "]) {
         baseText = @"Open ";
         NSString *bundleId = [cmd substringFromIndex:7];
@@ -3936,6 +3940,20 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         sheet.popoverPresentationController.sourceView = cell ?: self.view;
         sheet.popoverPresentationController.sourceRect = cell ? cell.bounds : self.view.bounds;
         [self presentViewController:sheet animated:YES completion:nil];
+    } else if ([currentAction hasPrefix:@"settings "]) {
+        // Open Settings Page: pick the page again, starting from the one it uses now
+        RCSettingsPagePickerViewController *picker = [[RCSettingsPagePickerViewController alloc] initWithPath:@[]];
+        picker.currentLabel = [currentAction substringFromIndex:9];
+        __weak typeof(self) weakSelf = self;
+        picker.onSelect = ^(NSString *label) {
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) return;
+            strongSelf.actions[indexPath.row] = [NSString stringWithFormat:@"settings %@", label];
+            [strongSelf saveActions];
+            [strongSelf.tableView reloadData];
+        };
+        UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:picker];
+        [self presentViewController:nav animated:YES completion:nil];
     } else if ([currentAction hasPrefix:@"uiopen "]) {
         // Edit App
         RCAppPickerViewController *appPicker = [[RCAppPickerViewController alloc] init];

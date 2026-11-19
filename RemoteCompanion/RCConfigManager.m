@@ -2123,6 +2123,8 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
             result = [NSString stringWithFormat:@"Set Brightness %@", [cmd substringFromIndex:11]];
         } else if ([cmd hasPrefix:@"orientation set "] && cmd.length > 16) {
             result = [NSString stringWithFormat:@"Orientation: %@", [[originalCmd substringFromIndex:16] capitalizedString]];
+        } else if ([cmd hasPrefix:@"settings "] && cmd.length > 9) {
+            result = [NSString stringWithFormat:@"Settings: %@", [originalCmd substringFromIndex:9]];
         } else if ([cmd hasPrefix:@"flashlight "] && ![[cmd lowercaseString] hasSuffix:@"on"] && ![[cmd lowercaseString] hasSuffix:@"off"] && ![[cmd lowercaseString] hasSuffix:@"toggle"]) {
             result = [NSString stringWithFormat:@"Flashlight %@%%", [cmd substringFromIndex:11]];
         } else if ([cmd hasPrefix:@"flash "] && ![[cmd lowercaseString] hasSuffix:@"on"] && ![[cmd lowercaseString] hasSuffix:@"off"] && ![[cmd lowercaseString] hasSuffix:@"toggle"]) {
@@ -2432,6 +2434,7 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         if ([cmd containsString:@"auto"]) return ([UIImage systemImageNamed:@"gyroscope"] ? @"gyroscope" : @"rotate.right");
         return ([UIImage systemImageNamed:@"rectangle.portrait.rotate"] ? @"rectangle.portrait.rotate" : @"rotate.right");
     }
+    if ([cmd hasPrefix:@"settings "]) return @"gear";
     if ([cmd hasPrefix:@"flashlight "] || [cmd hasPrefix:@"flash "]) return @"flashlight.on.fill";
     if ([cmd hasPrefix:@"Lua "] || [cmd hasPrefix:@"lua_eval "] || [cmd hasPrefix:@"lua-eval "] || [cmd hasPrefix:@"lua "]) return @"scroll.fill";
     if ([cmd hasPrefix:@"spotify "]) return @"music.note";

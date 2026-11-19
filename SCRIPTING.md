@@ -114,6 +114,7 @@ A sequence is a **JSON array** of actions. Each action is either:
 | `flashlight toggle` | Toggle flashlight |
 | `rotate toggle` | Toggle rotation lock |
 | `orientation set <mode>` | Set screen orientation: `portrait`, `landscape left`, `landscape right`, `portrait upside down`, `auto` |
+| `settings <label>` | Open the Settings app on that page, for example `settings Wi-Fi` or `settings Sileo` |
 | `vibration silent-toggle` | Toggle silent vibration |
 | `vibration ring-toggle` | Toggle ring vibration |
 
