@@ -20,6 +20,7 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
     RCAdvancedSettingsSectionLayout,
     RCAdvancedSettingsSectionButtons,
     RCAdvancedSettingsSectionSecurity,
+    RCAdvancedSettingsSectionDeveloper,
     RCAdvancedSettingsSectionCount,
 };
 
@@ -113,7 +114,8 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
     else if (section == RCAdvancedSettingsSectionOptions) title = @"Options";
     else if (section == RCAdvancedSettingsSectionLayout) title = @"Layout";
     else if (section == RCAdvancedSettingsSectionButtons) title = @"Buttons";
-    else title = @"Security";
+    else if (section == RCAdvancedSettingsSectionSecurity) title = @"Security";
+    else title = @"Developer";
     
     UIView *headerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, tableView.bounds.size.width, 40)];
     UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(20, 15, tableView.bounds.size.width - 40, 20)];
@@ -145,6 +147,8 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
         return @"How long a press waits for the next one before it counts. A shorter time responds sooner and needs quicker presses.";
     } else if (section == RCAdvancedSettingsSectionSecurity) {
         return @"Lets scripts, terminals and other tools call the root helper directly. Any app on this device can then get root, so leave it off unless you need it.";
+    } else if (section == RCAdvancedSettingsSectionDeveloper) {
+        return @"Unlocks developer actions in the action picker, such as annotating a screenshot and sending it to your editor.";
     }
     return nil;
 }
@@ -155,6 +159,7 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
     if (section == RCAdvancedSettingsSectionButtons) return (NSInteger)[self timingRows].count;
     if (section == RCAdvancedSettingsSectionLayout) return (NSInteger)RCLayoutScreens().count;
     if (section == RCAdvancedSettingsSectionSecurity) return 1;
+    if (section == RCAdvancedSettingsSectionDeveloper) return 1;
     return 5; // Excluded Apps, Wrap Long Names, Logging, Freeze Lists During Gestures, Only Unlock Out of Pocket
 }
 
@@ -266,6 +271,13 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
         [directRootSwitch addTarget:self action:@selector(directRootToggleChanged:) forControlEvents:UIControlEventValueChanged];
         cell.accessoryView = directRootSwitch;
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
+    } else if (indexPath.section == RCAdvancedSettingsSectionDeveloper) {
+        cell.textLabel.text = @"Developer Mode";
+        UISwitch *devSwitch = [[UISwitch alloc] init];
+        devSwitch.on = cm.developerMode;
+        [devSwitch addTarget:self action:@selector(developerModeToggleChanged:) forControlEvents:UIControlEventValueChanged];
+        cell.accessoryView = devSwitch;
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
     }
     
     return cell;
@@ -361,6 +373,10 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
 
 - (void)directRootToggleChanged:(UISwitch *)sender {
     [RCConfigManager sharedManager].allowDirectRootHelper = sender.on;
+}
+
+- (void)developerModeToggleChanged:(UISwitch *)sender {
+    [RCConfigManager sharedManager].developerMode = sender.on;
 }
 - (void)toastsWakeScreenChanged:(UISwitch *)sender {
     [RCConfigManager sharedManager].toastsWakeScreen = sender.on;

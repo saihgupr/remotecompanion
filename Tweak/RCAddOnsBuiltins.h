@@ -27,6 +27,7 @@ static NSString *const kRCAOBuiltinPrefixes[] = {
     @"clear-notifications ",
     @"delay ",
     @"delete run history ",
+    @"dev-annotate ",
     @"dnd ",
     @"exec ",
     @"export config ",

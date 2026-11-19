@@ -490,6 +490,7 @@ UIImage *RCActionCategoryIcon(NSString *sectionTitle) {
             @"System": @[@"gearshape.fill", @"gear"],
             @"Integrations": @[@"link"],
             @"Scripting & Logic": @[@"chevron.left.forwardslash.chevron.right", @"curlybraces"],
+            @"Developer": @[@"hammer.fill", @"wrench.and.screwdriver.fill"],
             @"Add-ons": @[@"puzzlepiece.extension.fill", @"puzzlepiece.fill"],
         };
     });
