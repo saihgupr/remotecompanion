@@ -48,3 +48,7 @@ Tweak/layout/Library/Application Support/RemoteCompanion/site.webmanifest
 .slim/worktrees/
 .slim/worktrees.json
 # END parallel OpenCode lanes
+
+# Python bytecode
+__pycache__/
+*.pyc
