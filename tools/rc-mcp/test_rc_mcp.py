@@ -11,6 +11,8 @@ import select
 import subprocess
 import sys
 
+import rc_mcp  # in this folder: the module itself, for the checks that never start the server
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 SERVER = os.path.join(HERE, "rc_mcp.py")
 TIMEOUT = 20
@@ -171,6 +173,49 @@ def main():
         for row in rows:
             for field in ("description", "category", "example"):
                 assert row.get(field), "%s has no %s" % (row.get("command"), field)
+        checks += 1
+
+        # 9. quoted() makes a double-quoted shell argument, escaping its own quotes and backslashes
+        assert rc_mcp.quoted('a "b" c\\d') == '"a \\"b\\" c\\\\d"', \
+            "quoted should escape quotes and backslashes: %r" % rc_mcp.quoted('a "b" c\\d')
+        assert rc_mcp.quoted("a\nb") == '"a b"', "quoted should keep a newline on one line"
+        checks += 1
+
+        # 10. rc_command reports a failed command as an error, and still hints when nothing was said
+        saved_phones = os.environ.get("RC_PHONES")
+        os.environ["RC_PHONES"] = "test=127.0.0.1"
+        real_ssh = rc_mcp.ssh
+
+        def fake_ssh(code, out, err):
+            return lambda phone, command, timeout=60: (code, out, err)
+
+        try:
+            rc_mcp.ssh = fake_ssh(1, "", "No such command: nope")
+            try:
+                rc_mcp.t_rc_command({"command": "nope"})
+            except rc_mcp.ToolError as e:
+                assert str(e) == "No such command: nope", "a failing command should raise with its output: %s" % e
+            else:
+                raise AssertionError("t_rc_command should raise when ssh exits non-zero")
+            rc_mcp.ssh = fake_ssh(1, "", "")
+            try:
+                rc_mcp.t_rc_command({"command": "nope"})
+            except rc_mcp.ToolError as e:
+                assert str(e) == "Failed (exit 1)", "a silent failure should name the exit status: %s" % e
+            else:
+                raise AssertionError("t_rc_command should raise when ssh exits non-zero with no output")
+            rc_mcp.ssh = fake_ssh(0, "", "")
+            text = rc_mcp.t_rc_command({"command": "quiet"})
+            assert text.startswith("(no reply"), "an empty success should still hint: %s" % text
+            rc_mcp.ssh = fake_ssh(0, "WiFi ON", "")
+            assert rc_mcp.t_rc_command({"command": "wifi status"}) == "WiFi ON", \
+                "a successful command should return its reply"
+        finally:
+            rc_mcp.ssh = real_ssh
+            if saved_phones is None:
+                os.environ.pop("RC_PHONES", None)
+            else:
+                os.environ["RC_PHONES"] = saved_phones
         checks += 1
     finally:
         server.close()

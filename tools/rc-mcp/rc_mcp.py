@@ -24,6 +24,7 @@ import shlex
 import subprocess
 import sys
 import time
+import uuid
 from urllib.parse import quote, urlencode, urlsplit
 
 VERSION = "1.0.0"
@@ -71,12 +72,18 @@ def phone_for(name):
     return name
 
 
-def ssh_args(address, command):
-    """The ssh command line for one address"""
-    args = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
-            # One connection kept open between calls, so each call is quick
-            "-o", "ControlMaster=auto", "-o", "ControlPersist=120",
-            "-o", "ControlPath=" + os.path.join(os.path.expanduser("~"), ".ssh", "rc-mcp-%C")]
+def ssh_args(address, command, mux=True):
+    """The ssh command line for one address. mux False leaves the connection between calls out, for
+    when its control socket went stale."""
+    args = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8"]
+    if mux:
+        # One connection kept open between calls, so each call is quick
+        args += ["-o", "ControlMaster=auto", "-o", "ControlPersist=120",
+                 "-o", "ControlPath=" + os.path.join(os.path.expanduser("~"), ".ssh", "rc-mcp-%C")]
+    # Keepalives: a connection that died silently is dropped in about 30 s, not left to hang the call
+    args += ["-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=3"]
+    if not mux:
+        args += ["-o", "ControlMaster=no", "-o", "ControlPath=none"]
     if os.environ.get("RC_SSH_KEY"):
         args += ["-i", os.path.expanduser(os.environ["RC_SSH_KEY"]), "-o", "IdentitiesOnly=yes"]
     if os.environ.get("RC_SSH_PORT"):
@@ -94,6 +101,35 @@ def addresses_for(phone):
     return addresses
 
 
+def mux_trouble(err):
+    """Whether ssh's error is about the connection it keeps open between calls: a control socket left
+    behind by a respring or a reboot can refuse every call until the socket goes."""
+    text = err.lower()
+    return any(word in text for word in ("controlsocket", "control socket", "multiplex", "mux_client"))
+
+
+def ssh_once(address, command, data, timeout, mux=True):
+    """One ssh run against one address: (exit status, stdout, stderr), or None when it timed out"""
+    options = {"stdin": subprocess.DEVNULL} if data is None else {"input": data}
+    try:
+        p = subprocess.run(ssh_args(address, command, mux), capture_output=True, timeout=timeout, **options)
+    except subprocess.TimeoutExpired:
+        return None
+    return (p.returncode, p.stdout.decode("utf-8", "replace").rstrip("\n"),
+            p.stderr.decode("utf-8", "replace").rstrip("\n"))
+
+
+def ssh_attempts(address, command, data, timeout):
+    """One address's runs: the first, then once more without multiplexing when a stale control socket
+    was what failed. (exit status, stdout, stderr), or None when it timed out."""
+    mux = True
+    while True:
+        result = ssh_once(address, command, data, timeout, mux)
+        if result is None or not (result[0] == 255 and mux and mux_trouble(result[2])):
+            return result
+        mux = False
+
+
 def ssh(phone, command, timeout=60):
     """Runs a shell command on the phone; returns (exit status, stdout, stderr). A phone with several
     addresses is tried in turn (the one that answered last first), so a name that stopped resolving
@@ -101,17 +137,14 @@ def ssh(phone, command, timeout=60):
     addresses = addresses_for(phone)
     failures = []
     for address in addresses:
-        try:
-            p = subprocess.run(ssh_args(address, command), stdin=subprocess.DEVNULL,
-                               capture_output=True, timeout=timeout)
-        except subprocess.TimeoutExpired:
+        result = ssh_attempts(address, command, None, timeout)
+        if result is None:
             failures.append("%s (no answer in %d s)" % (address, timeout))
             continue
-        out = p.stdout.decode("utf-8", "replace").rstrip("\n")
-        err = p.stderr.decode("utf-8", "replace").rstrip("\n")
-        if p.returncode != 255:
+        code, out, err = result
+        if code != 255:
             _LAST_GOOD[phone] = address
-            return p.returncode, out, err
+            return code, out, err
         failures.append("%s (%s)" % (address, (err or "no answer").splitlines()[-1]))
     hint = ""
     if len(addresses) == 1:
@@ -125,17 +158,14 @@ def ssh_input(phone, command, data, timeout=60):
     addresses = addresses_for(phone)
     failures = []
     for address in addresses:
-        try:
-            p = subprocess.run(ssh_args(address, command), input=data,
-                               capture_output=True, timeout=timeout)
-        except subprocess.TimeoutExpired:
+        result = ssh_attempts(address, command, data, timeout)
+        if result is None:
             failures.append("%s (no answer in %d s)" % (address, timeout))
             continue
-        out = p.stdout.decode("utf-8", "replace").rstrip("\n")
-        err = p.stderr.decode("utf-8", "replace").rstrip("\n")
-        if p.returncode != 255:
+        code, out, err = result
+        if code != 255:
             _LAST_GOOD[phone] = address
-            return p.returncode, out, err
+            return code, out, err
         failures.append("%s (%s)" % (address, (err or "no answer").splitlines()[-1]))
     raise ToolError("Couldn't reach %s over SSH. Tried %s." % (phone, " and ".join(failures)))
 
@@ -155,7 +185,9 @@ def run(phone, command, timeout=60):
 
 
 def quoted(text):
-    return '"%s"' % str(text).replace("\n", " ")
+    """The text as a double-quoted shell argument: backslashes and double quotes escaped, so alert
+    text that holds quotes ("RC" Would Like to Send...) reaches the phone as written"""
+    return '"%s"' % str(text).replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")
 
 
 def number_arg(args, name, default, low, high):
@@ -666,16 +698,23 @@ def settle_steps():
     return rc("screen settle 3") + " >/dev/null"
 
 
+def shot_path():
+    """A path for one screenshot, different for every call: two looks at once must not write over
+    each other's file. Only letters, digits and dashes, so the shell never needs to quote it."""
+    return "%s-%d-%s" % (SHOT, os.getpid(), uuid.uuid4().hex)
+
+
 def capture(phone, scale, grid, settle):
     """The screen as a JPEG (base64) at `scale` of its points, with a grid every `grid` points
     when above 0, taken once the screen stops changing when `settle`. Returns (data, width, height)."""
+    path = shot_path()
     steps = [settle_steps()] if settle else []
-    steps.append(rc("screen capture %s.jpg %g 0.6%s" % (SHOT, scale, (" grid %g" % grid) if grid else "")))
-    steps.append("echo; base64 < %s.jpg | tr -d '\\n'; rm -f %s.jpg" % (SHOT, SHOT))
+    steps.append(rc("screen capture %s.jpg %g 0.6%s" % (path, scale, (" grid %g" % grid) if grid else "")))
+    steps.append("echo; base64 < %s.jpg | tr -d '\\n'; rm -f %s.jpg" % (path, path))
     code, out, err = ssh(phone, "; ".join(steps), timeout=40)
     lines = [l for l in out.splitlines() if l.strip()]
-    info = next((l for l in lines if l.startswith(SHOT + ".jpg") or l.startswith("Error")), "")
-    if code != 0 or not info.startswith(SHOT) or len(lines) < 2:
+    info = next((l for l in lines if l.startswith(path + ".jpg") or l.startswith("Error")), "")
+    if code != 0 or not info.startswith(path) or len(lines) < 2:
         raise ToolError("Couldn't take a screenshot: %s" % (info or err or out or "no reply"))
     width, height = (int(v) for v in info.split()[1].split("x"))
     return lines[-1].strip(), width, height
@@ -862,9 +901,11 @@ def t_wake(args):
 def t_rc_command(args):
     phone = phone_for(args.get("phone"))
     timeout = max(1.0, min(float(args.get("timeout", 60)), 120))
-    _, out, err = ssh(phone, rc(args["command"]), timeout=timeout)
+    code, out, err = ssh(phone, rc(args["command"]), timeout=timeout)
     _STATE.pop(phone, None)  # it may have locked, respringed or opened something
     text = "\n".join(t for t in (out, err) if t)
+    if code != 0:
+        raise ToolError(text or "Failed (exit %d)" % code)
     if text.strip():
         return text
     return ("(no reply: the command may not exist, or it may not print anything. Run rc_help <words> "
