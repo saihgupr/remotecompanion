@@ -175,6 +175,8 @@
 // Vibration settings, the way this iOS version's Settings shows them: one Haptics menu from
 // iOS 17 (over the same two on/off values), the two switches by their names before that
 + (BOOL)hasHomeButton;
+// Whether the Apple Watch app is installed, so Watch features make sense on this device
++ (BOOL)watchFeaturesAvailable;
 + (BOOL)usesHapticsMenu;
 + (NSString *)vibrationNameForSilentMode:(BOOL)silent;
 // A "shortcut:" action: its shortcut name, whether it runs silently (-i) and its text input (-p);

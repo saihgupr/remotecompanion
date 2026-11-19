@@ -3608,7 +3608,7 @@ const TRIGGER_SECTIONS = [
   { title: 'Multi-Finger Gestures',  id: 'multifinger', keys: ['trigger_two_finger_tap','trigger_two_finger_swipe_left','trigger_two_finger_swipe_right','trigger_two_finger_swipe_up','trigger_two_finger_swipe_down','trigger_two_finger_rotate_cw','trigger_two_finger_rotate_ccw','trigger_statusbar_two_finger_swipe_down','trigger_bottom_two_finger_swipe_up'] },
   { title: 'Home Button',            id: 'home',      keys: ['trigger_home_double_click','trigger_home_triple_click','trigger_home_quadruple_click','trigger_home_hold','trigger_home_power','touchid_tap','touchid_hold'] },
   { title: 'Ringer Switch',          id: 'ringer',    keys: ['trigger_ringer_mute','trigger_ringer_unmute','trigger_ringer_toggle'] },
-  { title: 'Apple Watch',            id: 'watch',     keys: ['trigger_watch_ping','trigger_watch_ping_hold'] },
+  { title: 'Apple Watch',            id: 'watch',     keys: ['trigger_watch_ping','trigger_watch_ping_hold','trigger_watch_connect','trigger_watch_disconnect','trigger_watch_face'] },
   { title: 'Device State',           id: 'status',    keys: [], prefix: 'trigger_device_', prefix2: 'trigger_media_', deletable: true },
   { title: 'Physical Orientation',   id: 'orientation', keys: ['trigger_device_orientation_portrait_up','trigger_device_orientation_landscape_left','trigger_device_orientation_landscape_right','trigger_device_orientation_portrait_upside_down'] },
   { title: 'Motion Gestures',        id: 'motion',    keys: ['shake'] },
@@ -3645,6 +3645,8 @@ const TRIGGER_NAMES = {
   trigger_edge_right_swipe_up:'Right Edge Swipe Up', trigger_edge_right_swipe_down:'Right Edge Swipe Down',
   trigger_ringer_mute:'Ringer Muted', trigger_ringer_unmute:'Ringer Unmuted', trigger_ringer_toggle:'Ringer Toggled',
   trigger_watch_ping:'Ping iPhone', trigger_watch_ping_hold:'Ping iPhone (Hold)',
+  trigger_watch_connect:'Watch Connected', trigger_watch_disconnect:'Watch Disconnected',
+  trigger_watch_face:'Watch Face: Any',
   trigger_bottombar_swipe_left:'Bottom Bar Swipe Left', trigger_bottombar_swipe_right:'Bottom Bar Swipe Right',
   trigger_bottom_swipe_up_left:'Bottom Swipe Up (Left)', trigger_bottom_swipe_up_center:'Bottom Swipe Up (Center)', trigger_bottom_swipe_up_right:'Bottom Swipe Up (Right)',
   trigger_statusbar_two_finger_swipe_down:'2-Finger Top Slide Down', trigger_bottom_two_finger_swipe_up:'2-Finger Bottom Slide Up',
@@ -3708,6 +3710,9 @@ const TRIGGER_ICONS = {
   trigger_ringer_toggle: { icon:'bell_badge_fill', cls:'icon-orange' },
   trigger_watch_ping:      { icon:'dot_radiowaves_left_right', cls:'icon-blue' },
   trigger_watch_ping_hold: { icon:'dot_radiowaves_left_right', cls:'icon-blue' },
+  trigger_watch_connect:   { icon:'dot_radiowaves_left_right', cls:'icon-green' },
+  trigger_watch_disconnect:{ icon:'dot_radiowaves_left_right', cls:'icon-orange' },
+  trigger_watch_face:      { icon:'timer', cls:'icon-blue' },
   trigger_device_lock:   { icon:'lock_fill',       cls:'icon-red' },
   trigger_device_unlock: { icon:'lock_open_fill',  cls:'icon-green' },
   trigger_power_connect:    { icon:'bolt_fill',       cls:'icon-green' },
@@ -3927,6 +3932,7 @@ function offIntegrationForCmd(action) {
 function iconForKey(key) {
   if (TRIGGER_ICONS[key]) return TRIGGER_ICONS[key];
   if (key.startsWith('trigger_cc_button_')) return { icon:'switch_2', cls:'icon-blue' };
+  if (key.startsWith('trigger_watch_face_')) return { icon:'timer', cls:'icon-blue' };
   if (key.startsWith('trigger_device_focus_on')) return { icon:'moon_fill', cls:'icon-indigo' };
   if (key.startsWith('trigger_device_focus_off')) return { icon:'moon', cls:'icon-indigo' };
   if (key.startsWith('nfc_'))        return { icon:'antenna_radiowaves_left_right', cls:'icon-cyan' };
@@ -3955,7 +3961,7 @@ function iconForKey(key) {
 // Created triggers (a tag, a network, a device, an app, a notification, a time, a topic) can
 // have a name of their own ("customName"); the built-in ones keep theirs, so they always say
 // what they are. As in the app.
-const RENAMEABLE_PREFIXES = ['nfc_', 'wifi_', 'bt_', 'output_', 'app_launch_', 'app_exit_', 'app_hold_', 'notif_', 'notify_', 'sched_', 'mqtt_', 'trigger_cc_button_'];
+const RENAMEABLE_PREFIXES = ['nfc_', 'wifi_', 'bt_', 'output_', 'app_launch_', 'app_exit_', 'app_hold_', 'notif_', 'notify_', 'sched_', 'mqtt_', 'trigger_cc_button_', 'trigger_watch_face_'];
 function canRenameTrigger(key) {
   return RENAMEABLE_PREFIXES.some(prefix => key.startsWith(prefix));
 }
@@ -3992,6 +3998,7 @@ function defaultNameForKey(key) {
   if (key.startsWith('trigger_cc_button_')) return `Control Center Button ${key.slice(18)}`;
   const t = config.triggers[key];
   if (t && t.name) return t.name;
+  if (key.startsWith('trigger_watch_face_')) return 'Watch Face Changed';
   if (key === 'trigger_device_focus_on') return 'Focus On: Any';
   if (key === 'trigger_device_focus_off') return 'Focus Off: Any';
   if (key.startsWith('trigger_device_focus_on_')) return `Focus On: ${key.slice(24)}`;
@@ -4058,6 +4065,11 @@ const CMD_NAMES = {
   'open control center':'Control Center',
   'ldrestart':'Soft Reboot','userspace-reboot':'Userspace Reboot','uicache':'Refresh Icon Cache',
   'low power on':'Low Power On','low power off':'Low Power Off','low power toggle':'Low Power Toggle',
+  'watch theater':'Watch Theater Mode Toggle','watch theater on':'Watch Theater Mode On','watch theater off':'Watch Theater Mode Off','watch theater toggle':'Watch Theater Mode Toggle',
+  'watch silent':'Watch Silent Mode Toggle','watch silent on':'Watch Silent Mode On','watch silent off':'Watch Silent Mode Off','watch silent toggle':'Watch Silent Mode Toggle',
+  'watch wake':'Watch Wake on Wrist Raise Toggle','watch wake on':'Watch Wake on Wrist Raise On','watch wake off':'Watch Wake on Wrist Raise Off','watch wake toggle':'Watch Wake on Wrist Raise Toggle',
+  'watch water':'Watch Water Lock Toggle','watch water on':'Watch Water Lock On','watch water off':'Watch Water Lock Off','watch water toggle':'Watch Water Lock Toggle',
+  'watch alwayson':'Watch Always On Toggle','watch alwayson on':'Watch Always On On','watch alwayson off':'Watch Always On Off','watch alwayson toggle':'Watch Always On Toggle',
   'autolock toggle':'Auto-Lock Toggle','autolock 30s':'Auto-Lock 30 Seconds','autolock 1m':'Auto-Lock 1 Minute','autolock 2m':'Auto-Lock 2 Minutes','autolock 3m':'Auto-Lock 3 Minutes','autolock 4m':'Auto-Lock 4 Minutes','autolock 5m':'Auto-Lock 5 Minutes','autolock never':'Auto-Lock Never (Off)','autolock off':'Auto-Lock Never (Off)',
   'anc on':'Noise Cancellation On','anc off':'Noise Cancellation Off','anc transparency':'Transparency Mode',
   'airplay disconnect':'Disconnect AirPlay',
@@ -4383,6 +4395,14 @@ function nameForCmd(cmd) {
   if (lowCmd.startsWith('focus on '))     return `Turn On ${cmd.slice(9)}`;
   if (lowCmd.startsWith('focus toggle ')) return `Toggle ${cmd.slice(13)}`;
   if (lowCmd.startsWith('airplay connect ')) return `AirPlay Connect ${cmd.slice(16)}`;
+  if (lowCmd.startsWith('watch face ')) {
+    let val = cmd.slice(11).trim();
+    if (val.toLowerCase() === 'next') return 'Next Watch Face';
+    if (val.toLowerCase() === 'prev' || val.toLowerCase() === 'previous') return 'Previous Watch Face';
+    const hash = val.indexOf(' # ');
+    if (hash >= 0) val = val.slice(hash + 3);
+    return val ? `Watch Face: ${val}` : 'Switch Watch Face';
+  }
   // "... saved" without a saved passcode only wakes the screen to the passcode screen
   const unlockKind = /^(unlock|lock[- ]toggle) saved$/.test(lowCmd) && 'unlock_passcode_saved' in serverCapabilities && !serverCapabilities.unlock_passcode_saved ? '(Ask for Passcode)' : '(Saved Passcode)';
   if (lowCmd.startsWith('unlock '))       return `Unlock Device ${unlockKind}`;
@@ -4585,6 +4605,7 @@ function iconForCmd(cmd) {
     'respring':'arrow_2_circlepath','safemode':'shield_slash_fill','safe-mode':'shield_slash_fill','siri':'mic_fill','accessibility shortcut':'person_crop_circle','home':'house_fill',
     'open control center':'gear',
     'low power on':'battery_25','low power off':'battery_100',
+    'watch theater':'eye_slash_fill','watch theater on':'eye_slash_fill','watch theater off':'eye_slash_fill','watch theater toggle':'eye_slash_fill',
     'autolock toggle':'timer','autolock 30s':'timer','autolock 1m':'timer','autolock 2m':'timer','autolock 3m':'timer','autolock 4m':'timer','autolock 5m':'timer','autolock never':'timer',
     'screenshot':'camera_viewfinder','haptic':'hand_raised_fill',
     'screenrecord':'record_circle_fill','screenrecord toggle':'record_circle_fill','screenrecord start':'record_circle_fill','screenrecord stop':'stop_circle_fill',
@@ -4624,6 +4645,12 @@ function iconForCmd(cmd) {
   if (lowCmd.startsWith('bt connect '))   return { icon:'link',            cls:'icon-indigo' };
   if (lowCmd.startsWith('focus '))        return { icon:'moon_circle_fill', cls:'icon-indigo' };
   if (lowCmd.startsWith('airplay connect ')) return { icon:'airplayvideo',     cls:'icon-blue' };
+  if (lowCmd === 'watch theater' || lowCmd.startsWith('watch theater ')) return { icon:'eye_slash_fill', cls:'icon-purple' };
+  if (lowCmd === 'watch silent' || lowCmd.startsWith('watch silent ')) return { icon:'bell_slash_fill', cls:'icon-red' };
+  if (lowCmd === 'watch wake' || lowCmd.startsWith('watch wake ')) return { icon:'hand_tap', cls:'icon-blue' };
+  if (lowCmd === 'watch water' || lowCmd.startsWith('watch water ')) return { icon:'lock_fill', cls:'icon-blue' };
+  if (lowCmd === 'watch alwayson' || lowCmd.startsWith('watch alwayson ')) return { icon:'sun_max_fill', cls:'icon-yellow' };
+  if (lowCmd.startsWith('watch face')) return { icon:'timer', cls:'icon-blue' };
   if (lowCmd.startsWith('unlock '))          return { icon:'lock_open_fill',    cls:'icon-dark' };
   if (lowCmd.startsWith('lock-toggle ') || lowCmd.startsWith('lock toggle ') || lowCmd === 'lock-toggle' || lowCmd === 'lock toggle') return { icon:'lock_fill', cls:'icon-dark' };
   if (lowCmd.startsWith('set-vol '))      return { icon:'slider_horizontal_3',  cls:'icon-blue' };
@@ -4711,6 +4738,14 @@ const ACTION_SECTIONS = [
     { name:'Auto-Lock (Display Sleep)', cmd:'autolock toggle', icon:'timer', is_toggle:true, keywords:'display sleep timeout screen time off autolock' },
     { name:'Timer…',            cmd:'__TIMER__',     icon:'timer', needs_input:true, keywords:'timer countdown clock alarm watch nap reminder start stop pause resume' },
   ]},
+  { title:'Apple Watch', actions:[
+    { name:'Theater Mode',       cmd:'watch theater toggle', icon:'eye_slash_fill', is_toggle:true, keywords:'watch theater theatre cinema mode silent display toggle' },
+    { name:'Silent Mode',        cmd:'watch silent toggle', icon:'bell_slash_fill', is_toggle:true, keywords:'watch silent mute sound vibrate toggle' },
+    { name:'Wake on Wrist Raise',cmd:'watch wake toggle', icon:'hand_tap', is_toggle:true, keywords:'watch wake wrist raise screen display toggle' },
+    { name:'Water Lock',         cmd:'watch water toggle', icon:'lock_fill', is_toggle:true, keywords:'watch water lock swim eject toggle' },
+    { name:'Always On Display',  cmd:'watch alwayson toggle', icon:'sun_max_fill', is_toggle:true, keywords:'watch always on display screen toggle' },
+    { name:'Switch Watch Face…', cmd:'__WATCH_FACE__', icon:'timer', needs_input:true, keywords:'watch face switch change cycle next prev' },
+  ]},
   { title:'Connectivity', actions:[
     { name:'Wi-Fi',             cmd:'wifi toggle',  icon:'wifi', is_toggle:true },
     { name:'Bluetooth',         cmd:'bluetooth toggle',icon:'bolt_horizontal_fill', is_toggle:true },
@@ -4792,12 +4827,16 @@ const CONDITION_DEFS = [
   { key:'variable', title:'Variable', icon:'function', section:'Variables' },
   { key:'bt_device', title:'Bluetooth Device Connected', icon:'headphones', section:'Connectivity', freeText:true, hint:'Device name:' },
   { key:'carplay',    title:'CarPlay', icon:'car_fill', section:'Connectivity', values:[{value:'CONNECTED',title:'Connected'},{value:'NOT_CONNECTED',title:'Not Connected'}] },
+  { key:'watch',      title:'Apple Watch', icon:'timer', section:'Connectivity', values:[{value:'CONNECTED',title:'Connected'},{value:'NOT_CONNECTED',title:'Not Connected'}] },
   { key:'cellular',   title:'Cellular Data', icon:'antenna_radiowaves_left_right', section:'Connectivity', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
   { key:'location',   title:'Location Services', icon:'location_fill', section:'Connectivity', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
   { key:'airplane',   title:'Airplane Mode', icon:'airplane', section:'Connectivity', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
 ];
 
 let serverCapabilities = { snapper: false, sneakycam: false, audiostream: false, audiohandoff: false };
+// The Apple Watch entries only exist when the phone has a Watch app. Before the
+// capabilities arrive the dictionary is empty, so the entries stay, as with home_button.
+function watchAvailable() { return !(typeof serverCapabilities !== 'undefined' && serverCapabilities.watch === false); }
 // ── Add-ons (ADDONS.md) ──────────────────────────────────────────────────────
 let addOnCatalog = [];
 // The add-on that keeps a variable for itself (its "variables": names or name starts), else null
@@ -5193,6 +5232,8 @@ function computeVisibleSections() {
       keys = allKeys.filter(k => ['trigger_device_','trigger_media_','trigger_power_','trigger_carplay_'].some(p => k.startsWith(p)) && !k.startsWith('trigger_device_orientation_'));
     } else if (sec.id === 'favorites') {
       keys = favs.filter(k => triggerIsAdded(k));
+    } else if (sec.id === 'watch') {
+      keys = (sec.keys || []).filter(k => triggerIsAdded(k)).concat(allKeys.filter(k => k.startsWith('trigger_watch_face_')));
     } else if (sec.dynamic) {
       keys = allKeys.filter(k => sectionMatches(sec, k));
     } else {
@@ -6023,6 +6064,11 @@ function parseToggleCmd(cmd) {
     { key:'low_power', name:'Low Power Mode', icon:'battery_25', prefixes:['low power ','lpm ','low power mode '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'] },
     { key:'autolock', name:'Auto-Lock', icon:'timer', prefixes:['autolock ','auto-lock ','display sleep ','display-sleep ','display timeout ','display time off '], suffixes:['toggle','30s','1m','2m','3m','4m','5m','never'], displaySuffixes:['Toggle (Never / Previous)','30 Seconds','1 Minute','2 Minutes','3 Minutes','4 Minutes','5 Minutes','Never (Off)'], exactMatches: { 'autolock':'toggle','auto-lock':'toggle','display sleep':'toggle','display sleep off':'never','display time off':'never','autolock off':'never','auto-lock off':'never' } },
     { key:'dnd', name:'Do Not Disturb', icon:'moon_circle_fill', prefixes:['dnd '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'] },
+    { key:'watch_theater', name:'Watch Theater Mode', icon:'eye_slash_fill', prefixes:['watch theater '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'], exactMatches: { 'watch theater':'toggle' } },
+    { key:'watch_silent', name:'Watch Silent Mode', icon:'bell_slash_fill', prefixes:['watch silent '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'], exactMatches: { 'watch silent':'toggle' } },
+    { key:'watch_wake', name:'Watch Wake on Wrist Raise', icon:'hand_tap', prefixes:['watch wake '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'], exactMatches: { 'watch wake':'toggle' } },
+    { key:'watch_water', name:'Watch Water Lock', icon:'lock_fill', prefixes:['watch water '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'], exactMatches: { 'watch water':'toggle' } },
+    { key:'watch_alwayson', name:'Watch Always On', icon:'sun_max_fill', prefixes:['watch alwayson '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'], exactMatches: { 'watch alwayson':'toggle' } },
     { key:'wifi', name:'Wi-Fi', icon:'wifi', prefixes:['wifi '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'] },
     { key:'cellular', name:'Cellular Data', icon:'antenna_radiowaves_left_right', prefixes:['cellular ','cell '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'] },
     { key:'bluetooth', name:'Bluetooth', icon:'bolt_horizontal_fill', prefixes:['bluetooth ','bt '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'] },
@@ -7902,6 +7948,7 @@ function renderPickerCategoryBar() {
   mkChip('All', null);
   ACTION_SECTIONS.forEach(sec => {
     if (sec.title === 'Developer' && !config.developerMode) return;
+    if (sec.title === 'Apple Watch' && !watchAvailable()) return;
     mkChip(sec.title, sec.title);
   });
 }
@@ -7960,6 +8007,8 @@ function _pickerBackdropClick(e) {
 // actions only when that tweak / app is installed. Shared by the picker and Settings > Banners.
 function pickerActionAvailable(sec, a) {
   if (sec.title === 'Developer') return !!config.developerMode;
+  // The Apple Watch entries only exist where the Watch app is installed
+  if (sec.title === 'Apple Watch') return watchAvailable();
   if (sec.title !== 'Integrations') return true;
   if (a.cmd === '__HA_PICKER__') return !!config.haEnabled;
   if (a.cmd === '__KM_TRIGGER__') return !!config.kmEnabled;
@@ -8019,9 +8068,9 @@ function renderPickerSections() {
     return;
   }
 
-  const sections = g_pickerCategory
+  const sections = (g_pickerCategory
     ? ACTION_SECTIONS.filter(sec => sec.title === g_pickerCategory)
-    : ACTION_SECTIONS;
+    : ACTION_SECTIONS).filter(sec => sec.title !== 'Apple Watch' || watchAvailable());
 
   sections.forEach(sec => {
     // Searching finds an add-on's actions themselves, in place of its row
@@ -8111,6 +8160,8 @@ function selectPickerAction(act) {
     showDialog('Connect AirPlay', 'AirPlay Receiver name:', '', 'Add', val => {
       if (val) addActionToCurrent(`airplay connect ${val}`);
     });
+  } else if (c === '__WATCH_FACE__') {
+    promptWatchFacePicker();
   } else if (c === '__IF_CONDITION__') {
     condPickerNewType = 'if';
     openCondPicker(null);
@@ -8188,6 +8239,55 @@ function selectPickerAction(act) {
   } else {
     addActionToCurrent(c);
   }
+}
+
+async function promptWatchFacePicker() {
+  const buttons = [
+    { header: 'Cycle' },
+    { label: 'Next Watch Face', action() { addActionToCurrent('watch face next'); } },
+    { label: 'Previous Watch Face', action() { addActionToCurrent('watch face prev'); } },
+  ];
+  try {
+    const res = await sendCommand('watch faces');
+    if (res && res.ok) {
+      const text = await res.text();
+      const lines = text.split('\n').map(l => l.trimEnd()).filter(Boolean);
+      const faces = [];
+      for (const line of lines) {
+        if (line.startsWith('Error:') || line.startsWith('No Watch faces')) continue;
+        const isCurrent = line.startsWith('* ');
+        let raw = line.slice(2).trim();
+        let name = raw, target = raw;
+        const open = raw.lastIndexOf(' [');
+        if (open >= 0 && raw.endsWith(']')) {
+          name = raw.slice(0, open).trim();
+          const uid = raw.slice(open + 2, -1);
+          target = `${uid} # ${name}`;
+        }
+        if (name) faces.push({ name, target, isCurrent });
+      }
+      if (faces.length) {
+        buttons.push({ header: 'Watch Faces' });
+        for (const f of faces) {
+          buttons.push({
+            label: f.isCurrent ? `${f.name} (Current)` : f.name,
+            action() { addActionToCurrent(`watch face ${f.target}`); }
+          });
+        }
+      }
+    }
+  } catch (e) {}
+  buttons.push({ header: 'Other' });
+  buttons.push({
+    label: 'Enter Name…',
+    action() {
+      showDialog('Switch Watch Face', 'Watch face name or 1-based index:', '', 'Add', val => {
+        const name = (val || '').trim();
+        if (name) addActionToCurrent(`watch face ${name}`);
+      });
+    }
+  });
+  showSheet('Switch Watch Face', buttons);
 }
 
 function promptCameraPicker(isVideo) {
@@ -8303,7 +8403,7 @@ function saveTimeCondDialog() {
 // ── Condition picker (mirrors iOS RCConditionPickerViewController: grouped, ──
 // searchable sections; tapping a condition expands its options inline beneath it)
 const COND_SECTION_ORDER = ['Time', 'Device', 'Power', 'Sound', 'Connectivity', 'Variables', 'Other', 'Add-ons'];
-function allCondDefs() { return CONDITION_DEFS.concat(addOnConditionDefs); }
+function allCondDefs() { return CONDITION_DEFS.filter(d => d.key !== 'watch' || watchAvailable()).concat(addOnConditionDefs); }
 const COND_DAY_CODES = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
 const COND_DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 let condPickerEditIdx = null;
@@ -10833,6 +10933,7 @@ const BANNER_PLACEHOLDERS = {
   '__BT_CONNECT__': ['bt connect ', 'bluetooth connect '],
   '__BT_DISCONNECT__': ['bt disconnect ', 'bluetooth disconnect '],
   '__AIRPLAY_CONNECT__': ['airplay connect '],
+  '__WATCH_FACE__': ['watch face '],
   '__FOCUS__': ['focus on ', 'focus toggle ', 'focus off'],
   '__PLAY_GESTURE__': ['gesture play ', 'gesture play-latest'],
   '__OPEN_APP__': ['uiopen '],
@@ -11193,6 +11294,62 @@ function promptControlCenterTrigger() {
   });
 }
 
+async function promptWatchFaceTrigger() {
+  if (!watchAvailable()) return;
+  const buttons = [
+    {
+      label: 'Any Watch Face',
+      action() {
+        const key = 'trigger_watch_face';
+        if (!config.triggers[key]) {
+          config.triggers[key] = { enabled: true, actions: [], name: 'Watch Face: Any' };
+          saveConfig();
+        }
+        renderAll();
+        openActionsPanel(key);
+      }
+    }
+  ];
+  try {
+    const res = await sendCommand('watch faces');
+    if (res && res.ok) {
+      const text = await res.text();
+      const lines = text.split('\n').map(l => l.trimEnd()).filter(Boolean);
+      const faces = [];
+      for (const line of lines) {
+        if (line.startsWith('Error:') || line.startsWith('No Watch faces')) continue;
+        const isCurrent = line.startsWith('* ');
+        let raw = line.slice(2).trim();
+        let name = raw, uid = raw;
+        const open = raw.lastIndexOf(' [');
+        if (open >= 0 && raw.endsWith(']')) {
+          name = raw.slice(0, open).trim();
+          uid = raw.slice(open + 2, -1);
+        }
+        if (name && uid) faces.push({ name, uid, isCurrent });
+      }
+      if (faces.length) {
+        buttons.push({ header: 'Watch Faces' });
+        for (const f of faces) {
+          buttons.push({
+            label: f.isCurrent ? `${f.name} (Current)` : f.name,
+            action() {
+              const key = `trigger_watch_face_${f.uid}`;
+              if (!config.triggers[key]) {
+                config.triggers[key] = { enabled: true, actions: [], name: `Watch Face: ${f.name}` };
+                saveConfig();
+              }
+              renderAll();
+              openActionsPanel(key);
+            }
+          });
+        }
+      }
+    }
+  } catch (e) {}
+  showSheet('Watch Face Trigger', buttons);
+}
+
 function promptFocusTrigger() {
   showSheet('Focus', [
     { label: 'Turns On', action: () => promptFocusName('on') },
@@ -11299,6 +11456,7 @@ function showAddTriggerSheet() {
     { label: 'Audio Output Trigger', action: () => promptAudioOutputTrigger() },
     { label: 'Control Center Button', action: () => promptControlCenterTrigger() },
     { label: 'Focus Trigger', action: () => promptFocusTrigger() },
+    ...(watchAvailable() ? [{ label: 'Watch Face Trigger', action: () => promptWatchFaceTrigger() }] : []),
     { label: 'Notification Trigger', action: () => promptNotifTrigger() },
     { label: 'App Launch Trigger', action: () => promptAppLaunchPicker() },
     { label: 'App Exit Trigger', action: () => promptAppLaunchPicker(null, 'exit') },
@@ -11328,7 +11486,7 @@ const BUILT_IN_TRIGGER_GROUPS = [
   { title: 'Physical Orientation', keys: ['trigger_device_orientation_portrait_up','trigger_device_orientation_landscape_left','trigger_device_orientation_landscape_right','trigger_device_orientation_portrait_upside_down'] },
   { title: 'Media', keys: ['trigger_media_play','trigger_media_pause','trigger_media_track_change'] },
   { title: 'Calls', keys: ['trigger_device_call_incoming','trigger_device_call_start','trigger_device_call_end'] },
-  { title: 'Apple Watch', keys: ['trigger_watch_ping','trigger_watch_ping_hold'] },
+  { title: 'Apple Watch', keys: ['trigger_watch_ping','trigger_watch_ping_hold','trigger_watch_connect','trigger_watch_disconnect'] },
 ];
 
 function addBuiltInTrigger(key) {
@@ -11346,6 +11504,7 @@ function showBuiltInTriggerSheet() {
   const rows = [];
   BUILT_IN_TRIGGER_GROUPS.forEach(group => {
     if (group.title === 'Home Button' && typeof serverCapabilities !== 'undefined' && serverCapabilities.home_button === false) return;
+    if (group.title === 'Apple Watch' && !watchAvailable()) return;
     rows.push({ header: group.title });
     group.keys.forEach(key => {
       rows.push({ label: `${defaultNameForKey(key)}${triggerIsAdded(key) ? ' ✓' : ''}`, action: () => addBuiltInTrigger(key) });

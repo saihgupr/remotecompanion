@@ -9,6 +9,7 @@
 #import <sys/sysctl.h>
 #import "RCAddOnCatalog.h"
 #import <LocalAuthentication/LocalAuthentication.h>
+#import <objc/message.h>
 #import <notify.h>
 #import "RCServerClient.h"
 #include <fcntl.h>
@@ -437,6 +438,7 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
             @"trigger_ringer_mute", @"trigger_ringer_unmute", @"trigger_ringer_toggle",
             // Apple Watch
             @"trigger_watch_ping", @"trigger_watch_ping_hold",
+            @"trigger_watch_connect", @"trigger_watch_disconnect",
             // Motion Gestures
             @"shake",
             // Device State
@@ -1193,7 +1195,7 @@ static NSString *RCActionCommand(id item) {
 // topic) can have a name of their own; the built-in ones (Power Double Click...) keep theirs, so
 // they always say what they are
 + (BOOL)canRenameTrigger:(NSString *)triggerKey {
-    for (NSString *prefix in @[@"nfc_", @"wifi_", @"bt_", @"output_", @"app_launch_", @"app_exit_", @"app_hold_", @"notif_", @"notify_", @"sched_", @"mqtt_", @"notiftap_", @"notifbtn_", @"trigger_cc_button_"]) {
+    for (NSString *prefix in @[@"nfc_", @"wifi_", @"bt_", @"output_", @"app_launch_", @"app_exit_", @"app_hold_", @"notif_", @"notify_", @"sched_", @"mqtt_", @"notiftap_", @"notifbtn_", @"trigger_cc_button_", @"trigger_watch_face_"]) {
         if ([triggerKey hasPrefix:prefix]) return YES;
     }
     return NO;
@@ -1299,6 +1301,9 @@ static NSString *RCActionCommand(id item) {
         @"trigger_ringer_toggle": @"Ringer Toggled (Any Change)",
         @"trigger_watch_ping": @"Ping iPhone",
         @"trigger_watch_ping_hold": @"Ping iPhone (Hold)",
+        @"trigger_watch_connect": @"Watch Connected",
+        @"trigger_watch_disconnect": @"Watch Disconnected",
+        @"trigger_watch_face": @"Watch Face: Any",
         @"trigger_bottombar_swipe_left": @"Bottom Bar Swipe Left",
         @"trigger_bottombar_swipe_right": @"Bottom Bar Swipe Right",
         @"trigger_bottom_swipe_up_left": @"Bottom Swipe Up (Left)",
@@ -1306,6 +1311,10 @@ static NSString *RCActionCommand(id item) {
         @"trigger_bottom_swipe_up_right": @"Bottom Swipe Up (Right)"
     };
     
+    if ([triggerKey hasPrefix:@"trigger_watch_face_"]) {
+        return _config[@"triggers"][triggerKey][@"name"] ?: @"Watch Face Changed";
+    }
+
     if ([triggerKey hasPrefix:@"trigger_device_focus_"]) {
         return _config[@"triggers"][triggerKey][@"name"] ?: triggerKey;
     }
@@ -1942,6 +1951,26 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         @"autolock 5m": @"Auto-Lock 5 Minutes",
         @"autolock never": @"Auto-Lock Never (Off)",
         @"autolock off": @"Auto-Lock Never (Off)",
+        @"watch theater": @"Watch Theater Mode Toggle",
+        @"watch theater on": @"Watch Theater Mode On",
+        @"watch theater off": @"Watch Theater Mode Off",
+        @"watch theater toggle": @"Watch Theater Mode Toggle",
+        @"watch silent": @"Watch Silent Mode Toggle",
+        @"watch silent on": @"Watch Silent Mode On",
+        @"watch silent off": @"Watch Silent Mode Off",
+        @"watch silent toggle": @"Watch Silent Mode Toggle",
+        @"watch wake": @"Watch Wake on Wrist Raise Toggle",
+        @"watch wake on": @"Watch Wake on Wrist Raise On",
+        @"watch wake off": @"Watch Wake on Wrist Raise Off",
+        @"watch wake toggle": @"Watch Wake on Wrist Raise Toggle",
+        @"watch water": @"Watch Water Lock Toggle",
+        @"watch water on": @"Watch Water Lock On",
+        @"watch water off": @"Watch Water Lock Off",
+        @"watch water toggle": @"Watch Water Lock Toggle",
+        @"watch alwayson": @"Watch Always On Toggle",
+        @"watch alwayson on": @"Watch Always On On",
+        @"watch alwayson off": @"Watch Always On Off",
+        @"watch alwayson toggle": @"Watch Always On Toggle",
         @"mute toggle": @"Mute Toggle",
         @"mute on": @"Mute On",
         @"mute off": @"Mute Off",
@@ -2133,6 +2162,16 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
             result = [NSString stringWithFormat:@"Connect %@", val];
         } else if ([cmd hasPrefix:@"airplay disconnect"]) {
             result = @"Disconnect Airplay";
+        } else if ([cmd hasPrefix:@"watch face "]) {
+            NSString *val = [[originalCmd substringFromIndex:11] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            NSString *lowVal = [val lowercaseString];
+            if ([lowVal isEqualToString:@"next"]) result = @"Next Watch Face";
+            else if ([lowVal isEqualToString:@"prev"] || [lowVal isEqualToString:@"previous"]) result = @"Previous Watch Face";
+            else {
+                NSRange hash = [val rangeOfString:@" # "];
+                if (hash.location != NSNotFound) val = [val substringFromIndex:NSMaxRange(hash)];
+                result = val.length ? [NSString stringWithFormat:@"Watch Face: %@", val] : @"Switch Watch Face";
+            }
         } else if ([cmd hasPrefix:@"set-vol "]) {
             result = [NSString stringWithFormat:@"Set Volume %@", [cmd substringFromIndex:8]];
         } else if ([cmd hasPrefix:@"ringer volume "]) {
@@ -2439,6 +2478,24 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
     if ([cmd hasPrefix:@"bt connect "] || [cmd hasPrefix:@"bluetooth connect "]) return @"link";
     if ([cmd hasPrefix:@"bt disconnect "] || [cmd hasPrefix:@"bluetooth disconnect "]) return @"xmark.circle";
     if ([cmd hasPrefix:@"airplay connect "]) return @"airplayaudio";
+    if ([cmd isEqualToString:@"watch theater"] || [cmd hasPrefix:@"watch theater "]) {
+        if ([cmd hasSuffix:@" off"]) return ([UIImage systemImageNamed:@"theatermasks"] ? @"theatermasks" : @"applewatch");
+        return ([UIImage systemImageNamed:@"theatermasks.fill"] ? @"theatermasks.fill" : @"applewatch");
+    }
+    if ([cmd isEqualToString:@"watch silent"] || [cmd hasPrefix:@"watch silent "]) {
+        return [cmd hasSuffix:@" off"] ? @"bell" : @"bell.slash.fill";
+    }
+    if ([cmd isEqualToString:@"watch wake"] || [cmd hasPrefix:@"watch wake "]) {
+        return [cmd hasSuffix:@" off"] ? @"hand.raised" : @"hand.raised.fill";
+    }
+    if ([cmd isEqualToString:@"watch water"] || [cmd hasPrefix:@"watch water "]) {
+        NSString *sym = [cmd hasSuffix:@" off"] ? @"drop" : @"drop.fill";
+        return ([UIImage systemImageNamed:sym] ? sym : @"applewatch");
+    }
+    if ([cmd isEqualToString:@"watch alwayson"] || [cmd hasPrefix:@"watch alwayson "]) {
+        return [cmd hasSuffix:@" off"] ? @"sun.max" : @"sun.max.fill";
+    }
+    if ([cmd hasPrefix:@"watch face"]) return ([UIImage systemImageNamed:@"applewatch.watchface"] ? @"applewatch.watchface" : @"applewatch");
     if ([cmd hasPrefix:@"focus "]) return @"moon.circle";
     if ([cmd hasPrefix:@"shortcut:"]) return @"wand.and.stars";
     if ([cmd hasPrefix:@"set-vol "]) return @"slider.horizontal.3";
@@ -2558,6 +2615,26 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         @"low power mode on": @"battery.25",
         @"low power mode off": @"battery.100",
         @"low power mode toggle": @"battery.25",
+        @"watch theater": ([UIImage systemImageNamed:@"theatermasks.fill"] ? @"theatermasks.fill" : @"applewatch"),
+        @"watch theater on": ([UIImage systemImageNamed:@"theatermasks.fill"] ? @"theatermasks.fill" : @"applewatch"),
+        @"watch theater off": ([UIImage systemImageNamed:@"theatermasks"] ? @"theatermasks" : @"applewatch"),
+        @"watch theater toggle": ([UIImage systemImageNamed:@"theatermasks.fill"] ? @"theatermasks.fill" : @"applewatch"),
+        @"watch silent": @"bell.slash.fill",
+        @"watch silent on": @"bell.slash.fill",
+        @"watch silent off": @"bell",
+        @"watch silent toggle": @"bell.slash.fill",
+        @"watch wake": @"hand.raised.fill",
+        @"watch wake on": @"hand.raised.fill",
+        @"watch wake off": @"hand.raised",
+        @"watch wake toggle": @"hand.raised.fill",
+        @"watch water": ([UIImage systemImageNamed:@"drop.fill"] ? @"drop.fill" : @"applewatch"),
+        @"watch water on": ([UIImage systemImageNamed:@"drop.fill"] ? @"drop.fill" : @"applewatch"),
+        @"watch water off": ([UIImage systemImageNamed:@"drop"] ? @"drop" : @"applewatch"),
+        @"watch water toggle": ([UIImage systemImageNamed:@"drop.fill"] ? @"drop.fill" : @"applewatch"),
+        @"watch alwayson": @"sun.max.fill",
+        @"watch alwayson on": @"sun.max.fill",
+        @"watch alwayson off": @"sun.max",
+        @"watch alwayson toggle": @"sun.max.fill",
         @"anc on": @"ear.badge.checkmark",
         @"anc off": @"ear",
         @"anc transparency": @"waveform.circle.fill",
@@ -2645,6 +2722,35 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         hasHomeButton = context.biometryType != LABiometryTypeFaceID;
     });
     return hasHomeButton;
+}
+
+// Answers whether the Apple Watch app (Bridge) is installed, so Watch features make sense on
+// this device: never on iPad, and otherwise wherever the app can be found
++ (BOOL)watchFeaturesAvailable {
+    static BOOL available;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        if ([UIDevice currentDevice].userInterfaceIdiom == UIUserInterfaceIdiomPad) return;
+        if ([[NSFileManager defaultManager] fileExistsAtPath:@"/Applications/Bridge.app"]) {
+            available = YES;
+            return;
+        }
+        Class workspaceClass = objc_getClass("LSApplicationWorkspace");
+        SEL defaultWorkspace = NSSelectorFromString(@"defaultWorkspace");
+        id workspace = [workspaceClass respondsToSelector:defaultWorkspace] ? ((id (*)(id, SEL))objc_msgSend)(workspaceClass, defaultWorkspace) : nil;
+        SEL isInstalled = NSSelectorFromString(@"applicationIsInstalled:");
+        if ([workspace respondsToSelector:isInstalled]) {
+            available = ((BOOL (*)(id, SEL, id))objc_msgSend)(workspace, isInstalled, @"com.apple.Bridge");
+        }
+        if (!available) {
+            SEL appsForBundle = NSSelectorFromString(@"applicationsForBundleID:");
+            if ([workspace respondsToSelector:appsForBundle]) {
+                NSArray *apps = ((id (*)(id, SEL, id))objc_msgSend)(workspace, appsForBundle, @"com.apple.Bridge");
+                available = apps.count > 0;
+            }
+        }
+    });
+    return available;
 }
 
 + (BOOL)usesHapticsMenu {
@@ -2772,6 +2878,61 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
                 @"display time off": @"never",
                 @"autolock off": @"never",
                 @"auto-lock off": @"never"
+            }
+        },
+        @{
+            @"key": @"watch_theater",
+            @"name": @"Watch Theater Mode",
+            @"icon": ([UIImage systemImageNamed:@"theatermasks.fill"] ? @"theatermasks.fill" : @"applewatch"),
+            @"prefixes": @[@"watch theater "],
+            @"suffixes": @[@"on", @"off", @"toggle"],
+            @"displaySuffixes": @[@"On", @"Off", @"Toggle"],
+            @"exactMatches": @{
+                @"watch theater": @"toggle"
+            }
+        },
+        @{
+            @"key": @"watch_silent",
+            @"name": @"Watch Silent Mode",
+            @"icon": @"bell.slash.fill",
+            @"prefixes": @[@"watch silent "],
+            @"suffixes": @[@"on", @"off", @"toggle"],
+            @"displaySuffixes": @[@"On", @"Off", @"Toggle"],
+            @"exactMatches": @{
+                @"watch silent": @"toggle"
+            }
+        },
+        @{
+            @"key": @"watch_wake",
+            @"name": @"Watch Wake on Wrist Raise",
+            @"icon": @"hand.raised.fill",
+            @"prefixes": @[@"watch wake "],
+            @"suffixes": @[@"on", @"off", @"toggle"],
+            @"displaySuffixes": @[@"On", @"Off", @"Toggle"],
+            @"exactMatches": @{
+                @"watch wake": @"toggle"
+            }
+        },
+        @{
+            @"key": @"watch_water",
+            @"name": @"Watch Water Lock",
+            @"icon": ([UIImage systemImageNamed:@"drop.fill"] ? @"drop.fill" : @"applewatch"),
+            @"prefixes": @[@"watch water "],
+            @"suffixes": @[@"on", @"off", @"toggle"],
+            @"displaySuffixes": @[@"On", @"Off", @"Toggle"],
+            @"exactMatches": @{
+                @"watch water": @"toggle"
+            }
+        },
+        @{
+            @"key": @"watch_alwayson",
+            @"name": @"Watch Always On",
+            @"icon": @"sun.max.fill",
+            @"prefixes": @[@"watch alwayson "],
+            @"suffixes": @[@"on", @"off", @"toggle"],
+            @"displaySuffixes": @[@"On", @"Off", @"Toggle"],
+            @"exactMatches": @{
+                @"watch alwayson": @"toggle"
             }
         },
         @{

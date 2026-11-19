@@ -1920,6 +1920,8 @@ static BOOL rc_notify_answer(NSString *identifier, NSString *response) {
 static int send_notification(RCNotifyCommand *notify, NSString *identifier, BOOL sync) {
     NSMutableArray *args = [NSMutableArray arrayWithObjects:(notify.title.length ? notify.title : @"RemoteCompanion"), (notify.message ?: @""), nil];
     if (notify.urgent) [args addObject:@"--urgent"];
+    if (notify.watchMode == RCNotifyWatchOnly) [args addObject:@"--watch-only"];
+    else if (notify.watchMode == RCNotifyWatchAlso) [args addObjectsFromArray:@[@"--watch", @"always"]];
     if (notify.tapID.length) [args addObjectsFromArray:@[@"--tap", notify.tapID]];
     for (NSDictionary *button in notify.buttons) {
         NSMutableArray *flags = [NSMutableArray array];
@@ -2557,6 +2559,8 @@ static void rc_note_cc_buttons_change(NSDictionary *config) {
         [[NSNotificationCenter defaultCenter] postNotificationName:@"com.saihgupr.remotecompanion.ccbutton.refresh" object:nil];
     });
 }
+static void rc_watch_face_refresh_observer(NSDictionary *config);
+static void rc_watch_sync_observing(NSDictionary *config);
 
 static void load_trigger_config() {
     @autoreleasepool {
@@ -2602,6 +2606,8 @@ static void load_trigger_config() {
                 rc_note_cc_buttons_change(newConfig);
                 // A triple press binding may have changed: tell iOS whether its own shortcut is on
                 dispatch_async(dispatch_get_main_queue(), ^{ RC_RefreshAXTriplePress(); });
+                rc_watch_face_refresh_observer(newConfig);
+                rc_watch_sync_observing(newConfig);
             } else {
                 SRLogMin(@"Failed to parse config at %@", path);
             }
@@ -2955,8 +2961,8 @@ static BOOL rc_is_rc_notification(id request) {
     return [request respondsToSelector:@selector(sectionIdentifier)] && [[request sectionIdentifier] isEqual:@"com.saihgupr.remotecompanion"];
 }
 
-// The tap ID an RC notification carries (notify ... --tap ID), or nil
-static NSString *rc_notification_tap_id(id request) {
+// The userInfo carried by an RC notification (from UNNotificationContent or BBBulletin context)
+static NSDictionary *rc_notification_user_info(id request) {
     NSDictionary *info = nil;
     if ([request respondsToSelector:@selector(userNotification)]) {
         id note = [request userNotification];
@@ -2968,8 +2974,18 @@ static NSString *rc_notification_tap_id(id request) {
         id context = [request context];
         info = [context isKindOfClass:[NSDictionary class]] ? context[@"userInfo"] : nil;
     }
-    id tap = [info isKindOfClass:[NSDictionary class]] ? info[@"rcTap"] : nil;
+    return [info isKindOfClass:[NSDictionary class]] ? info : nil;
+}
+
+// The tap ID an RC notification carries (notify ... --tap ID), or nil
+static NSString *rc_notification_tap_id(id request) {
+    id tap = rc_notification_user_info(request)[@"rcTap"];
     return [tap isKindOfClass:[NSString class]] && [tap length] ? tap : nil;
+}
+
+static NSString *rc_notification_watch_mode(id request) {
+    id mode = rc_notification_user_info(request)[@"rcWatch"];
+    return [mode isKindOfClass:[NSString class]] && [mode length] ? mode : nil;
 }
 
 static NSString *rc_notification_identifier(id request) {
@@ -3016,8 +3032,19 @@ static NSString *rc_tracked_request_key(id request) {
 }
 
 %hook NCNotificationDispatcher
+- (BOOL)_shouldPostNotificationRequest:(id)request {
+    if (rc_is_rc_notification(request) && [rc_notification_watch_mode(request) isEqualToString:@"only"]) {
+        return NO;
+    }
+    return %orig;
+}
+
 - (void)postNotificationWithRequest:(id)request {
     g_rcNotificationDispatcher = self;
+    if (rc_is_rc_notification(request) && [rc_notification_watch_mode(request) isEqualToString:@"only"]) {
+        SRLogMin(@"[Notify] Watch Only: suppressed iPhone notification presentation");
+        return;
+    }
     if (request) {
         NSMutableDictionary *tracked = rc_tracked_requests();
         @synchronized (tracked) { tracked[rc_tracked_request_key(request)] = request; }
@@ -3027,6 +3054,9 @@ static NSString *rc_tracked_request_key(id request) {
 
 - (void)modifyNotificationWithRequest:(id)request {
     g_rcNotificationDispatcher = self;
+    if (rc_is_rc_notification(request) && [rc_notification_watch_mode(request) isEqualToString:@"only"]) {
+        return;
+    }
     if (request) {
         NSMutableDictionary *tracked = rc_tracked_requests();
         @synchronized (tracked) { tracked[rc_tracked_request_key(request)] = request; }
@@ -4209,6 +4239,7 @@ static NSString *rc_normalized_name(NSString *name) {
 }
 
 static BOOL rc_carplay_connected(void);
+static BOOL rc_watch_connected(void);
 
 // If conditions answered by reading the state directly rather than through a status
 // command. Sets *handled for the keys it knows. expected is already uppercased.
@@ -4230,6 +4261,8 @@ static BOOL rc_condition_direct_match(NSString *key, NSString *expected, BOOL *h
         actual = (device.torchMode == AVCaptureTorchModeOn) ? @"ON" : @"OFF";
     } else if ([key isEqualToString:@"carplay"]) {
         actual = rc_carplay_connected() ? @"CONNECTED" : @"NOT_CONNECTED";
+    } else if ([key isEqualToString:@"watch"]) {
+        actual = rc_watch_connected() ? @"CONNECTED" : @"NOT_CONNECTED";
     } else if ([key isEqualToString:@"charging"]) {
         UIDevice *device = [UIDevice currentDevice];
         device.batteryMonitoringEnabled = YES;
@@ -7117,6 +7150,152 @@ static void rc_airplane_mode_start_observing(void) {
                                     CFSTR("RadiosPreferencesAirplaneModeDidChangeNotification"),
                                     NULL,
                                     CFNotificationSuspensionBehaviorDeliverImmediately);
+}
+// The Watch app pairs the watch, without it nothing here can work.
+static BOOL rc_watch_features_available(void) {
+    static BOOL available;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        if ([[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad) return;
+        if ([[NSFileManager defaultManager] fileExistsAtPath:@"/Applications/Bridge.app"]) {
+            available = YES;
+            return;
+        }
+        Class workspaceClass = objc_getClass("LSApplicationWorkspace");
+        SEL defaultSel = NSSelectorFromString(@"defaultWorkspace");
+        id workspace = [workspaceClass respondsToSelector:defaultSel] ? ((id (*)(id, SEL))objc_msgSend)(workspaceClass, defaultSel) : nil;
+        SEL installedSel = NSSelectorFromString(@"applicationIsInstalled:");
+        if (![workspace respondsToSelector:installedSel]) return;
+        available = ((BOOL (*)(id, SEL, id))objc_msgSend)(workspace, installedSel, @"com.apple.Bridge");
+    });
+    return available;
+}
+
+@protocol RCIDSDevice <NSObject>
+@optional
+- (BOOL)isDefaultPairedDevice;
+- (BOOL)isNearby;
+- (BOOL)isConnected;
+- (NSString *)name;
+@end
+
+@protocol RCIDSService <NSObject>
+@optional
+- (instancetype)initWithService:(NSString *)service;
+- (NSArray *)devices;
+- (void)addDelegate:(id)delegate queue:(dispatch_queue_t)queue;
+@end
+
+@interface RCWatchIDSObserver : NSObject
+@end
+
+static id g_watchIDSService = nil;
+static RCWatchIDSObserver *g_watchIDSObserver = nil;
+static BOOL g_watchConnected = NO;
+static BOOL g_watchReady = NO;
+static BOOL g_watchStartAttempted = NO;
+static uint64_t g_watchDebounceGen = 0;
+
+static void rc_watch_start_observing(void);
+
+static id rc_watch_default_ids_device(void) {
+    if (!g_watchStartAttempted) rc_watch_start_observing();
+    if (!g_watchIDSService || ![g_watchIDSService respondsToSelector:@selector(devices)]) return nil;
+    NSArray *devices = [(id<RCIDSService>)g_watchIDSService devices];
+    if (![devices isKindOfClass:[NSArray class]] || devices.count == 0) return nil;
+    for (id dev in devices) {
+        if ([dev respondsToSelector:@selector(isDefaultPairedDevice)] && [(id<RCIDSDevice>)dev isDefaultPairedDevice]) {
+            return dev;
+        }
+    }
+    return devices.count == 1 ? devices.firstObject : nil;
+}
+
+static BOOL rc_watch_connected(void) {
+    id dev = rc_watch_default_ids_device();
+    if (!dev) return NO;
+    if ([dev respondsToSelector:@selector(isNearby)]) {
+        return [(id<RCIDSDevice>)dev isNearby];
+    }
+    if ([dev respondsToSelector:@selector(isConnected)]) {
+        return [(id<RCIDSDevice>)dev isConnected];
+    }
+    return NO;
+}
+
+static void rc_watch_schedule_update(NSString *source) {
+    if (!g_watchReady) return;
+    uint64_t gen = ++g_watchDebounceGen;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (gen != g_watchDebounceGen) return;
+        BOOL connected = rc_watch_connected();
+        if (connected == g_watchConnected) return;
+        g_watchConnected = connected;
+        SRLogMin(@"⌚ [RCWatch] Transition detected (%@): WATCH %@", source, connected ? @"CONNECTED" : @"DISCONNECTED");
+        RCExecuteTrigger(connected ? @"trigger_watch_connect" : @"trigger_watch_disconnect");
+    });
+}
+
+@implementation RCWatchIDSObserver
+- (void)service:(id)service devicesChanged:(NSArray *)devices {
+    dispatch_async(dispatch_get_main_queue(), ^{ rc_watch_schedule_update(@"devicesChanged"); });
+}
+- (void)service:(id)service nearbyDevicesChanged:(NSArray *)nearbyDevices {
+    dispatch_async(dispatch_get_main_queue(), ^{ rc_watch_schedule_update(@"nearbyDevicesChanged"); });
+}
+- (void)service:(id)service connectedDevicesChanged:(NSArray *)connectedDevices {
+    dispatch_async(dispatch_get_main_queue(), ^{ rc_watch_schedule_update(@"connectedDevicesChanged"); });
+}
+@end
+
+static void rc_watch_start_observing(void) {
+    BOOL attempted = g_watchStartAttempted;
+    g_watchStartAttempted = YES;
+    if (attempted || !rc_watch_features_available()) return;
+    dlopen("/System/Library/PrivateFrameworks/IDS.framework/IDS", RTLD_NOW);
+    Class svcCls = objc_getClass("IDSService");
+    if (!svcCls) {
+        SRLogMin(@"⌚ [RCWatch] IDSService not found - no Watch connection triggers");
+        return;
+    }
+    for (NSString *serviceName in @[
+        @"com.apple.private.alloy.springboard.notificationsync",
+        @"com.apple.private.alloy.bulletinboard",
+        @"com.apple.private.alloy.nearby"
+    ]) {
+        id svc = [(id<RCIDSService>)[svcCls alloc] initWithService:serviceName];
+        NSArray *devs = [svc respondsToSelector:@selector(devices)] ? [(id<RCIDSService>)svc devices] : nil;
+        if (svc && devs.count > 0) {
+            g_watchIDSService = svc;
+            SRLog(@"⌚ [RCWatch] Using IDSService %@ (%lu devices)", serviceName, (unsigned long)devs.count);
+            break;
+        }
+        if (!g_watchIDSService && svc) g_watchIDSService = svc;
+    }
+    if (!g_watchIDSService) return;
+    g_watchIDSObserver = [RCWatchIDSObserver new];
+    if ([g_watchIDSService respondsToSelector:@selector(addDelegate:queue:)]) {
+        [(id<RCIDSService>)g_watchIDSService addDelegate:g_watchIDSObserver queue:dispatch_get_main_queue()];
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        g_watchConnected = rc_watch_connected();
+        g_watchReady = YES;
+        id dev = rc_watch_default_ids_device();
+        BOOL nearby = [dev respondsToSelector:@selector(isNearby)] ? [(id<RCIDSDevice>)dev isNearby] : NO;
+        BOOL conn = [dev respondsToSelector:@selector(isConnected)] ? [(id<RCIDSDevice>)dev isConnected] : NO;
+        SRLogMin(@"⌚ [RCWatch] Watch state initialized: nearby=%d connected=%d (status=%@)", nearby, conn, g_watchConnected ? @"CONNECTED" : @"NOT_CONNECTED");
+    });
+}
+
+static BOOL rc_watch_connection_trigger_configured(NSDictionary *config) {
+    NSDictionary *triggers = [config isKindOfClass:[NSDictionary class]] ? config[@"triggers"] : nil;
+    if (![triggers isKindOfClass:[NSDictionary class]]) return NO;
+    return triggers[@"trigger_watch_connect"] != nil || triggers[@"trigger_watch_disconnect"] != nil;
+}
+
+static void rc_watch_sync_observing(NSDictionary *config) {
+    if (!rc_watch_features_available() || !rc_watch_connection_trigger_configured(config)) return;
+    rc_watch_start_observing();
 }
 
 // Orientation triggers: the screen turning to landscape or back to portrait. SpringBoard says when
@@ -11165,8 +11344,14 @@ static NSArray *RCCommandHelpSections(void) {
             @[@"paste \"Text\"", @"Paste text"],
             @[@"key <hex>", @"Press a HID key (0x28 is Return)"],
             @[@"toast \"Title\" [\"Subtitle\"] [\"Symbol\"]", @"Show a HUD toast"],
-            @[@"notify \"Title\" [\"Body\"] [--urgent]", @"Post a notification"],
+            @[@"notify \"Title\" [\"Body\"] [--urgent] [--watch [only]]", @"Post a notification"],
             @[@"clear-notifications", @"Dismiss notifications"],
+            @[@"watch theater [on|off|toggle]", @"Set or toggle Apple Watch Theater Mode"],
+            @[@"watch silent [on|off|toggle]", @"Set or toggle Apple Watch Silent Mode"],
+            @[@"watch wake [on|off|toggle]", @"Set or toggle Apple Watch Wake on Wrist Raise"],
+            @[@"watch water [on|off|toggle]", @"Set or toggle Apple Watch Water Lock"],
+            @[@"watch alwayson [on|off|toggle]", @"Set or toggle Apple Watch Always On"],
+            @[@"watch face [<name|uuid|next|prev|status|list>]", @"Switch or inspect Apple Watch face"],
         ]},
         @{@"title": @"Connectivity", @"rows": @[
             @[@"wifi [on|off|toggle|status]", @"Wi-Fi"],
@@ -11176,6 +11361,7 @@ static NSArray *RCCommandHelpSections(void) {
             @[@"airplane [on|off|toggle|status]", @"Airplane Mode"],
             @[@"bluetooth connect|disconnect <name>", @"Manage paired devices"],
             @[@"carplay status", @"CarPlay connection state"],
+            @[@"watch status", @"Apple Watch connection state"],
             @[@"battery status", @"Battery level and charging state"],
         ]},
         @{@"title": @"Automation", @"rows": @[
@@ -11331,6 +11517,513 @@ static NSString *rc_handle_unlock_passcode_command(NSString *cmd) {
     }
     SRLog(@"Received command: unlock-passcode (unknown)");
     return @"Error: usage: unlock-passcode [set CODE | forget]\n";
+}
+
+@protocol RCNTKFace <NSObject>
+@optional
+- (NSString *)name;
+@end
+
+@protocol RCNTKFaceCollection <NSObject>
+@optional
+- (BOOL)hasLoaded;
+- (NSUInteger)numberOfFaces;
+- (id)faceAtIndex:(NSUInteger)index;
+- (id)selectedFace;
+- (NSUInteger)selectedFaceIndex;
+- (NSUUID *)selectedUUID;
+- (NSUUID *)uuidForFace:(id)face;
+- (id)faceForUUID:(NSUUID *)uuid;
+- (void)setSelectedFace:(id)face suppressingCallbackToObserver:(id)observer;
+- (void)setSelectedFaceIndex:(NSUInteger)index suppressingCallbackToObserver:(id)observer;
+- (void)addObserver:(id)observer;
+- (void)removeObserver:(id)observer;
+@end
+
+@protocol RCNTKCompanionFaceCollectionsManager <NSObject>
+@optional
++ (instancetype)sharedInstance;
+- (NSArray *)sharedLibraryFaceCollectionsForAllDevices;
+- (id)sharedFaceCollectionForDevice:(id)device forCollectionIdentifier:(NSString *)identifier;
+@end
+
+@protocol RCNRPairedDeviceRegistry <NSObject>
+@optional
++ (instancetype)sharedInstance;
+- (NSArray *)getPairedDevices;
+- (id)getActivePairedDevice;
+@end
+
+static id rc_watch_face_collection(NSString **errorOut) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        dlopen("/System/Library/PrivateFrameworks/NanoRegistry.framework/NanoRegistry", RTLD_NOW);
+        dlopen("/System/Library/PrivateFrameworks/ClockKit.framework/ClockKit", RTLD_NOW);
+        dlopen("/System/Library/PrivateFrameworks/NanoTimeKitCompanion.framework/NanoTimeKitCompanion", RTLD_NOW);
+    });
+    Class nrCls = objc_getClass("NRPairedDeviceRegistry");
+    if (!nrCls || ![nrCls respondsToSelector:@selector(sharedInstance)]) {
+        if (errorOut) *errorOut = @"Error: Apple Watch support unavailable on this device\n";
+        return nil;
+    }
+    id nr = [(id)nrCls sharedInstance];
+    NSArray *paired = [nr respondsToSelector:@selector(getPairedDevices)] ? [(id)nr getPairedDevices] : nil;
+    if (![paired isKindOfClass:[NSArray class]] || paired.count == 0) {
+        if (errorOut) *errorOut = @"Error: No paired Apple Watch found\n";
+        return nil;
+    }
+    Class mgrCls = objc_getClass("NTKCompanionFaceCollectionsManager");
+    if (!mgrCls || ![mgrCls respondsToSelector:@selector(sharedInstance)]) {
+        if (errorOut) *errorOut = @"Error: NanoTimeKitCompanion unavailable on this iOS\n";
+        return nil;
+    }
+    __block id collection = nil;
+    rc_dispatch_sync_main_safe(^{
+        id mgr = [(id)mgrCls sharedInstance];
+        NSArray *cols = [mgr respondsToSelector:@selector(sharedLibraryFaceCollectionsForAllDevices)] ? [(id)mgr sharedLibraryFaceCollectionsForAllDevices] : nil;
+        if ([cols isKindOfClass:[NSArray class]] && cols.count > 0) collection = cols.firstObject;
+        if (!collection && [mgr respondsToSelector:@selector(sharedFaceCollectionForDevice:forCollectionIdentifier:)]) {
+            id activeDevice = [nr respondsToSelector:@selector(getActivePairedDevice)] ? [(id)nr getActivePairedDevice] : paired.firstObject;
+            if (activeDevice) collection = [(id)mgr sharedFaceCollectionForDevice:activeDevice forCollectionIdentifier:@"LibraryFaces"];
+        }
+    });
+    if (!collection) {
+        if (errorOut) *errorOut = @"Error: Could not open Apple Watch face collection\n";
+        return nil;
+    }
+    CFAbsoluteTime deadline = CFAbsoluteTimeGetCurrent() + 4.0;
+    while (CFAbsoluteTimeGetCurrent() < deadline) {
+        __block BOOL loaded = NO;
+        rc_dispatch_sync_main_safe(^{
+            loaded = [collection respondsToSelector:@selector(hasLoaded)] && [(id<RCNTKFaceCollection>)collection hasLoaded];
+        });
+        if (loaded) break;
+        if ([NSThread isMainThread]) {
+            [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+        } else {
+            usleep(50000);
+        }
+    }
+    __block BOOL isLoaded = NO;
+    rc_dispatch_sync_main_safe(^{
+        isLoaded = [collection respondsToSelector:@selector(hasLoaded)] && [(id<RCNTKFaceCollection>)collection hasLoaded];
+    });
+    if (!isLoaded) {
+        if (errorOut) *errorOut = @"Error: Timed out loading Apple Watch faces\n";
+        return nil;
+    }
+    return collection;
+}
+
+@interface RCWatchFaceObserver : NSObject
+@end
+
+static RCWatchFaceObserver *g_watchFaceObserver = nil;
+static id g_watchFaceObservedCollection = nil;
+static id g_watchFaceNotifToken = nil;
+static NSString *g_watchFaceLastUUID = nil;
+static BOOL g_watchFaceObserving = NO;
+
+static BOOL rc_watch_face_has_configured_trigger(NSDictionary *config) {
+    NSDictionary *triggers = [config isKindOfClass:[NSDictionary class]] ? config[@"triggers"] : nil;
+    if (![triggers isKindOfClass:[NSDictionary class]]) return NO;
+    for (NSString *key in triggers) {
+        if ([key isEqualToString:@"trigger_watch_face"] || [key hasPrefix:@"trigger_watch_face_"]) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+static void rc_watch_face_handle_collection_change(id collection, BOOL seedOnly, NSString *source) {
+    if (!collection) return;
+    if ([collection respondsToSelector:@selector(hasLoaded)] && ![(id<RCNTKFaceCollection>)collection hasLoaded]) return;
+    NSUUID *selUUID = [collection respondsToSelector:@selector(selectedUUID)] ? [(id<RCNTKFaceCollection>)collection selectedUUID] : nil;
+    NSString *uuidStr = selUUID.UUIDString;
+    if (!uuidStr.length) return;
+    if (seedOnly || !g_watchFaceLastUUID) {
+        g_watchFaceLastUUID = uuidStr;
+        SRLog(@"⌚ [RCWatchFace] Seeded current Watch face UUID (%@): %@", source, uuidStr);
+        return;
+    }
+    if ([uuidStr isEqualToString:g_watchFaceLastUUID]) return;
+    g_watchFaceLastUUID = uuidStr;
+    id face = [collection respondsToSelector:@selector(faceForUUID:)] ? [(id<RCNTKFaceCollection>)collection faceForUUID:selUUID] : nil;
+    if (!face && [collection respondsToSelector:@selector(selectedFace)]) face = [(id<RCNTKFaceCollection>)collection selectedFace];
+    NSString *faceName = [face respondsToSelector:@selector(name)] ? [(id<RCNTKFace>)face name] : nil;
+    SRLogMin(@"⌚ [RCWatchFace] Watch face changed (%@): %@ (%@)", source, faceName ?: @"?", uuidStr);
+    RCExecuteTrigger([@"trigger_watch_face_" stringByAppendingString:uuidStr]);
+    RCExecuteTrigger(@"trigger_watch_face");
+}
+
+static id rc_watch_face_current_collection_nonblocking(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        dlopen("/System/Library/PrivateFrameworks/NanoRegistry.framework/NanoRegistry", RTLD_NOW);
+        dlopen("/System/Library/PrivateFrameworks/ClockKit.framework/ClockKit", RTLD_NOW);
+        dlopen("/System/Library/PrivateFrameworks/NanoTimeKitCompanion.framework/NanoTimeKitCompanion", RTLD_NOW);
+    });
+    Class nrCls = objc_getClass("NRPairedDeviceRegistry");
+    Class mgrCls = objc_getClass("NTKCompanionFaceCollectionsManager");
+    if (!nrCls || !mgrCls || ![nrCls respondsToSelector:@selector(sharedInstance)] || ![mgrCls respondsToSelector:@selector(sharedInstance)]) return nil;
+    id nr = [(id)nrCls sharedInstance];
+    NSArray *paired = [nr respondsToSelector:@selector(getPairedDevices)] ? [(id)nr getPairedDevices] : nil;
+    if (![paired isKindOfClass:[NSArray class]] || paired.count == 0) return nil;
+    id mgr = [(id)mgrCls sharedInstance];
+    NSArray *cols = [mgr respondsToSelector:@selector(sharedLibraryFaceCollectionsForAllDevices)] ? [(id)mgr sharedLibraryFaceCollectionsForAllDevices] : nil;
+    if ([cols isKindOfClass:[NSArray class]] && cols.count > 0) return cols.firstObject;
+    if ([mgr respondsToSelector:@selector(sharedFaceCollectionForDevice:forCollectionIdentifier:)]) {
+        id activeDevice = [nr respondsToSelector:@selector(getActivePairedDevice)] ? [(id)nr getActivePairedDevice] : paired.firstObject;
+        if (activeDevice) return [(id)mgr sharedFaceCollectionForDevice:activeDevice forCollectionIdentifier:@"LibraryFaces"];
+    }
+    return nil;
+}
+
+static void rc_watch_face_attach_collection(id collection) {
+    if (!collection || collection == g_watchFaceObservedCollection) return;
+    if (g_watchFaceObservedCollection && g_watchFaceObserver && [g_watchFaceObservedCollection respondsToSelector:@selector(removeObserver:)]) {
+        [(id<RCNTKFaceCollection>)g_watchFaceObservedCollection removeObserver:g_watchFaceObserver];
+    }
+    g_watchFaceObservedCollection = collection;
+    if ([collection respondsToSelector:@selector(addObserver:)]) {
+        [(id<RCNTKFaceCollection>)collection addObserver:g_watchFaceObserver];
+    }
+    rc_watch_face_handle_collection_change(collection, g_watchFaceLastUUID == nil, @"attach");
+}
+
+@implementation RCWatchFaceObserver
+- (void)faceCollectionDidLoad:(id)collection {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (g_watchFaceObserving) rc_watch_face_handle_collection_change(collection, g_watchFaceLastUUID == nil, @"faceCollectionDidLoad");
+    });
+}
+- (void)faceCollection:(id)collection didSelectFace:(id)face atIndex:(NSUInteger)index {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (g_watchFaceObserving) rc_watch_face_handle_collection_change(collection, NO, @"didSelectFace");
+    });
+}
+@end
+
+static void rc_watch_face_refresh_observer(NSDictionary *config) {
+    BOOL shouldObserve = rc_watch_face_has_configured_trigger(config);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (shouldObserve == g_watchFaceObserving) return;
+        g_watchFaceObserving = shouldObserve;
+        if (shouldObserve) {
+            if (!g_watchFaceObserver) g_watchFaceObserver = [RCWatchFaceObserver new];
+            id collection = rc_watch_face_current_collection_nonblocking();
+            rc_watch_face_attach_collection(collection);
+            if (!g_watchFaceNotifToken) {
+                g_watchFaceNotifToken = [[NSNotificationCenter defaultCenter] addObserverForName:@"NTKCompanionFaceCollectionsDidChangeNotification"
+                                                                                          object:nil
+                                                                                           queue:[NSOperationQueue mainQueue]
+                                                                                      usingBlock:^(NSNotification *note) {
+                    if (!g_watchFaceObserving) return;
+                    id col = rc_watch_face_current_collection_nonblocking();
+                    if (col && col != g_watchFaceObservedCollection) {
+                        rc_watch_face_attach_collection(col);
+                    } else if (col) {
+                        rc_watch_face_handle_collection_change(col, NO, @"NTKCompanionFaceCollectionsDidChangeNotification");
+                    }
+                }];
+            }
+            SRLogMin(@"⌚ [RCWatchFace] Armed Watch face change observer");
+        } else {
+            if (g_watchFaceObservedCollection && g_watchFaceObserver && [g_watchFaceObservedCollection respondsToSelector:@selector(removeObserver:)]) {
+                [(id<RCNTKFaceCollection>)g_watchFaceObservedCollection removeObserver:g_watchFaceObserver];
+            }
+            g_watchFaceObservedCollection = nil;
+            if (g_watchFaceNotifToken) {
+                [[NSNotificationCenter defaultCenter] removeObserver:g_watchFaceNotifToken];
+                g_watchFaceNotifToken = nil;
+            }
+            g_watchFaceLastUUID = nil;
+            SRLogMin(@"⌚ [RCWatchFace] Disarmed Watch face change observer (no triggers configured)");
+        }
+    });
+}
+
+static NSString *rc_handle_watch_face_command(NSString *cleanCmd) {
+    NSString *err = nil;
+    id collection = rc_watch_face_collection(&err);
+    if (!collection) return err ?: @"Error: Watch face collection unavailable\n";
+
+    NSString *arg = @"";
+    NSString *lowCmd = [cleanCmd lowercaseString];
+    if ([lowCmd isEqualToString:@"watch faces"]) {
+        arg = @"list";
+    } else if ([lowCmd hasPrefix:@"watch face "]) {
+        arg = [[cleanCmd substringFromIndex:11] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    }
+    if (([arg hasPrefix:@"\""] && [arg hasSuffix:@"\""] && arg.length >= 2) ||
+        ([arg hasPrefix:@"'"] && [arg hasSuffix:@"'"] && arg.length >= 2)) {
+        arg = [arg substringWithRange:NSMakeRange(1, arg.length - 2)];
+    }
+    NSString *lowArg = [arg lowercaseString];
+
+    __block NSString *result = nil;
+    rc_dispatch_sync_main_safe(^{
+        id<RCNTKFaceCollection> fc = (id<RCNTKFaceCollection>)collection;
+        NSUInteger count = [fc respondsToSelector:@selector(numberOfFaces)] ? [fc numberOfFaces] : 0;
+        if (count == 0) {
+            result = @"No Watch faces found\n";
+            return;
+        }
+        NSUUID *selectedUUID = [fc respondsToSelector:@selector(selectedUUID)] ? [fc selectedUUID] : nil;
+        NSUInteger selectedIdx = [fc respondsToSelector:@selector(selectedFaceIndex)] ? [fc selectedFaceIndex] : NSNotFound;
+
+        if (lowArg.length == 0 || [lowArg isEqualToString:@"status"]) {
+            id curFace = [fc respondsToSelector:@selector(selectedFace)] ? [fc selectedFace] : nil;
+            NSString *name = [curFace respondsToSelector:@selector(name)] ? [(id<RCNTKFace>)curFace name] : nil;
+            result = name.length ? [name stringByAppendingString:@"\n"] : @"No Watch face selected\n";
+            return;
+        }
+
+        if ([lowArg isEqualToString:@"list"]) {
+            NSMutableString *out = [NSMutableString string];
+            for (NSUInteger i = 0; i < count; i++) {
+                id face = [fc faceAtIndex:i];
+                NSString *name = ([face respondsToSelector:@selector(name)] ? [(id<RCNTKFace>)face name] : nil) ?: [NSString stringWithFormat:@"Face %lu", (unsigned long)(i + 1)];
+                NSUUID *uid = [fc respondsToSelector:@selector(uuidForFace:)] ? [fc uuidForFace:face] : nil;
+                BOOL isCurrent = (selectedUUID && uid && [selectedUUID isEqual:uid]) || (i == selectedIdx);
+                if (uid) [out appendFormat:@"%@ %@ [%@]\n", isCurrent ? @"*" : @" ", name, uid.UUIDString];
+                else [out appendFormat:@"%@ %@\n", isCurrent ? @"*" : @" ", name];
+            }
+            result = out;
+            return;
+        }
+
+        id targetFace = nil;
+        NSUInteger targetIdx = NSNotFound;
+        if ([lowArg isEqualToString:@"next"]) {
+            NSUInteger base = (selectedIdx < count) ? selectedIdx : 0;
+            targetIdx = (base + 1) % count;
+            targetFace = [fc faceAtIndex:targetIdx];
+        } else if ([lowArg isEqualToString:@"prev"] || [lowArg isEqualToString:@"previous"]) {
+            NSUInteger base = (selectedIdx < count) ? selectedIdx : 0;
+            targetIdx = (base + count - 1) % count;
+            targetFace = [fc faceAtIndex:targetIdx];
+        } else {
+            // Support "UUID # Name" (from the app picker) as well as raw UUID, face name, or 1-based index
+            NSString *uuidPart = arg;
+            NSString *namePart = arg;
+            NSRange hash = [arg rangeOfString:@" # "];
+            if (hash.location != NSNotFound) {
+                uuidPart = [[arg substringToIndex:hash.location] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+                namePart = [[arg substringFromIndex:NSMaxRange(hash)] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+            }
+            NSUUID *parsedUUID = [[NSUUID alloc] initWithUUIDString:uuidPart];
+            if (parsedUUID && [fc respondsToSelector:@selector(faceForUUID:)]) {
+                targetFace = [fc faceForUUID:parsedUUID];
+            }
+            if (!targetFace && namePart.length) {
+                for (NSUInteger i = 0; i < count; i++) {
+                    id face = [fc faceAtIndex:i];
+                    NSString *name = [face respondsToSelector:@selector(name)] ? [(id<RCNTKFace>)face name] : nil;
+                    if (name && [name caseInsensitiveCompare:namePart] == NSOrderedSame) {
+                        targetFace = face;
+                        targetIdx = i;
+                        break;
+                    }
+                }
+                if (!targetFace) {
+                    for (NSUInteger i = 0; i < count; i++) {
+                        id face = [fc faceAtIndex:i];
+                        NSString *name = [face respondsToSelector:@selector(name)] ? [(id<RCNTKFace>)face name] : nil;
+                        if (name && [name localizedCaseInsensitiveContainsString:namePart]) {
+                            targetFace = face;
+                            targetIdx = i;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (!targetFace) {
+                NSScanner *sc = [NSScanner scannerWithString:arg];
+                NSInteger num = 0;
+                if ([sc scanInteger:&num] && sc.isAtEnd && num >= 1 && (NSUInteger)num <= count) {
+                    targetIdx = (NSUInteger)(num - 1);
+                    targetFace = [fc faceAtIndex:targetIdx];
+                }
+            }
+        }
+
+        if (!targetFace) {
+            result = [NSString stringWithFormat:@"Error: Watch face not found: %@\n", arg];
+            return;
+        }
+        if ([fc respondsToSelector:@selector(setSelectedFace:suppressingCallbackToObserver:)]) {
+            [fc setSelectedFace:targetFace suppressingCallbackToObserver:nil];
+        } else if (targetIdx != NSNotFound && [fc respondsToSelector:@selector(setSelectedFaceIndex:suppressingCallbackToObserver:)]) {
+            [fc setSelectedFaceIndex:targetIdx suppressingCallbackToObserver:nil];
+        } else {
+            result = @"Error: Face switching selector unavailable on this iOS\n";
+            return;
+        }
+        NSString *chosenName = ([targetFace respondsToSelector:@selector(name)] ? [(id<RCNTKFace>)targetFace name] : nil) ?: @"Watch Face";
+        SRLog(@"[WatchFace] Switched Watch face to %@", chosenName);
+        result = [NSString stringWithFormat:@"Watch face set to %@\n", chosenName];
+    });
+    return result ?: @"Error: Watch face operation failed\n";
+}
+
+@protocol RCWFWorkflowDataRunDescriptor <NSObject>
+- (instancetype)initWithWorkflowData:(NSData *)data;
+@end
+
+@protocol RCWFWorkflowRunRequest <NSObject>
+- (instancetype)initWithDescriptor:(id)descriptor input:(id)input presentationMode:(NSUInteger)presentationMode;
+- (void)setAllowsDialogNotifications:(BOOL)allows;
+- (void)setDonateInteraction:(BOOL)donate;
+@end
+
+@protocol RCWFWorkflowRunnerClientRun <NSObject>
+- (instancetype)initWithRunRequest:(id)request;
+- (void)setDelegate:(id)delegate;
+- (void)start;
+@end
+
+@interface RCWFTheaterRunDelegate : NSObject
+@property (nonatomic, strong) id retainedSelf;
+@property (nonatomic, strong) id retainedClient;
+@property (nonatomic, strong) dispatch_semaphore_t semaphore;
+@property (nonatomic, strong) NSError *runError;
+@property (nonatomic, assign) BOOL cancelled;
+@property (nonatomic, assign) BOOL finished;
+- (void)workflowRunnerClient:(id)client didFinishRunningWorkflowWithOutput:(id)output error:(NSError *)error cancelled:(BOOL)cancelled;
+- (void)workflowRunnerClient:(id)client didFinishRunningWorkflowWithError:(NSError *)error cancelled:(BOOL)cancelled;
+@end
+
+@implementation RCWFTheaterRunDelegate
+- (void)rc_finishWithError:(NSError *)error cancelled:(BOOL)cancelled {
+    dispatch_semaphore_t sem = nil;
+    @synchronized (self) {
+        if (self.finished) return;
+        self.finished = YES;
+        self.runError = error;
+        self.cancelled = cancelled;
+        sem = self.semaphore;
+        self.retainedClient = nil;
+        self.retainedSelf = nil;
+    }
+    if (sem) dispatch_semaphore_signal(sem);
+}
+- (void)workflowRunnerClient:(id)client didFinishRunningWorkflowWithOutput:(id)output error:(NSError *)error cancelled:(BOOL)cancelled {
+    [self rc_finishWithError:error cancelled:cancelled];
+}
+- (void)workflowRunnerClient:(id)client didFinishRunningWorkflowWithError:(NSError *)error cancelled:(BOOL)cancelled {
+    [self rc_finishWithError:error cancelled:cancelled];
+}
+@end
+
+typedef struct {
+    const char *subcmd;
+    const char *intentIdentifier;
+    const char *label;
+} RCWatchSettingSpec;
+
+static const RCWatchSettingSpec kRCWatchSettingSpecs[] = {
+    { "theater",  "com.apple.NanoSettings.NPRFSetTheaterModeIntent",      "Watch Theater Mode" },
+    { "silent",   "com.apple.NanoSettings.NPRFSetSilentModeIntent",       "Watch Silent Mode" },
+    { "wake",     "com.apple.NanoSettings.NPRFSetWakeOnWristRaiseIntent", "Watch Wake on Wrist Raise" },
+    { "water",    "com.apple.NanoSettings.NPRFSetWaterLockIntent",        "Watch Water Lock" },
+    { "alwayson", "com.apple.NanoSettings.NPRFSetAlwaysOnIntent",         "Watch Always On" },
+};
+
+static const RCWatchSettingSpec *rc_match_watch_setting_spec(NSString *cleanCmd) {
+    for (size_t i = 0; i < sizeof(kRCWatchSettingSpecs) / sizeof(kRCWatchSettingSpecs[0]); i++) {
+        NSString *prefix = [NSString stringWithFormat:@"watch %s", kRCWatchSettingSpecs[i].subcmd];
+        if ([cleanCmd isEqualToString:prefix] || [cleanCmd hasPrefix:[prefix stringByAppendingString:@" "]]) {
+            return &kRCWatchSettingSpecs[i];
+        }
+    }
+    return NULL;
+}
+
+static NSString *rc_handle_watch_setting_command(NSString *cleanCmd) {
+    const RCWatchSettingSpec *spec = rc_match_watch_setting_spec(cleanCmd);
+    if (!spec) return @"Error: Unknown Apple Watch setting\n";
+
+    NSString *prefix = [NSString stringWithFormat:@"watch %s", spec->subcmd];
+    NSString *arg = cleanCmd.length > prefix.length ? [[[cleanCmd substringFromIndex:prefix.length] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString] : @"";
+    NSString *opStr = @"toggle";
+    NSString *stStr = nil;
+    if ([arg isEqualToString:@"on"] || [arg isEqualToString:@"1"] || [arg isEqualToString:@"true"]) {
+        opStr = @"set";
+        stStr = @"on";
+    } else if ([arg isEqualToString:@"off"] || [arg isEqualToString:@"0"] || [arg isEqualToString:@"false"]) {
+        opStr = @"set";
+        stStr = @"off";
+    } else if (arg.length > 0 && ![arg isEqualToString:@"toggle"]) {
+        return [NSString stringWithFormat:@"Usage: watch %s [on|off|toggle]\n", spec->subcmd];
+    }
+
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        dlopen("/System/Library/PrivateFrameworks/WorkflowKit.framework/WorkflowKit", RTLD_NOW);
+        dlopen("/System/Library/PrivateFrameworks/VoiceShortcutClient.framework/VoiceShortcutClient", RTLD_NOW);
+    });
+
+    Class descCls = objc_getClass("WFWorkflowDataRunDescriptor");
+    Class reqCls = objc_getClass("WFWorkflowRunRequest");
+    Class clientCls = objc_getClass("WFWorkflowRunnerClient");
+    if (!descCls || !reqCls || !clientCls) {
+        return [NSString stringWithFormat:@"Error: %s runner unavailable on this iOS\n", spec->label];
+    }
+
+    NSMutableDictionary *params = [@{ @"operation": opStr, @"ShowWhenRun": @NO } mutableCopy];
+    if (stStr) params[@"state"] = stStr;
+    NSDictionary *wfPlist = @{
+        @"WFWorkflowMinimumClientVersionString": @"900",
+        @"WFWorkflowMinimumClientVersion": @900,
+        @"WFWorkflowClientVersion": @"1146.16.2.2",
+        @"WFWorkflowIcon": @{ @"WFWorkflowIconStartColor": @4282601983U, @"WFWorkflowIconGlyphNumber": @59511 },
+        @"WFWorkflowActions": @[ @{
+            @"WFWorkflowActionIdentifier": @(spec->intentIdentifier),
+            @"WFWorkflowActionParameters": params
+        } ],
+        @"WFWorkflowTypes": @[ @"Watch" ]
+    };
+    NSError *plistErr = nil;
+    NSData *wfData = [NSPropertyListSerialization dataWithPropertyList:wfPlist format:NSPropertyListBinaryFormat_v1_0 options:0 error:&plistErr];
+    if (!wfData) {
+        return [NSString stringWithFormat:@"Error: Failed to encode %s workflow (%@)\n", spec->label, plistErr.localizedDescription ?: @"unknown"];
+    }
+
+    id desc = [(id<RCWFWorkflowDataRunDescriptor>)[descCls alloc] initWithWorkflowData:wfData];
+    id req = [(id<RCWFWorkflowRunRequest>)[reqCls alloc] initWithDescriptor:desc input:nil presentationMode:3];
+    if ([req respondsToSelector:@selector(setAllowsDialogNotifications:)]) [(id<RCWFWorkflowRunRequest>)req setAllowsDialogNotifications:NO];
+    if ([req respondsToSelector:@selector(setDonateInteraction:)]) [(id<RCWFWorkflowRunRequest>)req setDonateInteraction:NO];
+
+    id runner = [clientCls alloc];
+    if (![runner respondsToSelector:@selector(initWithRunRequest:)]) {
+        return @"Error: WFWorkflowRunnerClient initWithRunRequest unavailable\n";
+    }
+    runner = [(id<RCWFWorkflowRunnerClientRun>)runner initWithRunRequest:req];
+    if (!runner) return [NSString stringWithFormat:@"Error: Failed to initialize %s runner\n", spec->label];
+
+    RCWFTheaterRunDelegate *del = [[RCWFTheaterRunDelegate alloc] init];
+    dispatch_semaphore_t sem = [NSThread isMainThread] ? nil : dispatch_semaphore_create(0);
+    del.semaphore = sem;
+    del.retainedSelf = del;
+    del.retainedClient = runner;
+    if ([runner respondsToSelector:@selector(setDelegate:)]) [(id<RCWFWorkflowRunnerClientRun>)runner setDelegate:del];
+    [(id<RCWFWorkflowRunnerClientRun>)runner start];
+
+    if (!sem) return [NSString stringWithFormat:@"%s updated\n", spec->label];
+    if (dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(15 * NSEC_PER_SEC))) != 0) {
+        SRLogMin(@"[WatchSetting] Timed out waiting for %s response", spec->label);
+        return [NSString stringWithFormat:@"Error: %s timed out\n", spec->label];
+    }
+    if (del.runError) {
+        SRLogMin(@"[WatchSetting] %s error: %@", spec->label, del.runError);
+        return [NSString stringWithFormat:@"Error: %@\n", del.runError.localizedDescription ?: [NSString stringWithFormat:@"%s failed", spec->label]];
+    }
+    if (del.cancelled) return [NSString stringWithFormat:@"Error: %s cancelled\n", spec->label];
+    SRLog(@"[WatchSetting] %s %@", spec->label, stStr ?: @"toggled");
+    if ([stStr isEqualToString:@"on"]) return [NSString stringWithFormat:@"%s enabled\n", spec->label];
+    if ([stStr isEqualToString:@"off"]) return [NSString stringWithFormat:@"%s disabled\n", spec->label];
+    return [NSString stringWithFormat:@"%s toggled\n", spec->label];
 }
 
 static NSString *handle_command(NSString *cmd) {
@@ -11752,6 +12445,14 @@ static NSString *handle_command(NSString *cmd) {
         return [NSString stringWithFormat:@"Cleared %lu notification(s)\n", (unsigned long)count];
     } else if ([cleanCmd isEqualToString:@"timer"] || [cleanCmd hasPrefix:@"timer "] || [RCTimerCommand isTimerCommand:cleanCmd]) {
         return rc_handle_timer_command(cleanCmd);
+    } else if ([cleanCmd isEqualToString:@"watch faces"] || [cleanCmd isEqualToString:@"watch face"] || [cleanCmd hasPrefix:@"watch face "]) {
+        return rc_handle_watch_face_command(cleanCmd);
+    } else if ([cleanCmd isEqualToString:@"watch theater"] || [cleanCmd hasPrefix:@"watch theater "] ||
+               [cleanCmd isEqualToString:@"watch silent"] || [cleanCmd hasPrefix:@"watch silent "] ||
+               [cleanCmd isEqualToString:@"watch wake"] || [cleanCmd hasPrefix:@"watch wake "] ||
+               [cleanCmd isEqualToString:@"watch water"] || [cleanCmd hasPrefix:@"watch water "] ||
+               [cleanCmd isEqualToString:@"watch alwayson"] || [cleanCmd hasPrefix:@"watch alwayson "]) {
+        return rc_handle_watch_setting_command(cleanCmd);
     } else if ([cleanCmd hasPrefix:@"notify confirm "]) {
         // A button that needed the passcode was pressed and the passcode given (RC's app reports
         // it): its answer goes to the action waiting on that notification
@@ -13493,6 +14194,8 @@ static NSString *handle_command(NSString *cmd) {
         return [NSString stringWithFormat:@"Haptics: %@\n", ring ? (silent ? @"ALWAYS" : @"RING_ONLY") : (silent ? @"SILENT_ONLY" : @"NEVER")];
     } else if ([cleanCmd isEqualToString:@"carplay"] || [cleanCmd isEqualToString:@"carplay status"]) {
         return rc_carplay_connected() ? @"CarPlay: CONNECTED\n" : @"CarPlay: NOT_CONNECTED\n";
+    } else if ([cleanCmd isEqualToString:@"watch"] || [cleanCmd isEqualToString:@"watch status"]) {
+        return rc_watch_connected() ? @"Watch: CONNECTED\n" : @"Watch: NOT_CONNECTED\n";
     } else if ([cleanCmd isEqualToString:@"ringer"] || [cleanCmd hasPrefix:@"ringer "]) {
         NSString *sub = cleanCmd.length > 7 ? [cleanCmd substringFromIndex:7] : @"status";
         // Ringtone & alerts volume, separate from the media volume (set-vol)
@@ -15030,7 +15733,7 @@ static void start_web_server() {
                                 // The answers of the status commands Set Variable's command list offers, for
                                 // the Web UI to show next to them. Only these: they report, they change nothing.
                                 NSArray *commands = @[@"battery", @"volume", @"wifi status", @"bt status", @"cell status", @"airplane status",
-                                                      @"location status", @"carplay status", @"ringer status", @"vibration silent-status",
+                                                      @"location status", @"carplay status", @"watch status", @"ringer status", @"vibration silent-status",
                                                       @"haptics status", @"is-playing", @"lock status", @"low power status", @"flashlight status",
                                                       @"dnd status", @"focus status", @"screenrecord status", @"timer status", @"proximity status",
                                                       @"orientation status", @"appearance status", @"autolock status"];
@@ -15296,6 +15999,7 @@ static void start_web_server() {
                                         @"audiostream": @(is_audiostream_installed()),
                                         @"audiostream_running": @(is_audiostreamerd_running()),
                                         @"home_button": @(rc_has_home_button()),
+                                        @"watch": @(rc_watch_features_available()),
                                         @"multi_timer": @([[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:(NSOperatingSystemVersion){17, 0, 0}]),
                                         @"ios17": @([[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:(NSOperatingSystemVersion){17, 0, 0}]),
                                         // Whether one is saved - never the passcode itself

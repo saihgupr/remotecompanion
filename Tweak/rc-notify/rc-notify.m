@@ -4,11 +4,13 @@
 // bundle ID. The app needs SBAppUsesLocalNotifications in its Info.plist (or iOS has no
 // notification section for it) and the user's permission, which the app asks for.
 //
-// usage: rc-notify "Title" ["Body"] [--urgent] [--id ID] [--tap TAP] [--button ID TITLE FLAGS]...
+// usage: rc-notify "Title" ["Body"] [--urgent] [--watch [only]] [--id ID] [--tap TAP] [--button ID TITLE FLAGS]...
 //        rc-notify --clear        removes all of the app's notifications
 //        rc-notify --remove ID    removes one posted with --id ID
 //        rc-notify --exists ID    exit 0 while it's still delivered, 4 once it's gone
 //   --urgent  Time Sensitive: shows through Focus and scheduled summaries
+//   --watch   force delivery to a paired Apple Watch even while iPhone is unlocked (with "only":
+//             also suppress the iPhone banner and sound)
 //   --tap     tapping it runs the Notification Tap trigger with this ID (SpringBoard part)
 //   --thread ID  its own group in Notification Center (not stacked with RC's others)
 //   --icon SPEC  its icon in place of the app's: "app:BUNDLE" (that app's icon) or "sf:NAME" (a symbol)
@@ -126,10 +128,27 @@ int main(int argc, char **argv) {
         BOOL urgent = NO, clear = NO;
         NSString *identifier = nil, *removeID = nil, *tap = nil, *existsID = nil, *imageURL = nil;
         NSMutableArray<UNNotificationAction *> *buttons = [NSMutableArray array];
-        NSString *icon = nil, *thread = nil;
+        NSString *icon = nil, *thread = nil, *watchMode = nil;
         for (int i = 1; i < argc; i++) {
             NSString *arg = [NSString stringWithUTF8String:argv[i]] ?: @"";
             if ([arg isEqualToString:@"--urgent"]) urgent = YES;
+            else if ([arg isEqualToString:@"--watch-only"]) watchMode = @"only";
+            else if ([arg isEqualToString:@"--watch"]) {
+                if (i + 1 < argc) {
+                    NSString *next = [[NSString stringWithUTF8String:argv[i + 1]] ?: @"" lowercaseString];
+                    if ([next isEqualToString:@"only"] || [next isEqualToString:@"watch-only"]) {
+                        watchMode = @"only";
+                        i++;
+                    } else if ([next isEqualToString:@"always"] || [next isEqualToString:@"also"] || [next isEqualToString:@"both"]) {
+                        watchMode = @"always";
+                        i++;
+                    } else {
+                        watchMode = @"always";
+                    }
+                } else {
+                    watchMode = @"always";
+                }
+            }
             else if ([arg isEqualToString:@"--clear"]) clear = YES;
             else if ([arg isEqualToString:@"--id"] && i + 1 < argc) identifier = [NSString stringWithUTF8String:argv[++i]];
             else if ([arg isEqualToString:@"--remove"] && i + 1 < argc) removeID = [NSString stringWithUTF8String:argv[++i]];
@@ -179,7 +198,10 @@ int main(int argc, char **argv) {
         content.title = texts[0];
         if (texts.count > 1) content.body = texts[1];
         content.sound = [UNNotificationSound defaultSound];
-        if (tap.length) content.userInfo = @{ @"rcTap": tap };
+        NSMutableDictionary *userInfo = [NSMutableDictionary dictionary];
+        if (tap.length) userInfo[@"rcTap"] = tap;
+        if (watchMode.length) userInfo[@"rcWatch"] = watchMode;
+        if (userInfo.count) content.userInfo = userInfo;
         if (thread.length) content.threadIdentifier = thread;
         if (urgent) {
             if (@available(iOS 15.0, *)) content.interruptionLevel = UNNotificationInterruptionLevelTimeSensitive;
