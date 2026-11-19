@@ -1,10 +1,8 @@
 #import "RCSettingsPagePickerViewController.h"
-#import "RCAppPickerViewController.h"
 #import "RCConfigManager.h"
 
 typedef NS_ENUM(NSInteger, RCSettingsPageSection) {
     RCSettingsPageSectionCommon = 0,
-    RCSettingsPageSectionApps,
     RCSettingsPageSectionOther,
     RCSettingsPageSectionCount
 };
@@ -247,30 +245,6 @@ static NSArray<NSDictionary *> *RCChildren(NSDictionary *node) {
     }
 }
 
-// An app's Settings page shows the app's name. Every installed app is listed: a page can come
-// from a Settings.bundle, a jailbreak preference bundle, or the Settings app's own list, so
-// there is no reliable way to ask which apps have one. A name with no row finds nothing.
-- (void)presentAppPicker {
-    RCAppPickerViewController *picker = [[RCAppPickerViewController alloc] init];
-    picker.title = @"App";
-    picker.suppressAutoPop = YES; // the app list is dismissed here, then the name is handed on
-    picker.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemCancel target:self action:@selector(cancelAppPicker)];
-    __weak typeof(self) weakSelf = self;
-    picker.onAppSelected = ^(NSString *name, __unused NSString *bundleId) {
-        __strong typeof(weakSelf) strongSelf = weakSelf;
-        if (!strongSelf) return;
-        [strongSelf dismissViewControllerAnimated:YES completion:^{
-            [strongSelf finishWithPath:@[name]];
-        }];
-    };
-    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:picker];
-    [self presentViewController:nav animated:YES completion:nil];
-}
-
-- (void)cancelAppPicker {
-    [self dismissViewControllerAnimated:YES completion:nil];
-}
-
 - (void)promptForName {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Settings Page"
                                                                    message:@"The row name as the Settings app shows it."
@@ -307,20 +281,19 @@ static NSArray<NSDictionary *> *RCChildren(NSDictionary *node) {
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    if (self.path.count || section == RCSettingsPageSectionCommon) return self.nodes.count;
+    // A pushed page starts with a row that picks the page itself
+    if (self.path.count) return self.nodes.count + 1;
+    if (section == RCSettingsPageSectionCommon) return self.nodes.count;
     return 1;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     if (self.path.count) return nil;
     if (section == RCSettingsPageSectionCommon) return @"Common Pages";
-    if (section == RCSettingsPageSectionApps) return @"Apps";
     return @"Other";
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    if (self.path.count) return nil;
-    if (section == RCSettingsPageSectionApps) return @"Apps without a Settings page have no row to find.";
     return nil;
 }
 
@@ -350,9 +323,14 @@ static NSArray<NSDictionary *> *RCChildren(NSDictionary *node) {
     cell.imageView.tintColor = [UIColor secondaryLabelColor];
     cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
 
-    // Rows under a pushed page: the children of the page that was tapped
+    // Rows under a pushed page: first the page itself, then the rows under it
     if (self.path.count) {
-        [self configureCell:cell forNode:self.nodes[indexPath.row] atPath:self.path];
+        if (indexPath.row == 0) {
+            cell.textLabel.text = self.path.lastObject;
+            cell.accessoryType = [self isCurrentPath:self.path] ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+            return cell;
+        }
+        [self configureCell:cell forNode:self.nodes[indexPath.row - 1] atPath:self.path];
         return cell;
     }
 
@@ -361,10 +339,7 @@ static NSArray<NSDictionary *> *RCChildren(NSDictionary *node) {
         return cell;
     }
 
-    if (indexPath.section == RCSettingsPageSectionApps) {
-        cell.textLabel.text = @"Choose an App...";
-        cell.imageView.image = [UIImage systemImageNamed:@"square.grid.2x2.fill"];
-    } else {
+    {
         cell.textLabel.text = @"Type a Name...";
         cell.imageView.image = [UIImage systemImageNamed:@"keyboard"];
         // A name that is not a listed page came from an app or from typing it
@@ -377,16 +352,17 @@ static NSArray<NSDictionary *> *RCChildren(NSDictionary *node) {
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    if (!self.path.count && indexPath.section == RCSettingsPageSectionApps) {
-        [self presentAppPicker];
-        return;
-    }
     if (!self.path.count && indexPath.section == RCSettingsPageSectionOther) {
         [self promptForName];
         return;
     }
 
-    NSDictionary *node = self.nodes[indexPath.row];
+    if (self.path.count && indexPath.row == 0) {
+        [self finishWithPath:self.path];
+        return;
+    }
+
+    NSDictionary *node = self.path.count ? self.nodes[indexPath.row - 1] : self.nodes[indexPath.row];
     NSArray<NSString *> *fullPath = [self.path arrayByAddingObject:node[@"name"]];
     // A row with rows under it drills down; a leaf is the page itself
     if (RCChildren(node).count > 0) {
