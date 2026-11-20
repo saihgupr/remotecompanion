@@ -4547,11 +4547,11 @@ function formatHACommandName(cmd) {
   }
   if (subCmd === 'turn_on' && parts.length > 1) {
     const eid = parts[1];
-    return `${formatEntity(eid) || eid} on`;
+    return `${formatEntity(eid) || eid} On`;
   }
   if (subCmd === 'turn_off' && parts.length > 1) {
     const eid = parts[1];
-    return `${formatEntity(eid) || eid} off`;
+    return `${formatEntity(eid) || eid} Off`;
   }
   if (subCmd === 'call' && parts.length > 1) {
     const service = parts[1];

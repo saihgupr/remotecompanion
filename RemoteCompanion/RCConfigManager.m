@@ -2248,10 +2248,10 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
                 result = [NSString stringWithFormat:@"Toggle %@", formatEntity(eid)];
             } else if ([subCmd isEqualToString:@"turn_on"] && cleanParts.count > 1) {
                 NSString *eid = cleanParts[1];
-                result = [NSString stringWithFormat:@"%@ on", formatEntity(eid)];
+                result = [NSString stringWithFormat:@"%@ On", formatEntity(eid)];
             } else if ([subCmd isEqualToString:@"turn_off"] && cleanParts.count > 1) {
                 NSString *eid = cleanParts[1];
-                result = [NSString stringWithFormat:@"%@ off", formatEntity(eid)];
+                result = [NSString stringWithFormat:@"%@ Off", formatEntity(eid)];
             } else if ([subCmd isEqualToString:@"call"] && cleanParts.count > 1) {
                 NSString *service = cleanParts[1];
                 NSString *eid = cleanParts.count > 2 ? cleanParts[2] : @"";

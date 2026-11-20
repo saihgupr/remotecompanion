@@ -9687,11 +9687,11 @@ static NSString *rc_ha_toast_message(NSString *domain, NSString *service, NSDict
     if ([domain isEqualToString:@"notify"]) return @"Notification sent";
 
     NSString *verb = nil;
-    if ([service isEqualToString:@"turn_on"]) verb = [domain isEqualToString:@"script"] ? @"started" : @"on";
-    else if ([service isEqualToString:@"turn_off"]) verb = @"off";
+    if ([service isEqualToString:@"turn_on"]) verb = [domain isEqualToString:@"script"] ? @"started" : @"On";
+    else if ([service isEqualToString:@"turn_off"]) verb = @"Off";
     else if ([service isEqualToString:@"toggle"]) {
         NSString *state = changed[@"state"];
-        verb = ([state isKindOfClass:[NSString class]] && state.length > 0) ? state : @"toggled";
+        verb = ([state isKindOfClass:[NSString class]] && state.length > 0) ? [state capitalizedString] : @"Toggled";
     }
     else if ([service isEqualToString:@"open_cover"] || [service isEqualToString:@"open"]) verb = @"opened";
     else if ([service isEqualToString:@"close_cover"] || [service isEqualToString:@"close"]) verb = @"closed";
