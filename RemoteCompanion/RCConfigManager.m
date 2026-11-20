@@ -1666,7 +1666,7 @@ static NSString *RCActionCommand(id item) {
         }
 
         // Keyboard Maestro actions store the macro's UUID, so the name map is what makes an
-        // imported action read as "KM: Macro Name" instead of a bare UUID. It is display-only
+        // imported action read as "Macro Name" instead of a bare UUID. It is display-only
         // and both devices' entries stay useful, so keep the local names and add the rest.
         if ([key isEqualToString:@"kmNamesByUuid"]) {
             if (![value isKindOfClass:[NSDictionary class]]) continue;
@@ -1930,12 +1930,12 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         @"audiomix toggle": @"AudioMix Toggle",
         @"audiomix status": @"AudioMix Status",
         @"audiomix": @"AudioMix Toggle",
-        @"audiohandoff enabled on": @"AudioHandoff: Automatic Switching",
-        @"audiohandoff enabled off": @"AudioHandoff: Automatic Switching",
-        @"audiohandoff enabled toggle": @"AudioHandoff: Automatic Switching",
-        @"audiohandoff auto on": @"AudioHandoff: Automatic Switching",
-        @"audiohandoff auto off": @"AudioHandoff: Automatic Switching",
-        @"audiohandoff auto toggle": @"AudioHandoff: Automatic Switching",
+        @"audiohandoff enabled on": @"Automatic Switching",
+        @"audiohandoff enabled off": @"Automatic Switching",
+        @"audiohandoff enabled toggle": @"Automatic Switching",
+        @"audiohandoff auto on": @"Automatic Switching",
+        @"audiohandoff auto off": @"Automatic Switching",
+        @"audiohandoff auto toggle": @"Automatic Switching",
         @"low power on": @"Low Power Mode On",
         @"low power off": @"Low Power Mode Off",
         @"low power mode on": @"Low Power Mode On",
@@ -2292,14 +2292,14 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
                 }
                 if (macro.length > 0) {
                     NSString *displayMacro = [self nameForKMMacroUid:macro] ?: macro;
-                    result = val.length > 0 ? [NSString stringWithFormat:@"KM: %@ (%@)", displayMacro, val] : [NSString stringWithFormat:@"KM: %@", displayMacro];
+                    result = val.length > 0 ? [NSString stringWithFormat:@"%@ (%@)", displayMacro, val] : [NSString stringWithFormat:@"%@", displayMacro];
                 } else {
                     result = @"KM Trigger";
                 }
             } else if ([[raw lowercaseString] hasPrefix:@"url "]) {
                 result = [NSString stringWithFormat:@"KM URL: %@", [raw substringFromIndex:4]];
             } else if (raw.length > 0) {
-                result = [NSString stringWithFormat:@"KM: %@", raw];
+                result = [NSString stringWithFormat:@"%@", raw];
             } else {
                 result = @"Keyboard Maestro";
             }
@@ -3019,7 +3019,7 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         },
         @{
             @"key": @"audiohandoff_enabled",
-            @"name": @"AudioHandoff: Automatic Switching",
+            @"name": @"Automatic Switching",
             @"icon": @"headphones",
             @"prefixes": @[@"audiohandoff enabled ", @"audiohandoff auto "],
             @"suffixes": @[@"on", @"off", @"toggle"],

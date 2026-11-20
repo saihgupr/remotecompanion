@@ -4052,7 +4052,7 @@ const CMD_NAMES = {
   'dnd on':'Do Not Disturb On','dnd off':'Do Not Disturb Off','dnd toggle':'Do Not Disturb Toggle',
   'focus off':'Focus Off',
   'audiomix on':'AudioMix On','audiomix off':'AudioMix Off','audiomix toggle':'AudioMix Toggle',
-  'audiohandoff enabled on':'AudioHandoff: Automatic Switching','audiohandoff enabled off':'AudioHandoff: Automatic Switching','audiohandoff enabled toggle':'AudioHandoff: Automatic Switching','audiohandoff auto on':'AudioHandoff: Automatic Switching','audiohandoff auto off':'AudioHandoff: Automatic Switching','audiohandoff auto toggle':'AudioHandoff: Automatic Switching',
+  'audiohandoff enabled on':'Automatic Switching','audiohandoff enabled off':'Automatic Switching','audiohandoff enabled toggle':'Automatic Switching','audiohandoff auto on':'Automatic Switching','audiohandoff auto off':'Automatic Switching','audiohandoff auto toggle':'Automatic Switching',
   'respring':'Respring','safemode':'Safe Mode','safe-mode':'Safe Mode','siri':'Activate Siri','accessibility shortcut':'Accessibility Shortcut','home':'Home Button','switcher':'App Switcher',
   'previous app':'Previous App',
   'kill current':'Kill Current App', 'kill front':'Kill Current App', 'kill foreground':'Kill Current App',
@@ -4516,12 +4516,12 @@ function formatKMCommandName(cmd) {
       val = val.substring(1, val.length - 1);
     }
     const resolvedName = (config.kmNamesByUuid && config.kmNamesByUuid[macro]) ? config.kmNamesByUuid[macro] : macro;
-    return `KM: ${resolvedName}${val ? ' (' + val + ')' : ''}`;
+    return `${resolvedName}${val ? ' (' + val + ')' : ''}`;
   }
   if (raw.toLowerCase().startsWith('url ')) {
     return `KM URL: ${raw.slice(4).trim()}`;
   }
-  return `KM: ${raw}`;
+  return `${raw}`;
 }
 
 function formatHACommandName(cmd) {
@@ -4769,7 +4769,7 @@ const ACTION_SECTIONS = [
     { name:'SneakyCam: Take Photo',           cmd:'sneakycam photo', icon:'camera_filters', group:'SneakyCam', groupIcon:'camera_filters' },
     { name:'SneakyCam: Toggle Video',         cmd:'sneakycam video', icon:'eye_slash_fill', group:'SneakyCam', groupIcon:'camera_filters' },
     { name:'AudioMix: Toggle',                cmd:'audiomix toggle',icon:'equalizer', is_toggle:true },
-    { name:'AudioHandoff: Automatic Switching', cmd:'audiohandoff enabled toggle', icon:'headphones', is_toggle:true },
+    { name:'Automatic Switching', cmd:'audiohandoff enabled toggle', icon:'headphones', is_toggle:true },
   ]},
   { title:'Scripting & Logic', actions:[
     { name:'If Condition…',     cmd:'__IF_CONDITION__',icon:'arrow_triangle_branch', needs_input:true },
@@ -6072,7 +6072,7 @@ function parseToggleCmd(cmd) {
     { key:'buttontriggers', name:'Button Triggers', icon:'pause_circle', prefixes:['button triggers '], suffixes:['pause 15','pause 60','pause','resume'], displaySuffixes:['Pause 15 Minutes','Pause 1 Hour','Pause Until Resumed','Resume'] },
     { key:'appearance', name:'Appearance', icon:'circle_lefthalf_fill', prefixes:['appearance '], suffixes:['dark','light','toggle'], displaySuffixes:['Dark','Light','Toggle'] },
     { key:'audiomix', name:'AudioMix', icon:'equalizer', prefixes:['audiomix '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'], exactMatches: { 'audiomix':'toggle' } },
-    { key:'audiohandoff_enabled', name:'AudioHandoff: Automatic Switching', icon:'headphones', prefixes:['audiohandoff enabled ','audiohandoff auto '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'], exactMatches: { 'audiohandoff enabled':'toggle','audiohandoff auto':'toggle' } },
+    { key:'audiohandoff_enabled', name:'Automatic Switching', icon:'headphones', prefixes:['audiohandoff enabled ','audiohandoff auto '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'], exactMatches: { 'audiohandoff enabled':'toggle','audiohandoff auto':'toggle' } },
     { key:'rotate', name:'Rotation Lock', icon:'lock_rotation', prefixes:['rotate '], suffixes:['lock','unlock','toggle'], displaySuffixes:['Lock','Unlock','Toggle'] },
     { key:'orientation', name:'Orientation', icon:'rotate_right', prefixes:['orientation set '], suffixes:['portrait','landscape left','landscape right','portrait upside down','auto'], displaySuffixes:['Portrait','Landscape Left','Landscape Right','Portrait Upside Down','Auto'] },
     { key:'vibration_silent', name:'Silent Vibration', icon:'bell_slash', prefixes:['vibration silent-'], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'] },
