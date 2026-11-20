@@ -297,7 +297,25 @@ def _extract_api_error(resp, status):
     return f"OpenCode API failed: HTTP {status}"
 
 
-def _deliver_opencode_api(svc, png_path, image_b64, text, delivery, project_dir):
+def _open_session_in_background(session_id, run_cmd=None):
+    """Ask OpenCode Desktop to show a session in a background tab.
+
+    The alfred-tabs GUI plugin treats ?background=1 as "open a tab, do not
+    select it". `open -g` keeps macOS from bringing the app to the front.
+    Best effort: the prompt is already queued, so a missing tab must not fail
+    the send.
+    """
+    if run_cmd is None:
+        run_cmd = _default_run_cmd
+    url = f"opencode://session/{urllib.parse.quote(session_id, safe='')}?background=1"
+    try:
+        run_cmd(["/usr/bin/open", "-g", url], None, None)
+        return True
+    except Exception:
+        return False
+
+
+def _deliver_opencode_api(svc, png_path, image_b64, text, delivery, project_dir, run_cmd=None):
     """Deliver screenshot + text directly to an OpenCode V2 session."""
     session = _pick_opencode_session(svc, project_dir)
     session_id = session["id"]
@@ -318,6 +336,7 @@ def _deliver_opencode_api(svc, png_path, image_b64, text, delivery, project_dir)
     status, resp = _http_json(svc, "POST", f"/api/session/{encoded_id}/prompt", body=body, timeout=10.0)
     if status < 200 or status >= 300:
         raise RuntimeError(_extract_api_error(resp, status))
+    _open_session_in_background(session_id, run_cmd=run_cmd)
     title = str(session.get("title") or "").strip() or session_id
     return title
 
@@ -679,6 +698,7 @@ def deliver(
                 text=text,
                 delivery=payload.get("delivery") or "queue",
                 project_dir=payload.get("project_dir") or "",
+                run_cmd=run_cmd,
             )
             return {"ok": True, "detail": detail}
 

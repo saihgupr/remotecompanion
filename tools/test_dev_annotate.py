@@ -248,6 +248,12 @@ class DevAnnotateTests(unittest.TestCase):
         server = start_mock_opencode(state)
         try:
             port = server.server_address[1]
+            calls = []
+
+            def fake_run_cmd(args, input_bytes=None, env=None):
+                calls.append((args, input_bytes, env))
+                return 0, "", ""
+
             with tempfile.TemporaryDirectory() as tmp:
                 stale_reg = os.path.join(tmp, "service.json")
                 live_reg = os.path.join(tmp, "service-beta.json")
@@ -266,9 +272,14 @@ class DevAnnotateTests(unittest.TestCase):
                     },
                     reg_paths=[stale_reg, live_reg],
                     tmp_dir=os.path.join(tmp, "shots"),
+                    run_cmd=fake_run_cmd,
                 )
                 self.assertTrue(res["ok"], res)
                 self.assertEqual(res["detail"], "Last Viewed")
+                self.assertEqual(
+                    calls,
+                    [(["/usr/bin/open", "-g", "opencode://session/ses_last_viewed?background=1"], None, None)],
+                )
                 self.assertEqual(len(state.posted_prompts), 1)
                 sid, body = state.posted_prompts[0]
                 self.assertEqual(sid, "ses_last_viewed")
@@ -316,6 +327,12 @@ class DevAnnotateTests(unittest.TestCase):
             # Simulate server directory query returning empty so client realpath fallback exercises.
             state.ignore_directory_query = False
             server = start_mock_opencode(state)
+            calls = []
+
+            def fake_run_cmd(args, input_bytes=None, env=None):
+                calls.append((args, input_bytes, env))
+                return 0, "", ""
+
             try:
                 port = server.server_address[1]
                 reg = os.path.join(tmp, "service.json")
@@ -332,9 +349,14 @@ class DevAnnotateTests(unittest.TestCase):
                     },
                     reg_paths=[reg],
                     tmp_dir=os.path.join(tmp, "shots"),
+                    run_cmd=fake_run_cmd,
                 )
                 self.assertTrue(res["ok"], res)
                 self.assertEqual(res["detail"], "Project Newer")
+                self.assertEqual(
+                    calls,
+                    [(["/usr/bin/open", "-g", "opencode://session/ses_proj_new?background=1"], None, None)],
+                )
                 sid, body = state.posted_prompts[0]
                 self.assertEqual(sid, "ses_proj_new")
                 self.assertEqual(body["text"], "See attached annotated screenshot.")
@@ -342,6 +364,44 @@ class DevAnnotateTests(unittest.TestCase):
             finally:
                 server.shutdown()
                 server.server_close()
+
+    def test_opencode_background_tab_failure_does_not_fail_send(self):
+        state = MockOpenCodeState(pid=888, password="pw")
+        state.sessions = [
+            {
+                "id": "ses_tab",
+                "title": "Tab Target",
+                "parentID": None,
+                "time": {"updated": 1000},
+                "location": {"directory": "/tmp/proj-tab"},
+            },
+        ]
+        server = start_mock_opencode(state)
+
+        def fake_run_cmd(args, input_bytes=None, env=None):
+            if args and args[0] == "/usr/bin/open":
+                raise RuntimeError("LaunchServices unavailable")
+            return 0, "", ""
+
+        try:
+            port = server.server_address[1]
+            with tempfile.TemporaryDirectory() as tmp:
+                reg = os.path.join(tmp, "service.json")
+                with open(reg, "w") as f:
+                    json.dump({"url": f"http://127.0.0.1:{port}", "pid": 888, "password": "pw"}, f)
+
+                res = rc_dev_deliver.deliver(
+                    {"image_b64": TINY_PNG_B64, "text": "note", "strategy": "opencode_api", "auto_send": True},
+                    reg_paths=[reg],
+                    tmp_dir=os.path.join(tmp, "shots"),
+                    run_cmd=fake_run_cmd,
+                )
+                self.assertTrue(res["ok"], res)
+                self.assertEqual(res["detail"], "Tab Target")
+                self.assertEqual(len(state.posted_prompts), 1)
+        finally:
+            server.shutdown()
+            server.server_close()
 
     def test_opencode_not_running_when_pid_mismatch_only(self):
         state = MockOpenCodeState(pid=111, password="pw")
