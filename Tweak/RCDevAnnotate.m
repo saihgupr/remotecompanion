@@ -25,6 +25,17 @@ typedef enum {
 extern void MRMediaRemoteSendCommand(RCMediaCommand command, NSDictionary *options);
 extern void MRMediaRemoteGetNowPlayingApplicationIsPlaying(dispatch_queue_t queue, void (^completion)(Boolean isPlaying));
 
+static BOOL rc_dev_phone_media_is_playing(void) {
+    __block BOOL playing = NO;
+    dispatch_semaphore_t sema = dispatch_semaphore_create(0);
+    MRMediaRemoteGetNowPlayingApplicationIsPlaying(dispatch_get_main_queue(), ^(Boolean isPlaying) {
+        playing = isPlaying ? YES : NO;
+        dispatch_semaphore_signal(sema);
+    });
+    dispatch_semaphore_wait(sema, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)));
+    return playing;
+}
+
 static void rc_dev_pause_phone_media(void) {
     MRMediaRemoteGetNowPlayingApplicationIsPlaying(dispatch_get_main_queue(), ^(Boolean isPlaying) {
         if (isPlaying) {
@@ -1476,7 +1487,8 @@ NSString *RCDevAnnotateCommand(NSString *cmd,
 
     __block RCDevAnnotateWindow *window = nil;
     __block RCDevAnnotateViewController *vc = nil;
-    __block BOOL musicPaused = NO;
+    __block BOOL phoneMusicPaused = NO;
+    __block BOOL pauseMusicRequested = NO;
     void (^cleanup)(void) = ^{
         rc_dev_main_sync(^{
             [vc prepareForDismiss];
@@ -1486,9 +1498,12 @@ NSString *RCDevAnnotateCommand(NSString *cmd,
             window = nil;
             vc = nil;
         });
-        if (musicPaused) {
-            musicPaused = NO;
+        if (phoneMusicPaused) {
+            phoneMusicPaused = NO;
             rc_dev_resume_phone_media();
+        }
+        if (pauseMusicRequested) {
+            // The Mac script only resumes what it actually paused, so this is safe when nothing was playing.
             rc_dev_run_ssh_quiet(targetHost, rc_dev_music_resume_script());
         }
         @synchronized (rc_dev_state_lock()) {
@@ -1553,8 +1568,12 @@ NSString *RCDevAnnotateCommand(NSString *cmd,
         }
 
         if ([components[@"pauseMusic"] boolValue]) {
-            musicPaused = YES;
-            rc_dev_pause_phone_media();
+            pauseMusicRequested = YES;
+            // Only claim the pause when something is actually playing, so a paused phone is left alone.
+            if (rc_dev_phone_media_is_playing()) {
+                phoneMusicPaused = YES;
+                rc_dev_pause_phone_media();
+            }
             rc_dev_run_ssh_quiet(targetHost, rc_dev_music_pause_script());
         }
 
