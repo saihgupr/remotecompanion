@@ -2256,7 +2256,26 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
             } else if ([subCmd isEqualToString:@"call"] && cleanParts.count > 1) {
                 NSString *service = cleanParts[1];
                 NSString *eid = cleanParts.count > 2 ? cleanParts[2] : @"";
-                result = [NSString stringWithFormat:@"HA Call %@%@", service, eid.length ? [NSString stringWithFormat:@": %@", formatEntity(eid)] : @""];
+                NSString *verb = [service componentsSeparatedByString:@"."].lastObject;
+                NSString *domain = [service componentsSeparatedByString:@"."].firstObject;
+                NSString *name = formatEntity(eid);
+                if (name.length && [domain isEqualToString:@"scene"]) {
+                    result = [NSString stringWithFormat:@"Activate %@", name];
+                } else if (name.length && ([domain isEqualToString:@"script"] || [verb isEqualToString:@"trigger"])) {
+                    result = [NSString stringWithFormat:@"Run %@", name];
+                } else if ([verb isEqualToString:@"toggle"] && name.length) {
+                    result = [NSString stringWithFormat:@"Toggle %@", name];
+                } else if ([verb isEqualToString:@"turn_on"] && name.length) {
+                    result = [NSString stringWithFormat:@"%@ On", name];
+                } else if ([verb isEqualToString:@"turn_off"] && name.length) {
+                    result = [NSString stringWithFormat:@"%@ Off", name];
+                } else if (name.length) {
+                    NSString *readable = [verb stringByReplacingOccurrencesOfString:@"_" withString:@" "];
+                    result = [NSString stringWithFormat:@"%@ · %@", name, readable];
+                } else {
+                    NSString *readable = [verb stringByReplacingOccurrencesOfString:@"_" withString:@" "];
+                    result = [NSString stringWithFormat:@"HA %@", [readable capitalizedString]];
+                }
             } else {
                 result = [NSString stringWithFormat:@"HA: %@", raw.length ? raw : @"Control"];
             }

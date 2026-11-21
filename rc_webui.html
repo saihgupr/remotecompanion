@@ -4556,7 +4556,17 @@ function formatHACommandName(cmd) {
   if (subCmd === 'call' && parts.length > 1) {
     const service = parts[1];
     const eid = parts[2] || '';
-    return `HA Call ${service}${eid ? ': ' + (formatEntity(eid) || eid) : ''}`;
+    const verb = service.split('.').pop();
+    const domain = service.split('.')[0];
+    const name = formatEntity(eid) || eid;
+    if (name && domain === 'scene') return `Activate ${name}`;
+    if (name && (domain === 'script' || verb === 'trigger')) return `Run ${name}`;
+    if (verb === 'toggle' && name) return `Toggle ${name}`;
+    if (verb === 'turn_on' && name) return `${name} On`;
+    if (verb === 'turn_off' && name) return `${name} Off`;
+    if (name) return `${name} · ${verb.replace(/_/g, ' ')}`;
+    const readable = verb.replace(/_/g, ' ');
+    return `HA ${readable.charAt(0).toUpperCase()}${readable.slice(1)}`;
   }
   if (subCmd === 'raw') {
     return `HA Raw: ${parts.slice(1).join(' ')}`;
