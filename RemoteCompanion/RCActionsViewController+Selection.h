@@ -13,6 +13,13 @@
 // on the clipboard), and Import / Export Actions, moved in from the list if it has them
 - (void)rc_addActionsSectionToMenuItems:(NSMutableArray<UIMenuElement *> *)menuItems;
 
+// Puts actions on the shared pasteboard under the app's own type, so a copy survives a relaunch
+// and the ••• menu can offer Paste
++ (void)rc_putActionsOnPasteboard:(NSArray *)actions;
+
+// The actions on the shared pasteboard, or nil
++ (NSArray *)rc_actionsOnPasteboard;
+
 // Called when a row is tapped while selecting
 - (void)rc_selectionChanged;
 

@@ -1358,10 +1358,24 @@ static UIImage *RCGrabberImage(void) {
 static id g_actionClipboard = nil;
 
 // The clipboard holds one action, or a whole block as its rows in order. Everything that pastes
-// goes through the array, so a copied If / Repeat block arrives complete.
+// goes through the array, so a copied If / Repeat block arrives complete. The shared pasteboard is
+// read too: a multi-select copy, or a JSON action put there by a script or the Web UI, can land here.
 static NSArray *RCActionClipboardItems(void) {
     if ([g_actionClipboard isKindOfClass:[NSArray class]]) return g_actionClipboard;
-    return g_actionClipboard ? @[g_actionClipboard] : nil;
+    if (g_actionClipboard) return @[g_actionClipboard];
+    NSArray *pasted = [RCActionsViewController rc_actionsOnPasteboard];
+    if (pasted.count > 0) return pasted;
+    if (@available(iOS 16.0, *)) {
+        // A plain string on the pasteboard would need the user's paste permission; the app's own
+        // type above is the copy that matters
+    } else {
+        NSString *text = [UIPasteboard generalPasteboard].string;
+        if (text.length) {
+            id parsed = [NSJSONSerialization JSONObjectWithData:[text dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+            if ([parsed isKindOfClass:[NSArray class]] && [parsed count] > 0) return parsed;
+        }
+    }
+    return nil;
 }
 
 static void RCActionClipboardSetItems(NSArray *items) {
@@ -1372,6 +1386,8 @@ static void RCActionClipboardSetItems(NSArray *items) {
     g_actionClipboard = items.count == 1
         ? [items.firstObject copy]
         : [[NSArray alloc] initWithArray:items copyItems:YES];
+    // The shared pasteboard keeps the copy across launches and lets the ••• menu offer Paste
+    [RCActionsViewController rc_putActionsOnPasteboard:items];
 }
 
 static NSString *RCActionClipboardCountText(NSUInteger count) {
@@ -4852,7 +4868,9 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 // The bar's paste button: left of Play, on an empty sequence, while the clipboard has something
 - (UIBarButtonItem *)pasteButton {
     if (!_pasteButton) {
-        _pasteButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"doc.on.clipboard"]
+        // A touch smaller than the bar's own glyphs, so it reads as a secondary action beside Play
+        UIImageSymbolConfiguration *symbol = [UIImageSymbolConfiguration configurationWithPointSize:14 weight:UIImageSymbolWeightRegular];
+        _pasteButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"doc.on.clipboard" withConfiguration:symbol]
                                                        style:UIBarButtonItemStylePlain
                                                       target:self
                                                       action:@selector(pasteClipboardToSequence)];
