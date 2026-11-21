@@ -5865,7 +5865,8 @@ function renderActionList() {
     if (rowIndent > 0) {
       let guides = '';
       for (let i = 1; i <= rowIndent; i++) {
-        const leftPx = 16 + (i - 1) * 20 + 8;
+        // The rail is the start of that level's indent: it sits at the parent level's content edge
+        const leftPx = 16 + (i - 1) * 20;
         const isInner = (i === rowIndent);
         guides += `<div class="indent-line ${isInner ? 'active-level' : ''}" style="left:${leftPx}px"></div>`;
         if (isInner) {

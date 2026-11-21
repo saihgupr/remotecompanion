@@ -206,6 +206,9 @@ static inline UIFont *RCActionCellTitleFont(void) {
 @property (nonatomic, strong) UIColor *borderColor;
 @property (nonatomic, assign) CGFloat borderWidth;
 @property (nonatomic, assign) BOOL squareTrailingCorners;
+// A nested row's card starts at its guide line: the card keeps its right edge and gives up this
+// much on the left only
+@property (nonatomic, assign) CGFloat leftInset;
 @end
 
 @interface UITableViewCell (RCActionSwipeSync)
@@ -278,6 +281,12 @@ static inline UIFont *RCActionCellTitleFont(void) {
     [self applyAppearance];
 }
 
+- (void)setLeftInset:(CGFloat)leftInset {
+    if (_leftInset == leftInset) return;
+    _leftInset = leftInset;
+    [self setNeedsLayout];
+}
+
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
     [super traitCollectionDidChange:previousTraitCollection];
     if (@available(iOS 13.0, *)) {
@@ -290,10 +299,12 @@ static inline UIFont *RCActionCellTitleFont(void) {
 - (void)layoutSubviews {
     [super layoutSubviews];
 
-    // The card is as wide as the cell and inset from its top and bottom, the same breath the
-    // folded rows' cards keep from their cells, so the open card lines up with its neighbours
-    CGRect card = CGRectMake(0.0, RCActionCellCardGap,
-                              self.bounds.size.width,
+    // The card keeps the cell's right edge and is inset from its top and bottom, the same breath
+    // the folded rows' cards keep from their cells. A nested row's leftInset moves its left edge
+    // to the guide line, so the card itself is what looks indented.
+    CGFloat left = MAX(0.0, MIN(self.leftInset, self.bounds.size.width));
+    CGRect card = CGRectMake(left, RCActionCellCardGap,
+                              self.bounds.size.width - left,
                               self.bounds.size.height - 2.0 * RCActionCellCardGap);
     if (CGRectGetWidth(card) <= 0 || CGRectGetHeight(card) <= 0) {
         _cardView.hidden = YES;
@@ -332,6 +343,8 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
 // YES while the cell sits in a trailing swipe wrapper, so its card squares off cleanly where it
 // meets the red delete button
 @property (nonatomic, assign, readonly) BOOL rcSwipingTrailing;
+// How far the row's card starts from the cell's left edge (its nesting indent)
+@property (nonatomic, assign) CGFloat rcCardLeftInset;
 // Shows the value editor under the row (nil takes it away)
 - (void)rc_showInlinePanel:(UIView *)panel rowContentHeight:(CGFloat)rowContentHeight;
 // Whether a point in the cell's own coordinates lands in the open editor
@@ -439,8 +452,9 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
             sibling.layer.cornerRadius = 0.0;
         }
     }
-    CGRect maskFrame = CGRectMake(0.0, RCActionCellCardGap,
-                                  container.bounds.size.width,
+    CGFloat maskLeft = MAX(0.0, MIN(self.rcCardLeftInset, container.bounds.size.width));
+    CGRect maskFrame = CGRectMake(maskLeft, RCActionCellCardGap,
+                                  MAX(0.0, container.bounds.size.width - maskLeft),
                                   MAX(0.0, container.bounds.size.height - 2.0 * RCActionCellCardGap));
     if (!CGRectIsEmpty(maskFrame)) {
         UIView *mask = container.maskView;
@@ -521,7 +535,7 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
     // the card's inset on both sides, and the card closes just below the panel
     CGFloat side = RCActionCellInlineSideInset;
     [NSLayoutConstraint activateConstraints:@[
-        [container.leadingAnchor constraintEqualToAnchor:self.leadingAnchor],
+        [container.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:self.rcCardLeftInset],
         [container.trailingAnchor constraintEqualToAnchor:self.trailingAnchor],
         [container.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:rowContentHeight],
         [container.bottomAnchor constraintEqualToAnchor:self.bottomAnchor],
@@ -5687,6 +5701,16 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     card.squareTrailingCorners = squareTrailing;
     selectedCard.squareTrailingCorners = squareTrailing;
 
+    // Nested rows' cards start at their guide line: the rail sits on the parent level's content
+    // edge and the card's left edge moves out to meet it. The content inside keeps its inset, so
+    // only the left side of the row is indented.
+    NSInteger level = [self indentationLevelForRow:indexPath.row];
+    CGFloat indentWidth = cell.indentationWidth > 0 ? cell.indentationWidth : 14.0f;
+    CGFloat cardLeft = level > 0 ? RCActionCellIconTileInset + (level - 1) * indentWidth : 0.0;
+    card.leftInset = cardLeft;
+    selectedCard.leftInset = cardLeft;
+    if ([cell isKindOfClass:[RCActionCell class]]) ((RCActionCell *)cell).rcCardLeftInset = cardLeft;
+
     cell.backgroundColor = [UIColor clearColor];
     cell.contentView.backgroundColor = [UIColor clearColor];
     if (cell.backgroundView != card) cell.backgroundView = card;
@@ -5805,7 +5829,11 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     // (not the content view's: the accessory narrows that one, and the panel keeps the card's insets)
     UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
     CGFloat cellWidth = cell ? cell.bounds.size.width : tableView.bounds.size.width - 40.0;
-    CGFloat panelWidth = cellWidth - 2.0 * RCActionCellInlineSideInset;
+    // The open card keeps the row's nesting indent on its left, so the editor is measured inside it
+    NSInteger level = [self indentationLevelForRow:indexPath.row];
+    CGFloat indentWidth = cell.indentationWidth > 0 ? cell.indentationWidth : 14.0f;
+    CGFloat cardLeft = level > 0 ? RCActionCellIconTileInset + (level - 1) * indentWidth : 0.0;
+    CGFloat panelWidth = cellWidth - cardLeft - 2.0 * RCActionCellInlineSideInset;
     UIView *panel = self.inlineRowEditor;
     CGFloat panelHeight = [(id)panel preferredHeightForWidth:panelWidth];
     return ceil(self.inlineEditorRowHeight + 1.0 / [UIScreen mainScreen].scale + RCActionCellInlineTopGap + panelHeight + RCActionCellCardGap + RCActionCellInlineBottomGap);
@@ -6093,48 +6121,10 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     return cell;
 }
 
-- (void)applyIndentGuidesToCell:(UITableViewCell *)cell level:(NSInteger)indentationLevel {
-    for (UIView *subview in [cell.contentView.subviews copy]) {
-        if (subview.tag == 998811) {
-            [subview removeFromSuperview];
-        }
-    }
-    
-    if (indentationLevel <= 0) return;
-    
-    // The guides stay within the row's own card, so they never cross the breath between cards
-    CGRect guideFrame = CGRectInset(cell.contentView.bounds, 0.0, RCActionCellCardGap);
-    UIView *container = [[UIView alloc] initWithFrame:guideFrame];
-    container.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    container.userInteractionEnabled = NO;
-    container.tag = 998811;
-    
-    CGFloat indentWidth = cell.indentationWidth > 0 ? cell.indentationWidth : 14.0f;
-    CGFloat baseMargin = 16.0f;
-    CGFloat lineW = 1.0f / [UIScreen mainScreen].scale;
-    
-    RCConfigManager *config = [RCConfigManager sharedManager];
-    UIColor *lineColor = [config tweakColorForKey:@"separators" defaultVal:0.25];
-    
-    for (NSInteger i = 1; i <= indentationLevel; i++) {
-        CGFloat x = baseMargin + (i - 1) * indentWidth + 6.0f;
-        
-        UIView *line = [[UIView alloc] initWithFrame:CGRectMake(x, 0, lineW, cell.contentView.bounds.size.height)];
-        line.autoresizingMask = UIViewAutoresizingFlexibleHeight;
-        line.backgroundColor = lineColor;
-        line.userInteractionEnabled = NO;
-        [container addSubview:line];
-    }
-    
-    [cell.contentView addSubview:container];
-}
-
 - (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath {
     [self applySectionCardStyleToCell:cell atIndexPath:indexPath];
     if ([self runShown]) cell.accessoryView.hidden = YES; // no drag handles while it runs
     else cell.accessoryView.hidden = NO;
-    NSInteger level = [self indentationLevelForRow:indexPath.row];
-    [self applyIndentGuidesToCell:cell level:level];
     // Rows being dragged stay dimmed as they scroll back into view (and a reused cell doesn't),
     // and the rows around an open value editor step back a little
     BOOL dragged = self.reorderSnapshot && NSLocationInRange(indexPath.row, self.reorderRange);
