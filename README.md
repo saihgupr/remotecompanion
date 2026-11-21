@@ -204,7 +204,7 @@ Configure these in the `RemoteCompanion` app for custom action sequences. Tip: *
   - **Home**: Double-tap (Touch ID), Double, Triple, or Quadruple click, **Hold**, or **Home + Power** combo.
   - **CarPlay**: Connected / Disconnected triggers.
   - **Apple Watch**: Ping iPhone (tap or hold Ping on a paired Watch).
-- **Touch ID Sensor**: **Single Tap** and **Hold (Rest Finger)** triggers.
+- **Touch ID Sensor**: **Single Tap** and **Hold (Rest Finger)** triggers. They stay quiet while iOS asks for a fingerprint itself, such as an App Store purchase, Apple Pay, or an app's password sheet.
 - **NFC Triggers**: Scan physical NFC tags to run actions on screen wake (Optional toggle in Settings).
 - **Ringer Switch**: Mute, Unmute, or Toggle triggers.
 - **Gestures**: 

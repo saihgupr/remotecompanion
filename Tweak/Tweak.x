@@ -7511,6 +7511,7 @@ static BOOL g_bioHoldTriggered = NO;
 static NSTimer *g_bioWatchdogTimer = nil;
 static NSTimeInterval g_bioIgnoreUntil = 0;
 static BOOL g_bioWasLocked = NO;
+static BOOL g_bioDownWasAuthPrompt = NO; // the finger went down for a system prompt, not a trigger
 static BOOL g_lastLockedState = NO;
 static BOOL g_lockStateInitialized = NO;
 // Top-button Touch ID (iPad mini 6, iPad Air 4/5) power-gates the sensor: HID
@@ -7539,6 +7540,148 @@ static BOOL rc_device_locked(SBLockScreenManager *lsm) {
         if (![backlight screenIsOn]) return YES;
     }
     return !known;
+}
+
+// System authentication prompts. An App Store purchase confirmation, an Apple ID sign-in, Apple
+// Pay, password autofill and an app's Touch ID sheet all run through CoreAuthUI. It is a UIKit
+// view service, so it is usually drawn inside the app that asked (SpringBoard only sees its
+// process), and when SpringBoard presents it, as a remote alert. While one is up the finger on
+// the sensor belongs to that prompt, so the Touch ID triggers must stay quiet: a confirmed
+// purchase is not a tap. Main thread only (reads processes and windows).
+static BOOL rc_auth_prompt_service(NSString *service) {
+    if (![service isKindOfClass:[NSString class]] || service.length == 0) return NO;
+    NSString *name = service.lowercaseString;
+    return [name containsString:@"coreauthui"] || [name containsString:@"localauthentication"];
+}
+
+// The view service exists only while its sheet does. FrontBoard tracks it; RunningBoard answers
+// as well when FrontBoard's list doesn't have it.
+static BOOL rc_auth_prompt_process(NSString *bundle) {
+    Class managerClass = objc_getClass("FBProcessManager");
+    id manager = [managerClass respondsToSelector:@selector(sharedInstance)] ? ((id (*)(Class, SEL))objc_msgSend)(managerClass, @selector(sharedInstance)) : nil;
+    SEL processesSel = NSSelectorFromString(@"processesForBundleIdentifier:"), runningSel = NSSelectorFromString(@"isRunning");
+    if ([manager respondsToSelector:processesSel]) {
+        id processes = ((id (*)(id, SEL, id))objc_msgSend)(manager, processesSel, bundle);
+        if ([processes isKindOfClass:[NSArray class]] || [processes isKindOfClass:[NSSet class]]) {
+            for (id process in processes) {
+                if ([process respondsToSelector:runningSel] && ((BOOL (*)(id, SEL))objc_msgSend)(process, runningSel)) return YES;
+            }
+        }
+    }
+
+    Class predicateClass = objc_getClass("RBSProcessPredicate"), handleClass = objc_getClass("RBSProcessHandle");
+    SEL predicateSel = NSSelectorFromString(@"predicateMatchingBundleIdentifier:"), handleSel = NSSelectorFromString(@"handleForPredicate:error:");
+    if ([predicateClass respondsToSelector:predicateSel] && [handleClass respondsToSelector:handleSel]) {
+        id predicate = ((id (*)(Class, SEL, id))objc_msgSend)(predicateClass, predicateSel, bundle);
+        id handle = ((id (*)(Class, SEL, id, void *))objc_msgSend)(handleClass, handleSel, predicate, NULL);
+        if (handle) return YES;
+    }
+    return NO;
+}
+
+static BOOL rc_auth_prompt_remote_alert(void) {
+    Class managerClass = objc_getClass("SBRemoteTransientOverlaySessionManager");
+    id manager = nil;
+    if ([managerClass respondsToSelector:@selector(sharedInstance)]) {
+        manager = ((id (*)(Class, SEL))objc_msgSend)(managerClass, @selector(sharedInstance));
+    }
+    if (!manager) {
+        id springBoard = [UIApplication sharedApplication];
+        SEL managerSel = NSSelectorFromString(@"remoteTransientOverlaySessionManager");
+        if ([springBoard respondsToSelector:managerSel]) manager = ((id (*)(id, SEL))objc_msgSend)(springBoard, managerSel);
+    }
+    SEL sessionsSel = NSSelectorFromString(@"sessionsWithDefinition:options:");
+    if (![manager respondsToSelector:sessionsSel]) return NO;
+    id sessions = ((id (*)(id, SEL, id, unsigned long long))objc_msgSend)(manager, sessionsSel, nil, 0ULL);
+    if (![sessions isKindOfClass:[NSArray class]]) return NO;
+    for (id session in sessions) {
+        SEL activatedSel = NSSelectorFromString(@"isActivated"), validSel = NSSelectorFromString(@"isValid");
+        if ([session respondsToSelector:activatedSel] && !((BOOL (*)(id, SEL))objc_msgSend)(session, activatedSel)) continue;
+        if ([session respondsToSelector:validSel] && !((BOOL (*)(id, SEL))objc_msgSend)(session, validSel)) continue;
+        SEL definitionSel = NSSelectorFromString(@"definition"), serviceSel = NSSelectorFromString(@"serviceName");
+        id definition = [session respondsToSelector:definitionSel] ? ((id (*)(id, SEL))objc_msgSend)(session, definitionSel) : nil;
+        NSString *service = [definition respondsToSelector:serviceSel] ? ((id (*)(id, SEL))objc_msgSend)(definition, serviceSel) : nil;
+        if (rc_auth_prompt_service(service)) return YES;
+    }
+    return NO;
+}
+
+// A presented overlay, or a hosted remote view, that belongs to the authentication service
+static BOOL rc_auth_prompt_controller(UIViewController *controller, NSUInteger depth) {
+    if (!controller || depth > 8) return NO;
+    SEL presentedBySel = NSSelectorFromString(@"isPresentedByBundleIdentifier:");
+    if ([controller respondsToSelector:presentedBySel]) {
+        for (NSString *bundle in @[@"com.apple.CoreAuthUI", @"com.apple.LocalAuthenticationUI"]) {
+            if (((BOOL (*)(id, SEL, id))objc_msgSend)(controller, presentedBySel, bundle)) return YES;
+        }
+    }
+    Class remoteClass = objc_getClass("_UIRemoteViewController");
+    if (remoteClass && [controller isKindOfClass:remoteClass]) {
+        SEL serviceSel = NSSelectorFromString(@"serviceBundleIdentifier");
+        NSString *service = [controller respondsToSelector:serviceSel] ? ((id (*)(id, SEL))objc_msgSend)(controller, serviceSel) : nil;
+        if (rc_auth_prompt_service(service)) return YES;
+    }
+    for (UIViewController *child in controller.childViewControllers) {
+        if (rc_auth_prompt_controller(child, depth + 1)) return YES;
+    }
+    return controller.presentedViewController ? rc_auth_prompt_controller(controller.presentedViewController, depth + 1) : NO;
+}
+
+static BOOL rc_view_tree_has_class(UIView *view, Class wanted, NSUInteger depth, NSUInteger *budget) {
+    if (!view || !wanted || depth > 16 || *budget == 0) return NO;
+    (*budget)--;
+    if ([view isKindOfClass:wanted]) return YES;
+    for (UIView *subview in view.subviews) {
+        if (rc_view_tree_has_class(subview, wanted, depth + 1, budget)) return YES;
+    }
+    return NO;
+}
+
+// Is iOS using the sensor for a prompt? Cheap enough to ask on a biometric event; cached for a
+// moment so the tap and the hold look at the same answer.
+static BOOL rc_biometric_auth_active(void) {
+    static BOOL cached = NO;
+    static NSTimeInterval checkedAt = 0;
+    static BOOL loggedActive = NO;
+    NSTimeInterval now = CFAbsoluteTimeGetCurrent();
+    if (checkedAt != 0 && now - checkedAt < 0.25) return cached;
+
+    BOOL active = NO;
+    @try {
+        active = rc_auth_prompt_remote_alert();
+
+        for (NSString *bundle in @[@"com.apple.CoreAuthUI", @"com.apple.LocalAuthenticationUI"]) {
+            if (active) break;
+            active = rc_auth_prompt_process(bundle);
+        }
+
+        if (!active) {
+            Class lockClass = objc_getClass("SBLockScreenManager");
+            SEL sharedLock = NSSelectorFromString(@"sharedInstance"), uiLocked = NSSelectorFromString(@"isUILocked");
+            id lockManager = [lockClass respondsToSelector:sharedLock] ? ((id (*)(Class, SEL))objc_msgSend)(lockClass, sharedLock) : nil;
+            BOOL locked = [lockManager respondsToSelector:uiLocked] && ((BOOL (*)(id, SEL))objc_msgSend)(lockManager, uiLocked);
+            Class passcodeViewClass = objc_getClass("SBUIPasscodeLockViewBase");
+            for (UIWindow *window in [UIApplication sharedApplication].windows) {
+                if (window.hidden || window.alpha == 0) continue;
+                if (rc_auth_prompt_controller(window.rootViewController, 0)) { active = YES; break; }
+                if (!locked && passcodeViewClass) {
+                    NSUInteger budget = 3000;
+                    if (rc_view_tree_has_class(window, passcodeViewClass, 0, &budget)) { active = YES; break; }
+                }
+            }
+        }
+    } @catch (NSException *e) {
+        SRLogMin(@"⚠️ [Bio] Authentication prompt check failed: %@", e);
+        active = NO;
+    }
+
+    if (active != loggedActive) {
+        SRLog(@"🔐 [Bio] System authentication prompt %@ - Touch ID triggers stay quiet", active ? @"is up" : @"closed");
+        loggedActive = active;
+    }
+    cached = active;
+    checkedAt = now;
+    return active;
 }
 
 // Focus triggers. trigger_device_focus_on_<name> / trigger_device_focus_off_<name> fire when
@@ -7654,6 +7797,7 @@ static void handle_lock_state_transition(BOOL isLocked, NSString *source) {
             // Reset biometric / unlock-related side effects
             g_bioFingerDownTime = 0;
             g_bioHoldTriggered = NO;
+            g_bioDownWasAuthPrompt = NO;
             
             if (g_bioWatchdogTimer) {
                 [g_bioWatchdogTimer invalidate];
@@ -18834,6 +18978,26 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
                  [g_triggerConfig[@"triggers"][@"touchid_tap"][@"enabled"] boolValue]);
             if (!enabled) return;
 
+            // The sensor belongs to a system prompt (purchase, Apple ID, Apple Pay, an app's
+            // Touch ID sheet): follow the touch so its lift is not taken for a new tap, but never
+            // fire. The prompt can close before the finger lifts, so the state says whose it was.
+            if (rc_biometric_auth_active()) {
+                if (g_bioWatchdogTimer) {
+                    [g_bioWatchdogTimer invalidate];
+                    g_bioWatchdogTimer = nil;
+                }
+                if (g_bioFingerDownTime == 0) {
+                    g_bioFingerDownTime = now;
+                    g_bioDownWasAuthPrompt = YES;
+                } else {
+                    g_bioFingerDownTime = 0;
+                    g_bioDownWasAuthPrompt = NO;
+                }
+                g_bioHoldTriggered = NO;
+                SRLogMin(@"[Bio] Ignored: a system authentication prompt has the sensor");
+                return;
+            }
+
             // DEBOUNCE CHECK:
             if (now < g_bioIgnoreUntil) {
                 // SRLog(@"[Bio] Ignoring Event (Debounce)");
@@ -18846,6 +19010,19 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
 
             if (g_bioFingerDownTime != 0 && !isStale) {
                 // STATE = DOWN. This event must be LIFT.
+
+                if (g_bioDownWasAuthPrompt) {
+                    // The down was for a system prompt: its lift is not a trigger either
+                    g_bioFingerDownTime = 0;
+                    g_bioDownWasAuthPrompt = NO;
+                    g_bioHoldTriggered = NO;
+                    if (g_bioWatchdogTimer) {
+                        [g_bioWatchdogTimer invalidate];
+                        g_bioWatchdogTimer = nil;
+                    }
+                    g_bioIgnoreUntil = now + 0.5;
+                    return;
+                }
                 
                 // VARIABLE DELAY:
                 // If we started on the lockscreen, we need a bigger window (0.4s) for biometrics to "win" the race.
@@ -18854,6 +19031,19 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
 
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(liftDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                     if (g_bioFingerDownTime == 0) return; // Already handled or reset
+
+                    // A prompt came up between the lift and this check: not a tap
+                    if (g_bioDownWasAuthPrompt || rc_biometric_auth_active()) {
+                        SRLog(@"[Bio] Suppressing Tap (system authentication prompt)");
+                        if (g_bioWatchdogTimer) {
+                            [g_bioWatchdogTimer invalidate];
+                            g_bioWatchdogTimer = nil;
+                        }
+                        g_bioFingerDownTime = 0;
+                        g_bioDownWasAuthPrompt = NO;
+                        g_bioHoldTriggered = NO;
+                        return;
+                    }
 
                     // Cancel timer if running.
                     if (g_bioWatchdogTimer) {
@@ -18889,15 +19079,27 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
                     }
                     g_bioFingerDownTime = 0; // Reset State to UP.
                     g_bioHoldTriggered = NO;
+                    g_bioDownWasAuthPrompt = NO;
                     
                     // START DEBOUNCE (Ignore subsequent events for 0.5s to squash "bouncing")
                     g_bioIgnoreUntil = [[NSDate date] timeIntervalSince1970] + 0.5;
                 });
 
             } else {
+                // A late lift of a touch that went down for a prompt: end it, never start a
+                // new touch from it (a finger can rest on the sensor longer than the stale limit)
+                if (g_bioDownWasAuthPrompt) {
+                    g_bioFingerDownTime = 0;
+                    g_bioDownWasAuthPrompt = NO;
+                    g_bioHoldTriggered = NO;
+                    g_bioIgnoreUntil = now + 0.5;
+                    return;
+                }
+
                 // STATE = UP (or Stale). This event must be DOWN.
                 // Start Timer!
                 g_bioFingerDownTime = now; // Set State to DOWN.
+                g_bioDownWasAuthPrompt = NO;
                 
                 // Track initial lock state
                 Class LSMC = objc_getClass("SBLockScreenManager");
@@ -18931,6 +19133,13 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
                         
                         if (g_bioWasLocked && !currentlyLocked2) {
                             SRLog(@"[Bio] Suppressing Hold (Unlock succeeded during decision window)");
+                            return;
+                        }
+
+                        // The finger is working a system prompt, or was when it went down
+                        if (g_bioDownWasAuthPrompt || rc_biometric_auth_active()) {
+                            SRLog(@"[Bio] Suppressing Hold (system authentication prompt)");
+                            g_bioDownWasAuthPrompt = YES;
                             return;
                         }
 
@@ -18988,6 +19197,7 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
                         }
                         g_bioFingerDownTime = 0;
                         g_bioHoldTriggered = NO;
+                        g_bioDownWasAuthPrompt = NO;
                     });
                 }
             } else { // UP
@@ -19072,6 +19282,7 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
                     });
                     g_bioFingerDownTime = 0;
                     g_bioHoldTriggered = NO;
+                    g_bioDownWasAuthPrompt = NO;
 
                     // Check for simultaneous press if Volume is already down.
                     // FALLBACK ONLY. performInitialButtonDownActions already detects this
