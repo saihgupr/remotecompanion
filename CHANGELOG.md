@@ -30,6 +30,7 @@ All notable changes to this project will be documented in this file.
 - **Action Sequence Edited trigger**: fires when any trigger's action sequence changes, including this trigger's own, from the app or the Web UI. Add, remove, reorder or edit an action and it runs, with an optional debounce (15 seconds by default, Off, 5, 10, 30 seconds, 1, 2 or 5 minutes) that waits until the edits stop so a run of changes runs the sequence once.
 
 ### Changed
+- **New Trigger menu: one Device State section**: Battery Level, Focus and Control Center Button now sit under Device State with the lock, power and other device-state triggers, instead of a separate Device section.
 - **Action summaries without brackets**: SSH and Remote rows show the computer or client name plainly, like "SSH Mac Mini: ..." and "Remote iPad: ...", instead of putting it in square brackets.
 - **Set Variable tile selection**: the chosen kind in the Set Variable and Variable condition editors, in the app and the Web UI, is shown by its blue icon, title and border; the blue fill behind the tile is gone.
 - **Watch features hide without the Watch app**: the Watch actions and triggers only appear on iPhones with the Apple Watch app installed, so a phone that has none does not show rows that cannot work.

@@ -1074,8 +1074,8 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
         @{ @"title": @"Notification", @"icon": @"bell.badge", @"section": @"Apps", @"handler": ^{ push([[RCNotificationTriggerViewController alloc] init]); } },
         @{ @"title": @"Notification Tap", @"icon": @"hand.tap", @"image": RCTriggerIconImage(@"notiftap_", 22), @"section": @"Apps", @"handler": ^{ push([[RCNotificationTapTriggerViewController alloc] init]); } },
         @{ @"title": @"Scheduled Trigger", @"icon": @"calendar.badge.clock", @"section": @"Time", @"handler": ^{ push([[RCScheduledTriggerViewController alloc] init]); } },
-        @{ @"title": @"Battery Level", @"icon": [UIImage systemImageNamed:@"battery.50"] ? @"battery.50" : @"battery.25", @"section": @"Device", @"handler": ^{ push([[RCBatteryTriggerViewController alloc] init]); } },
-        @{ @"title": @"Focus", @"icon": @"moon.fill", @"section": @"Device", @"handler": ^{ push([[RCFocusTriggerViewController alloc] init]); } },
+        @{ @"title": @"Battery Level", @"icon": [UIImage systemImageNamed:@"battery.50"] ? @"battery.50" : @"battery.25", @"section": @"Device State", @"handler": ^{ push([[RCBatteryTriggerViewController alloc] init]); } },
+        @{ @"title": @"Focus", @"icon": @"moon.fill", @"section": @"Device State", @"handler": ^{ push([[RCFocusTriggerViewController alloc] init]); } },
     ] mutableCopy];
     // Watch triggers only make sense where the Apple Watch app is installed
     if ([RCConfigManager watchFeaturesAvailable]) {
@@ -1109,7 +1109,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
         } }];
     }
     if ([RCConfigManager supportsControlCenterButtons]) {
-        [items addObject:@{ @"title": @"Control Center Button", @"icon": @"switch.2", @"section": @"Device", @"handler": ^{ push([[RCControlCenterTriggerViewController alloc] init]); } }];
+        [items addObject:@{ @"title": @"Control Center Button", @"icon": @"switch.2", @"section": @"Device State", @"handler": ^{ push([[RCControlCenterTriggerViewController alloc] init]); } }];
     }
 
     // A trigger over the config itself: its settings screen adds it (and is where the debounce
