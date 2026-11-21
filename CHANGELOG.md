@@ -26,6 +26,7 @@ All notable changes to this project will be documented in this file.
 - **Switched-off integrations show dimmed**: a trigger or action that needs MQTT, Home Assistant or Keyboard Maestro stays in its list and stays editable while that integration is off. The row is dimmed and marked "MQTT off" or "Home Assistant off" in the app and the Web UI, so it is clear why it does nothing; turning the integration back on restores the normal look.
 
 ### Fixed
+- **SSH tools come with the package**: RemoteCompanion now depends on `openssh-client` and `sshpass`, so SSH actions work right after installing instead of failing with `sshpass: not found`. Existing installs pick both up on the next upgrade.
 - **Home Button action is instant**: on a device with a Home button it now runs the handler a real Home press ends in, instead of injecting a press that SpringBoard then sits on for about a third of a second, so the Home Screen starts moving as soon as the action runs. Phones without a Home button keep the injected press.
 - **Trigger name after editing a schedule**: the trigger's screen updates its title as soon as a new time or days are saved, instead of showing the old name until you go back and open it again (#145).
 - **Test Kit on iOS 26**: Spotlight and the Today view are found and closed through the home screen controller, so a step starts on the right screen. Test Kit only, no user-facing change (#151).
