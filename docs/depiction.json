@@ -80,6 +80,19 @@
       "views": [
         {
           "class": "DepictionHeaderView",
+          "title": "Version 4.7.0",
+          "useBoldText": true
+        },
+        {
+          "class": "DepictionSubheaderView",
+          "title": "Released November 22, 2026"
+        },
+        {
+          "class": "DepictionMarkdownView",
+          "markdown": "### Added\n* **Developer Mode annotate and send**: freeze a screenshot, mark it up and add a note, then send both over SSH to OpenCode or Antigravity IDE. With OpenCode Auto-Send it queues in the active session and opens it in a background tab.\n* **Apple Watch actions and triggers**: Theater Mode, Silent Mode, Wake on Wrist Raise, Water Lock, Always On, Watch Face, Watch Connected, Watch Disconnected, Watch Face Changed, and Watch Only notifications.\n* **Real touch gestures and screen text**: `gesture tap|hold|swipe|drag|pinch|rotate` move the touchscreen itself, and Copy Text on Screen, Copy All Text on Screen, Tap Text on Screen, Wait for Text and the Text on Screen condition read any text that is drawn.\n* **Control Center Button trigger**: a named button with an SF Symbol and its own sequence, listed in Settings > Control Center with no four button limit. Needs CCSupport and iOS 17 or earlier.\n* **Native Apple timers**: real Clock timers with start, pause, resume, stop, status and optional labels, synced to the Lock Screen, Control Center and the Watch.\n* **New triggers**: Airplane Mode On and Off, Portrait Up, Landscape Left, Landscape Right, Portrait Upside Down, Long Press App Icon, and Action Sequence Edited with a debounce.\n* **Set Orientation action**: portrait, landscape left or right, upside down, or auto rotate.\n* **Add-ons**: one JSON file per add-on supplies actions, conditions, banners and triggers, with validation and a Settings page showing what loaded.\n* **Full backup and restore**: Export and Import carry integrations, SSH hosts, tokens, add-ons, gestures, notification filters, variables and the app blacklist, and `rc export` / `rc import` do the same from a terminal.\n* **Remote RC actions** run commands on a second device over its Web UI, and **duplicate actions** copy a row in place, whole If and Repeat blocks included.\n* **MCP server**: `tools/rc-mcp` adds state, trigger, config, sequence, deeplink and debugging tools for assistants.\n* **Test Kit passcode Forever**, a passcode that survives respring and restart.\n\n### Changed\n* **Triggers only when added**: the Triggers screen starts empty and every built-in trigger lives in the + menu, with a first-run invitation and an Add a Trigger button.\n* **Inline value editing**: Delay, Volume, Ringer Volume and Brightness expand in place with a stepper and an Exact field, and the sequence uses standalone rounded cards.\n* **Timer editor redesign**, a **compact New Trigger menu**, **banner categories**, one **Device State** section, and plain **Home Assistant and Keyboard Maestro row names**.\n* **AudioStream auto-start is opt-in**, and integrations that are switched off show dimmed with the reason.\n\n### Fixed\n* Touch ID triggers stay quiet while iOS asks for a fingerprint.\n* Pause Music no longer starts playback that was already stopped.\n* Home Assistant calls read plainly, like `Trigger Pause One Hour`.\n* Wi-Fi off no longer fires its own disconnect trigger, and notifications ask for permission on first launch.\n* `read file` and `http-request` need the API token from another device, a REST call to the phone's own address is not trusted as local, and HTTPS certificates are checked.\n* Backups keep add-on icons and the switched-off add-ons list, leave out the Run as Root list, and a restore writes only the files a backup holds."
+        },
+        {
+          "class": "DepictionHeaderView",
           "title": "Version 4.5.0",
           "useBoldText": true
         },

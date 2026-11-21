@@ -3,14 +3,15 @@
 RemoteCompanion provides fast, scriptable system control for modern rootless jailbreaks. It lets you bind physical gestures and hardware buttons, or send commands remotely from your computer, to trigger system actions, control media playback, and run custom scripts.
 
 > [!IMPORTANT]
-> **What’s New in v4.5.0**
-> - **Full Configuration Export & IAmLazy Tweak Backups**: Export Configuration writes one file with everything on this device, including settings, integrations, triggers, add-ons, gestures, notification filters and variables (`rc export` / `rc import`), while `rc backup` runs an IAmLazy tweak backup on the device and moves the `.tar.gz` archive to your Mac.
-> - **Triggers only when added**: the Triggers screen starts empty and every built-in trigger lives in the + menu, so the list holds only what you use. Removing a trigger puts it back in the menu.
-> - **Remote RC actions**: add another device under Settings > Integrations > Remote RC Clients, then run any RC command on it over its Web UI, with the same pickers and editors as local actions.
-> - **Duplicate actions**: the long-press action menu can duplicate a row in place, whole If and Repeat blocks included, and the Web UI's right-click menu has the same.
-> - **AudioStream auto-start is opt-in**: `/api/audiostream/start` now returns 403 unless you turn it on in Settings > Integrations > AudioStream, so a client timing out can no longer wake the streaming daemon.
-> - **iOS 18 and 26 fixes**: Control Center and App Switcher work on iOS 18, Quick Shortcuts and Camera modes work on iOS 26, and `objc_call` with arguments no longer crashes SpringBoard.
-> - **Smaller fixes**: a trigger's title updates as soon as its schedule changes, two-finger slides and Bluetooth triggers have their own icons, and Test Kit finds Spotlight and the Today view on iOS 26.
+> **What's New in v4.7.0**
+> - **Annotate and send to your editor**: freeze a screenshot, mark it up, and send it with a note to OpenCode or Antigravity over SSH. OpenCode Auto-Send queues it in the active session.
+> - **Apple Watch actions and triggers**: Theater, Silent, Wake on Raise, Water Lock, Always On, and face switching, with Connected, Disconnected, and Face Changed triggers plus Watch Only notifications.
+> - **Real touch gestures and screen text**: new gesture commands drive the touchscreen itself, and Copy, Tap, and Wait actions work on any text drawn on screen.
+> - **Control Center buttons**: create named buttons with icons that run action sequences straight from Control Center. Needs CCSupport and iOS 17 or earlier.
+> - **Native Apple timers**: real Clock timers that sync with the Lock Screen, Control Center, and Apple Watch, with pause, resume, stop, and status.
+> - **New triggers**: Airplane Mode On and Off, physical orientation from the accelerometer, Long Press App Icon, Set Orientation action, and Action Sequence Edited.
+> - **Add-ons and full backup**: one JSON file per add-on in the AddOns folder, plus Export and Import that carry the whole config to a new device (`rc export` / `rc import`).
+> - **Smaller polish**: standard iOS notifications with buttons and tap triggers, compact trigger menu, remote control of a second device, and clearer Home Assistant names.
 
 <p align="center">
   <a href="https://saihgupr.github.io/remotecompanion/">Official Website</a> •
