@@ -8,3 +8,4 @@
 > - **New triggers**: Airplane Mode On and Off, physical orientation from the accelerometer, Long Press App Icon, Set Orientation action, and Action Sequence Edited.
 > - **Add-ons and full backup**: one JSON file per add-on in the AddOns folder, plus Export and Import that carry the whole config to a new device (`rc export` / `rc import`).
 > - **Smaller polish**: standard iOS notifications with buttons and tap triggers, compact trigger menu, remote control of a second device, and clearer Home Assistant names.
+> - **Sequence editor**: undo and redo up to 50 steps, swipe a row to copy, paste or cut, nested cards that indent to their block, and a Test button on SSH hosts.

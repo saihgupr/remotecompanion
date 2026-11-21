@@ -40,7 +40,7 @@ This version also ships everything from 4.5.0, which was never announced. That m
 
 Security and backup: `read file` and `http-request` now need the API token when they arrive from another device, a REST API Call to the phone's own address is no longer trusted as local, and the Web UI reads an origin as an address so a public name like `10.example.com` does not count as local. REST API Call and Remote RC now check HTTPS certificates, with `"insecure": true` for a self-signed home server. Backups keep add-on icons and the switched-off add-ons list, leave out the Run as Root list, and a restore writes only the files a backup holds.
 
-Also here: standard iOS notifications from `notify` with a title editor, buttons, and tap triggers; a compact tile layout for the New Trigger menu; banner categories; one Device State section in the trigger menu; clearer Home Assistant and Keyboard Maestro row names; inline steppers for Delay, Volume, and Brightness rows; a redesigned Timer editor; and a Test Kit passcode Forever option that survives respring and restart.
+Also here: standard iOS notifications from `notify` with a title editor, buttons, and tap triggers; a compact tile layout for the New Trigger menu; banner categories; one Device State section in the trigger menu; clearer Home Assistant and Keyboard Maestro row names; inline steppers for Delay, Volume, and Brightness rows; a redesigned Timer editor; and a Test Kit passcode Forever option that survives respring and restart. The sequence editor also gains undo and redo up to 50 steps, swipe right on a row to copy, paste or cut it, nested If and Repeat cards that indent to their block, and a Test button on SSH hosts that reports Connected or the exact failure.
 
 # Compatibility
 

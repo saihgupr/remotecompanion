@@ -19,10 +19,11 @@ Public latest right now: v4.4.0 (GitHub release and Sileo repo). 4.5.0 notes wer
 - Home Assistant "Trigger ..." naming: alpha-4.7 already has it in both the app and the Web UI. The copy on test/latest is the same work.
 - main has zero commits that alpha-4.7 lacks.
 - Only real gap was PR #201, now applied.
-- Left out on purpose: feature/if-indent-rails (copy, cut, paste in the action list and indented nested cards, 330 lines, no changelog entry, unmerged, untested) and the closed PRs #138 (Triggers Enabled category) and #200 (Settings pages). Not release material for tomorrow.
+- Left out on purpose: the closed PRs #138 (Triggers Enabled category) and #200 (Settings pages). Not release material for tomorrow.
+- feature/if-indent-rails was merged into alpha-4.7 by another session at 10:06 after this audit (copy, cut, paste, indented nested cards, undo and redo, SSH connection test). The changelog covers all of it, and the Reddit and GitHub copy were updated to match.
 
 ## Before 9am (start at ~8:00)
-1. Decide how to land PR #201: commit the already-applied change with the release, then close #201 as shipped. Do not also merge the PR, the content is already here.
+1. PR #201 is closed as shipped. Its content is in commit 8e459e5 on alpha-4.7. Nothing left to do here.
 2. `git checkout main && git merge alpha-4.7`. Expect 303 commits. Watch CHANGELOG.md and README.md for conflicts.
 3. Build both packages as two separate commands. `--rootless --rootful` in one line only builds the last flag, which bit us once:
    `./build.sh --rootless`
