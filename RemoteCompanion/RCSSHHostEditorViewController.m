@@ -1,5 +1,6 @@
 #import "RCSSHHostEditorViewController.h"
 #import "RCConfigManager.h"
+#import "RCServerClient.h"
 
 @interface RCSSHHostEditorViewController () <UITableViewDelegate, UITableViewDataSource, UITextFieldDelegate>
 @property (nonatomic, strong) UITableView *tableView;
@@ -16,6 +17,9 @@
 @property (nonatomic, strong) UITextField *passwordField;
 @property (nonatomic, strong) UITextField *keyPathField;
 @property (nonatomic, strong) UISegmentedControl *authSegment;
+@property (nonatomic, strong) UIBarButtonItem *saveButton;
+@property (nonatomic, strong) UIBarButtonItem *testButton;
+@property (nonatomic, strong) UIActivityIndicatorView *testSpinner;
 @end
 
 @implementation RCSSHHostEditorViewController
@@ -39,9 +43,14 @@
     self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc]
         initWithBarButtonSystemItem:UIBarButtonSystemItemCancel
         target:self action:@selector(cancelTapped)];
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
+    self.saveButton = [[UIBarButtonItem alloc]
         initWithBarButtonSystemItem:UIBarButtonSystemItemSave
         target:self action:@selector(saveTapped)];
+    self.testButton = [[UIBarButtonItem alloc]
+        initWithTitle:@"Test"
+        style:UIBarButtonItemStylePlain
+        target:self action:@selector(testTapped)];
+    self.navigationItem.rightBarButtonItems = @[self.saveButton, self.testButton];
 
     [self buildFields];
 
@@ -191,7 +200,15 @@
 
 - (void)saveTapped {
     [self.view endEditing:YES];
+    NSDictionary *hostDict = [self hostDictionaryFromFields];
+    if (!hostDict) return;
+    [[RCConfigManager sharedManager] addOrUpdateSSHHost:hostDict];
+    [self.navigationController popViewControllerAnimated:YES];
+}
 
+// The host as it would be saved, or nil after telling the user what's missing. The Test button
+// saves through the same path, since the tweak's ssh-test reads the saved host by id.
+- (NSDictionary *)hostDictionaryFromFields {
     NSString *name = [self.nameField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     NSString *host = [self.hostField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     NSString *portStr = [self.portField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
@@ -201,19 +218,19 @@
 
     if (host.length == 0) {
         [self showErrorWithTitle:@"Host Required" message:@"Enter a hostname or IP address."];
-        return;
+        return nil;
     }
     if ([host hasPrefix:@"-"] || [host rangeOfString:@" "].location != NSNotFound) {
         [self showErrorWithTitle:@"Invalid Host" message:@"Hostname may not start with - or contain spaces."];
-        return;
+        return nil;
     }
     if ([user hasPrefix:@"-"] || [user rangeOfString:@" "].location != NSNotFound) {
         [self showErrorWithTitle:@"Invalid Username" message:@"Username may not start with - or contain spaces."];
-        return;
+        return nil;
     }
     if (self.useKeyAuth && keyInput.length == 0) {
         [self showErrorWithTitle:@"Key Path Required" message:@"Enter the path to the private key, e.g. ~/.ssh/id_rsa."];
-        return;
+        return nil;
     }
 
     NSInteger port = [portStr integerValue];
@@ -238,7 +255,7 @@
     }
 
     NSString *hostId = self.isEditingHost ? self.existingHost[@"id"] : [[NSUUID UUID] UUIDString];
-    NSDictionary *hostDict = @{
+    return @{
         @"id": hostId,
         @"name": name,
         @"host": host,
@@ -248,9 +265,56 @@
         @"password": password,
         @"keyPath": keyPath
     };
+}
 
+- (void)testTapped {
+    [self.view endEditing:YES];
+    NSDictionary *hostDict = [self hostDictionaryFromFields];
+    if (!hostDict) return;
+    // The test runs on the phone, which reads the saved host by id
     [[RCConfigManager sharedManager] addOrUpdateSSHHost:hostDict];
-    [self.navigationController popViewControllerAnimated:YES];
+    self.existingHost = hostDict;
+    self.isEditingHost = YES;
+    [self setTesting:YES];
+
+    __weak typeof(self) weakSelf = self;
+    NSString *command = [NSString stringWithFormat:@"ssh-test %@", hostDict[@"id"]];
+    [[RCServerClient sharedClient] executeCommand:command timeout:15.0 completion:^(NSString *output, NSError *error) {
+        __strong typeof(weakSelf) self = weakSelf;
+        if (!self) return;
+        [self setTesting:NO];
+        if (error) {
+            [self showErrorWithTitle:@"Connection Failed" message:error.localizedDescription];
+            return;
+        }
+        NSString *text = [output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if ([text.lowercaseString hasPrefix:@"error"]) {
+            NSString *detail = text;
+            if (detail.length > 6) detail = [[detail substringFromIndex:6] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            [self showErrorWithTitle:@"Connection Failed" message:(detail.length ? detail : @"The connection test failed.")];
+        } else if ([text.lowercaseString containsString:@"connected"]) {
+            [self showErrorWithTitle:@"Connection OK" message:text];
+        } else {
+            [self showErrorWithTitle:@"Connection Failed" message:(text.length ? text : @"No response from ssh.")];
+        }
+    }];
+}
+
+- (void)setTesting:(BOOL)testing {
+    if (testing) {
+        self.saveButton.enabled = NO;
+        self.testButton.enabled = NO;
+        if (!self.testSpinner) {
+            self.testSpinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
+        }
+        [self.testSpinner startAnimating];
+        self.navigationItem.rightBarButtonItems = @[self.saveButton, [[UIBarButtonItem alloc] initWithCustomView:self.testSpinner]];
+    } else {
+        [self.testSpinner stopAnimating];
+        self.saveButton.enabled = YES;
+        self.testButton.enabled = YES;
+        self.navigationItem.rightBarButtonItems = @[self.saveButton, self.testButton];
+    }
 }
 
 - (void)showErrorWithTitle:(NSString *)title message:(NSString *)message {

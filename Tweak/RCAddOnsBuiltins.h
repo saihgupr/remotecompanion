@@ -96,6 +96,7 @@ static NSString *const kRCAOBuiltinPrefixes[] = {
     @"spotify playlist ",
     @"springcut ",
     @"ssh-run ",
+    @"ssh-test ",
     @"stop run ",
     @"stop trigger ",
     @"sudo ",

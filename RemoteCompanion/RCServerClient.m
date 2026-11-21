@@ -15,6 +15,10 @@
 }
 
 - (void)executeCommand:(NSString *)command completion:(void (^)(NSString * _Nullable, NSError * _Nullable))completion {
+    [self executeCommand:command timeout:5.0 completion:completion];
+}
+
+- (void)executeCommand:(NSString *)command timeout:(NSTimeInterval)timeout completion:(void (^)(NSString * _Nullable, NSError * _Nullable))completion {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         int sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
         if (sockfd < 0) {
@@ -59,8 +63,8 @@
         char buffer[1024];
         ssize_t n;
         
-        // Increase timeout for reading data (5 seconds)
-        tv.tv_sec = 5;
+        // Increase timeout for reading data (5 seconds by default, longer for a slow command)
+        tv.tv_sec = (time_t)MAX(1.0, timeout);
         tv.tv_usec = 0;
         setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
         

@@ -12271,6 +12271,125 @@ static NSString *rc_handle_watch_setting_command(NSString *cleanCmd) {
     return [NSString stringWithFormat:@"%s toggled\n", spec->label];
 }
 
+// ssh-test <hostId>: run a quick command over the saved host's SSH settings and report whether
+// the connection and login worked. The command socket handles each command off the main thread.
+static NSString *rc_ssh_test_host(NSString *hostId) {
+    load_trigger_config();
+    NSDictionary *targetHost = nil;
+    for (NSDictionary *h in (g_triggerConfig[@"sshHosts"] ?: @[])) {
+        if ([h[@"id"] isEqualToString:hostId]) { targetHost = h; break; }
+    }
+    if (!targetHost) return [NSString stringWithFormat:@"Error: SSH Host '%@' not found\n", hostId];
+
+    NSString *host = targetHost[@"host"] ?: @"";
+    NSString *user = targetHost[@"user"] ?: @"mobile";
+    if (host.length == 0) return @"Error: Host address is empty\n";
+    if ([host hasPrefix:@"-"] || [host rangeOfString:@" "].location != NSNotFound ||
+        [user hasPrefix:@"-"] || [user rangeOfString:@" "].location != NSNotFound) {
+        return @"Error: Invalid host or user\n";
+    }
+    NSInteger port = [targetHost[@"port"] integerValue] > 0 ? [targetHost[@"port"] integerValue] : 22;
+    NSString *authType = targetHost[@"authType"] ?: @"password";
+    NSString *password = targetHost[@"password"] ?: @"";
+    NSString *keyPath = targetHost[@"keyPath"] ?: @"";
+    NSString *destination = user.length > 0 ? [NSString stringWithFormat:@"%@@%@", user, host] : host;
+    NSString *remoteCmd = @"echo RC_SSH_OK";
+
+    BOOL useSSHPass = NO;
+    NSString *fullSSHCmd = nil;
+    if ([authType isEqualToString:@"key"] && keyPath.length > 0) {
+        fullSSHCmd = [NSString stringWithFormat:@"ssh -i %@ -p %ld -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -o BatchMode=yes %@ %@",
+                      rc_sh_quote([keyPath stringByExpandingTildeInPath]), (long)port,
+                      rc_sh_quote(destination), rc_sh_quote(remoteCmd)];
+    } else if (password.length > 0) {
+        useSSHPass = YES;
+        fullSSHCmd = [NSString stringWithFormat:@"sshpass -e ssh -p %ld -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 %@ %@",
+                      (long)port, rc_sh_quote(destination), rc_sh_quote(remoteCmd)];
+    } else {
+        fullSSHCmd = [NSString stringWithFormat:@"ssh -p %ld -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -o BatchMode=yes %@ %@",
+                      (long)port, rc_sh_quote(destination), rc_sh_quote(remoteCmd)];
+    }
+
+    NSString *basePath = @"/var/jb/usr/local/bin:/var/jb/usr/bin:/var/jb/bin:/var/jb/usr/sbin:/var/jb/sbin:/usr/bin:/bin:/usr/sbin:/sbin";
+    extern char **environ;
+    NSMutableArray *envArray = [NSMutableArray array];
+    for (char **env = environ; *env != NULL; env++) {
+        NSString *envStr = [NSString stringWithUTF8String:*env];
+        if (envStr && ![envStr hasPrefix:@"PATH="] && ![envStr hasPrefix:@"SSHPASS="]) {
+            [envArray addObject:envStr];
+        }
+    }
+    [envArray addObject:[NSString stringWithFormat:@"PATH=%@", basePath]];
+    if (useSSHPass && password.length > 0) {
+        [envArray addObject:[NSString stringWithFormat:@"SSHPASS=%@", password]];
+    }
+    char **newEnviron = malloc(sizeof(char*) * (envArray.count + 1));
+    for (NSUInteger i = 0; i < envArray.count; i++) newEnviron[i] = strdup([envArray[i] UTF8String]);
+    newEnviron[envArray.count] = NULL;
+
+    int fds[2];
+    if (pipe(fds) != 0) {
+        for (NSUInteger i = 0; i < envArray.count; i++) { memset(newEnviron[i], 0, strlen(newEnviron[i])); free(newEnviron[i]); }
+        free(newEnviron);
+        return @"Error: Could not start the connection test\n";
+    }
+    posix_spawn_file_actions_t fileActions;
+    posix_spawn_file_actions_init(&fileActions);
+    posix_spawn_file_actions_adddup2(&fileActions, fds[1], STDOUT_FILENO);
+    posix_spawn_file_actions_adddup2(&fileActions, fds[1], STDERR_FILENO);
+    posix_spawn_file_actions_addclose(&fileActions, fds[0]);
+    posix_spawn_file_actions_addclose(&fileActions, fds[1]);
+
+    const char *sh = rc_shell_path();
+    char *args[] = {(char *)sh, "-c", (char *)[fullSSHCmd UTF8String], NULL};
+    pid_t pid = 0;
+    int spawnResult = rc_posix_spawn(&pid, sh, &fileActions, NULL, args, newEnviron);
+    posix_spawn_file_actions_destroy(&fileActions);
+    close(fds[1]);
+
+    NSMutableData *testOutput = [NSMutableData data];
+    int code = -1;
+    if (spawnResult == 0) {
+        char buf[512];
+        time_t deadline = time(NULL) + 12;
+        while (time(NULL) < deadline) {
+            fd_set set;
+            FD_ZERO(&set);
+            FD_SET(fds[0], &set);
+            struct timeval wait;
+            wait.tv_sec = 1;
+            wait.tv_usec = 0;
+            int ready = select(fds[0] + 1, &set, NULL, NULL, &wait);
+            if (ready < 0) break;
+            if (ready == 0) continue;
+            ssize_t n = read(fds[0], buf, sizeof(buf));
+            if (n <= 0) break;
+            [testOutput appendBytes:buf length:n];
+        }
+        close(fds[0]);
+        int status = 0;
+        if (waitpid(pid, &status, WNOHANG) == 0) {
+            kill(pid, SIGKILL);
+            waitpid(pid, &status, 0);
+        }
+        code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+    } else {
+        close(fds[0]);
+    }
+
+    for (NSUInteger i = 0; i < envArray.count; i++) {
+        if (newEnviron[i]) { memset(newEnviron[i], 0, strlen(newEnviron[i])); free(newEnviron[i]); }
+    }
+    free(newEnviron);
+
+    if (code == 0) return [NSString stringWithFormat:@"Connected to %@\n", host];
+
+    NSString *detail = [[[NSString alloc] initWithData:testOutput encoding:NSUTF8StringEncoding] ?: @"" stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (detail.length > 300) detail = [detail substringFromIndex:detail.length - 300];
+    if (detail.length == 0) detail = [NSString stringWithFormat:@"ssh exited with code %d", code];
+    return [NSString stringWithFormat:@"Error: %@\n", detail];
+}
+
 static NSString *handle_command(NSString *cmd) {
     if (!cmd || ![cmd isKindOfClass:[NSString class]]) {
         SRLogMin(@"ERROR: handle_command received nil or invalid command string");
@@ -15091,6 +15210,12 @@ static NSString *handle_command(NSString *cmd) {
         });
         
         return [NSString stringWithFormat:@"Executing SSH command on %@: %@\n", host, remoteCmd];
+
+    // ssh-test <hostId>: run a quick command over the saved host's settings and return the result
+    } else if ([cleanCmd hasPrefix:@"ssh-test "]) {
+        NSString *testHostId = [[cleanCmd substringFromIndex:9] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (testHostId.length == 0) return @"Usage: ssh-test <hostId>\n";
+        return rc_ssh_test_host(testHostId);
 
     // -- Touch gesture commands ------------------------------------------------
     // gesture record|play|list|delete|rename ... (RCGestures.m)
