@@ -11,6 +11,7 @@ static NSString *const kRCActionsPasteboardType = @"com.saihgupr.remotecompanion
 - (UIMenu *)moreMenu;
 - (void)saveActions;
 - (void)updatePasteButton;
+- (void)updateUndoButtons;
 - (NSRange)ifBlockRangeForIndex:(NSInteger)index;
 - (BOOL)isIfActionItem:(id)item;
 - (BOOL)isElseActionItem:(id)item;
@@ -147,6 +148,7 @@ static NSString *RCActionCountText(NSUInteger count) {
     }
     [self rc_selectionChanged];
     [self updatePasteButton];
+    [self updateUndoButtons];
 }
 
 - (void)rc_endSelecting {

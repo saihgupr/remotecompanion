@@ -838,6 +838,13 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
 // Shown left of Play on an empty sequence when an action has been copied, so the copy can land
 // without a row to long-press
 @property (nonatomic, strong) UIBarButtonItem *pasteButton;
+// Undo/redo for the sequence: snapshots of the states before the latest change
+@property (nonatomic, strong) NSMutableArray<NSArray *> *actionsUndoStack;
+@property (nonatomic, strong) NSMutableArray<NSArray *> *actionsRedoStack;
+@property (nonatomic, copy) NSArray *actionsBaseline;
+@property (nonatomic, strong) UIBarButtonItem *playButton;
+@property (nonatomic, strong) UIBarButtonItem *undoButton;
+@property (nonatomic, strong) UIBarButtonItem *redoButton;
 // The action picker while it's open for an action that leads to another screen; closed once
 // that action is added
 @property (nonatomic, weak) UINavigationController *addingNav;
@@ -1394,6 +1401,18 @@ static NSString *RCActionClipboardCountText(NSUInteger count) {
     return count == 1 ? @"1 Action" : [NSString stringWithFormat:@"%lu Actions", (unsigned long)count];
 }
 
+// A detached copy of the action sequence, for undo/redo snapshots. JSON keeps every string,
+// number and dictionary isolated from the live array; a shallow copy is the fallback.
+static NSArray *RCActionSnapshot(NSArray *actions) {
+    if (!actions) return @[];
+    NSData *data = [NSJSONSerialization dataWithJSONObject:actions options:0 error:nil];
+    if (data) {
+        id copy = [NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingMutableContainers error:nil];
+        if ([copy isKindOfClass:[NSArray class]]) return copy;
+    }
+    return [[NSArray alloc] initWithArray:actions copyItems:YES];
+}
+
 - (NSString *)displayNameForCommand:(id)cmd {
     return [[RCConfigManager sharedManager] nameForCommand:cmd truncate:YES];
 }
@@ -1782,6 +1801,7 @@ static void RCSetRunWatching(BOOL watching) {
     }];
     [self refreshTitle];
     [self updatePasteButton];
+    [self updateUndoButtons];
 }
 
 // The name can change while this screen is open: a trigger's editor (Edit Schedule) saves it and
@@ -2263,12 +2283,12 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
         [rightItems addObject:settingsButton];
     }
     
-    UIBarButtonItem *playButton = [[UIBarButtonItem alloc] 
+    self.playButton = [[UIBarButtonItem alloc]
         initWithImage:[UIImage systemImageNamed:@"play"] 
         style:UIBarButtonItemStylePlain 
         target:self 
         action:@selector(runSequence)];
-    [rightItems addObject:playButton];
+    [rightItems addObject:self.playButton];
     
     self.navigationItem.rightBarButtonItems = rightItems;
     if (self.debugRunID) {
@@ -2300,6 +2320,9 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
     
     // Load actions
     _actions = [[[RCConfigManager sharedManager] actionsForTrigger:_triggerKey] mutableCopy];
+    self.actionsUndoStack = [NSMutableArray array];
+    self.actionsRedoStack = [NSMutableArray array];
+    self.actionsBaseline = RCActionSnapshot(_actions);
     [self updateWrappedTitle];
     
     // Non-editing mode to allow swipe actions
@@ -2321,6 +2344,7 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
     self.tableView.rowHeight = [[NSUserDefaults standardUserDefaults] boolForKey:@"RCWrapLongNamesEnabled"] ? UITableViewAutomaticDimension : 70.0;
     self.tableView.estimatedRowHeight = 70;
     [self updatePasteButton];
+    [self updateUndoButtons];
 }
 
 - (void)wrapLongNamesSettingChanged:(NSNotification *)note {
@@ -2455,8 +2479,14 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
 
 - (void)handleConfigChanged:(NSNotification *)note {
     dispatch_async(dispatch_get_main_queue(), ^{
-        _actions = [[[RCConfigManager sharedManager] actionsForTrigger:_triggerKey] mutableCopy];
-        [self.tableView reloadData];
+        NSArray *fresh = [[RCConfigManager sharedManager] actionsForTrigger:_triggerKey];
+        // Our own save echoes back here; the sequence on screen is already that one, and its
+        // undo history must survive.
+        if (![fresh isEqualToArray:_actions ?: @[]]) {
+            _actions = [fresh mutableCopy];
+            [self resetUndoHistory]; // an edit from elsewhere starts a fresh history
+            [self.tableView reloadData];
+        }
         [self refreshTitle];
     });
 }
@@ -2549,6 +2579,7 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
             self.triggerKey = newKey;
             self.title = [config displayNameForTrigger:newKey];
             self.actions = [[config actionsForTrigger:newKey] mutableCopy];
+            [self resetUndoHistory];
             [self.tableView reloadData];
             [self updateWrappedTitle];
             // The picker closes itself once this returns (popping here too went back a screen too far)
@@ -2727,8 +2758,10 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
     
     [alert addAction:[UIAlertAction actionWithTitle:@"Clear All Actions" style:UIAlertActionStyleDestructive handler:^(UIAlertAction * _Nonnull action) {
         [self.actions removeAllObjects];
+        [self recordActionsForUndo];
         [[RCConfigManager sharedManager] setActions:self.actions forTrigger:self.triggerKey];
         [self.tableView reloadData];
+        [self updatePasteButton];
     }]];
     
     [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
@@ -3084,6 +3117,7 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
     // A Remote RC action edited as its inner command gets its client wrapper back
     [self finishPendingRemoteEdit];
     [self finishAdding]; // closes the picker once this save is done
+    [self recordActionsForUndo];
     [[RCConfigManager sharedManager] setActions:_actions forTrigger:_triggerKey];
     if (self.namePromptShown && _actions.count > 0) [self updateWrappedTitle];
     [self updatePasteButton];
@@ -4895,6 +4929,118 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     [self showHUDToast:[NSString stringWithFormat:@"Pasted %@", RCActionClipboardCountText(count)]
               subtitle:nil
                   icon:@"doc.on.clipboard"];
+}
+
+// Called by saveActions: the first save keeps the loaded sequence as the undo baseline, and each
+// later save pushes the state before that change. Equal saves add nothing.
+- (void)recordActionsForUndo {
+    if (!self.actionsUndoStack) self.actionsUndoStack = [NSMutableArray array];
+    if (!self.actionsRedoStack) self.actionsRedoStack = [NSMutableArray array];
+    NSArray *current = _actions ?: @[];
+    if (!self.actionsBaseline) {
+        self.actionsBaseline = RCActionSnapshot(current);
+        [self updateUndoButtons];
+        return;
+    }
+    if ([current isEqualToArray:self.actionsBaseline]) {
+        [self updateUndoButtons];
+        return;
+    }
+    [self.actionsUndoStack addObject:self.actionsBaseline];
+    if (self.actionsUndoStack.count > 50) [self.actionsUndoStack removeObjectAtIndex:0];
+    [self.actionsRedoStack removeAllObjects];
+    self.actionsBaseline = RCActionSnapshot(current);
+    [self updateUndoButtons];
+}
+
+// An edit from outside this screen (another device, the tweak): keep it as the new starting point
+- (void)resetUndoHistory {
+    [self.actionsUndoStack removeAllObjects];
+    [self.actionsRedoStack removeAllObjects];
+    self.actionsBaseline = RCActionSnapshot(_actions ?: @[]);
+    [self updateUndoButtons];
+}
+
+- (UIBarButtonItem *)undoButton {
+    if (!_undoButton) {
+        _undoButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"arrow.uturn.backward"]
+                                                       style:UIBarButtonItemStylePlain
+                                                      target:self
+                                                      action:@selector(undoActionChange)];
+        _undoButton.accessibilityLabel = @"Undo";
+    }
+    return _undoButton;
+}
+
+- (UIBarButtonItem *)redoButton {
+    if (!_redoButton) {
+        _redoButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"arrow.uturn.forward"]
+                                                       style:UIBarButtonItemStylePlain
+                                                      target:self
+                                                      action:@selector(redoActionChange)];
+        _redoButton.accessibilityLabel = @"Redo";
+    }
+    return _redoButton;
+}
+
+// Undo and Redo sit immediately left of Play; Paste stays left of both
+- (void)updateUndoButtons {
+    if (!self.isViewLoaded || self.debugRunID || self.rc_isSelectingActions) return;
+    NSMutableArray *items = [self.navigationItem.rightBarButtonItems mutableCopy] ?: [NSMutableArray array];
+    [items removeObject:self.undoButton];
+    [items removeObject:self.redoButton];
+    NSUInteger playIndex = self.playButton ? [items indexOfObject:self.playButton] : NSNotFound;
+    if (playIndex == NSNotFound) {
+        self.navigationItem.rightBarButtonItems = items;
+        return;
+    }
+    BOOL canUndo = self.actionsUndoStack.count > 0 && ![self runShown];
+    BOOL canRedo = self.actionsRedoStack.count > 0 && ![self runShown];
+    NSUInteger insert = playIndex + 1;
+    if (canUndo) [items insertObject:self.undoButton atIndex:insert++];
+    if (canRedo) [items insertObject:self.redoButton atIndex:insert++];
+    self.navigationItem.rightBarButtonItems = items;
+}
+
+- (void)undoActionChange {
+    if ([self runShown] || self.debugRunID || self.rc_isSelectingActions) return;
+    if (self.actionsUndoStack.count == 0) return;
+    NSArray *previous = self.actionsUndoStack.lastObject;
+    [self.actionsUndoStack removeLastObject];
+    [self.actionsRedoStack addObject:RCActionSnapshot(_actions ?: @[])];
+    [self restoreActionsSnapshot:previous];
+}
+
+- (void)redoActionChange {
+    if ([self runShown] || self.debugRunID || self.rc_isSelectingActions) return;
+    if (self.actionsRedoStack.count == 0) return;
+    NSArray *next = self.actionsRedoStack.lastObject;
+    [self.actionsRedoStack removeLastObject];
+    [self.actionsUndoStack addObject:RCActionSnapshot(_actions ?: @[])];
+    [self restoreActionsSnapshot:next];
+}
+
+- (void)restoreActionsSnapshot:(NSArray *)snapshot {
+    [self resetInlineEditorForActionsReplace];
+    self.actions = [RCActionSnapshot(snapshot) mutableCopy];
+    self.actionsBaseline = RCActionSnapshot(self.actions);
+    // Write directly: this is the restored state, not a new change to record
+    [[RCConfigManager sharedManager] setActions:self.actions forTrigger:self.triggerKey];
+    if (self.namePromptShown && self.actions.count > 0) [self updateWrappedTitle];
+    [self.tableView reloadData];
+    [self updatePasteButton];
+    [self updateUndoButtons];
+}
+
+// A row's open editor belongs to the sequence it was opened in; a restored sequence has none
+- (void)resetInlineEditorForActionsReplace {
+    [self.view endEditing:YES];
+    self.inlineEditorIndex = NSNotFound;
+    self.inlineEditorCommand = nil;
+    self.inlineEditorRowHeight = 0;
+    self.inlineRowItem = nil;
+    self.inlineRowEditor = nil;
+    self.inlineRowCommitting = NO;
 }
 
 #pragma mark - Table View Data Source
