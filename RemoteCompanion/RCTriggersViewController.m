@@ -350,6 +350,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     if ([RCAddOnCatalog isAddOnTriggerKey:triggerKey]) return [RCAddOnCatalog iconForTriggerKey:triggerKey] ?: @"puzzlepiece.extension";
     if ([triggerKey hasPrefix:@"app_launch_"]) return @"app.badge";
     if ([triggerKey hasPrefix:@"app_exit_"]) return [UIImage systemImageNamed:@"rectangle.portrait.and.arrow.right"] ? @"rectangle.portrait.and.arrow.right" : @"arrow.right.square"; // iOS 15+
+    if ([triggerKey hasPrefix:@"app_hold_"]) return @"hand.tap";
     if ([triggerKey hasPrefix:@"notiftap_"] || [triggerKey hasPrefix:@"notifbtn_"]) return @"bell.fill";
     if ([triggerKey hasPrefix:@"notif_"] || [triggerKey hasPrefix:@"notify_"]) return @"bell.badge.fill";
     if ([triggerKey hasPrefix:@"sched_"]) return @"clock.fill";
@@ -896,6 +897,12 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     }
     addSection(appExitKeys, @"App Exit Triggers", YES);
 
+    NSMutableArray *appHoldKeys = [NSMutableArray array];
+    for (NSString *key in [[RCConfigManager sharedManager] allConfiguredTriggerKeys]) {
+        if ([key hasPrefix:@"app_hold_"]) [appHoldKeys addObject:key];
+    }
+    addSection(appHoldKeys, @"App Long Press Triggers", YES);
+
     // Scheduled Triggers Section
     NSMutableArray *schedKeys = [NSMutableArray array];
     for (NSString *key in [[RCConfigManager sharedManager] allConfiguredTriggerKeys]) {
@@ -1046,11 +1053,29 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
             };
             push(vc);
         } },
+        @{ @"title": @"Long Press App Icon", @"icon": @"hand.tap", @"section": @"Apps", @"handler": ^{
+            RCAppPickerViewController *vc = [[RCAppPickerViewController alloc] init];
+            vc.allowsMultipleApps = YES;
+            vc.suppressAutoPop = YES; // We handle navigation ourselves
+            vc.onAppsSelected = ^(NSArray<NSString *> *names, NSArray<NSString *> *bundleIds) {
+                __strong typeof(weakSelf) self = weakSelf;
+                if (!self) return;
+                NSString *triggerKey = [[RCConfigManager sharedManager] saveAppTriggerWithPrefix:@"app_hold_" names:names bundleIds:bundleIds replacing:nil];
+
+                // Push actionsVC, then let the app picker pop (leaving [TriggersVC, ActionsVC])
+                RCActionsViewController *actionsVC = [[RCActionsViewController alloc] initWithTriggerKey:triggerKey];
+                NSMutableArray *vcs = [self.navigationController.viewControllers mutableCopy];
+                [vcs removeLastObject]; // Remove the app picker
+                [vcs addObject:actionsVC];
+                [self.navigationController setViewControllers:vcs animated:YES];
+            };
+            push(vc);
+        } },
         @{ @"title": @"Notification", @"icon": @"bell.badge", @"section": @"Apps", @"handler": ^{ push([[RCNotificationTriggerViewController alloc] init]); } },
         @{ @"title": @"Notification Tap", @"icon": @"hand.tap", @"image": RCTriggerIconImage(@"notiftap_", 22), @"section": @"Apps", @"handler": ^{ push([[RCNotificationTapTriggerViewController alloc] init]); } },
         @{ @"title": @"Scheduled Trigger", @"icon": @"calendar.badge.clock", @"section": @"Time", @"handler": ^{ push([[RCScheduledTriggerViewController alloc] init]); } },
-        @{ @"title": @"Battery Level", @"icon": [UIImage systemImageNamed:@"battery.50"] ? @"battery.50" : @"battery.25", @"section": @"Device", @"handler": ^{ push([[RCBatteryTriggerViewController alloc] init]); } },
-        @{ @"title": @"Focus", @"icon": @"moon.fill", @"section": @"Device", @"handler": ^{ push([[RCFocusTriggerViewController alloc] init]); } },
+        @{ @"title": @"Battery Level", @"icon": [UIImage systemImageNamed:@"battery.50"] ? @"battery.50" : @"battery.25", @"section": @"Device State", @"handler": ^{ push([[RCBatteryTriggerViewController alloc] init]); } },
+        @{ @"title": @"Focus", @"icon": @"moon.fill", @"section": @"Device State", @"handler": ^{ push([[RCFocusTriggerViewController alloc] init]); } },
     ] mutableCopy];
     // Watch triggers only make sense where the Apple Watch app is installed
     if ([RCConfigManager watchFeaturesAvailable]) {
@@ -1084,7 +1109,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
         } }];
     }
     if ([RCConfigManager supportsControlCenterButtons]) {
-        [items addObject:@{ @"title": @"Control Center Button", @"icon": @"switch.2", @"section": @"Device", @"handler": ^{ push([[RCControlCenterTriggerViewController alloc] init]); } }];
+        [items addObject:@{ @"title": @"Control Center Button", @"icon": @"switch.2", @"section": @"Device State", @"handler": ^{ push([[RCControlCenterTriggerViewController alloc] init]); } }];
     }
 
     // A trigger over the config itself: its settings screen adds it (and is where the debounce
@@ -1195,6 +1220,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     // picks it), and an add-on with its own picture
     NSDictionary<NSString *, NSString *> *sampleKeys = @{ @"NFC Tag": @"nfc_", @"Wi-Fi Network": @"wifi_", @"Bluetooth Device": @"bt_",
                                                           @"Audio Output": @"output_", @"App Launch": @"app_launch_", @"App Exit": @"app_exit_",
+                                                          @"Long Press App Icon": @"app_hold_",
                                                           @"Notification": @"notif_", @"Scheduled Trigger": @"sched_",
                                                           @"Battery Level": @"trigger_device_battery_below_", @"Focus": @"trigger_device_focus_on",
                                                           @"MQTT Topic": @"mqtt_" };
@@ -1650,7 +1676,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
 + (UIImage *)iconImageForTrigger:(NSString *)triggerKey size:(CGFloat)size {
     UIImage *custom = nil;
     if (custom) return custom;
-    for (NSString *prefix in @[@"app_launch_", @"app_exit_"]) {
+    for (NSString *prefix in @[@"app_launch_", @"app_exit_", @"app_hold_"]) {
         if ([triggerKey hasPrefix:prefix]) {
             UIImage *app = RCAppTriggerIconImage([triggerKey substringFromIndex:prefix.length], size + 7, [prefix isEqualToString:@"app_exit_"]);
             if (app) return app;
@@ -1675,9 +1701,10 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     return nil;
 }
 
-// An App Launch or App Exit trigger's app icon (its first app's) with its launch or exit badge, or nil
+// An App Launch, App Exit or App Long Press trigger's app icon (its first app's) with its launch,
+// exit or hold badge, or nil
 - (UIImage *)appIconForTrigger:(NSString *)triggerKey side:(CGFloat)side {
-    for (NSString *prefix in @[@"app_launch_", @"app_exit_"]) {
+    for (NSString *prefix in @[@"app_launch_", @"app_exit_", @"app_hold_"]) {
         if ([triggerKey hasPrefix:prefix]) return RCAppTriggerIconImage([triggerKey substringFromIndex:prefix.length], side, [prefix isEqualToString:@"app_exit_"]);
     }
     return nil;

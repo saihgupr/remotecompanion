@@ -2160,6 +2160,7 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
                           [_triggerKey hasPrefix:@"trigger_device_battery_"] ||
                           [_triggerKey hasPrefix:@"app_launch_"] ||
                           [_triggerKey hasPrefix:@"app_exit_"] ||
+                          [_triggerKey hasPrefix:@"app_hold_"] ||
                           [_triggerKey hasPrefix:@"notiftap_"] ||
                           [_triggerKey hasPrefix:@"notifbtn_"] ||
                           [_triggerKey isEqualToString:@"trigger_sequence_edited"];
@@ -2441,9 +2442,10 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
         vc = [[RCBluetoothTriggerViewController alloc] initWithTriggerKey:_triggerKey];
     } else if ([_triggerKey hasPrefix:@"output_"]) {
         vc = [[RCAudioOutputTriggerViewController alloc] initWithTriggerKey:_triggerKey];
-    } else if ([_triggerKey hasPrefix:@"app_launch_"] || [_triggerKey hasPrefix:@"app_exit_"]) {
-        BOOL isExit = [_triggerKey hasPrefix:@"app_exit_"];
-        NSString *prefix = isExit ? @"app_exit_" : @"app_launch_";
+    } else if ([_triggerKey hasPrefix:@"app_launch_"] || [_triggerKey hasPrefix:@"app_exit_"] || [_triggerKey hasPrefix:@"app_hold_"]) {
+        NSString *prefix = @"app_launch_";
+        if ([_triggerKey hasPrefix:@"app_exit_"]) prefix = @"app_exit_";
+        else if ([_triggerKey hasPrefix:@"app_hold_"]) prefix = @"app_hold_";
         RCAppPickerViewController *appVC = [[RCAppPickerViewController alloc] init];
         appVC.allowsMultipleApps = YES;
         NSArray *apps = [[RCConfigManager sharedManager] triggerDataForKey:_triggerKey][@"apps"];
@@ -3501,6 +3503,15 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             @"input": @"variable"
         }
     ] arrayByAddingObjectsFromArray:[self addOnConditionDefinitions]];
+    // The Watch condition only makes sense where the Apple Watch app is installed
+    if (![RCConfigManager watchFeaturesAvailable]) {
+        NSMutableArray<NSDictionary *> *kept = [NSMutableArray array];
+        for (NSDictionary *definition in definitions) {
+            if ([definition[@"key"] isEqualToString:@"watch"]) continue;
+            [kept addObject:definition];
+        }
+        definitions = kept;
+    }
     return RCAdaptVibrationConditions(definitions);
 }
 

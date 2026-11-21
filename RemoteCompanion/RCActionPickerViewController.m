@@ -353,7 +353,7 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
         ({
             NSMutableArray *integrations = [NSMutableArray array];
             if (cm.haEnabled) {
-                [integrations addObject:@{ @"name": @"Home Assistant: Control Entity...", @"command": @"__HA_PICKER__", @"icon": @"lightbulb.fill" }];
+                [integrations addObject:@{ @"name": @"Home Assistant: Control Entity...", @"command": @"__HA_PICKER__", @"icon": @"house.fill" }];
             }
             if (cm.kmEnabled) {
                 [integrations addObject:@{ @"name": @"Keyboard Maestro: Trigger Macro...", @"command": @"__KM_TRIGGER__", @"icon": @"command" }];
@@ -520,7 +520,7 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
             @{ @"name": @"Annotate & Send to Editor...",
                @"command": @"__DEV_ANNOTATE__",
                @"icon": @"viewfinder",
-               @"keywords": @"developer dev annotate screenshot red rectangle box dictate voice mic ai editor opencode antigravity claude cursor hex" }
+               @"keywords": @"developer dev annotate screenshot red rectangle box dictate voice mic ai editor opencode antigravity" }
         ]];
     }
     _sectionTitles = titles;

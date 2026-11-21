@@ -1196,7 +1196,7 @@ static NSString *RCActionCommand(id item) {
 // topic) can have a name of their own; the built-in ones (Power Double Click...) keep theirs, so
 // they always say what they are
 + (BOOL)canRenameTrigger:(NSString *)triggerKey {
-    for (NSString *prefix in @[@"nfc_", @"wifi_", @"bt_", @"output_", @"app_launch_", @"app_exit_", @"notif_", @"notify_", @"sched_", @"mqtt_", @"notiftap_", @"notifbtn_", @"trigger_cc_button_", @"trigger_watch_face_"]) {
+    for (NSString *prefix in @[@"nfc_", @"wifi_", @"bt_", @"output_", @"app_launch_", @"app_exit_", @"app_hold_", @"notif_", @"notify_", @"sched_", @"mqtt_", @"notiftap_", @"notifbtn_", @"trigger_cc_button_", @"trigger_watch_face_"]) {
         if ([triggerKey hasPrefix:prefix]) return YES;
     }
     return NO;
@@ -1339,12 +1339,10 @@ static NSString *RCActionCommand(id item) {
     }
 
     if ([triggerKey hasPrefix:@"trigger_cc_button_"]) {
-        NSString *name = _config[@"triggers"][triggerKey][@"name"];
-        if (name.length) return name;
         return [NSString stringWithFormat:@"Control Center Button %@", [triggerKey substringFromIndex:18]];
     }
 
-    if ([triggerKey hasPrefix:@"wifi_"] || [triggerKey hasPrefix:@"bt_"] || [triggerKey hasPrefix:@"app_launch_"] || [triggerKey hasPrefix:@"app_exit_"] || [triggerKey hasPrefix:@"output_"] || [triggerKey hasPrefix:@"notif_"] || [triggerKey hasPrefix:@"notify_"] || [triggerKey hasPrefix:@"sched_"] || [triggerKey hasPrefix:@"mqtt_"] || [triggerKey hasPrefix:@"mqtt_sub_"]) {
+    if ([triggerKey hasPrefix:@"wifi_"] || [triggerKey hasPrefix:@"bt_"] || [triggerKey hasPrefix:@"app_launch_"] || [triggerKey hasPrefix:@"app_exit_"] || [triggerKey hasPrefix:@"app_hold_"] || [triggerKey hasPrefix:@"output_"] || [triggerKey hasPrefix:@"notif_"] || [triggerKey hasPrefix:@"notify_"] || [triggerKey hasPrefix:@"sched_"] || [triggerKey hasPrefix:@"mqtt_"] || [triggerKey hasPrefix:@"mqtt_sub_"]) {
         return _config[@"triggers"][triggerKey][@"name"] ?: triggerKey;
     }
     
@@ -1669,7 +1667,7 @@ static NSString *RCActionCommand(id item) {
         }
 
         // Keyboard Maestro actions store the macro's UUID, so the name map is what makes an
-        // imported action read as "KM: Macro Name" instead of a bare UUID. It is display-only
+        // imported action read as "Macro Name" instead of a bare UUID. It is display-only
         // and both devices' entries stay useful, so keep the local names and add the rest.
         if ([key isEqualToString:@"kmNamesByUuid"]) {
             if (![value isKindOfClass:[NSDictionary class]]) continue;
@@ -1933,12 +1931,12 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         @"audiomix toggle": @"AudioMix Toggle",
         @"audiomix status": @"AudioMix Status",
         @"audiomix": @"AudioMix Toggle",
-        @"audiohandoff enabled on": @"AudioHandoff: Automatic Switching",
-        @"audiohandoff enabled off": @"AudioHandoff: Automatic Switching",
-        @"audiohandoff enabled toggle": @"AudioHandoff: Automatic Switching",
-        @"audiohandoff auto on": @"AudioHandoff: Automatic Switching",
-        @"audiohandoff auto off": @"AudioHandoff: Automatic Switching",
-        @"audiohandoff auto toggle": @"AudioHandoff: Automatic Switching",
+        @"audiohandoff enabled on": @"Automatic Switching",
+        @"audiohandoff enabled off": @"Automatic Switching",
+        @"audiohandoff enabled toggle": @"Automatic Switching",
+        @"audiohandoff auto on": @"Automatic Switching",
+        @"audiohandoff auto off": @"Automatic Switching",
+        @"audiohandoff auto toggle": @"Automatic Switching",
         @"low power on": @"Low Power Mode On",
         @"low power off": @"Low Power Mode Off",
         @"low power mode on": @"Low Power Mode On",
@@ -2101,7 +2099,7 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
                 NSDictionary *client = [self rcClientForId:clientId];
                 NSString *clientName = client[@"name"] ?: client[@"host"] ?: @"Missing Client";
                 NSString *remoteName = [self nameForCommand:remoteCmd truncate:NO];
-                result = [NSString stringWithFormat:@"Remote [%@]: %@", clientName, remoteName.length > 0 ? remoteName : remoteCmd];
+                result = [NSString stringWithFormat:@"Remote %@: %@", clientName, remoteName.length > 0 ? remoteName : remoteCmd];
             } else {
                 result = [NSString stringWithFormat:@"Remote: %@", payload];
             }
@@ -2131,7 +2129,7 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
                 NSString *remoteCmd = [payload substringFromIndex:firstSpace.location + 1];
                 NSDictionary *host = [self sshHostForId:hostId];
                 NSString *hostName = host[@"name"] ?: host[@"host"] ?: @"SSH";
-                result = [NSString stringWithFormat:@"SSH [%@]: %@", hostName, remoteCmd];
+                result = [NSString stringWithFormat:@"SSH %@: %@", hostName, remoteCmd];
             } else {
                 result = [NSString stringWithFormat:@"SSH: %@", payload];
             }
@@ -2248,13 +2246,13 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
 
             if ([subCmd isEqualToString:@"toggle"] && cleanParts.count > 1) {
                 NSString *eid = cleanParts[1];
-                result = [NSString stringWithFormat:@"HA Toggle: %@", formatEntity(eid)];
+                result = [NSString stringWithFormat:@"Toggle %@", formatEntity(eid)];
             } else if ([subCmd isEqualToString:@"turn_on"] && cleanParts.count > 1) {
                 NSString *eid = cleanParts[1];
-                result = [NSString stringWithFormat:@"HA Turn On: %@", formatEntity(eid)];
+                result = [NSString stringWithFormat:@"%@ On", formatEntity(eid)];
             } else if ([subCmd isEqualToString:@"turn_off"] && cleanParts.count > 1) {
                 NSString *eid = cleanParts[1];
-                result = [NSString stringWithFormat:@"HA Turn Off: %@", formatEntity(eid)];
+                result = [NSString stringWithFormat:@"%@ Off", formatEntity(eid)];
             } else if ([subCmd isEqualToString:@"call"] && cleanParts.count > 1) {
                 NSString *service = cleanParts[1];
                 NSString *eid = cleanParts.count > 2 ? cleanParts[2] : @"";
@@ -2295,14 +2293,14 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
                 }
                 if (macro.length > 0) {
                     NSString *displayMacro = [self nameForKMMacroUid:macro] ?: macro;
-                    result = val.length > 0 ? [NSString stringWithFormat:@"KM: %@ (%@)", displayMacro, val] : [NSString stringWithFormat:@"KM: %@", displayMacro];
+                    result = val.length > 0 ? [NSString stringWithFormat:@"%@ (%@)", displayMacro, val] : [NSString stringWithFormat:@"%@", displayMacro];
                 } else {
                     result = @"KM Trigger";
                 }
             } else if ([[raw lowercaseString] hasPrefix:@"url "]) {
                 result = [NSString stringWithFormat:@"KM URL: %@", [raw substringFromIndex:4]];
             } else if (raw.length > 0) {
-                result = [NSString stringWithFormat:@"KM: %@", raw];
+                result = [NSString stringWithFormat:@"%@", raw];
             } else {
                 result = @"Keyboard Maestro";
             }
@@ -2467,7 +2465,7 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
     if ([cmd hasPrefix:@"snapper instant"]) return @"bolt.fill";
     if ([cmd hasPrefix:@"snapper close"]) return @"xmark.rectangle.fill";
     if ([cmd hasPrefix:@"snapper"]) return @"crop";
-    if ([cmd hasPrefix:@"ha "] || [cmd isEqualToString:@"ha"]) return @"lightbulb.fill";
+    if ([cmd hasPrefix:@"ha "] || [cmd isEqualToString:@"ha"]) return @"house.fill";
     if ([cmd hasPrefix:@"km "] || [cmd isEqualToString:@"km"]) return @"command";
     if ([cmd hasPrefix:@"mqtt "] || [cmd isEqualToString:@"mqtt"]) return @"dot.radiowaves.left.and.right";
     if ([cmd hasPrefix:@"toast"]) return @"text.bubble.fill";
@@ -3022,7 +3020,7 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         },
         @{
             @"key": @"audiohandoff_enabled",
-            @"name": @"AudioHandoff: Automatic Switching",
+            @"name": @"Automatic Switching",
             @"icon": @"headphones",
             @"prefixes": @[@"audiohandoff enabled ", @"audiohandoff auto "],
             @"suffixes": @[@"on", @"off", @"toggle"],
@@ -3237,7 +3235,8 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
 
 - (NSString *)saveAppTriggerWithPrefix:(NSString *)prefix names:(NSArray<NSString *> *)names bundleIds:(NSArray<NSString *> *)bundleIds replacing:(NSString *)oldKey {
     if (bundleIds.count == 0) return oldKey;
-    NSString *verb = [prefix isEqualToString:@"app_exit_"] ? @"Exit" : @"Launch";
+    NSDictionary<NSString *, NSString *> *verbs = @{@"app_exit_": @"Exit", @"app_hold_": @"Long Press"};
+    NSString *verb = verbs[prefix] ?: @"Launch";
     NSString *newKey = [prefix stringByAppendingString:bundleIds.firstObject];
     // The name says which apps: "Launch Safari, Notes" (a long one wraps in the lists)
     NSMutableArray<NSString *> *shown = [NSMutableArray array];

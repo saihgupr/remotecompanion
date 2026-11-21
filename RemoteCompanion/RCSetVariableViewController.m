@@ -150,7 +150,8 @@ UIMenu *RCVariableInsertMenuWithRound(NSArray<NSString *> *runNames, NSArray<NSS
     [super setSelected:selected];
     RCConfigManager *cm = [RCConfigManager sharedManager];
     UIColor *accent = self.tintColor ?: [UIColor systemBlueColor];
-    self.backgroundColor = selected ? [accent colorWithAlphaComponent:0.18] : [cm tweakColorForKey:@"blockBackground" defaultVal:0.12];
+    // Blue border, icon and title pick the tile; its fill stays the usual one, with no blue wash over it
+    self.backgroundColor = [cm tweakColorForKey:@"blockBackground" defaultVal:0.12];
     self.layer.borderColor = (selected ? accent : [UIColor clearColor]).CGColor;
     self.iconView.tintColor = selected ? accent : [UIColor labelColor];
     self.titleLabel.textColor = selected ? accent : [UIColor labelColor];

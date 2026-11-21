@@ -284,7 +284,7 @@
     .row-icon svg { color: #fff; }
     .row-icon { position: relative; }
     /* A created trigger's letter, in the icon square's corner */
-    /* App Launch / App Exit: a green checkmark or red x in a white circle at the top right */
+    /* App Launch / App Exit / App Long Press: a green checkmark or red x in a white circle at the top right */
     .row-icon-app-badge {
       position: absolute; right: 0; top: 0;
       width: 13px; height: 13px; border-radius: 50%;
@@ -1669,13 +1669,13 @@
       min-height: 64px; padding: 8px 4px; border-radius: 12px; cursor: pointer;
       background: var(--rc-fill); border: 1.5px solid transparent; color: var(--rc-label);
       font-family: inherit; font-size: 12px; font-weight: 500; line-height: 1.15; text-align: center;
-      transition: background 0.12s, border-color 0.12s, transform 0.1s;
+      transition: border-color 0.12s, color 0.12s, transform 0.1s;
     }
     .var-ed-tile i.f7-icons { font-size: 22px; color: var(--rc-blue); }
     .var-ed-grid.compact .var-ed-tile { min-height: 54px; font-size: 11px; }
     .var-ed-grid.compact .var-ed-tile i.f7-icons { font-size: 19px; }
     .var-ed-tile:active { transform: scale(0.96); }
-    .var-ed-tile.selected { background: rgba(var(--rc-blue-rgb), 0.22); border-color: var(--rc-blue); }
+    .var-ed-tile.selected { border-color: var(--rc-blue); color: var(--rc-blue); }
     .var-ed-card { background: var(--rc-fill); border-radius: 12px; overflow: hidden; }
     .var-ed-row { display: flex; align-items: center; gap: 12px; min-height: 46px; padding: 0 12px 0 14px; position: relative; }
     .var-ed-card > .var-ed-row + .var-ed-row::before, .var-ed-card > .var-ed-row + .var-ed-chips::before {
@@ -2994,11 +2994,6 @@
         <input class="dialog-input" id="dev-annotate-project" type="text" placeholder="Optional (last viewed)" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" style="width:100%; box-sizing:border-box; margin:0; height:40px; text-align:left;">
       </div>
 
-      <div id="dev-annotate-custom-row" style="display:none; margin-bottom:10px;">
-        <div style="font-size:12px; font-weight:600; color:var(--rc-label-2); margin:0 0 4px 2px;">Custom App</div>
-        <input class="dialog-input" id="dev-annotate-custom" type="text" placeholder="App name or bundle ID" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" style="width:100%; box-sizing:border-box; margin:0; height:40px; text-align:left;">
-      </div>
-
       <label style="display:flex; align-items:center; justify-content:space-between; padding:6px 2px; font-size:15px; color:var(--rc-label); cursor:pointer;">
         <span>Auto-Send</span>
         <input type="checkbox" class="ios-toggle" id="dev-annotate-autosend" checked>
@@ -3619,6 +3614,7 @@ const TRIGGER_SECTIONS = [
   { title: 'Notification Triggers',  id: 'notif',     keys: [], dynamic: true, prefix: 'notif_', prefix2: 'notify_', deletable: true },
   { title: 'App Launch Triggers',    id: 'app',       keys: [], dynamic: true, prefix: 'app_launch_', deletable: true },
   { title: 'App Exit Triggers',      id: 'appexit',   keys: [], dynamic: true, prefix: 'app_exit_',   deletable: true },
+  { title: 'App Long Press Triggers', id: 'apphold',  keys: [], dynamic: true, prefix: 'app_hold_',   deletable: true },
   { title: 'Add-on Triggers',         id: 'addon',     keys: [], dynamic: true, prefix: 'addon_', deletable: true },
   { title: 'Scheduled Triggers',     id: 'sched',     keys: [], dynamic: true, prefix: 'sched_',      deletable: true },
   { title: 'MQTT Subscription Triggers', id: 'mqtt', keys: [], dynamic: true, prefix: 'mqtt_sub_', prefix2: 'mqtt_', deletable: true },
@@ -3883,7 +3879,7 @@ function phoneIconSVG(spec) {
 // A created trigger's letter (as in the app): the first of the user's name for it, else of its
 // network, device or topic; none for an unnamed NFC tag or schedule
 function letterForKey(key) {
-  if (!canRenameTrigger(key) || key.startsWith('app_')) return null;
+  if (!canRenameTrigger(key) || key.startsWith('app_') || key.startsWith('trigger_cc_button_')) return null;
   let source = customNameForKey(key);
   if (!source) {
     const name = defaultNameForKey(key);
@@ -3906,7 +3902,7 @@ function triggerIconHTML(key) {
   const { icon } = iconForKey(key);
   const letter = letterForKey(key);
   const exit = key.startsWith('app_exit_');
-  const appBadge = (exit || key.startsWith('app_launch_'))
+  const appBadge = (exit || key.startsWith('app_launch_') || key.startsWith('app_hold_'))
     ? `<span class="row-icon-app-badge ${exit ? 'exit' : 'launch'}"><i class="f7-icons">${exit ? 'xmark_circle_fill' : 'checkmark_circle_fill'}</i></span>` : '';
   return `<i class="f7-icons">${icon}</i>${letter ? `<span class="row-icon-letter">${escapeHtml(letter)}</span>` : ''}${appBadge}`;
 }
@@ -3947,6 +3943,7 @@ function iconForKey(key) {
   if (key.startsWith('bt_'))         return { icon:'bolt_horizontal_fill',          cls:'icon-indigo' };
   if (key.startsWith('app_launch_')) return { icon:'app_badge_fill',                cls:'icon-pink' };
   if (key.startsWith('app_exit_')) return { icon:'app_badge_fill',                cls:'icon-pink' };
+  if (key.startsWith('app_hold_')) return { icon:'app_badge_fill',                cls:'icon-pink' };
   if (key.startsWith('notif_') || key.startsWith('notify_'))      return { icon:'bell_circle_fill',              cls:'icon-red' };
   if (key.startsWith('addon_')) { const e = addOnTriggerEvents().find(x => x.key === key); return { icon: symbolId(e && e.icon), iconUrl: e && e.iconUrl, cls: e && e.iconUrl ? 'icon-image' : 'icon-purple' }; }
   if (key.startsWith('sched_'))      return { icon:'clock_fill',                    cls:'icon-orange' };
@@ -3959,7 +3956,7 @@ function iconForKey(key) {
 // Created triggers (a tag, a network, a device, an app, a notification, a time, a topic) can
 // have a name of their own ("customName"); the built-in ones keep theirs, so they always say
 // what they are. As in the app.
-const RENAMEABLE_PREFIXES = ['nfc_', 'wifi_', 'bt_', 'output_', 'app_launch_', 'app_exit_', 'notif_', 'notify_', 'sched_', 'mqtt_', 'trigger_watch_face_'];
+const RENAMEABLE_PREFIXES = ['nfc_', 'wifi_', 'bt_', 'output_', 'app_launch_', 'app_exit_', 'app_hold_', 'notif_', 'notify_', 'sched_', 'mqtt_', 'trigger_cc_button_', 'trigger_watch_face_'];
 function canRenameTrigger(key) {
   return RENAMEABLE_PREFIXES.some(prefix => key.startsWith(prefix));
 }
@@ -3967,7 +3964,12 @@ function customNameForKey(key) {
   if (!canRenameTrigger(key)) return null;
   const t = config.triggers[key];
   const name = t && t.customName ? String(t.customName).trim() : '';
-  return name || null;
+  if (name) return name;
+  if (key.startsWith('trigger_cc_button_') && t && t.name) {
+    const raw = String(t.name).trim();
+    if (raw && raw !== defaultNameForKey(key)) return raw;
+  }
+  return null;
 }
 function nameForKey(key) {
   return customNameForKey(key) || defaultNameForKey(key);
@@ -3980,6 +3982,7 @@ function promptRenameTrigger(key) {
   showDialog('Rename Trigger', `Leave empty for its default name, “${defaultNameForKey(key)}”.`, customNameForKey(key) || '', 'Save', val => {
     const name = String(val || '').trim();
     if (name) t.customName = name; else delete t.customName;
+    if (key.startsWith('trigger_cc_button_')) t.name = name || defaultNameForKey(key);
     saveConfig(); renderAll();
     openActionsPanel(key);
   });
@@ -3987,10 +3990,10 @@ function promptRenameTrigger(key) {
 
 function defaultNameForKey(key) {
   if (TRIGGER_NAMES[key]) return TRIGGER_NAMES[key];
+  if (key.startsWith('trigger_cc_button_')) return `Control Center Button ${key.slice(18)}`;
   const t = config.triggers[key];
   if (t && t.name) return t.name;
   if (key.startsWith('trigger_watch_face_')) return 'Watch Face Changed';
-  if (key.startsWith('trigger_cc_button_')) return `Control Center Button ${key.slice(18)}`;
   if (key === 'trigger_device_focus_on') return 'Focus On: Any';
   if (key === 'trigger_device_focus_off') return 'Focus Off: Any';
   if (key.startsWith('trigger_device_focus_on_')) return `Focus On: ${key.slice(24)}`;
@@ -4008,6 +4011,7 @@ function defaultNameForKey(key) {
   if (key.startsWith('bt_'))         return `BT: ${key.slice(3)}`;
   if (key.startsWith('app_launch_')) return `Launch: ${key.slice(11)}`;
   if (key.startsWith('app_exit_')) return `Exit: ${key.slice(9)}`;
+  if (key.startsWith('app_hold_')) return `Long Press: ${key.slice(9)}`;
   if (key.startsWith('notif_') || key.startsWith('notify_')) {
     if (key.startsWith('notify_')) return `Notif: ${key.slice(7)}`;
     return `Notif: ${key.slice(6)}`;
@@ -4048,7 +4052,7 @@ const CMD_NAMES = {
   'dnd on':'Do Not Disturb On','dnd off':'Do Not Disturb Off','dnd toggle':'Do Not Disturb Toggle',
   'focus off':'Focus Off',
   'audiomix on':'AudioMix On','audiomix off':'AudioMix Off','audiomix toggle':'AudioMix Toggle',
-  'audiohandoff enabled on':'AudioHandoff: Automatic Switching','audiohandoff enabled off':'AudioHandoff: Automatic Switching','audiohandoff enabled toggle':'AudioHandoff: Automatic Switching','audiohandoff auto on':'AudioHandoff: Automatic Switching','audiohandoff auto off':'AudioHandoff: Automatic Switching','audiohandoff auto toggle':'AudioHandoff: Automatic Switching',
+  'audiohandoff enabled on':'Automatic Switching','audiohandoff enabled off':'Automatic Switching','audiohandoff enabled toggle':'Automatic Switching','audiohandoff auto on':'Automatic Switching','audiohandoff auto off':'Automatic Switching','audiohandoff auto toggle':'Automatic Switching',
   'respring':'Respring','safemode':'Safe Mode','safe-mode':'Safe Mode','siri':'Activate Siri','accessibility shortcut':'Accessibility Shortcut','home':'Home Button','switcher':'App Switcher',
   'previous app':'Previous App',
   'kill current':'Kill Current App', 'kill front':'Kill Current App', 'kill foreground':'Kill Current App',
@@ -4512,12 +4516,12 @@ function formatKMCommandName(cmd) {
       val = val.substring(1, val.length - 1);
     }
     const resolvedName = (config.kmNamesByUuid && config.kmNamesByUuid[macro]) ? config.kmNamesByUuid[macro] : macro;
-    return `KM: ${resolvedName}${val ? ' (' + val + ')' : ''}`;
+    return `${resolvedName}${val ? ' (' + val + ')' : ''}`;
   }
   if (raw.toLowerCase().startsWith('url ')) {
     return `KM URL: ${raw.slice(4).trim()}`;
   }
-  return `KM: ${raw}`;
+  return `${raw}`;
 }
 
 function formatHACommandName(cmd) {
@@ -4539,15 +4543,15 @@ function formatHACommandName(cmd) {
 
   if (subCmd === 'toggle' && parts.length > 1) {
     const eid = parts[1];
-    return `HA Toggle: ${formatEntity(eid) || eid}`;
+    return `Toggle ${formatEntity(eid) || eid}`;
   }
   if (subCmd === 'turn_on' && parts.length > 1) {
     const eid = parts[1];
-    return `HA Turn On: ${formatEntity(eid) || eid}`;
+    return `${formatEntity(eid) || eid} On`;
   }
   if (subCmd === 'turn_off' && parts.length > 1) {
     const eid = parts[1];
-    return `HA Turn Off: ${formatEntity(eid) || eid}`;
+    return `${formatEntity(eid) || eid} Off`;
   }
   if (subCmd === 'call' && parts.length > 1) {
     const service = parts[1];
@@ -4623,7 +4627,7 @@ function iconForCmd(cmd) {
   if (map[lowCmd]) return { icon:map[lowCmd], cls:'icon-dark' };
   const toggleInfo = parseToggleCmd(cmd);
   if (toggleInfo) return { icon:toggleInfo.icon, cls:'icon-dark' };
-  if (lowCmd.startsWith('ha ') || lowCmd === 'ha') return { icon:'lightbulb_fill', cls:'icon-blue' };
+  if (lowCmd.startsWith('ha ') || lowCmd === 'ha') return { icon:'house_fill', cls:'icon-blue' };
   if (lowCmd.startsWith('km ') || lowCmd === 'km') return { icon:'command', cls:'icon-yellow' };
   if (lowCmd.startsWith('mqtt ') || lowCmd === 'mqtt') return { icon:'dot_radiowaves_left_right', cls:'icon-blue' };
   if (isDevAnnotateCmd(lowCmd)) return { icon:'camera_viewfinder', cls:'icon-red' };
@@ -4753,7 +4757,7 @@ const ACTION_SECTIONS = [
     { name:'Soft Reboot',       cmd:'ldrestart',     icon:'arrow_clockwise' },
   ]},
   { title:'Integrations', actions:[
-    { name:'Home Assistant: Control Entity…',  cmd:'__HA_PICKER__', icon:'lightbulb_fill', needs_input:true },
+    { name:'Home Assistant: Control Entity…',  cmd:'__HA_PICKER__', icon:'house_fill', needs_input:true },
     { name:'Keyboard Maestro: Trigger Macro…',cmd:'__KM_TRIGGER__', icon:'command', needs_input:true },
     { name:'MQTT: Publish Topic…',            cmd:'__MQTT_PUBLISH__', icon:'dot_radiowaves_left_right', needs_input:true },
     { name:'REST API Call…',                  cmd:'__HTTP_REQUEST__', icon:'network', needs_input:true, keywords:'http rest api request url webhook curl' },
@@ -4765,7 +4769,7 @@ const ACTION_SECTIONS = [
     { name:'SneakyCam: Take Photo',           cmd:'sneakycam photo', icon:'camera_filters', group:'SneakyCam', groupIcon:'camera_filters' },
     { name:'SneakyCam: Toggle Video',         cmd:'sneakycam video', icon:'eye_slash_fill', group:'SneakyCam', groupIcon:'camera_filters' },
     { name:'AudioMix: Toggle',                cmd:'audiomix toggle',icon:'equalizer', is_toggle:true },
-    { name:'AudioHandoff: Automatic Switching', cmd:'audiohandoff enabled toggle', icon:'headphones', is_toggle:true },
+    { name:'Automatic Switching', cmd:'audiohandoff enabled toggle', icon:'headphones', is_toggle:true },
   ]},
   { title:'Scripting & Logic', actions:[
     { name:'If Condition…',     cmd:'__IF_CONDITION__',icon:'arrow_triangle_branch', needs_input:true },
@@ -4784,7 +4788,7 @@ const ACTION_SECTIONS = [
     { name:'Set Ringer Volume…', cmd:'__SET_RINGER_VOLUME__',icon:'bell_fill', needs_input:true },
   ]},
   { title:'Developer', actions:[
-    { name:'Annotate & Send to Editor…', cmd:'__DEV_ANNOTATE__', icon:'camera_viewfinder', needs_input:true, keywords:'developer dev annotate screenshot red rectangle box dictate voice mic ai editor opencode antigravity claude cursor hex' },
+    { name:'Annotate & Send to Editor…', cmd:'__DEV_ANNOTATE__', icon:'camera_viewfinder', needs_input:true, keywords:'developer dev annotate screenshot red rectangle box dictate voice mic ai editor opencode' },
   ]},
 ];
 
@@ -5338,6 +5342,7 @@ const TRIGGER_CATEGORY_ICONS = {
   'Notification Triggers': 'bell_circle_fill',
   'App Launch Triggers': 'arrow_up_right_square_fill',
   'App Exit Triggers': 'xmark_square_fill',
+  'App Long Press Triggers': 'hand_tap',
   'Scheduled Triggers': 'clock_fill',
   'MQTT Subscription Triggers': 'antenna_radiowaves_left_right',
 };
@@ -5718,7 +5723,7 @@ function openActionsPanel(key) {
   const isNotif = key.startsWith('notif_') || key.startsWith('notify_');
   const isWiFi = key.startsWith('wifi_');
   const isBT = key.startsWith('bt_');
-  const isApp = key.startsWith('app_launch_') || key.startsWith('app_exit_');
+  const isApp = key.startsWith('app_launch_') || key.startsWith('app_exit_') || key.startsWith('app_hold_');
   
   if (isSched || isNotif || isWiFi || isBT || isApp || key === 'trigger_sequence_edited' || canRenameTrigger(key) || canKeepDefault(key)) {
     editBtn.style.display = 'flex';
@@ -5773,7 +5778,7 @@ function triggerSettingsAction(currentKey) {
   const isNotif = currentKey.startsWith('notif_') || currentKey.startsWith('notify_');
   const isWiFi = currentKey.startsWith('wifi_');
   const isBT = currentKey.startsWith('bt_');
-  const isApp = currentKey.startsWith('app_launch_') || currentKey.startsWith('app_exit_');
+  const isApp = currentKey.startsWith('app_launch_') || currentKey.startsWith('app_exit_') || currentKey.startsWith('app_hold_');
   
   if (isSched) return () => promptSchedTrigger(currentKey);
   if (isNotif) return () => promptNotifTrigger(currentKey);
@@ -5786,8 +5791,8 @@ function triggerSettingsAction(currentKey) {
 function promptAppEdit(key) {
   const data = config.triggers[key];
   if (!data) return;
-  const bid = key.replace(/^app_(launch|exit)_/, '');
-  const kind = key.startsWith('app_exit_') ? 'exit' : 'launch';
+  const bid = key.replace(/^app_(launch|exit|hold)_/, '');
+  const kind = key.startsWith('app_exit_') ? 'exit' : (key.startsWith('app_hold_') ? 'hold' : 'launch');
   promptAppLaunchPicker(null, kind, (data.apps && data.apps.length) ? data.apps : [bid], key);
 }
 
@@ -6067,7 +6072,7 @@ function parseToggleCmd(cmd) {
     { key:'buttontriggers', name:'Button Triggers', icon:'pause_circle', prefixes:['button triggers '], suffixes:['pause 15','pause 60','pause','resume'], displaySuffixes:['Pause 15 Minutes','Pause 1 Hour','Pause Until Resumed','Resume'] },
     { key:'appearance', name:'Appearance', icon:'circle_lefthalf_fill', prefixes:['appearance '], suffixes:['dark','light','toggle'], displaySuffixes:['Dark','Light','Toggle'] },
     { key:'audiomix', name:'AudioMix', icon:'equalizer', prefixes:['audiomix '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'], exactMatches: { 'audiomix':'toggle' } },
-    { key:'audiohandoff_enabled', name:'AudioHandoff: Automatic Switching', icon:'headphones', prefixes:['audiohandoff enabled ','audiohandoff auto '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'], exactMatches: { 'audiohandoff enabled':'toggle','audiohandoff auto':'toggle' } },
+    { key:'audiohandoff_enabled', name:'Automatic Switching', icon:'headphones', prefixes:['audiohandoff enabled ','audiohandoff auto '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'], exactMatches: { 'audiohandoff enabled':'toggle','audiohandoff auto':'toggle' } },
     { key:'rotate', name:'Rotation Lock', icon:'lock_rotation', prefixes:['rotate '], suffixes:['lock','unlock','toggle'], displaySuffixes:['Lock','Unlock','Toggle'] },
     { key:'orientation', name:'Orientation', icon:'rotate_right', prefixes:['orientation set '], suffixes:['portrait','landscape left','landscape right','portrait upside down','auto'], displaySuffixes:['Portrait','Landscape Left','Landscape Right','Portrait Upside Down','Auto'] },
     { key:'vibration_silent', name:'Silent Vibration', icon:'bell_slash', prefixes:['vibration silent-'], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'] },
@@ -6483,13 +6488,8 @@ function saveRestDialog() {
 
 // ── Developer Annotate & Send Modal ──
 const DEV_EDITOR_PRESETS = [
-  { id:'opencode',    name:'OpenCode',        subtitle:"Uses OpenCode's local API when Auto-Send is on (queues directly into the active session). Pastes into the composer when Auto-Send is off." },
-  { id:'antigravity', name:'Antigravity IDE', subtitle:'Activates Antigravity IDE and pastes the annotated screenshot and text into the active composer.' },
-  { id:'claude',      name:'Claude',          subtitle:'Activates Claude Desktop and pastes the annotated screenshot and text into the active composer.' },
-  { id:'cursor',      name:'Cursor',          subtitle:'Activates Cursor and pastes the annotated screenshot and text into the active chat.' },
-  { id:'vscode',      name:'VS Code',         subtitle:'Activates VS Code and pastes the annotated screenshot and text into the active chat.' },
-  { id:'active',      name:'Active Window',   subtitle:'Pastes into whichever app is currently focused on your Mac.' },
-  { id:'custom',      name:'Custom App',      subtitle:'Activates a custom macOS app by name or bundle ID and pastes into its active composer.' }
+  { id:'opencode', name:'OpenCode', supportsProjectDir:true, subtitle:"Uses OpenCode's local API when Auto-Send is on (queues directly into the active session). Pastes into the composer when Auto-Send is off." },
+  { id:'antigravity', name:'Antigravity IDE', supportsProjectDir:true, subtitle:"Uses the RemoteCompanion Antigravity Bridge extension to focus the project window's Agent chat panel, paste the screenshot, and insert or send your note." }
 ];
 
 function isDevAnnotateCmd(cmd) {
@@ -6499,27 +6499,23 @@ function isDevAnnotateCmd(cmd) {
 
 function parseDevAnnotateCmd(cmd) {
   const raw = String(cmd || '').trim().replace(/^dev-annotate/i, '').trim();
-  if (!raw) return { hostId:'', editor:'opencode', autoSend:true, projectDir:'', customApp:'' };
+  if (!raw) return { hostId:'', editor:'opencode', autoSend:true, projectDir:'' };
   try {
     const obj = JSON.parse(raw);
-    if (!obj || typeof obj !== 'object') return { hostId:'', editor:'opencode', autoSend:true, projectDir:'', customApp:'' };
+    if (!obj || typeof obj !== 'object') return { hostId:'', editor:'opencode', autoSend:true, projectDir:'' };
     return {
       hostId: String(obj.hostId || '').trim(),
       editor: String(obj.editor || 'opencode').trim() || 'opencode',
       autoSend: obj.autoSend === undefined ? true : !!obj.autoSend,
-      projectDir: String(obj.projectDir || '').trim(),
-      customApp: String(obj.customApp || '').trim()
+      projectDir: String(obj.projectDir || '').trim()
     };
   } catch (e) {
-    return { hostId:'', editor:'opencode', autoSend:true, projectDir:'', customApp:'' };
+    return { hostId:'', editor:'opencode', autoSend:true, projectDir:'' };
   }
 }
 
 function formatDevAnnotateName(cmd) {
   const comp = parseDevAnnotateCmd(cmd);
-  if (comp.editor === 'custom') {
-    return `Annotate \u2192 ${comp.customApp || 'Custom App'}`;
-  }
   const preset = DEV_EDITOR_PRESETS.find(p => p.id === comp.editor);
   return `Annotate \u2192 ${preset ? preset.name : comp.editor}`;
 }
@@ -6537,7 +6533,7 @@ function openDevAnnotateDialog(editIdx = null) {
   const act = editIdx === null ? '' : actions[editIdx];
   const cmd = act && typeof act === 'object' ? String(act.command || '') : String(act || '');
   const comp = editIdx === null
-    ? { hostId: hosts.length === 1 ? (hosts[0].id || '') : '', editor: 'opencode', autoSend: true, projectDir: '', customApp: '' }
+    ? { hostId: hosts.length === 1 ? (hosts[0].id || '') : '', editor: 'opencode', autoSend: true, projectDir: '' }
     : parseDevAnnotateCmd(cmd);
 
   const hostSel = document.getElementById('dev-annotate-host');
@@ -6562,10 +6558,10 @@ function openDevAnnotateDialog(editIdx = null) {
     opt.textContent = p.name;
     editorSel.appendChild(opt);
   });
-  editorSel.value = DEV_EDITOR_PRESETS.some(p => p.id === comp.editor) ? comp.editor : 'opencode';
+  editorSel.value = DEV_EDITOR_PRESETS.some(p => p.id === comp.editor) ? comp.editor : DEV_EDITOR_PRESETS[0].id;
+  editorSel.disabled = (DEV_EDITOR_PRESETS.length <= 1);
 
   document.getElementById('dev-annotate-project').value = comp.projectDir || '';
-  document.getElementById('dev-annotate-custom').value = comp.customApp || '';
   document.getElementById('dev-annotate-autosend').checked = comp.autoSend !== false;
   document.getElementById('dev-annotate-dialog-title').textContent = editIdx === null ? 'Annotate & Send to Editor' : 'Edit Annotate & Send';
   onDevAnnotateEditorChange();
@@ -6576,8 +6572,7 @@ function onDevAnnotateEditorChange() {
   const editor = document.getElementById('dev-annotate-editor').value;
   const preset = DEV_EDITOR_PRESETS.find(p => p.id === editor);
   document.getElementById('dev-annotate-hint').textContent = preset ? preset.subtitle : '';
-  document.getElementById('dev-annotate-project-row').style.display = (editor === 'opencode') ? '' : 'none';
-  document.getElementById('dev-annotate-custom-row').style.display = (editor === 'custom') ? '' : 'none';
+  document.getElementById('dev-annotate-project-row').style.display = (preset && preset.supportsProjectDir) ? '' : 'none';
 }
 
 function closeDevAnnotateDialog() {
@@ -6587,21 +6582,16 @@ function closeDevAnnotateDialog() {
 
 function saveDevAnnotateDialog() {
   const hostId = document.getElementById('dev-annotate-host').value.trim();
-  const editor = document.getElementById('dev-annotate-editor').value || 'opencode';
+  const editor = document.getElementById('dev-annotate-editor').value || DEV_EDITOR_PRESETS[0].id;
+  const preset = DEV_EDITOR_PRESETS.find(p => p.id === editor);
   const autoSend = !!document.getElementById('dev-annotate-autosend').checked;
   const projectDir = document.getElementById('dev-annotate-project').value.trim();
-  const customApp = document.getElementById('dev-annotate-custom').value.trim();
   if (!hostId) {
     showToast('Select an SSH host');
     return;
   }
-  if (editor === 'custom' && !customApp) {
-    showToast('Enter a custom app name or bundle ID');
-    return;
-  }
   const obj = { autoSend, editor, hostId };
-  if (editor === 'opencode' && projectDir) obj.projectDir = projectDir;
-  if (editor === 'custom' && customApp) obj.customApp = customApp;
+  if (preset && preset.supportsProjectDir && projectDir) obj.projectDir = projectDir;
   const command = 'dev-annotate ' + JSON.stringify(obj);
   const actions = triggerData(currentKey).actions || [];
   if (g_editingDevAnnotateIdx !== null && g_editingDevAnnotateIdx < actions.length) {
@@ -7939,6 +7929,7 @@ function renderPickerCategoryBar() {
   ACTION_SECTIONS.forEach(sec => {
     if (sec.title === 'Apple Watch' && !watchAvailable()) return;
     if (sec.title === 'Developer' && !config.developerMode) return;
+    if (sec.title === 'Apple Watch' && !watchAvailable()) return;
     mkChip(sec.title, sec.title);
   });
 }
@@ -7997,6 +7988,8 @@ function _pickerBackdropClick(e) {
 // actions only when that tweak / app is installed. Shared by the picker and Settings > Banners.
 function pickerActionAvailable(sec, a) {
   if (sec.title === 'Developer') return !!config.developerMode;
+  // The Apple Watch entries only exist where the Watch app is installed
+  if (sec.title === 'Apple Watch') return watchAvailable();
   if (sec.title !== 'Integrations') return true;
   if (a.cmd === '__HA_PICKER__') return !!config.haEnabled;
   if (a.cmd === '__KM_TRIGGER__') return !!config.kmEnabled;
@@ -11104,16 +11097,16 @@ let appPickerMulti = false;
 let appPickerChosen = [];        // bundle ids, in the order ticked
 let appPickerReplacingKey = null;
 async function promptAppLaunchPicker(callback, kind, preselected, replacingKey, titleOverride) {
-  appPickerKind = kind === 'exit' ? 'exit' : 'launch';
+  appPickerKind = (kind === 'exit' || kind === 'hold') ? kind : 'launch';
   appPickerMulti = !callback;
   appPickerChosen = (preselected || []).slice();
   appPickerReplacingKey = replacingKey || null;
-  document.getElementById('app-launch-dialog-title').textContent = titleOverride || (appPickerKind === 'exit' ? 'App Exit Trigger' : 'App Launch Trigger');
+  document.getElementById('app-launch-dialog-title').textContent = titleOverride || (appPickerKind === 'exit' ? 'App Exit Trigger' : (appPickerKind === 'hold' ? 'App Long Press Trigger' : 'App Launch Trigger'));
   document.getElementById('app-launch-dialog-msg').textContent = titleOverride
     ? 'Pick the app this condition matches.'
     : (appPickerMulti
-    ? (appPickerKind === 'exit' ? 'Fires when any selected app is switched away from.' : 'Fires when any selected app is opened.')
-    : (appPickerKind === 'exit' ? 'Fires when an app is switched away from.' : 'Fires when an app is opened on the device.'));
+    ? (appPickerKind === 'exit' ? 'Fires when any selected app is switched away from.' : (appPickerKind === 'hold' ? 'Fires when any selected app icon is long pressed.' : 'Fires when any selected app is opened.'))
+    : (appPickerKind === 'exit' ? 'Fires when an app is switched away from.' : (appPickerKind === 'hold' ? 'Fires when an app icon is long pressed.' : 'Fires when an app is opened on the device.')));
   document.getElementById('app-picker-done').style.display = appPickerMulti ? '' : 'none';
   document.getElementById('app-picker-done').disabled = appPickerChosen.length === 0;
   const listEl = document.getElementById('app-picker-list');
@@ -11229,19 +11222,20 @@ function closeAppLaunchDialog() {
   dialogCallback = null;
 }
 
-// Saves an App Launch / App Exit trigger for these apps. Its key is the first app's; two or
-// more apps are kept in an "apps" list. The actions of the trigger it replaces, or of one that
-// already exists for the first app, are kept.
+// Saves an App Launch / App Exit / App Long Press trigger for these apps. Its key is the first
+// app's; two or more apps are kept in an "apps" list. The actions of the trigger it replaces, or
+// of one that already exists for the first app, are kept.
 function saveAppTrigger(kind, names, ids, replacingKey) {
   const exit = kind === 'exit';
-  const prefix = exit ? 'app_exit_' : 'app_launch_';
+  const hold = kind === 'hold';
+  const prefix = exit ? 'app_exit_' : (hold ? 'app_hold_' : 'app_launch_');
   const key = prefix + ids[0];
   const previous = config.triggers[replacingKey || key] || {};
   const data = {
     enabled: previous.enabled !== undefined ? previous.enabled : true,
     actions: previous.actions || [],
     // The name says which apps: "Launch: Safari, Notes"
-    name: `${exit ? 'Exit' : 'Launch'}: ${names.join(', ')}`
+    name: `${exit ? 'Exit' : (hold ? 'Long Press' : 'Launch')}: ${names.join(', ')}`
   };
   if (ids.length > 1) data.apps = ids;
   config.triggers[key] = data;
@@ -11253,30 +11247,32 @@ function saveAppTrigger(kind, names, ids, replacingKey) {
 
 // ── Focus Trigger Setup ─────────────────────────────────────────────────────
 function promptControlCenterTrigger() {
-  const slots = [1, 2, 3, 4];
-  const freeSlots = slots.filter(s => !config.triggers[`trigger_cc_button_${s}`]);
-  if (!freeSlots.length) {
-    showToast('All 4 Control Center buttons are in use.');
-    return;
+  const prefix = 'trigger_cc_button_';
+  let maxNum = 0;
+  for (const key of Object.keys(config.triggers || {})) {
+    if (!key.startsWith(prefix)) continue;
+    const n = parseInt(key.slice(prefix.length), 10);
+    if (Number.isFinite(n) && n > maxNum) maxNum = n;
   }
-  showSheet('Control Center Button Number', freeSlots.map(s => ({
-    label: `Button ${s}`,
-    action: () => {
-      showDialog('Button Name', 'Name:', `Control Center Button ${s}`, 'Next', name => {
-        name = (name || `Control Center Button ${s}`).trim();
-        showDialog('Icon (SF Symbol)', 'Symbol name (e.g. bolt.fill, lightbulb.fill):', 'bolt.fill', 'Add', icon => {
-          icon = (icon || 'bolt.fill').trim();
-          const key = `trigger_cc_button_${s}`;
-          if (!config.triggers[key]) {
-            config.triggers[key] = { enabled: true, actions: [], name, icon };
-            saveConfig();
-          }
-          renderAll();
-          openActionsPanel(key);
-        });
-      });
-    }
-  })));
+  let nextNum = maxNum + 1;
+  while (config.triggers && config.triggers[prefix + nextNum]) nextNum++;
+  const defaultName = `Control Center Button ${nextNum}`;
+  showDialog('Button Name', 'Name:', defaultName, 'Next', rawName => {
+    const trimmed = String(rawName || '').trim();
+    const name = trimmed || defaultName;
+    showDialog('Icon (SF Symbol)', 'Symbol name (e.g. bolt.fill, lightbulb.fill):', 'bolt.fill', 'Add', icon => {
+      icon = (String(icon || '')).trim() || 'bolt.fill';
+      const key = prefix + nextNum;
+      if (!config.triggers[key]) {
+        const data = { enabled: true, actions: [], name, icon };
+        if (trimmed && trimmed !== defaultName) data.customName = trimmed;
+        config.triggers[key] = data;
+        saveConfig();
+      }
+      renderAll();
+      openActionsPanel(key);
+    });
+  });
 }
 
 async function promptWatchFaceTrigger() {
@@ -11372,6 +11368,16 @@ function promptAudioOutputName(mode) {
       saveConfig();
     }
     renderAll();
+    openActionsPanel(key);
+  });
+}
+
+// ── Action Sequence Edited Trigger Setup ─────────────────────────────────────
+// Runs when any trigger's actions change. A debounce waits for the edits to stop, so a run of
+// changes runs the sequence once. Changes to this trigger's own actions count too.
+const SEQUENCE_DEBOUNCE_OPTIONS = [0, 5, 10, 15, 30, 60, 120, 300];
+function sequenceDebounceLabel(seconds) {
+  if (!seconds) return 'Off';
   if (seconds < 60) return `${seconds} Seconds`;
   return `${seconds / 60} Minute${seconds >= 120 ? 's' : ''}`;
 }
@@ -11435,6 +11441,7 @@ function showAddTriggerSheet() {
     { label: 'Notification Trigger', action: () => promptNotifTrigger() },
     { label: 'App Launch Trigger', action: () => promptAppLaunchPicker() },
     { label: 'App Exit Trigger', action: () => promptAppLaunchPicker(null, 'exit') },
+    { label: 'Long Press App Icon', action: () => promptAppLaunchPicker(null, 'hold') },
     { label: 'Add-on Trigger', action: () => promptAddOnTrigger() },
     { label: 'Scheduled Trigger', action: () => promptSchedTrigger() },
     { label: 'Battery Level Trigger', action: () => promptBatteryTrigger() },

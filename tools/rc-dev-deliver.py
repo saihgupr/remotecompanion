@@ -297,7 +297,25 @@ def _extract_api_error(resp, status):
     return f"OpenCode API failed: HTTP {status}"
 
 
-def _deliver_opencode_api(svc, png_path, image_b64, text, delivery, project_dir):
+def _open_session_in_background(session_id, run_cmd=None):
+    """Ask OpenCode Desktop to show a session in a background tab.
+
+    The alfred-tabs GUI plugin treats ?background=1 as "open a tab, do not
+    select it". `open -g` keeps macOS from bringing the app to the front.
+    Best effort: the prompt is already queued, so a missing tab must not fail
+    the send.
+    """
+    if run_cmd is None:
+        run_cmd = _default_run_cmd
+    url = f"opencode://session/{urllib.parse.quote(session_id, safe='')}?background=1"
+    try:
+        run_cmd(["/usr/bin/open", "-g", url], None, None)
+        return True
+    except Exception:
+        return False
+
+
+def _deliver_opencode_api(svc, png_path, image_b64, text, delivery, project_dir, run_cmd=None):
     """Deliver screenshot + text directly to an OpenCode V2 session."""
     session = _pick_opencode_session(svc, project_dir)
     session_id = session["id"]
@@ -318,6 +336,7 @@ def _deliver_opencode_api(svc, png_path, image_b64, text, delivery, project_dir)
     status, resp = _http_json(svc, "POST", f"/api/session/{encoded_id}/prompt", body=body, timeout=10.0)
     if status < 200 or status >= 300:
         raise RuntimeError(_extract_api_error(resp, status))
+    _open_session_in_background(session_id, run_cmd=run_cmd)
     title = str(session.get("title") or "").strip() or session_id
     return title
 
@@ -367,20 +386,8 @@ def _run_osascript(script, run_cmd):
         raise RuntimeError(msg)
 
 
-def _activate_target_app(bundle_id, app_name, custom_app, run_cmd):
+def _activate_target_app(bundle_id, app_name, run_cmd):
     """Activate the target macOS application and return a display label for it."""
-    custom = custom_app.strip() if isinstance(custom_app, str) else ""
-    if custom:
-        if "." in custom and " " not in custom:
-            try:
-                _run_osascript(f'tell application id "{_escape_applescript(custom)}" to activate', run_cmd)
-                return custom
-            except RuntimeError as err:
-                if "Accessibility" in str(err):
-                    raise
-        _run_osascript(f'tell application "{_escape_applescript(custom)}" to activate', run_cmd)
-        return custom
-
     bid = bundle_id.strip() if isinstance(bundle_id, str) else ""
     name = app_name.strip() if isinstance(app_name, str) else ""
     if bid:
@@ -393,26 +400,151 @@ def _activate_target_app(bundle_id, app_name, custom_app, run_cmd):
     if name:
         _run_osascript(f'tell application "{_escape_applescript(name)}" to activate', run_cmd)
         return name
-    return "Active Window"
+    raise RuntimeError("Missing target application")
 
 
-def _deliver_clipboard_paste(
-    png_path,
-    text,
-    bundle_id,
-    app_name,
-    custom_app,
-    auto_send,
-    image_paste_delay_ms,
-    submit_key,
-    run_cmd=_default_run_cmd,
-    sleep_fn=time.sleep,
-):
-    """Activate the target editor, paste the PNG and text, and optionally submit."""
-    display_target = _activate_target_app(bundle_id, app_name, custom_app, run_cmd)
-    if display_target != "Active Window":
-        sleep_fn(0.25)
+def _antigravity_registration_paths():
+    """Return RemoteCompanion Antigravity Bridge registration JSON paths."""
+    home = os.path.expanduser("~")
+    xdg_state = os.environ.get("XDG_STATE_HOME", "").strip()
+    dirs = []
+    if xdg_state:
+        dirs.append(os.path.join(xdg_state, "rc-antigravity"))
+    dirs.append(os.path.join(home, ".local", "state", "rc-antigravity"))
 
+    paths = []
+    seen = set()
+    for d in dirs:
+        for p in sorted(glob.glob(os.path.join(d, "window-*.json"))):
+            norm = os.path.abspath(p)
+            if norm not in seen:
+                seen.add(norm)
+                paths.append(p)
+    return paths
+
+
+def _discover_antigravity_windows(reg_paths=None):
+    """Discover all live Antigravity IDE bridge instances whose /info verifies."""
+    paths = reg_paths if reg_paths is not None else _antigravity_registration_paths()
+    windows = []
+    for path in paths:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                candidate = json.load(f)
+        except (OSError, ValueError):
+            continue
+
+        svc = _parse_loopback_service(candidate)
+        if not svc:
+            continue
+
+        try:
+            status, info = _http_json(svc, "GET", "/info", timeout=1.5, max_bytes=MAX_INFO_BYTES)
+        except Exception:
+            continue
+
+        if status != 200 or not isinstance(info, dict) or info.get("ok") is not True:
+            continue
+        if svc["pid"] is not None and info.get("pid") != svc["pid"]:
+            continue
+
+        try:
+            last_focused = int(info.get("lastFocusedAt") or 0)
+        except (TypeError, ValueError):
+            last_focused = 0
+
+        windows.append(
+            {
+                "service": svc,
+                "pid": info.get("pid"),
+                "workspaceName": str(info.get("workspaceName") or "").strip(),
+                "workspaceFolders": [
+                    str(p)
+                    for p in (info.get("workspaceFolders") or [])
+                    if isinstance(p, str) and p.strip()
+                ],
+                "windowFocused": bool(info.get("windowFocused")),
+                "lastFocusedAt": last_focused,
+            }
+        )
+    return windows
+
+
+def _open_folder_with_app(bundle_id, app_name, folder_path, run_cmd):
+    """Open `folder_path` using macOS `open` with the target bundle ID or app name."""
+    bid = bundle_id.strip() if isinstance(bundle_id, str) else ""
+    name = app_name.strip() if isinstance(app_name, str) else ""
+    if not bid and not name:
+        raise RuntimeError("Missing target application")
+
+    rc = 1
+    stderr = ""
+    if bid:
+        rc, _, stderr = run_cmd(["/usr/bin/open", "-b", bid, folder_path], None, None)
+        if rc != 0 and name:
+            rc, _, stderr = run_cmd(["/usr/bin/open", "-a", name, folder_path], None, None)
+    else:
+        rc, _, stderr = run_cmd(["/usr/bin/open", "-a", name, folder_path], None, None)
+
+    if rc != 0:
+        err_text = (stderr or "").strip()
+        msg = err_text.splitlines()[-1][:200] if err_text else "Failed to open project folder"
+        raise RuntimeError(msg)
+
+
+def _pick_antigravity_window(project_dir, bundle_id, app_name, reg_paths, run_cmd, sleep_fn):
+    """Resolve the target Antigravity IDE window, opening `project_dir` if needed."""
+    def sort_key(win):
+        return (1 if win["windowFocused"] else 0, win["lastFocusedAt"])
+
+    has_project = isinstance(project_dir, str) and bool(project_dir.strip())
+    if has_project:
+        expanded = os.path.expanduser(project_dir.strip())
+        if not os.path.isdir(expanded):
+            raise RuntimeError(f"Project folder not found: {expanded}")
+        norm_project = os.path.realpath(expanded)
+
+        def find_matching(win_list):
+            matched_wins = []
+            for win in win_list:
+                for folder in win["workspaceFolders"]:
+                    try:
+                        if os.path.realpath(os.path.expanduser(folder)) == norm_project:
+                            matched_wins.append(win)
+                            break
+                    except OSError:
+                        pass
+            return matched_wins
+
+        windows = _discover_antigravity_windows(reg_paths)
+        matched = find_matching(windows)
+        if not matched:
+            _open_folder_with_app(bundle_id, app_name, expanded, run_cmd)
+            for _ in range(20):
+                sleep_fn(0.25)
+                windows = _discover_antigravity_windows(reg_paths)
+                matched = find_matching(windows)
+                if matched:
+                    break
+
+        if not matched:
+            if not windows:
+                raise RuntimeError("Antigravity Bridge extension isn't active (reload Antigravity IDE window)")
+            label = os.path.basename(norm_project) or norm_project
+            raise RuntimeError(f"No Antigravity IDE window found for {label}")
+
+        matched.sort(key=sort_key, reverse=True)
+        return matched[0]
+
+    windows = _discover_antigravity_windows(reg_paths)
+    if not windows:
+        raise RuntimeError("Antigravity Bridge extension isn't active (reload Antigravity IDE window)")
+    windows.sort(key=sort_key, reverse=True)
+    return windows[0]
+
+
+def _paste_png_from_clipboard(png_path, image_paste_delay_ms, run_cmd, sleep_fn):
+    """Put `png_path` on the macOS clipboard as PNG, paste via Cmd+V, and wait."""
     escaped_path = _escape_applescript(png_path)
     _run_osascript(
         f'set the clipboard to (read POSIX file "{escaped_path}" as «class PNGf»)',
@@ -430,6 +562,88 @@ def _deliver_clipboard_paste(
     delay_ms = max(150, min(2000, delay_ms))
     sleep_fn(delay_ms / 1000.0)
 
+
+def _send_submit_key(submit_key, run_cmd, sleep_fn):
+    """Send Return (or Cmd+Return) via System Events after a short delay."""
+    sleep_fn(0.15)
+    if submit_key == "cmd+return":
+        _run_osascript(
+            'tell application "System Events" to key code 36 using command down',
+            run_cmd,
+        )
+    else:
+        _run_osascript(
+            'tell application "System Events" to key code 36',
+            run_cmd,
+        )
+
+
+def _deliver_antigravity_ext(
+    png_path,
+    text,
+    bundle_id,
+    app_name,
+    auto_send,
+    image_paste_delay_ms,
+    submit_key,
+    project_dir,
+    reg_paths,
+    run_cmd,
+    sleep_fn,
+):
+    """Deliver screenshot + text to Antigravity IDE via the companion bridge extension."""
+    win = _pick_antigravity_window(project_dir, bundle_id, app_name, reg_paths, run_cmd, sleep_fn)
+    svc = win["service"]
+
+    if win["workspaceFolders"]:
+        _open_folder_with_app(bundle_id, app_name, win["workspaceFolders"][0], run_cmd)
+    _activate_target_app(bundle_id, app_name, run_cmd)
+    sleep_fn(0.2)
+
+    status, prep = _http_json(svc, "POST", "/prepare", body={}, timeout=5.0)
+    if status != 200 or not isinstance(prep, dict) or not prep.get("ok") or not prep.get("isFocused"):
+        err = (prep.get("error") if isinstance(prep, dict) else None) or "Couldn't focus Antigravity Agent chat panel"
+        raise RuntimeError(str(err))
+
+    _paste_png_from_clipboard(png_path, image_paste_delay_ms, run_cmd, sleep_fn)
+
+    clean_text = text.strip() if isinstance(text, str) else ""
+    status, pop = _http_json(
+        svc,
+        "POST",
+        "/populate",
+        body={"text": clean_text, "autoSend": bool(auto_send)},
+        timeout=5.0,
+    )
+    if status != 200 or not isinstance(pop, dict) or not pop.get("ok"):
+        err = (pop.get("error") if isinstance(pop, dict) else None) or "Failed to populate Antigravity Agent chat"
+        raise RuntimeError(str(err))
+
+    if auto_send and not pop.get("sent"):
+        if not pop.get("isFocused"):
+            raise RuntimeError("Antigravity Agent chat lost focus before send")
+        _send_submit_key(submit_key, run_cmd, sleep_fn)
+
+    return str(pop.get("workspaceName") or prep.get("workspaceName") or win.get("workspaceName") or "Antigravity IDE")
+
+
+def _deliver_clipboard_paste(
+    png_path,
+    text,
+    bundle_id,
+    app_name,
+    auto_send,
+    image_paste_delay_ms,
+    submit_key,
+    run_cmd=_default_run_cmd,
+    sleep_fn=time.sleep,
+):
+    """Activate the target editor, paste the PNG and text, and optionally submit."""
+    display_target = _activate_target_app(bundle_id, app_name, run_cmd)
+    sleep_fn(0.25)
+
+    _paste_png_from_clipboard(png_path, image_paste_delay_ms, run_cmd, sleep_fn)
+
     clean_text = text.strip() if isinstance(text, str) else ""
     if clean_text:
         rc, _, stderr = run_cmd(
@@ -445,17 +659,7 @@ def _deliver_clipboard_paste(
         )
 
     if auto_send:
-        sleep_fn(0.15)
-        if submit_key == "cmd+return":
-            _run_osascript(
-                'tell application "System Events" to key code 36 using command down',
-                run_cmd,
-            )
-        else:
-            _run_osascript(
-                'tell application "System Events" to key code 36',
-                run_cmd,
-            )
+        _send_submit_key(submit_key, run_cmd, sleep_fn)
 
     return display_target
 
@@ -463,6 +667,7 @@ def _deliver_clipboard_paste(
 def deliver(
     payload,
     reg_paths=None,
+    antigravity_reg_paths=None,
     tmp_dir=DEFAULT_TMP_DIR,
     run_cmd=_default_run_cmd,
     sleep_fn=time.sleep,
@@ -479,6 +684,9 @@ def deliver(
         auto_send = bool(payload.get("auto_send", True))
         text = payload.get("text") or ""
 
+        if strategy not in ("opencode_api", "antigravity_ext", "clipboard_paste"):
+            return {"ok": False, "error": f"Unsupported delivery strategy: {strategy}"}
+
         if strategy == "opencode_api" and auto_send:
             svc = _discover_opencode_service(reg_paths=reg_paths)
             if not svc:
@@ -490,6 +698,23 @@ def deliver(
                 text=text,
                 delivery=payload.get("delivery") or "queue",
                 project_dir=payload.get("project_dir") or "",
+                run_cmd=run_cmd,
+            )
+            return {"ok": True, "detail": detail}
+
+        if strategy == "antigravity_ext":
+            detail = _deliver_antigravity_ext(
+                png_path=png_path,
+                text=text,
+                bundle_id=payload.get("bundle_id") or "",
+                app_name=payload.get("app_name") or "",
+                auto_send=auto_send,
+                image_paste_delay_ms=payload.get("image_paste_delay_ms", 450),
+                submit_key=payload.get("submit_key") or "return",
+                project_dir=payload.get("project_dir") or "",
+                reg_paths=antigravity_reg_paths,
+                run_cmd=run_cmd,
+                sleep_fn=sleep_fn,
             )
             return {"ok": True, "detail": detail}
 
@@ -498,7 +723,6 @@ def deliver(
             text=text,
             bundle_id=payload.get("bundle_id") or "",
             app_name=payload.get("app_name") or "",
-            custom_app=payload.get("custom_app") or "",
             auto_send=auto_send,
             image_paste_delay_ms=payload.get("image_paste_delay_ms", 450),
             submit_key=payload.get("submit_key") or "return",

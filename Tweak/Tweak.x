@@ -2442,6 +2442,7 @@ static NSString *get_human_name_for_trigger(NSString *key, NSDictionary *trigger
     if ([key hasPrefix:@"bt_disconnect_"]) return [NSString stringWithFormat:@"Bluetooth Disconnected: %@", [key substringFromIndex:14]];
     if ([key hasPrefix:@"app_launch_"]) return [NSString stringWithFormat:@"App Launched: %@", [key substringFromIndex:11]];
     if ([key hasPrefix:@"app_exit_"]) return [NSString stringWithFormat:@"App Exited: %@", [key substringFromIndex:9]];
+    if ([key hasPrefix:@"app_hold_"]) return [NSString stringWithFormat:@"App Icon Held: %@", [key substringFromIndex:9]];
     if ([key hasPrefix:@"output_set_"]) return [NSString stringWithFormat:@"Audio Output Set: %@", [key substringFromIndex:11]];
     if ([key hasPrefix:@"output_unset_"]) return [NSString stringWithFormat:@"Audio Output Unset: %@", [key substringFromIndex:13]];
     if ([key hasPrefix:@"notif_"] || [key hasPrefix:@"notify_"]) return @"Notification Trigger";
@@ -2524,6 +2525,40 @@ static void rc_note_action_sequence_edit(NSDictionary *config) {
     dispatch_async(dispatch_get_main_queue(), ^{ rc_fire_sequence_edited_trigger(); });
 }
 
+static NSDictionary *g_ccButtonsSnapshot = nil;
+
+// Captures the Control Center button triggers (name, customName, icon) so any add, remove,
+// rename, or icon edit tells CCSupport and active RCCCButton instances to refresh live.
+static NSDictionary *rc_cc_buttons_snapshot(NSDictionary *config) {
+    NSDictionary *triggers = [config[@"triggers"] isKindOfClass:[NSDictionary class]] ? config[@"triggers"] : nil;
+    NSMutableDictionary *snapshot = [NSMutableDictionary dictionary];
+    for (id rawKey in triggers) {
+        if (![rawKey isKindOfClass:[NSString class]]) continue;
+        NSString *key = rawKey;
+        if (![key hasPrefix:@"trigger_cc_button_"]) continue;
+        NSDictionary *trigger = [triggers[key] isKindOfClass:[NSDictionary class]] ? triggers[key] : nil;
+        if (!trigger) continue;
+        NSString *name = [trigger[@"name"] isKindOfClass:[NSString class]] ? trigger[@"name"] : @"";
+        NSString *customName = [trigger[@"customName"] isKindOfClass:[NSString class]] ? trigger[@"customName"] : @"";
+        NSString *icon = [trigger[@"icon"] isKindOfClass:[NSString class]] ? trigger[@"icon"] : @"";
+        snapshot[key] = @{ @"name": name, @"customName": customName, @"icon": icon };
+    }
+    return [snapshot copy];
+}
+
+static void rc_note_cc_buttons_change(NSDictionary *config) {
+    NSDictionary *current = rc_cc_buttons_snapshot(config);
+    BOOL changed = NO;
+    @synchronized (rc_trigger_config_lock()) {
+        changed = g_ccButtonsSnapshot && ![g_ccButtonsSnapshot isEqualToDictionary:current];
+        g_ccButtonsSnapshot = current;
+    }
+    if (!changed) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        notify_post("com.opa334.ccsupport/ReloadProviders");
+        [[NSNotificationCenter defaultCenter] postNotificationName:@"com.saihgupr.remotecompanion.ccbutton.refresh" object:nil];
+    });
+}
 static void rc_watch_face_refresh_observer(NSDictionary *config);
 static void rc_watch_sync_observing(NSDictionary *config);
 
@@ -2568,6 +2603,7 @@ static void load_trigger_config() {
                       (unsigned long)[newConfig[@"triggers"] count]);
                 // Another editor (the app or the web UI) may have changed an action sequence
                 rc_note_action_sequence_edit(newConfig);
+                rc_note_cc_buttons_change(newConfig);
                 // A triple press binding may have changed: tell iOS whether its own shortcut is on
                 dispatch_async(dispatch_get_main_queue(), ^{ RC_RefreshAXTriplePress(); });
                 rc_watch_face_refresh_observer(newConfig);
@@ -6809,30 +6845,18 @@ static void rc_schedule_audio_output_check(void) {
     });
 }
 
-// Control Center Button triggers: the module for slot N (Tweak/rc-ccmodule) posts
-// com.saihgupr.remotecompanion.ccbutton.N when it's tapped, and that runs trigger_cc_button_N
-#define RC_CC_BUTTON_SLOTS 4
-static void handle_cc_button_notification(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
-    NSString *notification = (__bridge NSString *)name;
-    NSRange dot = [notification rangeOfString:@"." options:NSBackwardsSearch];
-    if (!notification.length || dot.location == NSNotFound) return;
-    NSString *key = [@"trigger_cc_button_" stringByAppendingString:[notification substringFromIndex:dot.location + 1]];
-    SRLogMin(@"🎛️ [RCSystem] Control Center button: %@", key);
-    dispatch_async(dispatch_get_main_queue(), ^{
-        RCExecuteTrigger(key);
-    });
-}
-
+// Control Center Button triggers: RCCCButton (Tweak/rc-ccmodule) runs inside SpringBoard and
+// posts com.saihgupr.remotecompanion.ccbutton.tap with userInfo[@"triggerKey"] when tapped.
 static void rc_cc_button_start_observing(void) {
-    for (int slot = 1; slot <= RC_CC_BUTTON_SLOTS; slot++) {
-        NSString *name = [NSString stringWithFormat:@"com.saihgupr.remotecompanion.ccbutton.%d", slot];
-        CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),
-                                        NULL,
-                                        handle_cc_button_notification,
-                                        (__bridge CFStringRef)name,
-                                        NULL,
-                                        CFNotificationSuspensionBehaviorDeliverImmediately);
-    }
+    [[NSNotificationCenter defaultCenter] addObserverForName:@"com.saihgupr.remotecompanion.ccbutton.tap"
+                                                      object:nil
+                                                       queue:[NSOperationQueue mainQueue]
+                                                  usingBlock:^(NSNotification *note) {
+        NSString *key = note.userInfo[@"triggerKey"];
+        if (![key isKindOfClass:[NSString class]] || ![key hasPrefix:@"trigger_cc_button_"]) return;
+        SRLogMin(@"🎛️ [RCSystem] Control Center button: %@", key);
+        RCExecuteTrigger(key);
+    }];
 }
 
 static void handle_wifi_notification(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
@@ -7127,7 +7151,6 @@ static void rc_airplane_mode_start_observing(void) {
                                     NULL,
                                     CFNotificationSuspensionBehaviorDeliverImmediately);
 }
-
 // The Watch app pairs the watch, without it nothing here can work.
 static BOOL rc_watch_features_available(void) {
     static BOOL available;
@@ -7488,6 +7511,7 @@ static BOOL g_bioHoldTriggered = NO;
 static NSTimer *g_bioWatchdogTimer = nil;
 static NSTimeInterval g_bioIgnoreUntil = 0;
 static BOOL g_bioWasLocked = NO;
+static BOOL g_bioDownWasAuthPrompt = NO; // the finger went down for a system prompt, not a trigger
 static BOOL g_lastLockedState = NO;
 static BOOL g_lockStateInitialized = NO;
 // Top-button Touch ID (iPad mini 6, iPad Air 4/5) power-gates the sensor: HID
@@ -7516,6 +7540,148 @@ static BOOL rc_device_locked(SBLockScreenManager *lsm) {
         if (![backlight screenIsOn]) return YES;
     }
     return !known;
+}
+
+// System authentication prompts. An App Store purchase confirmation, an Apple ID sign-in, Apple
+// Pay, password autofill and an app's Touch ID sheet all run through CoreAuthUI. It is a UIKit
+// view service, so it is usually drawn inside the app that asked (SpringBoard only sees its
+// process), and when SpringBoard presents it, as a remote alert. While one is up the finger on
+// the sensor belongs to that prompt, so the Touch ID triggers must stay quiet: a confirmed
+// purchase is not a tap. Main thread only (reads processes and windows).
+static BOOL rc_auth_prompt_service(NSString *service) {
+    if (![service isKindOfClass:[NSString class]] || service.length == 0) return NO;
+    NSString *name = service.lowercaseString;
+    return [name containsString:@"coreauthui"] || [name containsString:@"localauthentication"];
+}
+
+// The view service exists only while its sheet does. FrontBoard tracks it; RunningBoard answers
+// as well when FrontBoard's list doesn't have it.
+static BOOL rc_auth_prompt_process(NSString *bundle) {
+    Class managerClass = objc_getClass("FBProcessManager");
+    id manager = [managerClass respondsToSelector:@selector(sharedInstance)] ? ((id (*)(Class, SEL))objc_msgSend)(managerClass, @selector(sharedInstance)) : nil;
+    SEL processesSel = NSSelectorFromString(@"processesForBundleIdentifier:"), runningSel = NSSelectorFromString(@"isRunning");
+    if ([manager respondsToSelector:processesSel]) {
+        id processes = ((id (*)(id, SEL, id))objc_msgSend)(manager, processesSel, bundle);
+        if ([processes isKindOfClass:[NSArray class]] || [processes isKindOfClass:[NSSet class]]) {
+            for (id process in processes) {
+                if ([process respondsToSelector:runningSel] && ((BOOL (*)(id, SEL))objc_msgSend)(process, runningSel)) return YES;
+            }
+        }
+    }
+
+    Class predicateClass = objc_getClass("RBSProcessPredicate"), handleClass = objc_getClass("RBSProcessHandle");
+    SEL predicateSel = NSSelectorFromString(@"predicateMatchingBundleIdentifier:"), handleSel = NSSelectorFromString(@"handleForPredicate:error:");
+    if ([predicateClass respondsToSelector:predicateSel] && [handleClass respondsToSelector:handleSel]) {
+        id predicate = ((id (*)(Class, SEL, id))objc_msgSend)(predicateClass, predicateSel, bundle);
+        id handle = ((id (*)(Class, SEL, id, void *))objc_msgSend)(handleClass, handleSel, predicate, NULL);
+        if (handle) return YES;
+    }
+    return NO;
+}
+
+static BOOL rc_auth_prompt_remote_alert(void) {
+    Class managerClass = objc_getClass("SBRemoteTransientOverlaySessionManager");
+    id manager = nil;
+    if ([managerClass respondsToSelector:@selector(sharedInstance)]) {
+        manager = ((id (*)(Class, SEL))objc_msgSend)(managerClass, @selector(sharedInstance));
+    }
+    if (!manager) {
+        id springBoard = [UIApplication sharedApplication];
+        SEL managerSel = NSSelectorFromString(@"remoteTransientOverlaySessionManager");
+        if ([springBoard respondsToSelector:managerSel]) manager = ((id (*)(id, SEL))objc_msgSend)(springBoard, managerSel);
+    }
+    SEL sessionsSel = NSSelectorFromString(@"sessionsWithDefinition:options:");
+    if (![manager respondsToSelector:sessionsSel]) return NO;
+    id sessions = ((id (*)(id, SEL, id, unsigned long long))objc_msgSend)(manager, sessionsSel, nil, 0ULL);
+    if (![sessions isKindOfClass:[NSArray class]]) return NO;
+    for (id session in sessions) {
+        SEL activatedSel = NSSelectorFromString(@"isActivated"), validSel = NSSelectorFromString(@"isValid");
+        if ([session respondsToSelector:activatedSel] && !((BOOL (*)(id, SEL))objc_msgSend)(session, activatedSel)) continue;
+        if ([session respondsToSelector:validSel] && !((BOOL (*)(id, SEL))objc_msgSend)(session, validSel)) continue;
+        SEL definitionSel = NSSelectorFromString(@"definition"), serviceSel = NSSelectorFromString(@"serviceName");
+        id definition = [session respondsToSelector:definitionSel] ? ((id (*)(id, SEL))objc_msgSend)(session, definitionSel) : nil;
+        NSString *service = [definition respondsToSelector:serviceSel] ? ((id (*)(id, SEL))objc_msgSend)(definition, serviceSel) : nil;
+        if (rc_auth_prompt_service(service)) return YES;
+    }
+    return NO;
+}
+
+// A presented overlay, or a hosted remote view, that belongs to the authentication service
+static BOOL rc_auth_prompt_controller(UIViewController *controller, NSUInteger depth) {
+    if (!controller || depth > 8) return NO;
+    SEL presentedBySel = NSSelectorFromString(@"isPresentedByBundleIdentifier:");
+    if ([controller respondsToSelector:presentedBySel]) {
+        for (NSString *bundle in @[@"com.apple.CoreAuthUI", @"com.apple.LocalAuthenticationUI"]) {
+            if (((BOOL (*)(id, SEL, id))objc_msgSend)(controller, presentedBySel, bundle)) return YES;
+        }
+    }
+    Class remoteClass = objc_getClass("_UIRemoteViewController");
+    if (remoteClass && [controller isKindOfClass:remoteClass]) {
+        SEL serviceSel = NSSelectorFromString(@"serviceBundleIdentifier");
+        NSString *service = [controller respondsToSelector:serviceSel] ? ((id (*)(id, SEL))objc_msgSend)(controller, serviceSel) : nil;
+        if (rc_auth_prompt_service(service)) return YES;
+    }
+    for (UIViewController *child in controller.childViewControllers) {
+        if (rc_auth_prompt_controller(child, depth + 1)) return YES;
+    }
+    return controller.presentedViewController ? rc_auth_prompt_controller(controller.presentedViewController, depth + 1) : NO;
+}
+
+static BOOL rc_view_tree_has_class(UIView *view, Class wanted, NSUInteger depth, NSUInteger *budget) {
+    if (!view || !wanted || depth > 16 || *budget == 0) return NO;
+    (*budget)--;
+    if ([view isKindOfClass:wanted]) return YES;
+    for (UIView *subview in view.subviews) {
+        if (rc_view_tree_has_class(subview, wanted, depth + 1, budget)) return YES;
+    }
+    return NO;
+}
+
+// Is iOS using the sensor for a prompt? Cheap enough to ask on a biometric event; cached for a
+// moment so the tap and the hold look at the same answer.
+static BOOL rc_biometric_auth_active(void) {
+    static BOOL cached = NO;
+    static NSTimeInterval checkedAt = 0;
+    static BOOL loggedActive = NO;
+    NSTimeInterval now = CFAbsoluteTimeGetCurrent();
+    if (checkedAt != 0 && now - checkedAt < 0.25) return cached;
+
+    BOOL active = NO;
+    @try {
+        active = rc_auth_prompt_remote_alert();
+
+        for (NSString *bundle in @[@"com.apple.CoreAuthUI", @"com.apple.LocalAuthenticationUI"]) {
+            if (active) break;
+            active = rc_auth_prompt_process(bundle);
+        }
+
+        if (!active) {
+            Class lockClass = objc_getClass("SBLockScreenManager");
+            SEL sharedLock = NSSelectorFromString(@"sharedInstance"), uiLocked = NSSelectorFromString(@"isUILocked");
+            id lockManager = [lockClass respondsToSelector:sharedLock] ? ((id (*)(Class, SEL))objc_msgSend)(lockClass, sharedLock) : nil;
+            BOOL locked = [lockManager respondsToSelector:uiLocked] && ((BOOL (*)(id, SEL))objc_msgSend)(lockManager, uiLocked);
+            Class passcodeViewClass = objc_getClass("SBUIPasscodeLockViewBase");
+            for (UIWindow *window in [UIApplication sharedApplication].windows) {
+                if (window.hidden || window.alpha == 0) continue;
+                if (rc_auth_prompt_controller(window.rootViewController, 0)) { active = YES; break; }
+                if (!locked && passcodeViewClass) {
+                    NSUInteger budget = 3000;
+                    if (rc_view_tree_has_class(window, passcodeViewClass, 0, &budget)) { active = YES; break; }
+                }
+            }
+        }
+    } @catch (NSException *e) {
+        SRLogMin(@"⚠️ [Bio] Authentication prompt check failed: %@", e);
+        active = NO;
+    }
+
+    if (active != loggedActive) {
+        SRLog(@"🔐 [Bio] System authentication prompt %@ - Touch ID triggers stay quiet", active ? @"is up" : @"closed");
+        loggedActive = active;
+    }
+    cached = active;
+    checkedAt = now;
+    return active;
 }
 
 // Focus triggers. trigger_device_focus_on_<name> / trigger_device_focus_off_<name> fire when
@@ -7631,6 +7797,7 @@ static void handle_lock_state_transition(BOOL isLocked, NSString *source) {
             // Reset biometric / unlock-related side effects
             g_bioFingerDownTime = 0;
             g_bioHoldTriggered = NO;
+            g_bioDownWasAuthPrompt = NO;
             
             if (g_bioWatchdogTimer) {
                 [g_bioWatchdogTimer invalidate];
@@ -9609,6 +9776,97 @@ static NSDictionary *rc_execute_ha_request(NSString *endpointPath, NSString *htt
     return resultDict ?: @{@"ok": @NO, @"error": @"Request timed out"};
 }
 
+static NSString *rc_ha_capitalized_word(NSString *word) {
+    if (word.length == 0) return @"";
+    return [word stringByReplacingCharactersInRange:NSMakeRange(0, 1)
+                                         withString:[[word substringToIndex:1] uppercaseString]];
+}
+
+static NSString *rc_ha_pretty_entity_name(NSString *entityId) {
+    if (![entityId isKindOfClass:[NSString class]] || entityId.length == 0) return nil;
+    NSString *base = entityId;
+    NSRange dot = [base rangeOfString:@"."];
+    if (dot.location != NSNotFound) base = [base substringFromIndex:dot.location + 1];
+    NSMutableArray<NSString *> *words = [NSMutableArray array];
+    for (NSString *word in [base componentsSeparatedByString:@"_"]) {
+        if (word.length == 0) continue;
+        [words addObject:rc_ha_capitalized_word(word)];
+    }
+    return words.count > 0 ? [words componentsJoinedByString:@" "] : nil;
+}
+
+static NSDictionary *rc_ha_changed_state(id data, NSString *entityId) {
+    NSArray *items = nil;
+    if ([data isKindOfClass:[NSArray class]]) items = data;
+    else if ([data isKindOfClass:[NSDictionary class]]) items = @[data];
+    if (items.count == 0) return nil;
+    if ([entityId isKindOfClass:[NSString class]] && entityId.length > 0) {
+        for (id item in items) {
+            if ([item isKindOfClass:[NSDictionary class]] && [item[@"entity_id"] isEqualToString:entityId]) {
+                return item;
+            }
+        }
+    }
+    for (id item in items) {
+        if ([item isKindOfClass:[NSDictionary class]]) return item;
+    }
+    return nil;
+}
+
+// The toast reads like "Bedroom Occupancy on" instead of the raw service call.
+static NSString *rc_ha_toast_message(NSString *domain, NSString *service, NSDictionary *payload, NSDictionary *res) {
+    id rawEntity = payload[@"entity_id"];
+    NSString *entityId = [rawEntity isKindOfClass:[NSString class]] ? rawEntity : nil;
+    if ([rawEntity isKindOfClass:[NSArray class]] && [(NSArray *)rawEntity count] > 0) {
+        id first = [(NSArray *)rawEntity firstObject];
+        if ([first isKindOfClass:[NSString class]]) entityId = first;
+    }
+
+    NSDictionary *changed = rc_ha_changed_state(res[@"data"], entityId);
+    NSString *name = changed[@"attributes"][@"friendly_name"];
+    if (![name isKindOfClass:[NSString class]] || name.length == 0) {
+        name = rc_ha_pretty_entity_name(entityId);
+    }
+
+    if ([domain isEqualToString:@"notify"]) return @"Notification sent";
+
+    NSString *verb = nil;
+    if ([service isEqualToString:@"turn_on"]) verb = [domain isEqualToString:@"script"] ? @"started" : @"On";
+    else if ([service isEqualToString:@"turn_off"]) verb = @"Off";
+    else if ([service isEqualToString:@"toggle"]) {
+        NSString *state = changed[@"state"];
+        verb = ([state isKindOfClass:[NSString class]] && state.length > 0) ? [state capitalizedString] : @"Toggled";
+    }
+    else if ([service isEqualToString:@"open_cover"] || [service isEqualToString:@"open"]) verb = @"opened";
+    else if ([service isEqualToString:@"close_cover"] || [service isEqualToString:@"close"]) verb = @"closed";
+    else if ([service isEqualToString:@"lock"]) verb = @"locked";
+    else if ([service isEqualToString:@"unlock"]) verb = @"unlocked";
+    else if ([service isEqualToString:@"media_play"]) verb = @"playing";
+    else if ([service isEqualToString:@"media_pause"]) verb = @"paused";
+    else if ([service isEqualToString:@"media_stop"]) verb = @"stopped";
+    else if ([service isEqualToString:@"media_next_track"]) verb = @"next track";
+    else if ([service isEqualToString:@"media_previous_track"]) verb = @"previous track";
+    else if ([service isEqualToString:@"volume_up"]) verb = @"volume up";
+    else if ([service isEqualToString:@"volume_down"]) verb = @"volume down";
+    else if ([service isEqualToString:@"volume_mute"]) verb = @"muted";
+    else if ([service isEqualToString:@"volume_unmute"]) verb = @"unmuted";
+    else if ([service isEqualToString:@"start"]) verb = @"started";
+    else if ([service isEqualToString:@"stop"]) verb = @"stopped";
+    else if ([service isEqualToString:@"pause"]) verb = @"paused";
+    else if ([service isEqualToString:@"return_to_base"]) verb = @"returning to base";
+    else if ([service isEqualToString:@"trigger"]) verb = @"triggered";
+    else if ([service isEqualToString:@"press"]) verb = @"pressed";
+    else if ([service isEqualToString:@"reload"]) verb = @"reloaded";
+    else if ([service isEqualToString:@"select_option"]) verb = @"changed";
+
+    if ([name isKindOfClass:[NSString class]] && name.length > 0) {
+        if (verb.length > 0) return [NSString stringWithFormat:@"%@ %@", name, verb];
+        NSString *readable = [[service stringByReplacingOccurrencesOfString:@"_" withString:@" "] lowercaseString];
+        return [NSString stringWithFormat:@"%@ \u00b7 %@", name, readable];
+    }
+    return [NSString stringWithFormat:@"Executed %@.%@", domain, service];
+}
+
 static NSString *rc_execute_ha_command(NSString *cmdArgs) {
     if (!g_triggerConfig) load_trigger_config();
     BOOL haEnabled = [g_triggerConfig[@"haEnabled"] boolValue];
@@ -9686,7 +9944,7 @@ static NSString *rc_execute_ha_command(NSString *cmdArgs) {
     NSString *path = [NSString stringWithFormat:@"/api/services/%@/%@", domain, service];
     NSDictionary *res = rc_execute_ha_request(path, @"POST", payload, nil, nil);
     if ([res[@"ok"] boolValue]) {
-        if (rc_own_banner_enabled(@"__HA_PICKER__")) rc_show_hud_toast(@"Home Assistant", [NSString stringWithFormat:@"Executed %@.%@", domain, service], @"house.fill");
+        if (rc_own_banner_enabled(@"__HA_PICKER__")) rc_show_hud_toast(@"Home Assistant", rc_ha_toast_message(domain, service, payload, res), @"house.fill");
         return [NSString stringWithFormat:@"Home Assistant call succeeded: %@.%@\n", domain, service];
     } else {
         return [NSString stringWithFormat:@"Home Assistant call failed: %@\n", res[@"error"] ?: @"Unknown error"];
@@ -15920,6 +16178,7 @@ static void start_web_server() {
                                                     rc_set_trigger_config([incoming copy]);
                                                     rc_note_action_sequence_edit(incoming);
                                                     save_trigger_config();
+                                                    rc_note_cc_buttons_change(incoming);
                                                     responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: 12\r\n\r\n{\"ok\": true}", cors];
                                                 }
                                             } else {
@@ -18719,6 +18978,26 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
                  [g_triggerConfig[@"triggers"][@"touchid_tap"][@"enabled"] boolValue]);
             if (!enabled) return;
 
+            // The sensor belongs to a system prompt (purchase, Apple ID, Apple Pay, an app's
+            // Touch ID sheet): follow the touch so its lift is not taken for a new tap, but never
+            // fire. The prompt can close before the finger lifts, so the state says whose it was.
+            if (rc_biometric_auth_active()) {
+                if (g_bioWatchdogTimer) {
+                    [g_bioWatchdogTimer invalidate];
+                    g_bioWatchdogTimer = nil;
+                }
+                if (g_bioFingerDownTime == 0) {
+                    g_bioFingerDownTime = now;
+                    g_bioDownWasAuthPrompt = YES;
+                } else {
+                    g_bioFingerDownTime = 0;
+                    g_bioDownWasAuthPrompt = NO;
+                }
+                g_bioHoldTriggered = NO;
+                SRLogMin(@"[Bio] Ignored: a system authentication prompt has the sensor");
+                return;
+            }
+
             // DEBOUNCE CHECK:
             if (now < g_bioIgnoreUntil) {
                 // SRLog(@"[Bio] Ignoring Event (Debounce)");
@@ -18731,6 +19010,19 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
 
             if (g_bioFingerDownTime != 0 && !isStale) {
                 // STATE = DOWN. This event must be LIFT.
+
+                if (g_bioDownWasAuthPrompt) {
+                    // The down was for a system prompt: its lift is not a trigger either
+                    g_bioFingerDownTime = 0;
+                    g_bioDownWasAuthPrompt = NO;
+                    g_bioHoldTriggered = NO;
+                    if (g_bioWatchdogTimer) {
+                        [g_bioWatchdogTimer invalidate];
+                        g_bioWatchdogTimer = nil;
+                    }
+                    g_bioIgnoreUntil = now + 0.5;
+                    return;
+                }
                 
                 // VARIABLE DELAY:
                 // If we started on the lockscreen, we need a bigger window (0.4s) for biometrics to "win" the race.
@@ -18739,6 +19031,19 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
 
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(liftDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                     if (g_bioFingerDownTime == 0) return; // Already handled or reset
+
+                    // A prompt came up between the lift and this check: not a tap
+                    if (g_bioDownWasAuthPrompt || rc_biometric_auth_active()) {
+                        SRLog(@"[Bio] Suppressing Tap (system authentication prompt)");
+                        if (g_bioWatchdogTimer) {
+                            [g_bioWatchdogTimer invalidate];
+                            g_bioWatchdogTimer = nil;
+                        }
+                        g_bioFingerDownTime = 0;
+                        g_bioDownWasAuthPrompt = NO;
+                        g_bioHoldTriggered = NO;
+                        return;
+                    }
 
                     // Cancel timer if running.
                     if (g_bioWatchdogTimer) {
@@ -18774,15 +19079,27 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
                     }
                     g_bioFingerDownTime = 0; // Reset State to UP.
                     g_bioHoldTriggered = NO;
+                    g_bioDownWasAuthPrompt = NO;
                     
                     // START DEBOUNCE (Ignore subsequent events for 0.5s to squash "bouncing")
                     g_bioIgnoreUntil = [[NSDate date] timeIntervalSince1970] + 0.5;
                 });
 
             } else {
+                // A late lift of a touch that went down for a prompt: end it, never start a
+                // new touch from it (a finger can rest on the sensor longer than the stale limit)
+                if (g_bioDownWasAuthPrompt) {
+                    g_bioFingerDownTime = 0;
+                    g_bioDownWasAuthPrompt = NO;
+                    g_bioHoldTriggered = NO;
+                    g_bioIgnoreUntil = now + 0.5;
+                    return;
+                }
+
                 // STATE = UP (or Stale). This event must be DOWN.
                 // Start Timer!
                 g_bioFingerDownTime = now; // Set State to DOWN.
+                g_bioDownWasAuthPrompt = NO;
                 
                 // Track initial lock state
                 Class LSMC = objc_getClass("SBLockScreenManager");
@@ -18816,6 +19133,13 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
                         
                         if (g_bioWasLocked && !currentlyLocked2) {
                             SRLog(@"[Bio] Suppressing Hold (Unlock succeeded during decision window)");
+                            return;
+                        }
+
+                        // The finger is working a system prompt, or was when it went down
+                        if (g_bioDownWasAuthPrompt || rc_biometric_auth_active()) {
+                            SRLog(@"[Bio] Suppressing Hold (system authentication prompt)");
+                            g_bioDownWasAuthPrompt = YES;
                             return;
                         }
 
@@ -18873,6 +19197,7 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
                         }
                         g_bioFingerDownTime = 0;
                         g_bioHoldTriggered = NO;
+                        g_bioDownWasAuthPrompt = NO;
                     });
                 }
             } else { // UP
@@ -18957,6 +19282,7 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
                     });
                     g_bioFingerDownTime = 0;
                     g_bioHoldTriggered = NO;
+                    g_bioDownWasAuthPrompt = NO;
 
                     // Check for simultaneous press if Volume is already down.
                     // FALLBACK ONLY. performInitialButtonDownActions already detects this
@@ -21658,6 +21984,98 @@ static void RC_FireAppTriggers(NSString *prefix, NSString *bundleId) {
     }
     for (NSString *key in keys) RCExecuteTrigger(key);
 }
+
+// Long press on a Home Screen app icon. An icon view gets one recognizer of its own, and any hold
+// recognizer SpringBoard already gives it also feeds us, so Haptic Touch, dragging and jiggle mode
+// keep working. The bundle id under the icon picks app_hold_<bundleId>.
+static char kRCIconHoldObserverKey;
+static char kRCIconHoldViewInstalledKey;
+static char kRCIconHoldOurRecognizerKey;
+static char kRCIconHoldBorrowedKey;
+
+@interface RCIconHoldObserver : NSObject <UIGestureRecognizerDelegate>
+@property (nonatomic, weak) UIView *iconView;
+- (void)handleHold:(UIGestureRecognizer *)recognizer;
+@end
+
+static RCIconHoldObserver *RC_IconHoldObserver(UIView *iconView) {
+    RCIconHoldObserver *observer = objc_getAssociatedObject(iconView, &kRCIconHoldObserverKey);
+    if ([observer isKindOfClass:[RCIconHoldObserver class]]) return observer;
+    observer = [RCIconHoldObserver new];
+    observer.iconView = iconView;
+    objc_setAssociatedObject(iconView, &kRCIconHoldObserverKey, observer, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    return observer;
+}
+
+@implementation RCIconHoldObserver
+
+- (void)handleHold:(UIGestureRecognizer *)recognizer {
+    if (recognizer.state != UIGestureRecognizerStateBegan) return;
+    UIView *iconView = self.iconView;
+    if (!iconView) return;
+    SEL iconSel = NSSelectorFromString(@"icon");
+    if (![iconView respondsToSelector:iconSel]) return;
+    id icon = ((id (*)(id, SEL))objc_msgSend)(iconView, iconSel);
+    if (!icon) return;
+    NSString *bundleId = nil;
+    for (NSString *name in @[@"applicationBundleID", @"bundleIdentifier", @"applicationBundleIdentifier"]) {
+        SEL sel = NSSelectorFromString(name);
+        if (![icon respondsToSelector:sel]) continue;
+        id value = ((id (*)(id, SEL))objc_msgSend)(icon, sel);
+        if ([value isKindOfClass:[NSString class]] && [value length]) {
+            bundleId = value;
+            break;
+        }
+    }
+    if (!bundleId.length) return;
+    // Our recognizer and SpringBoard's can both report the same hold; one run per 2 seconds is enough
+    static NSMutableDictionary<NSString *, NSNumber *> *lastFired;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ lastFired = [NSMutableDictionary dictionary]; });
+    NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
+    if (now - [lastFired[bundleId] doubleValue] < 2.0) return;
+    lastFired[bundleId] = @(now);
+    SRLog(@"[IconHold] %@", bundleId);
+    RC_FireAppTriggers(@"app_hold_", bundleId);
+}
+
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherGestureRecognizer {
+    return YES; // the hold still reaches SpringBoard, so the icon menu and drag behave as before
+}
+
+@end
+
+%hook SBIconView
+
+- (void)addGestureRecognizer:(UIGestureRecognizer *)gestureRecognizer {
+    %orig;
+    if (objc_getAssociatedObject(gestureRecognizer, &kRCIconHoldOurRecognizerKey)) return;
+    if (objc_getAssociatedObject(gestureRecognizer, &kRCIconHoldBorrowedKey)) return;
+    NSString *kind = NSStringFromClass([gestureRecognizer class]);
+    BOOL isHold = [gestureRecognizer isKindOfClass:[UILongPressGestureRecognizer class]] ||
+                  [kind containsString:@"LongPress"] || [kind containsString:@"Force"];
+    if (!isHold) return;
+    objc_setAssociatedObject(gestureRecognizer, &kRCIconHoldBorrowedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    [gestureRecognizer addTarget:RC_IconHoldObserver((UIView *)self) action:@selector(handleHold:)];
+}
+
+- (void)didMoveToWindow {
+    %orig;
+    UIView *iconView = (UIView *)self;
+    if (!iconView.window) return;
+    if (objc_getAssociatedObject(iconView, &kRCIconHoldViewInstalledKey)) return;
+    RCIconHoldObserver *observer = RC_IconHoldObserver(iconView);
+    UILongPressGestureRecognizer *hold = [[UILongPressGestureRecognizer alloc] initWithTarget:observer action:@selector(handleHold:)];
+    hold.minimumPressDuration = 0.5;
+    hold.allowableMovement = 12;
+    hold.cancelsTouchesInView = NO;
+    hold.delegate = observer;
+    objc_setAssociatedObject(hold, &kRCIconHoldOurRecognizerKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(iconView, &kRCIconHoldViewInstalledKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    [iconView addGestureRecognizer:hold];
+}
+
+%end
 
 static NSTimeInterval s_last_camera_app_trigger = 0;
 

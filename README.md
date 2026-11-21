@@ -204,7 +204,7 @@ Configure these in the `RemoteCompanion` app for custom action sequences. Tip: *
   - **Home**: Double-tap (Touch ID), Double, Triple, or Quadruple click, **Hold**, or **Home + Power** combo.
   - **CarPlay**: Connected / Disconnected triggers.
   - **Apple Watch**: Ping iPhone (tap or hold Ping on a paired Watch).
-- **Touch ID Sensor**: **Single Tap** and **Hold (Rest Finger)** triggers.
+- **Touch ID Sensor**: **Single Tap** and **Hold (Rest Finger)** triggers. They stay quiet while iOS asks for a fingerprint itself, such as an App Store purchase, Apple Pay, or an app's password sheet.
 - **NFC Triggers**: Scan physical NFC tags to run actions on screen wake (Optional toggle in Settings).
 - **Ringer Switch**: Mute, Unmute, or Toggle triggers.
 - **Gestures**: 
@@ -218,6 +218,7 @@ Configure these in the `RemoteCompanion` app for custom action sequences. Tip: *
   - **WiFi/Bluetooth**: Trigger actions on network or device connectivity.
   - **App Launch**: Fire actions when a specific app is opened.
   - **App Exit**: Fire actions when a specific app is switched away from.
+  - **Long Press App Icon**: Fire actions when an app's icon is long pressed on the Home Screen. One app or several, and the normal Haptic Touch menu and drag still work.
   - **Audio Output**: Fire actions when an AirPlay, Bluetooth, or iPhone output is set or unset.
   - **Calls**: Incoming Call, Call Started and Call Ended, for Phone, FaceTime and other calling apps.
   - **Battery Level**: Fire once when the battery drops to or rises to a chosen level from 1 to 100%.

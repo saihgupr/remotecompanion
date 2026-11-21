@@ -6,14 +6,14 @@
 @property (nonatomic, copy) NSString *hostId;
 @property (nonatomic, copy) NSString *editorId;
 @property (nonatomic, copy) NSString *projectDir;
-@property (nonatomic, copy) NSString *customApp;
 @property (nonatomic, assign) BOOL autoSend;
+@property (nonatomic, assign) BOOL pauseMusic;
 @property (nonatomic, assign) BOOL editingExisting;
 
 @property (nonatomic, strong) UIBarButtonItem *saveButton;
 @property (nonatomic, strong) UITextField *projectDirField;
-@property (nonatomic, strong) UITextField *customAppField;
 @property (nonatomic, strong) UISwitch *autoSendSwitch;
+@property (nonatomic, strong) UISwitch *pauseMusicSwitch;
 @end
 
 typedef NS_ENUM(NSInteger, RCDevAnnotateSection) {
@@ -31,10 +31,14 @@ typedef NS_ENUM(NSInteger, RCDevAnnotateSection) {
         NSDictionary *comp = [RCDevAnnotateAction componentsFromActionString:actionString];
         _editingExisting = (comp != nil);
         _hostId = [comp[@"hostId"] copy] ?: @"";
-        _editorId = [comp[@"editor"] copy] ?: @"opencode";
+        NSString *parsedEditor = [comp[@"editor"] copy] ?: @"";
+        if (![RCDevAnnotateAction presetForId:parsedEditor]) {
+            parsedEditor = [RCDevAnnotateAction presets].firstObject[@"id"] ?: @"opencode";
+        }
+        _editorId = parsedEditor;
         _projectDir = [comp[@"projectDir"] copy] ?: @"";
-        _customApp = [comp[@"customApp"] copy] ?: @"";
         _autoSend = comp[@"autoSend"] ? [comp[@"autoSend"] boolValue] : YES;
+        _pauseMusic = comp[@"pauseMusic"] ? [comp[@"pauseMusic"] boolValue] : NO;
     }
     return self;
 }
@@ -87,12 +91,13 @@ typedef NS_ENUM(NSInteger, RCDevAnnotateSection) {
     self.projectDirField.text = self.projectDir;
     self.projectDirField.keyboardType = UIKeyboardTypeURL;
 
-    self.customAppField = [self textFieldWithPlaceholder:@"App name or bundle ID"];
-    self.customAppField.text = self.customApp;
-
     self.autoSendSwitch = [[UISwitch alloc] init];
     self.autoSendSwitch.on = self.autoSend;
     [self.autoSendSwitch addTarget:self action:@selector(autoSendChanged:) forControlEvents:UIControlEventValueChanged];
+
+    self.pauseMusicSwitch = [[UISwitch alloc] init];
+    self.pauseMusicSwitch.on = self.pauseMusic;
+    [self.pauseMusicSwitch addTarget:self action:@selector(pauseMusicChanged:) forControlEvents:UIControlEventValueChanged];
 }
 
 - (UITextField *)textFieldWithPlaceholder:(NSString *)placeholder {
@@ -120,21 +125,12 @@ typedef NS_ENUM(NSInteger, RCDevAnnotateSection) {
 }
 
 - (BOOL)showsProjectFolderRow {
-    return [self.editorId isEqualToString:@"opencode"];
-}
-
-- (BOOL)showsCustomAppRow {
-    return [self.editorId isEqualToString:@"custom"];
+    return [[self selectedPreset][@"supportsProjectDir"] boolValue];
 }
 
 - (void)updateSaveButton {
     BOOL hostValid = (self.hostId.length > 0 && [[RCConfigManager sharedManager] sshHostForId:self.hostId] != nil);
-    BOOL appValid = YES;
-    if ([self showsCustomAppRow]) {
-        NSString *trimmedApp = [self.customApp stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        appValid = trimmedApp.length > 0;
-    }
-    self.saveButton.enabled = (hostValid && appValid);
+    self.saveButton.enabled = hostValid;
 }
 
 #pragma mark - Table
@@ -145,7 +141,10 @@ typedef NS_ENUM(NSInteger, RCDevAnnotateSection) {
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if (section == RCDevAnnotateSectionEditor) {
-        return ([self showsProjectFolderRow] || [self showsCustomAppRow]) ? 2 : 1;
+        return [self showsProjectFolderRow] ? 2 : 1;
+    }
+    if (section == RCDevAnnotateSectionDelivery) {
+        return 2;
     }
     return 1;
 }
@@ -164,7 +163,7 @@ typedef NS_ENUM(NSInteger, RCDevAnnotateSection) {
         NSDictionary *preset = [self selectedPreset];
         return [preset[@"subtitle"] isKindOfClass:[NSString class]] ? preset[@"subtitle"] : nil;
     }
-    return @"On sends the prompt immediately. Off pastes the image and text into the editor without submitting.";
+    return @"On sends the prompt immediately. Off pastes the image and text into the editor without submitting. Pause Music stops Music or Spotify while you annotate, then resumes it.";
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -193,20 +192,21 @@ typedef NS_ENUM(NSInteger, RCDevAnnotateSection) {
         if (indexPath.row == 0) {
             UITableViewCell *cell = [self styledCellWithStyle:UITableViewCellStyleValue1 cm:cm];
             NSDictionary *preset = [self selectedPreset];
+            BOOL multiEditor = ([RCDevAnnotateAction presets].count > 1);
             cell.textLabel.text = @"Editor";
             cell.detailTextLabel.text = preset[@"name"] ?: self.editorId;
-            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+            cell.accessoryType = multiEditor ? UITableViewCellAccessoryDisclosureIndicator : UITableViewCellAccessoryNone;
+            if (!multiEditor) {
+                cell.selectionStyle = UITableViewCellSelectionStyleNone;
+            }
             return cell;
         }
-        if ([self showsProjectFolderRow]) {
-            return [self cellWithLabel:@"Project Folder" control:self.projectDirField cm:cm];
-        }
-        return [self cellWithLabel:@"App" control:self.customAppField cm:cm];
+        return [self cellWithLabel:@"Project Folder" control:self.projectDirField cm:cm];
     }
 
     UITableViewCell *cell = [self styledCellWithStyle:UITableViewCellStyleDefault cm:cm];
-    cell.textLabel.text = @"Auto-Send";
-    cell.accessoryView = self.autoSendSwitch;
+    cell.accessoryView = indexPath.row == 0 ? self.autoSendSwitch : self.pauseMusicSwitch;
+    cell.textLabel.text = indexPath.row == 0 ? @"Auto-Send" : @"Pause Music";
     cell.selectionStyle = UITableViewCellSelectionStyleNone;
     return cell;
 }
@@ -256,7 +256,7 @@ typedef NS_ENUM(NSInteger, RCDevAnnotateSection) {
     UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
     if (indexPath.section == RCDevAnnotateSectionComputer) {
         [self chooseHostFromView:cell];
-    } else if (indexPath.section == RCDevAnnotateSectionEditor && indexPath.row == 0) {
+    } else if (indexPath.section == RCDevAnnotateSectionEditor && indexPath.row == 0 && [RCDevAnnotateAction presets].count > 1) {
         [self chooseEditorFromView:cell];
     }
 }
@@ -328,14 +328,15 @@ typedef NS_ENUM(NSInteger, RCDevAnnotateSection) {
 - (void)fieldEditingChanged:(UITextField *)sender {
     if (sender == self.projectDirField) {
         self.projectDir = sender.text ?: @"";
-    } else if (sender == self.customAppField) {
-        self.customApp = sender.text ?: @"";
-        [self updateSaveButton];
     }
 }
 
 - (void)autoSendChanged:(UISwitch *)sender {
     self.autoSend = sender.on;
+}
+
+- (void)pauseMusicChanged:(UISwitch *)sender {
+    self.pauseMusic = sender.on;
 }
 
 - (BOOL)textFieldShouldReturn:(UITextField *)textField {
@@ -358,20 +359,16 @@ typedef NS_ENUM(NSInteger, RCDevAnnotateSection) {
 - (void)saveTapped {
     [self.view endEditing:YES];
     self.projectDir = self.projectDirField.text ?: self.projectDir ?: @"";
-    self.customApp = self.customAppField.text ?: self.customApp ?: @"";
     self.autoSend = self.autoSendSwitch.on;
+    self.pauseMusic = self.pauseMusicSwitch.on;
 
     if (self.hostId.length == 0) return;
-    if ([self showsCustomAppRow] &&
-        [self.customApp stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]].length == 0) {
-        return;
-    }
 
     NSString *actionString = [RCDevAnnotateAction actionStringWithHostId:self.hostId
                                                                  editor:self.editorId
                                                                autoSend:self.autoSend
                                                              projectDir:self.projectDir
-                                                              customApp:self.customApp];
+                                                             pauseMusic:self.pauseMusic];
     if (self.onSave) self.onSave(actionString);
 }
 

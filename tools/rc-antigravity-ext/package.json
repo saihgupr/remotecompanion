@@ -1,0 +1,28 @@
+{
+  "name": "rc-antigravity-bridge",
+  "displayName": "RemoteCompanion Antigravity Bridge",
+  "description": "Local loopback bridge for RemoteCompanion Annotate & Send to focus and populate the Antigravity IDE Agent chat panel.",
+  "version": "1.1.0",
+  "publisher": "saihgupr",
+  "engines": {
+    "vscode": "^1.68.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "*",
+    "onStartupFinished",
+    "onUri"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "rcAntigravityBridge.focusChat",
+        "title": "Focus Agent Chat for RemoteCompanion",
+        "category": "RemoteCompanion"
+      }
+    ]
+  }
+}

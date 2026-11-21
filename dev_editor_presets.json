@@ -14,62 +14,12 @@
   {
     "id": "antigravity",
     "name": "Antigravity IDE",
-    "strategy": "clipboard_paste",
+    "strategy": "antigravity_ext",
     "bundleId": "com.google.antigravity-ide",
     "appName": "Antigravity IDE",
     "imagePasteDelayMs": 450,
     "submitKey": "return",
-    "subtitle": "Activates Antigravity IDE and pastes the annotated screenshot and text into the active composer."
-  },
-  {
-    "id": "claude",
-    "name": "Claude",
-    "strategy": "clipboard_paste",
-    "bundleId": "com.anthropic.claudefordesktop",
-    "appName": "Claude",
-    "imagePasteDelayMs": 450,
-    "submitKey": "return",
-    "subtitle": "Activates Claude Desktop and pastes the annotated screenshot and text into the active composer."
-  },
-  {
-    "id": "cursor",
-    "name": "Cursor",
-    "strategy": "clipboard_paste",
-    "bundleId": "com.todesktop.230313mzl4w4u92",
-    "appName": "Cursor",
-    "imagePasteDelayMs": 450,
-    "submitKey": "return",
-    "subtitle": "Activates Cursor and pastes the annotated screenshot and text into the active chat."
-  },
-  {
-    "id": "vscode",
-    "name": "VS Code",
-    "strategy": "clipboard_paste",
-    "bundleId": "com.microsoft.VSCode",
-    "appName": "Visual Studio Code",
-    "imagePasteDelayMs": 450,
-    "submitKey": "return",
-    "subtitle": "Activates VS Code and pastes the annotated screenshot and text into the active chat."
-  },
-  {
-    "id": "active",
-    "name": "Active Window",
-    "strategy": "clipboard_paste",
-    "bundleId": "",
-    "appName": "",
-    "imagePasteDelayMs": 400,
-    "submitKey": "return",
-    "subtitle": "Pastes into whichever app is currently focused on your Mac."
-  },
-  {
-    "id": "custom",
-    "name": "Custom App",
-    "strategy": "clipboard_paste",
-    "bundleId": "",
-    "appName": "",
-    "imagePasteDelayMs": 450,
-    "submitKey": "return",
-    "isCustom": true,
-    "subtitle": "Activates a custom macOS app by name or bundle ID and pastes into its active composer."
+    "supportsProjectDir": true,
+    "subtitle": "Uses the RemoteCompanion Antigravity Bridge extension to focus the project window's Agent chat panel, paste the screenshot, and insert or send your note."
   }
 ]

@@ -453,6 +453,8 @@ UIImage *RCTriggerCategoryIcon(NSString *sectionTitle) {
             // An app, entered or closed: alike, told apart by the arrow and the cross
             @"App Launch Triggers": @[@"arrow.up.forward.app.fill", @"arrow.up.right.square.fill"],
             @"App Exit Triggers": @[@"xmark.app.fill", @"xmark.square.fill"],
+            // A held icon: the hand that does the holding
+            @"App Long Press Triggers": @[@"hand.tap.fill", @"hand.tap"],
             @"Scheduled Triggers": @[@"clock.fill"],
             @"MQTT Subscription Triggers": @[@"antenna.radiowaves.left.and.right"],
             @"Configuration": @[@"square.and.pencil", @"pencil"],

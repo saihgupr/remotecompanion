@@ -72,14 +72,19 @@ static NSString *RCDevTrimmed(NSString *text) {
     }
 
     NSString *projectDir = [raw[@"projectDir"] isKindOfClass:[NSString class]] ? RCDevTrimmed(raw[@"projectDir"]) : @"";
-    NSString *customApp = [raw[@"customApp"] isKindOfClass:[NSString class]] ? RCDevTrimmed(raw[@"customApp"]) : @"";
+
+    BOOL pauseMusic = NO;
+    id rawPauseMusic = raw[@"pauseMusic"];
+    if ([rawPauseMusic isKindOfClass:[NSNumber class]] || [rawPauseMusic isKindOfClass:[NSString class]]) {
+        pauseMusic = [rawPauseMusic boolValue];
+    }
 
     return @{
         @"hostId": hostId,
         @"editor": editor,
         @"autoSend": @(autoSend),
         @"projectDir": projectDir,
-        @"customApp": customApp
+        @"pauseMusic": @(pauseMusic)
     };
 }
 
@@ -87,7 +92,7 @@ static NSString *RCDevTrimmed(NSString *text) {
                               editor:(NSString *)editor
                             autoSend:(BOOL)autoSend
                           projectDir:(nullable NSString *)projectDir
-                           customApp:(nullable NSString *)customApp {
+                          pauseMusic:(BOOL)pauseMusic {
     NSString *cleanHost = RCDevTrimmed(hostId ?: @"");
     NSString *cleanEditor = RCDevTrimmed(editor ?: @"");
     if (cleanEditor.length == 0) cleanEditor = @"opencode";
@@ -98,13 +103,13 @@ static NSString *RCDevTrimmed(NSString *text) {
     dict[@"hostId"] = cleanHost;
 
     NSString *cleanProject = RCDevTrimmed(projectDir ?: @"");
-    if (cleanProject.length > 0 && [cleanEditor isEqualToString:@"opencode"]) {
+    NSDictionary *preset = [self presetForId:cleanEditor];
+    if (cleanProject.length > 0 && [preset[@"supportsProjectDir"] boolValue]) {
         dict[@"projectDir"] = cleanProject;
     }
 
-    NSString *cleanCustom = RCDevTrimmed(customApp ?: @"");
-    if (cleanCustom.length > 0 && [cleanEditor isEqualToString:@"custom"]) {
-        dict[@"customApp"] = cleanCustom;
+    if (pauseMusic) {
+        dict[@"pauseMusic"] = @YES;
     }
 
     NSData *json = [NSJSONSerialization dataWithJSONObject:dict
@@ -118,11 +123,6 @@ static NSString *RCDevTrimmed(NSString *text) {
     if (![components isKindOfClass:[NSDictionary class]]) return @"Editor";
     NSString *editor = RCDevTrimmed(components[@"editor"] ?: @"");
     if (editor.length == 0) editor = @"opencode";
-
-    if ([editor isEqualToString:@"custom"]) {
-        NSString *customApp = RCDevTrimmed(components[@"customApp"] ?: @"");
-        return customApp.length > 0 ? customApp : @"Custom App";
-    }
 
     NSDictionary *preset = [self presetForId:editor];
     NSString *name = preset[@"name"];
