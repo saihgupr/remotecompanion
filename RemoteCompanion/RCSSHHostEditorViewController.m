@@ -18,7 +18,6 @@
 @property (nonatomic, strong) UITextField *keyPathField;
 @property (nonatomic, strong) UISegmentedControl *authSegment;
 @property (nonatomic, strong) UIBarButtonItem *saveButton;
-@property (nonatomic, strong) UIBarButtonItem *testButton;
 @property (nonatomic, strong) UIActivityIndicatorView *testSpinner;
 @end
 
@@ -46,11 +45,7 @@
     self.saveButton = [[UIBarButtonItem alloc]
         initWithBarButtonSystemItem:UIBarButtonSystemItemSave
         target:self action:@selector(saveTapped)];
-    self.testButton = [[UIBarButtonItem alloc]
-        initWithTitle:@"Test"
-        style:UIBarButtonItemStylePlain
-        target:self action:@selector(testTapped)];
-    self.navigationItem.rightBarButtonItems = @[self.saveButton, self.testButton];
+    self.navigationItem.rightBarButtonItem = self.saveButton;
 
     [self buildFields];
 
@@ -303,17 +298,18 @@
 - (void)setTesting:(BOOL)testing {
     if (testing) {
         self.saveButton.enabled = NO;
-        self.testButton.enabled = NO;
         if (!self.testSpinner) {
             self.testSpinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
         }
         [self.testSpinner startAnimating];
-        self.navigationItem.rightBarButtonItems = @[self.saveButton, [[UIBarButtonItem alloc] initWithCustomView:self.testSpinner]];
     } else {
         [self.testSpinner stopAnimating];
+        self.testSpinner = nil;
         self.saveButton.enabled = YES;
-        self.testButton.enabled = YES;
-        self.navigationItem.rightBarButtonItems = @[self.saveButton, self.testButton];
+    }
+    if (self.isViewLoaded) {
+        [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:2]
+                      withRowAnimation:UITableViewRowAnimationNone];
     }
 }
 
@@ -340,20 +336,23 @@
 #pragma mark - Table View
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    return 2;
+    return 3;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if (section == 0) return 4; // Name, Host, Port, Username
-    return 2; // Auth picker + one credential field
+    if (section == 1) return 2; // Auth picker + one credential field
+    return 1; // Test Connection
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    return section == 0 ? @"Server" : @"Authentication";
+    if (section == 0) return @"Server";
+    if (section == 1) return @"Authentication";
+    return nil;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    if (section == 0) return nil;
+    if (section != 1) return nil;
     if (self.useKeyAuth) {
         return @"The key file must already exist on this iPhone. A path starting with ~ expands to the home directory.";
     }
@@ -366,7 +365,33 @@
     return @"Saved passwords are never shown once stored. Leave empty for key-agent logins.";
 }
 
+// The Test button sits in its own card below Authentication, like a Settings action row
+- (UITableViewCell *)testConnectionCell {
+    UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
+    cell.backgroundColor = [[RCConfigManager sharedManager] tweakColorForKey:@"blockBackground" defaultVal:0.12];
+    cell.textLabel.textAlignment = NSTextAlignmentCenter;
+    cell.textLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightMedium];
+    if (self.testSpinner) {
+        cell.textLabel.text = @"Testing…";
+        cell.textLabel.textColor = [UIColor secondaryLabelColor];
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        cell.accessoryView = self.testSpinner;
+    } else {
+        cell.textLabel.text = @"Test Connection";
+        cell.textLabel.textColor = [UIColor systemBlueColor];
+        cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+    }
+    return cell;
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    if (indexPath.section == 2 && !self.testSpinner) [self testTapped];
+}
+
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (indexPath.section == 2) return [self testConnectionCell];
+
     if (indexPath.section == 0) {
         NSArray *labels = @[@"Name", @"Host", @"Port", @"Username"];
         NSArray *fields = @[self.nameField, self.hostField, self.portField, self.userField];
