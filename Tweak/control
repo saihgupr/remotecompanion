@@ -1,6 +1,6 @@
 Package: com.saihgupr.remotecompanion
 Name: RemoteCompanion
-Depends: mobilesubstrate
+Depends: mobilesubstrate, openssh-client, sshpass
 Suggests: com.opa334.ccsupport
 Version: 4.6.0
 Architecture: iphoneos-arm64

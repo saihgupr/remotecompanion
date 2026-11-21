@@ -29,6 +29,7 @@ All notable changes to this project will be documented in this file.
 - **Tighter bar gesture zones**: the status bar and bottom bar gesture areas now cover 25pt from the edge instead of 50pt, so a touch has to land closer to the bar. Two-finger slides keep their wider 75pt landing zone.
 
 ### Fixed
+- **SSH tools come with the package**: RemoteCompanion now depends on `openssh-client` and `sshpass`, so SSH actions work right after installing instead of failing with `sshpass: not found`. Existing installs pick both up on the next upgrade.
 - **Notification actions read as just the notification**: a notification now saves as `notify "Hi"` instead of `notify "Hi" "" --tap 1a2b3c4d5e`, with no empty message and no tap ID until a Notification Tap trigger picks it. The Actions list shows the same `notify "Hi"`, so the tap ID and the other options no longer trail off the end of the row.
 - **Wi-Fi off no longer runs the Wi-Fi Network disconnect trigger**: turning the radio off with `wifi off` or `wifi toggle` is the command itself, not the network going away, so `wifi_disconnect_<SSID>` is skipped for a few seconds afterwards. An action that turned Wi-Fi off could otherwise be undone by that trigger's own actions a second later.
 - **Cards keep their portrait width after rotating**: the rounded card behind action rows and trigger rows is now redrawn to the row's real width, so in landscape it reaches the normal right margin instead of stopping halfway across the screen. The Trigger and Action Sequence screens both use the same card view.
