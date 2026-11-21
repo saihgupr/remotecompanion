@@ -4560,7 +4560,8 @@ function formatHACommandName(cmd) {
     const domain = service.split('.')[0];
     const name = formatEntity(eid) || eid;
     if (name && domain === 'scene') return `Activate ${name}`;
-    if (name && (domain === 'script' || verb === 'trigger')) return `Run ${name}`;
+    if (name && domain === 'script') return `Run ${name}`;
+    if (name && verb === 'trigger') return `Trigger ${name}`;
     if (verb === 'toggle' && name) return `Toggle ${name}`;
     if (verb === 'turn_on' && name) return `${name} On`;
     if (verb === 'turn_off' && name) return `${name} Off`;

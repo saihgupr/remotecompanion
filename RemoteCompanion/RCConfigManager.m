@@ -2261,8 +2261,10 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
                 NSString *name = formatEntity(eid);
                 if (name.length && [domain isEqualToString:@"scene"]) {
                     result = [NSString stringWithFormat:@"Activate %@", name];
-                } else if (name.length && ([domain isEqualToString:@"script"] || [verb isEqualToString:@"trigger"])) {
+                } else if (name.length && [domain isEqualToString:@"script"]) {
                     result = [NSString stringWithFormat:@"Run %@", name];
+                } else if (name.length && [verb isEqualToString:@"trigger"]) {
+                    result = [NSString stringWithFormat:@"Trigger %@", name];
                 } else if ([verb isEqualToString:@"toggle"] && name.length) {
                     result = [NSString stringWithFormat:@"Toggle %@", name];
                 } else if ([verb isEqualToString:@"turn_on"] && name.length) {
