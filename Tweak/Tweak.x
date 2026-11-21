@@ -2748,17 +2748,18 @@ static NSDictionary *rc_backup_file_entry(NSString *path) {
     return @{ @"data": [data base64EncodedStringWithOptions:0], @"mode": mode };
 }
 
+// Not in it: rc_addons.json, which RemoteCompanion rebuilds from the add-on files, and
+// rc_addons_root.json, the add-ons allowed to run as root, which are turned on again on each
+// device (a backup from elsewhere must not be able to grant root)
 static NSArray<NSString *> *rc_backup_document_names(void) {
-    return @[@"rc_addons.json", @"rc_addons_root.json", @"rc_gestures.plist",
-             @"rc_notify.plist", @"rc_variables.json"];
+    return @[@"rc_addons_off.json", @"rc_gestures.plist", @"rc_notify.plist", @"rc_variables.json"];
 }
 
 // Add-on definitions are root-owned, so they are read from the same folders the
 // add-on loader uses and written back through rc-root.
+// By jailbreak, not by which folder exists: a new rootless device may have no add-on folder yet
 static NSArray<NSString *> *rc_backup_addon_folders(void) {
-    NSString *rootless = @"/var/jb/Library/RemoteCompanion/AddOns";
-    NSString *rootful = @"/Library/RemoteCompanion/AddOns";
-    return [[NSFileManager defaultManager] fileExistsAtPath:rootless] ? @[rootless] : @[rootful];
+    return @[[root_prefix() stringByAppendingString:@"/Library/RemoteCompanion/AddOns"]];
 }
 
 static NSString *rc_backup_json(void) {
@@ -2781,7 +2782,8 @@ static NSString *rc_backup_json(void) {
 
     for (NSString *folder in rc_backup_addon_folders()) {
         for (NSString *name in [[NSFileManager defaultManager] contentsOfDirectoryAtPath:folder error:NULL]) {
-            if (![name.pathExtension.lowercaseString isEqualToString:@"json"]) continue;
+            // The definitions and the icon images beside them
+            if (![@[@"json", @"png", @"jpg", @"jpeg"] containsObject:name.pathExtension.lowercaseString]) continue;
             NSDictionary *entry = rc_backup_file_entry([folder stringByAppendingPathComponent:name]);
             if (entry) files[[@"addons/" stringByAppendingString:name]] = entry;
         }
@@ -2891,11 +2893,15 @@ static NSString *rc_restore_backup(void) {
             BOOL ok = NO;
             if ([key hasPrefix:@"documents/"]) {
                 NSString *name = [key substringFromIndex:10];
+                // Only the files a backup holds (older backups also carried the two left out above)
+                if (![rc_backup_document_names() containsObject:name]) continue;
                 if (rc_backup_name_is_safe(name)) {
                     ok = rc_write_file([@"/var/mobile/Documents" stringByAppendingPathComponent:name], fileData, mode);
                 }
             } else if ([key hasPrefix:@"preferences/"]) {
                 NSString *name = [key substringFromIndex:12];
+                // Only RemoteCompanion's own app blacklist, never another app's preferences
+                if (![name isEqualToString:@"com.saihgupr.remotecompanion.blacklist.plist"]) continue;
                 if (rc_backup_name_is_safe(name)) {
                     ok = rc_write_file([@"/var/mobile/Library/Preferences" stringByAppendingPathComponent:name], fileData, mode);
                 }
@@ -5139,6 +5145,9 @@ static BOOL rc_command_needs_token(NSString *cmd, int depth) {
            [trimmed hasPrefix:@"sudo "] || [trimmed isEqualToString:@"sudo"] ||
            [trimmed hasPrefix:@"exec "] || [trimmed isEqualToString:@"exec"] ||
            [trimmed hasPrefix:@"backup config"] || [trimmed hasPrefix:@"restore backup"] ||
+           [trimmed hasPrefix:@"read file "] ||
+           // A request from SpringBoard reaches this server over loopback, which is trusted
+           [trimmed hasPrefix:@"http-request"] ||
            [trimmed hasPrefix:@"lua "] || [trimmed hasPrefix:@"lua_eval "] || [trimmed hasPrefix:@"Lua "] ||
            [trimmed hasPrefix:@"ssh-run "] ||
            [trimmed isEqualToString:@"dev-annotate"] || [trimmed hasPrefix:@"dev-annotate "] ||
@@ -11308,7 +11317,8 @@ BOOL RCCommandFromLocalSocket(void) {
 // REST API Call: makes one HTTP request, as the action's JSON says. It runs in the background,
 // so the actions after it go on right away; the reply is written to the log.
 //   http-request {"method":"POST","url":"https://example.com/hook","headers":{"X-Key":"…"},"body":"…"}
-// A bare URL is a GET, and "body" can be a JSON object instead of text.
+// A bare URL is a GET, and "body" can be a JSON object instead of text. HTTPS certificates are
+// checked; "insecure": true accepts any (a self-signed one on a home server).
 static NSString *rc_handle_http_request(NSString *action) {
     NSString *problem = nil;
     NSDictionary *request = rc_http_request_parse(action, &problem);
@@ -11371,7 +11381,7 @@ static NSString *rc_handle_http_request(NSString *action) {
     sessionConfig.timeoutIntervalForRequest = timeout;
     sessionConfig.timeoutIntervalForResource = timeout;
     NSURLSession *session = [NSURLSession sessionWithConfiguration:sessionConfig
-                                                         delegate:[RCInsecureSessionDelegate sharedDelegate]
+                                                         delegate:([request[@"insecure"] boolValue] ? [RCInsecureSessionDelegate sharedDelegate] : nil)
                                                     delegateQueue:nil];
     NSURLSessionDataTask *task = [session dataTaskWithRequest:httpRequest completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         if (error) {
@@ -14937,7 +14947,7 @@ static NSString *handle_command(NSString *cmd) {
         sessionConfig.timeoutIntervalForRequest = 8.0;
         sessionConfig.timeoutIntervalForResource = 8.0;
         NSURLSession *session = [NSURLSession sessionWithConfiguration:sessionConfig
-                                                             delegate:[RCInsecureSessionDelegate sharedDelegate]
+                                                             delegate:nil
                                                         delegateQueue:nil];
         NSURLSessionDataTask *task = [session dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
             if (error) {
@@ -15748,6 +15758,26 @@ static NSDictionary* get_system_diagnostics(void) {
     };
 }
 
+// Whether a page's host is this device, a .local name or a private-network address. Addresses are
+// parsed, not matched as text: "10.example.com" is a public name, not 10.x.x.x.
+static BOOL rc_origin_host_is_local(NSString *host) {
+    host = host.lowercaseString;
+    if ([host hasPrefix:@"["] && [host hasSuffix:@"]"]) host = [host substringWithRange:NSMakeRange(1, host.length - 2)];
+    if (host.length == 0) return NO;
+    if ([host isEqualToString:@"localhost"] || [host hasSuffix:@".local"]) return YES;
+    struct in_addr v4;
+    if (inet_pton(AF_INET, host.UTF8String, &v4) == 1) {
+        uint32_t a = ntohl(v4.s_addr);
+        return (a >> 24) == 127 || (a >> 24) == 10 || (a >> 16) == 0xC0A8 || (a >> 16) == 0xA9FE ||
+               (a >> 20) == 0xAC1; // 127/8, 10/8, 192.168/16, 169.254/16, 172.16/12
+    }
+    struct in6_addr v6;
+    if (inet_pton(AF_INET6, host.UTF8String, &v6) == 1) {
+        return IN6_IS_ADDR_LOOPBACK(&v6) || IN6_IS_ADDR_LINKLOCAL(&v6) || (v6.s6_addr[0] & 0xFE) == 0xFC; // ::1, fe80::/10, fc00::/7
+    }
+    return NO;
+}
+
 static NSString *rc_cors_headers_for_request(NSString *requestString, BOOL *outOriginBlocked) {
     if (outOriginBlocked) *outOriginBlocked = NO;
     NSString *origin = nil;
@@ -15765,22 +15795,8 @@ static NSString *rc_cors_headers_for_request(NSString *requestString, BOOL *outO
         return @"Access-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization, X-API-Key\r\n";
     }
     
-    BOOL isAllowedOrigin = NO;
     NSURL *originUrl = [NSURL URLWithString:origin];
-    NSString *host = originUrl.host.lowercaseString;
-    if (host.length > 0) {
-        if ([host isEqualToString:@"localhost"] || [host isEqualToString:@"127.0.0.1"] || [host isEqualToString:@"::1"] || [host hasSuffix:@".local"]) {
-            isAllowedOrigin = YES;
-        } else if ([host hasPrefix:@"192.168."] || [host hasPrefix:@"10."] || [host hasPrefix:@"169.254."]) {
-            isAllowedOrigin = YES;
-        } else if ([host hasPrefix:@"172."]) {
-            NSArray *parts = [host componentsSeparatedByString:@"."];
-            if (parts.count >= 2) {
-                int secondOctet = [parts[1] intValue];
-                if (secondOctet >= 16 && secondOctet <= 31) isAllowedOrigin = YES;
-            }
-        }
-    }
+    BOOL isAllowedOrigin = rc_origin_host_is_local(originUrl.host);
     
     if (isAllowedOrigin) {
         return [NSString stringWithFormat:@"Access-Control-Allow-Origin: %@\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization, X-API-Key\r\n", origin];
@@ -16030,6 +16046,9 @@ static void start_web_server() {
                                         if (mConfig[@"mqttPassword"] && [mConfig[@"mqttPassword"] length] > 0) {
                                             mConfig[@"mqttPassword"] = @"••••••••";
                                         }
+                                        if (mConfig[@"kmPassword"] && [mConfig[@"kmPassword"] length] > 0) {
+                                            mConfig[@"kmPassword"] = @"••••••••";
+                                        }
                                         NSArray *sshHosts = mConfig[@"sshHosts"];
                                         if ([sshHosts isKindOfClass:[NSArray class]]) {
                                             NSMutableArray *mHosts = [NSMutableArray array];
@@ -16108,6 +16127,9 @@ static void start_web_server() {
                                                 }
                                                 if ([incoming[@"mqttPassword"] isEqualToString:@"••••••••"]) {
                                                     incoming[@"mqttPassword"] = g_triggerConfig[@"mqttPassword"];
+                                                }
+                                                if ([incoming[@"kmPassword"] isEqualToString:@"••••••••"]) {
+                                                    incoming[@"kmPassword"] = g_triggerConfig[@"kmPassword"];
                                                 }
                                                 NSArray *newHosts = incoming[@"sshHosts"];
                                                 NSArray *oldHosts = g_triggerConfig[@"sshHosts"];

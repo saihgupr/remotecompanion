@@ -55,6 +55,9 @@ All notable changes to this project will be documented in this file.
 - **Clear Notifications with a full `.txt` list**: `rc clear notification FILE.txt` sends the command in one write, so a long list like the 66-line `CleanNotifications.txt` is no longer cut at 1 KB and silently ignored.
 - **Backup privacy warning**: the README Backup section, the app's export confirmation, and the Web UI export toast now say the configuration file may contain saved credentials and should be kept private.
 - **Imported Keyboard Maestro actions show their macro names**: importing a configuration now merges the saved macro name map, so a `km trigger <uuid>` action reads as "KM: Macro Name" instead of a bare UUID on the other device.
+- **The API token covers file reads and REST calls into the phone**: `read file` and `http-request` now need the token when they arrive from another device, like `root` and `exec`. A REST API Call to the phone's own address is no longer treated as a trusted local request, and the Web UI reads an origin as an address instead of matching text, so a public name like `10.example.com` no longer counts as local. The Keyboard Maestro password is masked in the config like the other secrets.
+- **Backups hold what restore needs and nothing that can grant root**: a backup now keeps add-on icon images and the switched-off add-ons list, and leaves out the add-on catalog and the Run as Root list, so importing a file from somewhere else cannot turn on Run as Root. A restore writes only the files a backup holds, and add-ons go to the jailbreak's own folder even when it does not exist yet.
+- **HTTPS certificates are checked**: REST API Call and Remote RC refuse an invalid certificate, and a request to a home server with a self-signed one can add `"insecure": true` to allow it.
 
 ## [4.5.0] - 2026-11-11
 
