@@ -226,7 +226,6 @@ static NSString *RCActionCountText(NSUInteger count) {
     if (@available(iOS 15.0, *)) {} else {
         self.moreButton.menu = [self moreMenu]; // shows Paste
     }
-    [self showHUDToast:[NSString stringWithFormat:@"Copied %@", RCActionCountText(indexes.count)] subtitle:nil icon:@"doc.on.doc"];
 }
 
 - (void)rc_deleteSelected {

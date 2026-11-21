@@ -4595,13 +4595,10 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             [self.tableView reloadData];
         }]];
         
-        // Copy option: a whole If / Repeat block when the row is one
+        // Copy option: a whole If / Repeat block when the row is one. The phone's own clipboard
+        // notice is the confirmation, so the app doesn't add a second toast.
         [alert addAction:[UIAlertAction actionWithTitle:@"Copy" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-            NSRange range = [self wholeBlockRangeForRow:indexPath.row];
             [self copyActionRangeForRow:indexPath.row];
-            [self showHUDToast:(range.length > 1 ? @"Copied Block" : [NSString stringWithFormat:@"Copied %@", RCActionClipboardCountText(range.length)])
-                      subtitle:nil
-                          icon:@"doc.on.doc"];
         }]];
         
         // Duplicate option: a copy right below the row (a whole block for block rows)
@@ -6665,9 +6662,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
                                                                      handler:^(UIContextualAction * _Nonnull action, __kindof UIView * _Nonnull sourceView, void (^ _Nonnull completionHandler)(BOOL)) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf) { completionHandler(NO); return; }
-        [strongSelf copyActionRangeForRow:indexPath.row];
-        NSString *text = isBlock ? @"Copied Block" : [NSString stringWithFormat:@"Copied %@", RCActionClipboardCountText(block.length)];
-        [strongSelf showHUDToast:text subtitle:nil icon:@"doc.on.doc"];
+        [strongSelf copyActionRangeForRow:indexPath.row]; // the phone's clipboard notice confirms it
         completionHandler(YES);
     }];
     copy.image = [UIImage systemImageNamed:@"doc.on.doc"];
