@@ -26,10 +26,11 @@ RemoteCompanion provides fast, scriptable system control for modern rootless jai
 </p>
 
 <p align="center">
-  <img src="docs/images/4.1.0/01_dashboard.png" width="200" alt="Main Dashboard" />
-  <img src="docs/images/4.1.0/02_add_trigger.png" width="200" alt="Add Trigger" />
-  <img src="docs/images/4.1.0/03_action_conditions.png" width="200" alt="Conditional Logic" />
-  <img src="docs/images/4.1.0/04_settings.png" width="200" alt="Settings & Web UI" />
+  <img src="docs/images/4.7.0/reddit-01-annotate-editor.png" width="160" alt="Annotate and Send setup" />
+  <img src="docs/images/4.7.0/reddit-02-annotate-actions.png" width="160" alt="Annotate actions in a sequence" />
+  <img src="docs/images/4.7.0/reddit-03-watch-actions.png" width="160" alt="Apple Watch actions" />
+  <img src="docs/images/4.7.0/reddit-04-timer-editor.png" width="160" alt="Timer editor" />
+  <img src="docs/images/4.7.0/reddit-05-screen-text.png" width="160" alt="Screen text actions" />
 </p>
 
 ## Features

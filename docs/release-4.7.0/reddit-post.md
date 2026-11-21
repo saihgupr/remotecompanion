@@ -8,6 +8,16 @@ Format notes from the last three posts: `[Update]` prefix, `Update` flair, galle
 2. `[Update] RemoteCompanion v4.7.0 - Apple Watch control, tap text on screen, Control Center buttons, and native Apple timers`
 3. `[Update] RemoteCompanion v4.7.0 - Control Center buttons, tap any text on screen, and full backup and restore`
 
+## Gallery order (upload from `docs/images/4.7.0/`)
+
+1. `reddit-01-annotate-editor.png` - Edit Annotate & Send, with the username and IP blurred
+2. `reddit-02-annotate-actions.png` - the two annotate actions in a real sequence
+3. `reddit-03-watch-actions.png` - Watch actions in Select Action
+4. `reddit-04-timer-editor.png` - the redesigned Timer editor
+5. `reddit-05-screen-text.png` - the screen text actions in Select Action
+
+All five are 1242x2208 PNGs captured on the iPhone running 4.7.0.
+
 ## Post body
 
 RemoteCompanion 4.7.0 is out. Update through Sileo or Zebra, or from the GitHub releases page.
