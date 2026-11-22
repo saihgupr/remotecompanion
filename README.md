@@ -8,7 +8,6 @@ RemoteCompanion provides fast, scriptable system control for modern rootless jai
 > - **Triggers only when added**: the Triggers screen starts empty and every built-in trigger lives in the + menu, so the list holds only what you use. Removing a trigger puts it back in the menu.
 > - **Remote RC actions**: add another device under Settings > Integrations > Remote RC Clients, then run any RC command on it over its Web UI, with the same pickers and editors as local actions.
 > - **Duplicate actions**: the long-press action menu can duplicate a row in place, whole If and Repeat blocks included, and the Web UI's right-click menu has the same.
-> - **AudioStream auto-start is opt-in**: `/api/audiostream/start` now returns 403 unless you turn it on in Settings > Integrations > AudioStream, so a client timing out can no longer wake the streaming daemon.
 > - **iOS 18 and 26 fixes**: Control Center and App Switcher work on iOS 18, Quick Shortcuts and Camera modes work on iOS 26, and `objc_call` with arguments no longer crashes SpringBoard.
 > - **Smaller fixes**: a trigger's title updates as soon as its schedule changes, two-finger slides and Bluetooth triggers have their own icons, and Test Kit finds Spotlight and the Today view on iOS 26.
 
