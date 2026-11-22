@@ -161,19 +161,19 @@
             </div>
         </section>
  
-        <!-- Screenshots Showcase (v4.1.0) -->
+        <!-- Screenshots Showcase (v4.5.0) -->
         <section id="screenshots" class="glass-card screenshots-section">
             <div class="section-title-group">
                 <div class="section-label">iOS Interface</div>
                 <h2 class="section-title">Interface & Experience</h2>
-                <p class="section-subtitle">Take a look at the modern iOS design, trigger builder, action pickers, and settings.</p>
+                <p class="section-subtitle">Take a look at the new trigger menu, add-ons, integrations, Remote RC and backup screens.</p>
             </div>
             <p align="center" class="screenshots-container">
-                <img src="images/4.1.0/01_dashboard.png" width="160" alt="Main Interface" class="app-screenshot" loading="lazy" />
-                <img src="images/4.1.0/02_add_trigger.png" width="160" alt="Add Trigger" class="app-screenshot" loading="lazy" />
-                <img src="images/4.1.0/03_action_conditions.png" width="160" alt="If Conditions" class="app-screenshot" loading="lazy" />
-                <img src="images/4.1.0/04_settings.png" width="160" alt="Settings & Web UI" class="app-screenshot" loading="lazy" />
-                <img src="images/4.1.0/05_home_assistant.png" width="160" alt="Home Assistant" class="app-screenshot" loading="lazy" />
+                <img src="images/4.5.0/shot-new-trigger-menu.png" width="160" alt="New Trigger Menu" class="app-screenshot" loading="lazy" />
+                <img src="images/4.5.0/shot-addons-list.png" width="160" alt="Add-ons" class="app-screenshot" loading="lazy" />
+                <img src="images/4.5.0/shot-integrations.png" width="160" alt="Integrations" class="app-screenshot" loading="lazy" />
+                <img src="images/4.5.0/shot-remote-rc.png" width="160" alt="Remote RC Clients" class="app-screenshot" loading="lazy" />
+                <img src="images/4.5.0/shot-backup.png" width="160" alt="Backup and Restore" class="app-screenshot" loading="lazy" />
             </p>
         </section>
  
@@ -362,7 +362,7 @@
             <div class="changelog-header">
                 <div>
                     <div class="section-label">Release Notes</div>
-                    <h2 class="section-title">What's New in v4.4</h2>
+                    <h2 class="section-title">What's New in v4.5</h2>
                 </div>
                 <span class="version-badge">November 2026</span>
             </div>
@@ -370,62 +370,50 @@
             <div class="changelog-list">
                 <div class="changelog-item">
                     <span class="changelog-tag tag-new">New</span>
-                    <p class="changelog-text"><strong>New Triggers:</strong> Rotated to Landscape / Portrait, Find My Sound, Incoming Call / Call Started / Call Ended, Battery Level (1-100%), and Focus on / off for a chosen Focus or any Focus.</p>
+                    <p class="changelog-text"><strong>Add-ons:</strong> one JSON file adds actions, conditions, banners and triggers, checked as they load, with a Settings screen and <code>addons validate</code>.</p>
                 </div>
                 <div class="changelog-item">
                     <span class="changelog-tag tag-new">New</span>
-                    <p class="changelog-text"><strong>Gesture Recorder:</strong> Settings → Gestures records taps, swipes and scrolls, plays back at 0.5x to 3x, with trim, re-record, replace, rename, export and import.</p>
+                    <p class="changelog-text"><strong>Full Backup &amp; Restore:</strong> export everything to one file, including integrations, SSH hosts, tokens, add-ons, gestures, filters, variables and the app blacklist, and put it back on a new device. <code>rc export</code> and <code>rc import</code> do the same from a terminal.</p>
                 </div>
                 <div class="changelog-item">
                     <span class="changelog-tag tag-new">New</span>
-                    <p class="changelog-text"><strong>Loops and Waits:</strong> Repeat, Repeat While, Exit Repeat and Wait Until blocks, <code>{round}</code> inside a loop, and nesting with If blocks in either order.</p>
+                    <p class="changelog-text"><strong>Triggers Only When Added:</strong> the Triggers screen starts empty and every built-in trigger lives in the + menu, so the list holds only what you use. Removing a trigger puts it back.</p>
                 </div>
                 <div class="changelog-item">
                     <span class="changelog-tag tag-new">New</span>
-                    <p class="changelog-text"><strong>Running &amp; History:</strong> See every trigger running now, stop one or all, follow a run step by step, and review past runs with the actions as they ran. Keep 0 to 50 runs per trigger, on iOS and in the Web UI.</p>
+                    <p class="changelog-text"><strong>Remote RC Actions:</strong> add another device under Settings &rarr; Integrations &rarr; Remote RC Clients, then run any RC command on it over its Web UI, with the same pickers and editors as local actions.</p>
                 </div>
                 <div class="changelog-item">
                     <span class="changelog-tag tag-new">New</span>
-                    <p class="changelog-text"><strong>Faster Building:</strong> Compact tile layout with trigger icons, copy and paste for actions, search in the New Trigger screen, and a searchable Stop Trigger picker styled like the Triggers screen.</p>
+                    <p class="changelog-text"><strong>Duplicate Actions:</strong> long-press a row to duplicate it in place, whole If and Repeat blocks included, and the Web UI's right-click menu has the same.</p>
                 </div>
                 <div class="changelog-item">
                     <span class="changelog-tag tag-new">New</span>
-                    <p class="changelog-text"><strong>Variables:</strong> Set Variable action, <code>{name}</code> substitution in action text, a Variable condition, and a saved list in Settings → Advanced Settings → Variables.</p>
-                </div>
-                <div class="changelog-item">
-                    <span class="changelog-tag tag-new">New</span>
-                    <p class="changelog-text"><strong>App Quick Action:</strong> Pick an app, then one of its registered shortcuts, read live from SpringBoard so the Home Screen menu never has to be opened first.</p>
-                </div>
-                <div class="changelog-item">
-                    <span class="changelog-tag tag-new">New</span>
-                    <p class="changelog-text"><strong>Excluded Apps:</strong> Settings → Advanced Settings → Options lists every trigger that has actions, grouped like the Triggers page, and sets the apps where each one stays quiet.</p>
-                </div>
-                <div class="changelog-item">
-                    <span class="changelog-tag tag-new">New</span>
-                    <p class="changelog-text"><strong>Toasts on the Lock Screen:</strong> Toasts show over the lock screen, wait for the next wake when the screen is off, and can wake the screen with the new Wake Screen switch.</p>
+                    <p class="changelog-text"><strong>rc pull-backup:</strong> copies the newest IAmLazy backup from the phone to a folder on the Mac and prints its path, refusing an unmounted drive instead of writing to the boot disk.</p>
                 </div>
                 <div class="changelog-item">
                     <span class="changelog-tag tag-improved">UI Refresh</span>
-                    <p class="changelog-text"><strong>Web UI Light Mode:</strong> The Web UI follows system appearance with a full light palette, and the Running sheet covers live runs and recent history.</p>
+                    <p class="changelog-text"><strong>Cleaner Integrations &amp; Editors:</strong> integrations fold into their own lists, HA actions open the entity picker, REST and terminal editors tighten up, and switched-off integrations show dimmed with the reason.</p>
                 </div>
                 <div class="changelog-item">
-                    <span class="changelog-tag tag-fix">Security</span>
-                    <p class="changelog-text"><strong>API Token Gating:</strong> An optional token in Settings → Web UI → Access gates privileged <code>/api/command</code> calls such as <code>root</code>, <code>sudo</code> and <code>exec</code>.</p>
+                    <span class="changelog-tag tag-improved">Changed</span>
+                    <p class="changelog-text"><strong>AudioStream Auto-Start Opt-In:</strong> <code>/api/audiostream/start</code> returns 403 until enabled in Settings &rarr; Integrations &rarr; AudioStream, so a client timing out cannot wake the streaming daemon. Built-in triggers can also be deleted back into the + menu.</p>
                 </div>
                 <div class="changelog-item">
-                    <span class="changelog-tag tag-new">New</span>
-                    <p class="changelog-text"><strong>Two-Finger Slides:</strong> Slide up from the bottom bar or down from the status bar with two fingers, each firing its own trigger, with distance-based firing, a widened landing zone and Control Center suppression.</p>
-                </div>
-                <div class="changelog-item">
-                    <span class="changelog-tag tag-improved">UI Refresh</span>
-                    <p class="changelog-text"><strong>Lock Scrolling During Gestures:</strong> An off-by-default toggle that keeps lists still while gesturing.</p>
+                    <span class="changelog-tag tag-fix">Fixes</span>
+                    <p class="changelog-text"><strong>Fixes and packages:</strong> Home Button actions are instant, add-on exec steps work again on rootless, two-finger and Bluetooth triggers have their own icons, and <code>openssh-client</code> plus <code>sshpass</code> now install with the package.</p>
                 </div>
             </div>
 
             <!-- Expandable Past Releases -->
             <details class="history-accordion">
-                <summary>View Previous Version History (v4.1.0 – v3.4.0)</summary>
+                <summary>View Previous Version History (v4.4.0 – v3.4.0)</summary>
                 <div class="history-content">
+                    <div class="changelog-item">
+                        <span class="changelog-tag tag-new">v4.4.0</span>
+                        <p class="changelog-text"><strong>Gesture Recorder, Compact Layout, Loops &amp; Variables:</strong> record and replay gestures at 0.5x to 3x, compact tile layouts, Repeat / Repeat While / Wait Until, Set Variable and a Variables list, live Running sheet and Run History, new rotation, Find My Sound, call, battery, focus and two-finger slide triggers, Keychain passcode, API token gating, and iOS 18 / 26 fixes.</p>
+                    </div>
                     <div class="changelog-item">
                         <span class="changelog-tag tag-new">v4.1.0</span>
                         <p class="changelog-text"><strong>Web UI Access Control, New Triggers & Retrigger Control:</strong> Any / Trusted / This iPhone Only access, CarPlay Connected/Disconnected, Ping iPhone from Apple Watch, Home Button (Hold) and Home + Power, Keep Default Action, When Triggered Again with Stop Trigger, Set Focus action, Button Triggers pause, Experimental NFC mode, Shortcuts without SpringCuts, and on-device Test Kit.</p>
@@ -480,17 +468,17 @@
                     <h3 class="feature-title">2. Direct .deb Downloads</h3>
                     <p class="feature-desc">Download prebuilt Debian binaries directly for Filza or terminal installation:</p>
                     <div class="direct-downloads">
-                        <a href="com.saihgupr.remotecompanion_3.7.0_iphoneos-arm64.deb" class="deb-btn" download>
+                        <a href="com.saihgupr.remotecompanion_4.5.0_iphoneos-arm64.deb" class="deb-btn" download>
                             <div>
                                 <div>Rootless (arm64) .deb</div>
-                                <span class="deb-meta">Dopamine / Palera1n • v3.7.0</span>
+                                <span class="deb-meta">Dopamine / Palera1n • v4.5.0</span>
                             </div>
                             <span>⬇</span>
                         </a>
-                        <a href="com.saihgupr.remotecompanion_3.7.0_iphoneos-arm.deb" class="deb-btn" download>
+                        <a href="com.saihgupr.remotecompanion_4.5.0_iphoneos-arm.deb" class="deb-btn" download>
                             <div>
                                 <div>Rootful (arm) .deb</div>
-                                <span class="deb-meta">Legacy Rootful • v3.7.0</span>
+                                <span class="deb-meta">Legacy Rootful • v4.5.0</span>
                             </div>
                             <span>⬇</span>
                         </a>
