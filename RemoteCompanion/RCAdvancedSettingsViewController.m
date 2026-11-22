@@ -2,7 +2,6 @@
 #import "RCConfigManager.h"
 #import "RCUITweaker.h"
 #import "RCBannersViewController.h"
-#import "RCTweaksViewController.h"
 #import "RCExcludedAppsViewController.h"
 #import "RCConfigManager+AppExclusions.h"
 #import "RCActionTile.h"
@@ -18,7 +17,6 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
     RCAdvancedSettingsSectionBanners,
     RCAdvancedSettingsSectionNFC,
     RCAdvancedSettingsSectionOptions,
-    RCAdvancedSettingsSectionTweaks,
     RCAdvancedSettingsSectionLayout,
     RCAdvancedSettingsSectionButtons,
     RCAdvancedSettingsSectionSecurity,
@@ -114,7 +112,6 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
     if (section == RCAdvancedSettingsSectionBanners) title = @"Banners";
     else if (section == RCAdvancedSettingsSectionNFC) title = @"NFC";
     else if (section == RCAdvancedSettingsSectionOptions) title = @"Options";
-    else if (section == RCAdvancedSettingsSectionTweaks) title = @"Tweaks";
     else if (section == RCAdvancedSettingsSectionLayout) title = @"Layout";
     else if (section == RCAdvancedSettingsSectionButtons) title = @"Buttons";
     else if (section == RCAdvancedSettingsSectionSecurity) title = @"Security";
@@ -144,8 +141,6 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
         return @"NFC scanning options.";
     } else if (section == RCAdvancedSettingsSectionOptions) {
         return nil;
-    } else if (section == RCAdvancedSettingsSectionTweaks) {
-        return @"Optional iOS system behavior tweaks.";
     } else if (section == RCAdvancedSettingsSectionLayout) {
         return @"Compact shows a grid of tiles instead of a list. Triggers per Row applies to Triggers in Compact.";
     } else if (section == RCAdvancedSettingsSectionButtons) {
@@ -161,7 +156,6 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if (section == RCAdvancedSettingsSectionBanners) return 2; // Banners, Wake Screen
     if (section == RCAdvancedSettingsSectionNFC) return 3;
-    if (section == RCAdvancedSettingsSectionTweaks) return 1;
     if (section == RCAdvancedSettingsSectionButtons) return (NSInteger)[self timingRows].count;
     if (section == RCAdvancedSettingsSectionLayout) return (NSInteger)RCLayoutScreens().count;
     if (section == RCAdvancedSettingsSectionSecurity) return 1;
@@ -179,7 +173,6 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
     BOOL isValueRow = (indexPath.section == RCAdvancedSettingsSectionBanners) ||
                       (indexPath.section == RCAdvancedSettingsSectionNFC && indexPath.row == 2) ||
                       (indexPath.section == RCAdvancedSettingsSectionOptions && (indexPath.row == 2 || indexPath.row == 0)) ||
-                      (indexPath.section == RCAdvancedSettingsSectionTweaks) ||
                       (indexPath.section == RCAdvancedSettingsSectionButtons);
     UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:isValueRow ? UITableViewCellStyleValue1 : UITableViewCellStyleDefault reuseIdentifier:nil];
     cell.backgroundColor = [cm tweakColorForKey:@"blockBackground" defaultVal:0.12];
@@ -265,11 +258,6 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
             cell.accessoryView = proximityUnlockSwitch;
             cell.selectionStyle = UITableViewCellSelectionStyleNone;
         }
-    } else if (indexPath.section == RCAdvancedSettingsSectionTweaks) {
-        cell.textLabel.text = @"Tweaks";
-        NSUInteger count = [RCTweaksViewController enabledCount];
-        cell.detailTextLabel.text = count ? [NSString stringWithFormat:@"%lu", (unsigned long)count] : @"Off";
-        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     } else if (indexPath.section == RCAdvancedSettingsSectionButtons) {
         NSDictionary *row = [self timingRows][indexPath.row];
         double (^get)(void) = row[@"get"];
@@ -306,8 +294,6 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
         [self.navigationController pushViewController:[[RCExcludedAppsViewController alloc] init] animated:YES];
     } else if (indexPath.section == RCAdvancedSettingsSectionOptions && indexPath.row == 2) {
         [self chooseLogLevelFromView:[tableView cellForRowAtIndexPath:indexPath]];
-    } else if (indexPath.section == RCAdvancedSettingsSectionTweaks) {
-        [self.navigationController pushViewController:[[RCTweaksViewController alloc] init] animated:YES];
     } else if (indexPath.section == RCAdvancedSettingsSectionButtons) {
         NSDictionary *row = [self timingRows][indexPath.row];
         double (^get)(void) = row[@"get"];

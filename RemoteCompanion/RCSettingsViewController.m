@@ -8,6 +8,7 @@
 #import "RCWebUIAccessViewController.h"
 #import "RCVariablesViewController.h"
 #import "RCVariableIcon.h"
+#import "RCTweaksViewController.h"
 #import "RCGesturesViewController.h"
 #import "RCAddOnCatalog.h"
 #import "RCAddOnsViewController.h"
@@ -238,7 +239,7 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     } else if (section == RCSettingsSectionIntegrations) {
         return @"Configure connections to external services and automations.";
     } else if (section == RCSettingsSectionAdvanced) {
-        return @"NFC, banners, logging, and display options, and the variables that Set Variable actions save.";
+        return @"NFC, banners, logging, display options and tweaks, and the variables that Set Variable actions save.";
     } else if (section == RCSettingsSectionGestures) {
         return @"Recorded gestures and the recording tab's options.";
     } else if (section == RCSettingsSectionDiagnostics) {
@@ -257,7 +258,7 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
         return 2; // Export / Import
     }
     if (section == RCSettingsSectionAdvanced) {
-        return 2; // Advanced Settings / Variables
+        return 3; // Advanced Settings / Variables / Tweaks
     }
     if (section == RCSettingsSectionDiagnostics) {
         return 2; // Running, Test Kit
@@ -272,7 +273,8 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     RCConfigManager *cm = [RCConfigManager sharedManager];
     
-    BOOL isLinkRow = (indexPath.section == RCSettingsSectionGeneral && indexPath.row >= 2);
+    BOOL isLinkRow = (indexPath.section == RCSettingsSectionGeneral && indexPath.row >= 2) ||
+                     (indexPath.section == RCSettingsSectionAdvanced && indexPath.row == 2);
     UITableViewCellStyle style = isLinkRow ? UITableViewCellStyleValue1 : UITableViewCellStyleDefault;
     UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:style reuseIdentifier:nil];
     cell.backgroundColor = [cm tweakColorForKey:@"blockBackground" defaultVal:0.12];
@@ -333,6 +335,14 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
         cell.imageView.image = RCVariableMenuIcon();
         cell.imageView.tintColor = nil;
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    } else if (indexPath.section == RCSettingsSectionAdvanced && indexPath.row == 2) {
+        cell.textLabel.text = @"Tweaks";
+        UIImage *img = [UIImage systemImageNamed:@"slider.horizontal.3"];
+        cell.imageView.image = img;
+        cell.imageView.tintColor = [UIColor systemGrayColor];
+        NSUInteger count = [RCTweaksViewController enabledCount];
+        cell.detailTextLabel.text = count ? [NSString stringWithFormat:@"%lu", (unsigned long)count] : @"Off";
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     } else if (indexPath.section == RCSettingsSectionAdvanced) {
         cell.textLabel.text = @"Advanced Settings";
         UIImage *img = [UIImage systemImageNamed:@"gearshape.2.fill"];
@@ -387,6 +397,8 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
         [self.navigationController pushViewController:integrationsVC animated:YES];
     } else if (indexPath.section == RCSettingsSectionAdvanced && indexPath.row == 1) {
         [self.navigationController pushViewController:[[RCVariablesViewController alloc] init] animated:YES];
+    } else if (indexPath.section == RCSettingsSectionAdvanced && indexPath.row == 2) {
+        [self.navigationController pushViewController:[[RCTweaksViewController alloc] init] animated:YES];
     } else if (indexPath.section == RCSettingsSectionAdvanced) {
         [self.navigationController pushViewController:[[RCAdvancedSettingsViewController alloc] init] animated:YES];
     } else if (indexPath.section == RCSettingsSectionGestures) {

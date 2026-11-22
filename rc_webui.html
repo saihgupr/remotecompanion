@@ -2250,7 +2250,13 @@
         <div class="action-row-text">Advanced Settings</div>
         <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
       </div>
+      <div class="action-list-row" onclick="openTweaksPanel()">
+        <div class="action-row-icon icon-gray"><i class="f7-icons">slider_horizontal_3</i></div>
+        <div class="action-row-text" style="flex:1">Tweaks<br><span id="setting-tweaks-count" style="font-size:13px;color:var(--rc-label-2);font-weight:400">Off</span></div>
+        <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
+      </div>
     </div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 32px 0">Optional iOS system behavior tweaks.</div>
 
     <div class="action-list-header">Diagnostics</div>
     <div class="action-list-card">
@@ -2616,14 +2622,6 @@
         </div>
       </div>
     </div>
-    <div class="action-list-header">Tweaks</div>
-    <div class="action-list-card">
-      <div class="action-list-row" onclick="openTweaksPanel()">
-        <div class="action-row-text" style="flex:1">Tweaks<br><span id="setting-tweaks-count" style="font-size:13px;color:var(--rc-label-2);font-weight:400">Off</span></div>
-        <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
-      </div>
-    </div>
-    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 32px 0">Optional iOS system behavior tweaks.</div>
     <div class="action-list-header">Buttons</div>
     <div class="action-list-card">
       <div class="settings-row">
@@ -3188,7 +3186,7 @@
 <div class="rc-panel" id="tweaks-panel">
   <div class="panel-navbar">
     <button class="panel-back" onclick="closeTweaksPanel()">
-      <i class="f7-icons">chevron_left</i> Advanced Settings
+      <i class="f7-icons">chevron_left</i> Settings
     </button>
     <div class="panel-title">Tweaks</div>
     <div style="width:80px"></div>
@@ -9916,6 +9914,7 @@ function openSettings() {
   renderAccessPanel();
   document.getElementById('setting-loglevel').value = ['off','minimal','full'].includes(config.logLevel) ? config.logLevel : 'minimal';
   updateBannersCount();
+  updateTweaksCount();
   updateIntegrationsStatus();
   populateTimingSelects();
 
