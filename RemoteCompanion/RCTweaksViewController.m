@@ -13,10 +13,6 @@ typedef NS_ENUM(NSInteger, RCTweaksSection) {
 
 @implementation RCTweaksViewController
 
-+ (NSUInteger)enabledCount {
-    return [RCConfigManager sharedManager].disableWakeOnPower ? 1 : 0;
-}
-
 - (void)viewDidLoad {
     [super viewDidLoad];
 

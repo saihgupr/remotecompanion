@@ -239,7 +239,7 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     } else if (section == RCSettingsSectionIntegrations) {
         return @"Configure connections to external services and automations.";
     } else if (section == RCSettingsSectionAdvanced) {
-        return @"NFC, banners, logging, display options and tweaks, and the variables that Set Variable actions save.";
+        return @"Advanced Settings holds NFC, banners, logging and display options. Tweaks changes how iOS behaves, and Variables shows what Set Variable actions save.";
     } else if (section == RCSettingsSectionGestures) {
         return @"Recorded gestures and the recording tab's options.";
     } else if (section == RCSettingsSectionDiagnostics) {
@@ -273,8 +273,7 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     RCConfigManager *cm = [RCConfigManager sharedManager];
     
-    BOOL isLinkRow = (indexPath.section == RCSettingsSectionGeneral && indexPath.row >= 2) ||
-                     (indexPath.section == RCSettingsSectionAdvanced && indexPath.row == 2);
+    BOOL isLinkRow = (indexPath.section == RCSettingsSectionGeneral && indexPath.row >= 2);
     UITableViewCellStyle style = isLinkRow ? UITableViewCellStyleValue1 : UITableViewCellStyleDefault;
     UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:style reuseIdentifier:nil];
     cell.backgroundColor = [cm tweakColorForKey:@"blockBackground" defaultVal:0.12];
@@ -339,9 +338,11 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
         cell.textLabel.text = @"Tweaks";
         UIImage *img = [UIImage systemImageNamed:@"slider.horizontal.3"];
         cell.imageView.image = img;
-        cell.imageView.tintColor = [UIColor systemGrayColor];
-        NSUInteger count = [RCTweaksViewController enabledCount];
-        cell.detailTextLabel.text = count ? [NSString stringWithFormat:@"%lu", (unsigned long)count] : @"Off";
+        if (@available(iOS 15.0, *)) {
+            cell.imageView.tintColor = [UIColor systemCyanColor];
+        } else {
+            cell.imageView.tintColor = [UIColor systemTealColor];
+        }
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     } else if (indexPath.section == RCSettingsSectionAdvanced) {
         cell.textLabel.text = @"Advanced Settings";
