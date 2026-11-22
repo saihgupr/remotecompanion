@@ -2616,6 +2616,14 @@
         </div>
       </div>
     </div>
+    <div class="action-list-header">Tweaks</div>
+    <div class="action-list-card">
+      <div class="action-list-row" onclick="openTweaksPanel()">
+        <div class="action-row-text" style="flex:1">Tweaks<br><span id="setting-tweaks-count" style="font-size:13px;color:var(--rc-label-2);font-weight:400">Off</span></div>
+        <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
+      </div>
+    </div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 32px 0">Optional iOS system behavior tweaks.</div>
     <div class="action-list-header">Buttons</div>
     <div class="action-list-card">
       <div class="settings-row">
@@ -3173,6 +3181,29 @@
   <div class="panel-content">
     <div style="color:var(--rc-label-2);font-size:13px;margin:20px 16px 0">Checked actions show a banner whenever a trigger runs them. Toggles show their new state; other actions show their name.</div>
     <div id="banners-list"></div>
+  </div>
+</div>
+
+<!-- ══ TWEAKS PANEL (Settings > Advanced Settings > Tweaks) ═══════════════════ -->
+<div class="rc-panel" id="tweaks-panel">
+  <div class="panel-navbar">
+    <button class="panel-back" onclick="closeTweaksPanel()">
+      <i class="f7-icons">chevron_left</i> Advanced Settings
+    </button>
+    <div class="panel-title">Tweaks</div>
+    <div style="width:80px"></div>
+  </div>
+  <div class="panel-content">
+    <div class="action-list-header" style="margin-top:28px">Power</div>
+    <div class="action-list-card">
+      <div class="settings-row">
+        <span class="settings-label">Disable Wake Screen On Power</span>
+        <div class="settings-btn">
+          <input type="checkbox" class="ios-toggle" id="setting-disable-wake-on-power" onchange="config.disableWakeOnPower=this.checked;saveConfig();updateTweaksCount()">
+        </div>
+      </div>
+    </div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 32px 0">Keeps the screen off when power connects or disconnects while the display is off or dimmed. Battery status and charging triggers still update normally.</div>
   </div>
 </div>
 
@@ -9977,6 +10008,7 @@ function openAdvancedPanel() {
   updateNFCScreenOffLabel();
   updateNFCFooter();
   updateBannersCount();
+  updateTweaksCount();
   populateTimingSelects();
   document.getElementById('advanced-panel').classList.add('active');
 }
@@ -11059,10 +11091,28 @@ function closeBannersPanel() {
   updateBannersCount();
 }
 
+function updateTweaksCount() {
+  const el = document.getElementById('setting-tweaks-count');
+  if (el) el.textContent = config.disableWakeOnPower ? '1' : 'Off';
+}
+
+function openTweaksPanel() {
+  const wakeEl = document.getElementById('setting-disable-wake-on-power');
+  if (wakeEl) wakeEl.checked = !!config.disableWakeOnPower;
+  document.getElementById('tweaks-panel').classList.add('active');
+}
+
+function closeTweaksPanel() {
+  document.getElementById('tweaks-panel').classList.remove('active');
+  updateTweaksCount();
+}
+
 function closeSettings() {
   document.getElementById('settings-panel').classList.remove('active');
   const accessPanel = document.getElementById('access-panel');
   if (accessPanel) accessPanel.classList.remove('active');
+  const tweaksPanel = document.getElementById('tweaks-panel');
+  if (tweaksPanel) tweaksPanel.classList.remove('active');
   document.getElementById('footer-settings-fixed').style.display = 'none';
 }
 

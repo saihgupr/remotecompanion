@@ -280,7 +280,7 @@ extern Boolean MRMediaRemoteSendCommandToApp(MRMediaRemoteCommand command, NSDic
 - (BOOL)attemptUnlockWithPasscode:(NSString *)passcode;
 - (BOOL)_attemptUnlockWithPasscode:(NSString *)passcode mesa:(BOOL)mesa finishUIUnlock:(BOOL)finishUI;
 - (void)lockUIFromSource:(int)source withOptions:(id)options;
-- (void)unlockUIFromSource:(int)source withOptions:(id)options;
+- (BOOL)unlockUIFromSource:(int)source withOptions:(id)options;
 - (void)_setUILocked:(BOOL)locked animated:(BOOL)animated withReason:(id)reason;
 - (BOOL)isUILocked;
 - (id)lockScreenViewController;
@@ -288,8 +288,11 @@ extern Boolean MRMediaRemoteSendCommandToApp(MRMediaRemoteCommand command, NSDic
 
 @interface SBBacklightController : NSObject
 + (id)sharedInstance;
++ (id)sharedInstanceIfExists;
 - (BOOL)screenIsOn;
+- (BOOL)screenIsDim;
 - (float)backlightLevel;
+- (void)turnOnScreenFullyWithBacklightSource:(long long)source;
 @end
 
 @interface BKOperation : NSObject
@@ -623,6 +626,8 @@ static int RC_ProximityManagerState(void) {
 - (BOOL)isACPowerConnected;
 - (BOOL)isOnAC;
 - (void)ACPowerChanged;
+- (void)possiblyWakeForPowerStatusChangeWithUnlockSource:(int)source;
+- (void)setIsConnectedToUnsupportedChargingAccessory:(BOOL)arg1;
 - (void)updateBatteryState:(id)arg1;
 - (void)setIsACPowerConnected:(BOOL)arg1;
 @end
@@ -2094,6 +2099,22 @@ static NSObject *rc_trigger_config_lock(void) {
 }
 
 static volatile uint32_t g_twoFingerConfiguredMask = 0;
+static volatile BOOL g_rcDisableWakeOnPower = NO;
+static __thread int g_rcPowerChangeWakeGuardDepth = 0;
+static __thread int g_rcPowerChangeLogDepth = 0;
+
+static BOOL rc_screen_is_off_or_dim(void) {
+    Class blClass = objc_getClass("SBBacklightController");
+    if (!blClass) return NO;
+    SBBacklightController *bl = [blClass respondsToSelector:@selector(sharedInstanceIfExists)]
+        ? [blClass sharedInstanceIfExists]
+        : [blClass sharedInstance];
+    if (!bl) return NO;
+    BOOL screenOn = [bl respondsToSelector:@selector(screenIsOn)] ? [bl screenIsOn] : YES;
+    if (!screenOn) return YES;
+    BOOL screenDim = [bl respondsToSelector:@selector(screenIsDim)] ? [bl screenIsDim] : NO;
+    return screenDim;
+}
 
 static uint32_t rc_two_finger_mask_for_config(NSDictionary *config) {
     if (![config isKindOfClass:[NSDictionary class]] || ![config[@"masterEnabled"] boolValue]) return 0;
@@ -2126,6 +2147,7 @@ static void rc_set_trigger_config(NSDictionary *config) {
         old = g_triggerConfig;
         g_triggerConfig = config;
         g_twoFingerConfiguredMask = rc_two_finger_mask_for_config(config);
+        g_rcDisableWakeOnPower = [config isKindOfClass:[NSDictionary class]] && [config[@"disableWakeOnPower"] boolValue];
     }
     if (old) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(10 * NSEC_PER_SEC)), dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
@@ -19675,6 +19697,32 @@ static void setup_background_hid_listener() {
     return result;
 }
 
+- (BOOL)unlockUIFromSource:(int)source withOptions:(id)options {
+    if (g_rcPowerChangeWakeGuardDepth > 0) {
+        SRLog(@"[PowerWake] Suppressed -[SBLockScreenManager unlockUIFromSource:%d withOptions:%@]", source, options);
+        return NO;
+    }
+    if (g_rcPowerChangeLogDepth > 0) {
+        SRLog(@"[PowerWake] Observed -[SBLockScreenManager unlockUIFromSource:%d withOptions:%@] during power change", source, options);
+    }
+    return %orig;
+}
+
+%end
+
+%hook SBBacklightController
+
+- (void)turnOnScreenFullyWithBacklightSource:(long long)source {
+    if (g_rcPowerChangeWakeGuardDepth > 0) {
+        SRLog(@"[PowerWake] Suppressed -[SBBacklightController turnOnScreenFullyWithBacklightSource:%lld]", source);
+        return;
+    }
+    if (g_rcPowerChangeLogDepth > 0) {
+        SRLog(@"[PowerWake] Observed -[SBBacklightController turnOnScreenFullyWithBacklightSource:%lld] during power change", source);
+    }
+    %orig;
+}
+
 %end
 
 %hook SBProximitySensorManager
@@ -22091,11 +22139,55 @@ static void update_edge_gestures() {
 
 %hook SBUIController
 
-- (void)ACPowerChanged {
+- (void)possiblyWakeForPowerStatusChangeWithUnlockSource:(int)source {
+    BOOL offOrDim = (g_rcDisableWakeOnPower || g_rcLogLevel >= 2) ? rc_screen_is_off_or_dim() : NO;
+    BOOL suppress = g_rcDisableWakeOnPower && offOrDim;
+    if (suppress || g_rcLogLevel >= 2) {
+        SRLog(@"[PowerWake] possiblyWakeForPowerStatusChangeWithUnlockSource:%d disable=%d offOrDim=%d -> %@",
+              source, g_rcDisableWakeOnPower ? 1 : 0, offOrDim ? 1 : 0,
+              suppress ? @"SUPPRESSED" : @"allow");
+    }
+    if (suppress) return;
     %orig;
+}
+
+- (void)ACPowerChanged {
+    BOOL observing = (g_rcLogLevel >= 2);
+    BOOL offOrDim = (g_rcDisableWakeOnPower || observing) ? rc_screen_is_off_or_dim() : NO;
+    BOOL shouldGuard = g_rcDisableWakeOnPower && offOrDim;
+    if (observing) {
+        SRLog(@"[PowerWake] ACPowerChanged begin (disable=%d offOrDim=%d)",
+              g_rcDisableWakeOnPower ? 1 : 0, offOrDim ? 1 : 0);
+        g_rcPowerChangeLogDepth++;
+    }
+    if (shouldGuard) g_rcPowerChangeWakeGuardDepth++;
+    @try {
+        %orig;
+    } @finally {
+        if (shouldGuard) g_rcPowerChangeWakeGuardDepth--;
+        if (observing) g_rcPowerChangeLogDepth--;
+    }
     dispatch_async(dispatch_get_main_queue(), ^{
         handle_power_state_transition(is_device_power_connected(), @"SBUIController ACPowerChanged");
     });
+}
+
+- (void)setIsConnectedToUnsupportedChargingAccessory:(BOOL)arg1 {
+    BOOL observing = (g_rcLogLevel >= 2);
+    BOOL offOrDim = (g_rcDisableWakeOnPower || observing) ? rc_screen_is_off_or_dim() : NO;
+    BOOL shouldGuard = arg1 && g_rcDisableWakeOnPower && offOrDim;
+    if (observing) {
+        SRLog(@"[PowerWake] setIsConnectedToUnsupportedChargingAccessory:%d (disable=%d offOrDim=%d)",
+              arg1 ? 1 : 0, g_rcDisableWakeOnPower ? 1 : 0, offOrDim ? 1 : 0);
+        g_rcPowerChangeLogDepth++;
+    }
+    if (shouldGuard) g_rcPowerChangeWakeGuardDepth++;
+    @try {
+        %orig;
+    } @finally {
+        if (shouldGuard) g_rcPowerChangeWakeGuardDepth--;
+        if (observing) g_rcPowerChangeLogDepth--;
+    }
 }
 
 - (void)updateBatteryState:(id)arg1 {
@@ -23414,6 +23506,15 @@ static NSTimeInterval s_last_camera_launch_notify = 0;
             SRLog(@"Delayed Initialization & Gesture Setup...");
             
             load_trigger_config();
+            Class uiCls = objc_getClass("SBUIController");
+            Class lsmCls = objc_getClass("SBLockScreenManager");
+            Class blCls = objc_getClass("SBBacklightController");
+            SRLog(@"[PowerWake] Hooks present: possiblyWake=%d ACPowerChanged=%d unlockUI=%d turnOnScreen=%d (disableWakeOnPower=%d)",
+                  (uiCls && class_getInstanceMethod(uiCls, @selector(possiblyWakeForPowerStatusChangeWithUnlockSource:)) != NULL) ? 1 : 0,
+                  (uiCls && class_getInstanceMethod(uiCls, @selector(ACPowerChanged)) != NULL) ? 1 : 0,
+                  (lsmCls && class_getInstanceMethod(lsmCls, @selector(unlockUIFromSource:withOptions:)) != NULL) ? 1 : 0,
+                  (blCls && class_getInstanceMethod(blCls, @selector(turnOnScreenFullyWithBacklightSource:)) != NULL) ? 1 : 0,
+                  g_rcDisableWakeOnPower ? 1 : 0);
             register_config_observer();
             register_simulation_observers();
             register_system_event_observers(); // WiFi/BT Triggers

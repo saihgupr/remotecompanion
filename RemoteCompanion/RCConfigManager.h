@@ -58,6 +58,9 @@
 // Unlocks Developer Mode actions in the action picker (Settings > Advanced Settings > Developer).
 // Off by default.
 @property (nonatomic, assign) BOOL developerMode;
+// Prevent the display from waking when external power connects or disconnects while the
+// screen is off or dimmed. Off by default (Settings > Advanced Settings > Tweaks).
+@property (nonatomic, assign) BOOL disableWakeOnPower;
 @property (nonatomic, assign) BOOL haEnabled;
 @property (nonatomic, copy) NSString *haUrl;
 @property (nonatomic, copy) NSString *haToken;

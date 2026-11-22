@@ -368,6 +368,12 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
             [self saveConfig];
         }
 
+        // Auto-add disableWakeOnPower (default to NO: iOS wakes the screen on power changes as usual)
+        if (_config[@"disableWakeOnPower"] == nil) {
+            _config[@"disableWakeOnPower"] = @NO;
+            [self saveConfig];
+        }
+
     } else {
         // Default config: no triggers until one is added from the New Trigger screen
         NSLog(@"[RCConfigManager] Using default config");
@@ -379,6 +385,7 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
             @"allowDirectRootHelper": @NO,
             @"onlyUnlockOutOfPocket": @NO,
             @"developerMode": @NO,
+            @"disableWakeOnPower": @NO,
             @"nfcEnabled": @YES,
             @"rootEnabled": @YES,
             @"sshHosts": [NSMutableArray array],
@@ -674,6 +681,15 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
 
 - (void)setOnlyUnlockOutOfPocket:(BOOL)onlyUnlockOutOfPocket {
     _config[@"onlyUnlockOutOfPocket"] = @(onlyUnlockOutOfPocket);
+    [self saveConfig];
+}
+
+- (BOOL)disableWakeOnPower {
+    return [_config[@"disableWakeOnPower"] boolValue];
+}
+
+- (void)setDisableWakeOnPower:(BOOL)disableWakeOnPower {
+    _config[@"disableWakeOnPower"] = @(disableWakeOnPower);
     [self saveConfig];
 }
 
