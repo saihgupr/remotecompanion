@@ -24,9 +24,9 @@ RemoteCompanion provides fast, scriptable system control for modern rootless jai
 
 <p align="center">
   <img src="images/4.1.0/01_dashboard.png" width="200" alt="Main Dashboard" />
-  <img src="images/4.1.0/02_add_trigger.png" width="200" alt="Add Trigger" />
+  <img src="images/4.5.0/new-trigger-picker.png" width="200" alt="New Trigger Screen" />
   <img src="images/4.1.0/03_action_conditions.png" width="200" alt="Conditional Logic" />
-  <img src="images/4.1.0/04_settings.png" width="200" alt="Settings & Web UI" />
+  <img src="images/4.5.0/settings-webui.png" width="200" alt="Settings & Web UI" />
 </p>
 
 ## Features
