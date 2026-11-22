@@ -3599,7 +3599,7 @@ const TRIGGER_SECTIONS = [
   { title: 'Power Button',           id: 'power',     keys: ['power_double_tap','power_triple_click','power_quadruple_click','power_volume_up','power_volume_down','power_long_press'] },
   { title: 'Status Bar',             id: 'statusbar', keys: ['trigger_statusbar_left_hold','trigger_statusbar_center_hold','trigger_statusbar_right_hold','trigger_statusbar_swipe_left','trigger_statusbar_swipe_right','trigger_statusbar_double_tap','trigger_statusbar_swipe_down_left','trigger_statusbar_swipe_down_center','trigger_statusbar_swipe_down_right'] },
   { title: 'Edge Gestures',          id: 'edge',      keys: ['trigger_edge_left_swipe_up','trigger_edge_left_swipe_down','trigger_edge_right_swipe_up','trigger_edge_right_swipe_down'] },
-  { title: 'Bottom Bar Gestures',    id: 'bottombar', keys: ['trigger_bottombar_swipe_left','trigger_bottombar_swipe_right','trigger_bottom_swipe_up_left','trigger_bottom_swipe_up_center','trigger_bottom_swipe_up_right'] },
+  { title: 'Bottom Bar Gestures',    id: 'bottombar', keys: ['trigger_bottombar_swipe_left','trigger_bottombar_swipe_right','trigger_bottom_swipe_up_left','trigger_bottom_swipe_up_center','trigger_bottom_swipe_up_right','trigger_bottom_swipe_down_left','trigger_bottom_swipe_down_center','trigger_bottom_swipe_down_right'] },
   { title: 'Multi-Finger Gestures',  id: 'multifinger', keys: ['trigger_two_finger_tap','trigger_two_finger_swipe_left','trigger_two_finger_swipe_right','trigger_two_finger_swipe_up','trigger_two_finger_swipe_down','trigger_two_finger_rotate_cw','trigger_two_finger_rotate_ccw','trigger_statusbar_two_finger_swipe_down','trigger_bottom_two_finger_swipe_up'] },
   { title: 'Home Button',            id: 'home',      keys: ['trigger_home_double_click','trigger_home_triple_click','trigger_home_quadruple_click','trigger_home_hold','trigger_home_power','touchid_tap','touchid_hold'] },
   { title: 'Ringer Switch',          id: 'ringer',    keys: ['trigger_ringer_mute','trigger_ringer_unmute','trigger_ringer_toggle'] },
@@ -3644,6 +3644,7 @@ const TRIGGER_NAMES = {
   trigger_watch_face:'Watch Face: Any',
   trigger_bottombar_swipe_left:'Bottom Bar Swipe Left', trigger_bottombar_swipe_right:'Bottom Bar Swipe Right',
   trigger_bottom_swipe_up_left:'Bottom Swipe Up (Left)', trigger_bottom_swipe_up_center:'Bottom Swipe Up (Center)', trigger_bottom_swipe_up_right:'Bottom Swipe Up (Right)',
+  trigger_bottom_swipe_down_left:'Bottom Swipe Down (Left)', trigger_bottom_swipe_down_center:'Bottom Swipe Down (Center)', trigger_bottom_swipe_down_right:'Bottom Swipe Down (Right)',
   trigger_statusbar_two_finger_swipe_down:'2-Finger Top Slide Down', trigger_bottom_two_finger_swipe_up:'2-Finger Bottom Slide Up',
   trigger_two_finger_tap:'2-Finger Tap',
   trigger_two_finger_swipe_left:'2-Finger Swipe Left', trigger_two_finger_swipe_right:'2-Finger Swipe Right',
@@ -3700,6 +3701,9 @@ const TRIGGER_ICONS = {
   trigger_bottom_swipe_up_left: { icon:'arrow_up_to_line',        cls:'icon-indigo' },
   trigger_bottom_swipe_up_center:{ icon:'arrow_up_to_line',       cls:'icon-indigo' },
   trigger_bottom_swipe_up_right: { icon:'arrow_up_to_line',       cls:'icon-indigo' },
+  trigger_bottom_swipe_down_left:   { icon:'arrow_down_to_line', cls:'icon-indigo' },
+  trigger_bottom_swipe_down_center: { icon:'arrow_down_to_line', cls:'icon-indigo' },
+  trigger_bottom_swipe_down_right:  { icon:'arrow_down_to_line', cls:'icon-indigo' },
   trigger_ringer_mute:   { icon:'bell_slash_fill', cls:'icon-red' },
   trigger_ringer_unmute: { icon:'bell_fill',       cls:'icon-green' },
   trigger_ringer_toggle: { icon:'bell_badge_fill', cls:'icon-orange' },
@@ -3766,6 +3770,9 @@ const PHONE_ICONS = (() => {
     trigger_bottom_swipe_up_left: { arrowAt: 'L' },
     trigger_bottom_swipe_up_center: { arrowAt: 'C' },
     trigger_bottom_swipe_up_right: { arrowAt: 'R' },
+    trigger_bottom_swipe_down_left: { arrowDownBottomAt: 'L' },
+    trigger_bottom_swipe_down_center: { arrowDownBottomAt: 'C' },
+    trigger_bottom_swipe_down_right: { arrowDownBottomAt: 'R' },
     trigger_statusbar_two_finger_swipe_down: { zone: 'top', fingers: 'down' },
     trigger_bottom_two_finger_swipe_up: { zone: 'bottom', fingers: 'up' },
     trigger_two_finger_tap: { twoFingers: 'tap' },
@@ -3825,6 +3832,10 @@ function phoneIconSVG(spec) {
     if (spec.arrowDownAt) {
       parts.push(svgArrow({ L: 15, C: 20, R: 25 }[spec.arrowDownAt], 14, 'down', 11, 2.8));
       rect(14, 3.2, 12, 1.8, 0.9);
+    }
+    if (spec.arrowDownBottomAt) {
+      parts.push(svgArrow({ L: 15, C: 20, R: 25 }[spec.arrowDownBottomAt], 26, 'down', 11, 2.8));
+      rect(14, 35, 12, 1.8, 0.9);
     }
     if (spec.fingers) {
       // Two fingertips in the zone, and the way they slide across the rest of the screen
@@ -4076,6 +4087,9 @@ const CMD_NAMES = {
   'trigger_bottom_swipe_up_left':'Bottom Swipe Up (Left)',
   'trigger_bottom_swipe_up_center':'Bottom Swipe Up (Center)',
   'trigger_bottom_swipe_up_right':'Bottom Swipe Up (Right)',
+  'trigger_bottom_swipe_down_left':'Bottom Swipe Down (Left)',
+  'trigger_bottom_swipe_down_center':'Bottom Swipe Down (Center)',
+  'trigger_bottom_swipe_down_right':'Bottom Swipe Down (Right)',
   'trigger_statusbar_swipe_down_left':'Top Swipe Down (Left)',
   'trigger_statusbar_swipe_down_center':'Top Swipe Down (Center)',
   'trigger_statusbar_swipe_down_right':'Top Swipe Down (Right)',
@@ -4669,6 +4683,7 @@ function iconForCmd(cmd) {
   if (lowCmd.startsWith('exec ') || lowCmd.startsWith('root ')) return { icon:'chevron_right_square_fill', cls:'icon-dark' };
   if (lowCmd.startsWith('trigger_statusbar_swipe_down')) return { icon:'arrow_down_to_line', cls:'icon-indigo' };
   if (lowCmd.startsWith('trigger_bottom_swipe_up')) return { icon:'arrow_up_to_line', cls:'icon-indigo' };
+  if (lowCmd.startsWith('trigger_bottom_swipe_down')) return { icon:'arrow_down_to_line', cls:'icon-indigo' };
   if (lowCmd.startsWith('trigger_bottombar')) return { icon:'square_stack_3d_up_fill', cls:'icon-gray' };
   // Recorded gestures
   if (lowCmd.startsWith('gesture record-toggle')) return { icon:'record_circle_fill', cls:'icon-red' };
@@ -5763,13 +5778,14 @@ function onEditTriggerSettings() {
 
 // Triggers that take over what iOS normally does can keep it as well, as in the app: the ping
 // sounds, and with a Home button the Accessibility Shortcut, App Switcher, Siri and screenshot,
-// otherwise Siri, the Accessibility Shortcut, a screenshot and Wallet
+// otherwise Siri, the Accessibility Shortcut, a screenshot, Wallet and Reachability
 function keepDefaultKeys() {
   const pings = ['trigger_device_findmy_sound', 'trigger_watch_ping', 'trigger_watch_ping_hold'];
   const home = typeof serverCapabilities === 'undefined' || serverCapabilities.home_button !== false;
   return pings.concat(home
     ? ['trigger_home_triple_click', 'trigger_home_double_click', 'trigger_home_hold', 'trigger_home_power']
-    : ['power_long_press', 'power_triple_click', 'power_volume_up', 'power_double_tap']);
+    : ['power_long_press', 'power_triple_click', 'power_volume_up', 'power_double_tap',
+       'trigger_bottom_swipe_down_left', 'trigger_bottom_swipe_down_center', 'trigger_bottom_swipe_down_right']);
 }
 function canKeepDefault(key) { return keepDefaultKeys().includes(key); }
 function keepsDefault(key) {
@@ -9466,7 +9482,7 @@ function defaultHapticsForTrigger(key) {
   if (key.startsWith('trigger_home_')) return true;
   if (key.startsWith('trigger_statusbar_')) return true;
   if (key.startsWith('trigger_bottombar_')) return true;
-  if (key.startsWith('trigger_bottom_swipe_up_')) return true;
+  if (key.startsWith('trigger_bottom_swipe_')) return true;
   if (key.startsWith('trigger_edge_')) return true;
   return false;
 }
@@ -11469,7 +11485,7 @@ const BUILT_IN_TRIGGER_GROUPS = [
   { title: 'Power Button', keys: ['power_double_tap','power_triple_click','power_quadruple_click','power_volume_up','power_volume_down','power_long_press'] },
   { title: 'Status Bar', keys: ['trigger_statusbar_left_hold','trigger_statusbar_center_hold','trigger_statusbar_right_hold','trigger_statusbar_swipe_left','trigger_statusbar_swipe_right','trigger_statusbar_double_tap','trigger_statusbar_swipe_down_left','trigger_statusbar_swipe_down_center','trigger_statusbar_swipe_down_right'] },
   { title: 'Edge Gestures', keys: ['trigger_edge_left_swipe_up','trigger_edge_left_swipe_down','trigger_edge_right_swipe_up','trigger_edge_right_swipe_down'] },
-  { title: 'Bottom Bar Gestures', keys: ['trigger_bottombar_swipe_left','trigger_bottombar_swipe_right','trigger_bottom_swipe_up_left','trigger_bottom_swipe_up_center','trigger_bottom_swipe_up_right'] },
+  { title: 'Bottom Bar Gestures', keys: ['trigger_bottombar_swipe_left','trigger_bottombar_swipe_right','trigger_bottom_swipe_up_left','trigger_bottom_swipe_up_center','trigger_bottom_swipe_up_right','trigger_bottom_swipe_down_left','trigger_bottom_swipe_down_center','trigger_bottom_swipe_down_right'] },
   { title: 'Multi-Finger Gestures', keys: ['trigger_two_finger_tap','trigger_two_finger_swipe_left','trigger_two_finger_swipe_right','trigger_two_finger_swipe_up','trigger_two_finger_swipe_down','trigger_two_finger_rotate_cw','trigger_two_finger_rotate_ccw','trigger_statusbar_two_finger_swipe_down','trigger_bottom_two_finger_swipe_up'] },
   { title: 'Home Button', keys: ['trigger_home_double_click','trigger_home_triple_click','trigger_home_quadruple_click','trigger_home_hold','trigger_home_power','touchid_tap','touchid_hold'] },
   { title: 'Ringer Switch', keys: ['trigger_ringer_mute','trigger_ringer_unmute','trigger_ringer_toggle'] },
