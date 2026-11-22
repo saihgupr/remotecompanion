@@ -1981,6 +1981,8 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         @"home": @"Home Button",
         @"open control center": @"Open Control Center",
         @"control center": @"Open Control Center",
+        @"open notification center": @"Open Notification Center",
+        @"notification center": @"Open Notification Center",
         @"ldrestart": @"Soft Reboot (ldrestart)",
         @"userspace-reboot": @"Userspace Reboot",
         @"uicache": @"Refresh Icon Cache",
@@ -2674,6 +2676,8 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         @"accessibility shortcut": ([UIImage systemImageNamed:@"accessibility"] ? @"accessibility" : @"figure.stand"), // "accessibility" is iOS 15+
         @"open control center": @"switch.2",
         @"control center": @"switch.2",
+        @"open notification center": @"bell.badge",
+        @"notification center": @"bell.badge",
         @"ldrestart": @"arrow.clockwise",
         @"userspace-reboot": @"arrow.clockwise.circle",
         @"uicache": @"square.grid.2x2",
