@@ -46,7 +46,7 @@ New to RemoteCompanion? The app gives you a trigger list and an action sequence 
 
 # Also in this release
 
-This version also ships everything from 4.5.0, which was never announced. That means the add-ons system (one JSON file per add-on in the AddOns folder), full backup and restore of the whole config with `rc export` and `rc import`, a Triggers screen that starts empty with everything in the + menu, and Remote RC actions that run commands on a second device over its Web UI.
+4.7.0 builds on 4.5.0. The add-ons system, full backup and restore, the Triggers screen that starts empty, and Remote RC actions all keep working, and everything above fits around them.
 
 Security and backup: `read file` and `http-request` now need the API token when they arrive from another device, a REST API Call to the phone's own address is no longer trusted as local, and the Web UI reads an origin as an address so a public name like `10.example.com` does not count as local. REST API Call and Remote RC now check HTTPS certificates, with `"insecure": true` for a self-signed home server. Backups keep add-on icons and the switched-off add-ons list, leave out the Run as Root list, and a restore writes only the files a backup holds.
 
