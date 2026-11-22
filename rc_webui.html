@@ -3200,8 +3200,14 @@
           <input type="checkbox" class="ios-toggle" id="setting-disable-wake-on-power" onchange="config.disableWakeOnPower=this.checked;saveConfig()">
         </div>
       </div>
+      <div class="settings-row">
+        <span class="settings-label">Disable Power Connected Haptics</span>
+        <div class="settings-btn">
+          <input type="checkbox" class="ios-toggle" id="setting-disable-power-haptics" onchange="config.disablePowerConnectedHaptics=this.checked;saveConfig()">
+        </div>
+      </div>
     </div>
-    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 32px 0">Keeps the screen off when power connects or disconnects while the display is off or dimmed. Battery status and charging triggers still update normally.</div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 32px 0">Disable Wake Screen On Power keeps the screen off when power connects or disconnects while the display is off or dimmed. Disable Power Connected Haptics stops the charging vibration and chime when power connects. Battery status and charging triggers still update normally.</div>
   </div>
 </div>
 
@@ -11092,6 +11098,8 @@ function closeBannersPanel() {
 function openTweaksPanel() {
   const wakeEl = document.getElementById('setting-disable-wake-on-power');
   if (wakeEl) wakeEl.checked = !!config.disableWakeOnPower;
+  const hapticsEl = document.getElementById('setting-disable-power-haptics');
+  if (hapticsEl) hapticsEl.checked = !!config.disablePowerConnectedHaptics;
   document.getElementById('tweaks-panel').classList.add('active');
 }
 

@@ -628,8 +628,16 @@ static int RC_ProximityManagerState(void) {
 - (void)ACPowerChanged;
 - (void)possiblyWakeForPowerStatusChangeWithUnlockSource:(int)source;
 - (void)setIsConnectedToUnsupportedChargingAccessory:(BOOL)arg1;
+- (void)playChargingChimeIfAppropriate;
+- (BOOL)_powerSourceWantsToPlayChime;
 - (void)updateBatteryState:(id)arg1;
 - (void)setIsACPowerConnected:(BOOL)arg1;
+@end
+
+@interface SBSoundController : NSObject
++ (instancetype)sharedInstance;
+- (BOOL)playSoundWithDefaultEnvironment:(id)sound;
+- (BOOL)playSound:(id)sound environments:(long long)environments completion:(id)completion;
 @end
 
 @interface UISUserInterfaceStyleMode : NSObject
@@ -2100,8 +2108,12 @@ static NSObject *rc_trigger_config_lock(void) {
 
 static volatile uint32_t g_twoFingerConfiguredMask = 0;
 static volatile BOOL g_rcDisableWakeOnPower = NO;
+static volatile BOOL g_rcDisablePowerConnectedHaptics = NO;
+static BOOL g_rcSoundControllerHookAlive = NO;
 static __thread int g_rcPowerChangeWakeGuardDepth = 0;
 static __thread int g_rcPowerChangeLogDepth = 0;
+static __thread int g_rcPowerChimeSuppressDepth = 0;
+static __thread int g_rcPowerChimeLogDepth = 0;
 
 static BOOL rc_screen_is_off_or_dim(void) {
     Class blClass = objc_getClass("SBBacklightController");
@@ -2148,6 +2160,7 @@ static void rc_set_trigger_config(NSDictionary *config) {
         g_triggerConfig = config;
         g_twoFingerConfiguredMask = rc_two_finger_mask_for_config(config);
         g_rcDisableWakeOnPower = [config isKindOfClass:[NSDictionary class]] && [config[@"disableWakeOnPower"] boolValue];
+        g_rcDisablePowerConnectedHaptics = [config isKindOfClass:[NSDictionary class]] && [config[@"disablePowerConnectedHaptics"] boolValue];
     }
     if (old) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(10 * NSEC_PER_SEC)), dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
@@ -19725,6 +19738,21 @@ static void setup_background_hid_listener() {
 
 %end
 
+%hook SBSoundController
+
+- (BOOL)playSound:(id)sound environments:(long long)environments completion:(id)completion {
+    if (g_rcPowerChimeSuppressDepth > 0) {
+        SRLog(@"[PowerHaptics] Suppressed -[SBSoundController playSound:%@ environments:%lld]", sound, environments);
+        return NO;
+    }
+    if (g_rcPowerChimeLogDepth > 0) {
+        SRLog(@"[PowerHaptics] Observed -[SBSoundController playSound:%@ environments:%lld] during charging chime", sound, environments);
+    }
+    return %orig;
+}
+
+%end
+
 %hook SBProximitySensorManager
 - (id)init {
     id orig = %orig;
@@ -22204,6 +22232,30 @@ static void update_edge_gestures() {
     });
 }
 
+- (void)playChargingChimeIfAppropriate {
+    BOOL suppress = g_rcDisablePowerConnectedHaptics;
+    BOOL observing = (g_rcLogLevel >= 2);
+    if (observing) {
+        SRLog(@"[PowerHaptics] playChargingChimeIfAppropriate (disable=%d soundHook=%d)",
+              suppress ? 1 : 0, g_rcSoundControllerHookAlive ? 1 : 0);
+    }
+    if (suppress && !g_rcSoundControllerHookAlive) {
+        if ([self respondsToSelector:@selector(_powerSourceWantsToPlayChime)]) {
+            (void)[self _powerSourceWantsToPlayChime];
+        }
+        SRLog(@"[PowerHaptics] Suppressed -[SBUIController playChargingChimeIfAppropriate] directly");
+        return;
+    }
+    if (suppress) g_rcPowerChimeSuppressDepth++;
+    if (observing) g_rcPowerChimeLogDepth++;
+    @try {
+        %orig;
+    } @finally {
+        if (suppress) g_rcPowerChimeSuppressDepth--;
+        if (observing) g_rcPowerChimeLogDepth--;
+    }
+}
+
 %end
 
 
@@ -23484,6 +23536,10 @@ static NSTimeInterval s_last_camera_launch_notify = 0;
             class_getInstanceMethod(volActions, @selector(volumeDecreasePressDownWithModifiers:))) {
             g_volHookAlive = YES;
         }
+        Class soundClsAtLoad = objc_getClass("SBSoundController");
+        if (soundClsAtLoad && class_getInstanceMethod(soundClsAtLoad, @selector(playSound:environments:completion:))) {
+            g_rcSoundControllerHookAlive = YES;
+        }
         SRLog(@"[Power] Hooks live at load: power=%d volume=%d", g_powerHookAlive, g_volHookAlive);
 
         CFNotificationCenterAddObserver(
@@ -23509,12 +23565,16 @@ static NSTimeInterval s_last_camera_launch_notify = 0;
             Class uiCls = objc_getClass("SBUIController");
             Class lsmCls = objc_getClass("SBLockScreenManager");
             Class blCls = objc_getClass("SBBacklightController");
-            SRLog(@"[PowerWake] Hooks present: possiblyWake=%d ACPowerChanged=%d unlockUI=%d turnOnScreen=%d (disableWakeOnPower=%d)",
+            Class soundCls = objc_getClass("SBSoundController");
+            SRLog(@"[PowerWake] Hooks present: possiblyWake=%d ACPowerChanged=%d unlockUI=%d turnOnScreen=%d playChime=%d soundCtrl=%d (disableWakeOnPower=%d disablePowerConnectedHaptics=%d)",
                   (uiCls && class_getInstanceMethod(uiCls, @selector(possiblyWakeForPowerStatusChangeWithUnlockSource:)) != NULL) ? 1 : 0,
                   (uiCls && class_getInstanceMethod(uiCls, @selector(ACPowerChanged)) != NULL) ? 1 : 0,
                   (lsmCls && class_getInstanceMethod(lsmCls, @selector(unlockUIFromSource:withOptions:)) != NULL) ? 1 : 0,
                   (blCls && class_getInstanceMethod(blCls, @selector(turnOnScreenFullyWithBacklightSource:)) != NULL) ? 1 : 0,
-                  g_rcDisableWakeOnPower ? 1 : 0);
+                  (uiCls && class_getInstanceMethod(uiCls, @selector(playChargingChimeIfAppropriate)) != NULL) ? 1 : 0,
+                  (soundCls && class_getInstanceMethod(soundCls, @selector(playSound:environments:completion:)) != NULL) ? 1 : 0,
+                  g_rcDisableWakeOnPower ? 1 : 0,
+                  g_rcDisablePowerConnectedHaptics ? 1 : 0);
             register_config_observer();
             register_simulation_observers();
             register_system_event_observers(); // WiFi/BT Triggers

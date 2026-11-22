@@ -59,8 +59,11 @@
 // Off by default.
 @property (nonatomic, assign) BOOL developerMode;
 // Prevent the display from waking when external power connects or disconnects while the
-// screen is off or dimmed. Off by default (Settings > Advanced Settings > Tweaks).
+// screen is off or dimmed. Off by default (Settings > Tweaks).
 @property (nonatomic, assign) BOOL disableWakeOnPower;
+// Stop iOS from playing the charging haptic/chime when external power connects.
+// Off by default (Settings > Tweaks).
+@property (nonatomic, assign) BOOL disablePowerConnectedHaptics;
 @property (nonatomic, assign) BOOL haEnabled;
 @property (nonatomic, copy) NSString *haUrl;
 @property (nonatomic, copy) NSString *haToken;

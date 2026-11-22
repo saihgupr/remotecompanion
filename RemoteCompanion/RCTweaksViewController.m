@@ -4,6 +4,7 @@
 @interface RCTweaksViewController ()
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) UISwitch *disableWakeOnPowerSwitch;
+@property (nonatomic, strong) UISwitch *disablePowerConnectedHapticsSwitch;
 @end
 
 typedef NS_ENUM(NSInteger, RCTweaksSection) {
@@ -111,13 +112,13 @@ typedef NS_ENUM(NSInteger, RCTweaksSection) {
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == RCTweaksSectionPower) {
-        return @"Keeps the screen off when power connects or disconnects while the display is off or dimmed. Battery status and charging triggers still update normally.";
+        return @"Disable Wake Screen On Power keeps the screen off when power connects or disconnects while the display is off or dimmed. Disable Power Connected Haptics stops the charging vibration and chime when power connects. Battery status and charging triggers still update normally.";
     }
     return nil;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    return 1;
+    return 2;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -143,6 +144,13 @@ typedef NS_ENUM(NSInteger, RCTweaksSection) {
         [self.disableWakeOnPowerSwitch addTarget:self action:@selector(disableWakeOnPowerChanged:) forControlEvents:UIControlEventValueChanged];
         cell.accessoryView = self.disableWakeOnPowerSwitch;
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
+    } else if (indexPath.section == RCTweaksSectionPower && indexPath.row == 1) {
+        cell.textLabel.text = @"Disable Power Connected Haptics";
+        self.disablePowerConnectedHapticsSwitch = [[UISwitch alloc] init];
+        self.disablePowerConnectedHapticsSwitch.on = cm.disablePowerConnectedHaptics;
+        [self.disablePowerConnectedHapticsSwitch addTarget:self action:@selector(disablePowerConnectedHapticsChanged:) forControlEvents:UIControlEventValueChanged];
+        cell.accessoryView = self.disablePowerConnectedHapticsSwitch;
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
     }
 
     return cell;
@@ -152,6 +160,10 @@ typedef NS_ENUM(NSInteger, RCTweaksSection) {
 
 - (void)disableWakeOnPowerChanged:(UISwitch *)sender {
     [RCConfigManager sharedManager].disableWakeOnPower = sender.on;
+}
+
+- (void)disablePowerConnectedHapticsChanged:(UISwitch *)sender {
+    [RCConfigManager sharedManager].disablePowerConnectedHaptics = sender.on;
 }
 
 @end

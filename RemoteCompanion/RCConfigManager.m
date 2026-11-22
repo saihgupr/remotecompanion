@@ -374,6 +374,12 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
             [self saveConfig];
         }
 
+        // Auto-add disablePowerConnectedHaptics (default to NO: iOS plays power-connected feedback as usual)
+        if (_config[@"disablePowerConnectedHaptics"] == nil) {
+            _config[@"disablePowerConnectedHaptics"] = @NO;
+            [self saveConfig];
+        }
+
     } else {
         // Default config: no triggers until one is added from the New Trigger screen
         NSLog(@"[RCConfigManager] Using default config");
@@ -386,6 +392,7 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
             @"onlyUnlockOutOfPocket": @NO,
             @"developerMode": @NO,
             @"disableWakeOnPower": @NO,
+            @"disablePowerConnectedHaptics": @NO,
             @"nfcEnabled": @YES,
             @"rootEnabled": @YES,
             @"sshHosts": [NSMutableArray array],
@@ -690,6 +697,15 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
 
 - (void)setDisableWakeOnPower:(BOOL)disableWakeOnPower {
     _config[@"disableWakeOnPower"] = @(disableWakeOnPower);
+    [self saveConfig];
+}
+
+- (BOOL)disablePowerConnectedHaptics {
+    return [_config[@"disablePowerConnectedHaptics"] boolValue];
+}
+
+- (void)setDisablePowerConnectedHaptics:(BOOL)disablePowerConnectedHaptics {
+    _config[@"disablePowerConnectedHaptics"] = @(disablePowerConnectedHaptics);
     [self saveConfig];
 }
 
