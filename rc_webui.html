@@ -11515,6 +11515,8 @@ function showBuiltInTriggerSheet() {
     if (group.title === 'Apple Watch' && !watchAvailable()) return;
     rows.push({ header: group.title });
     group.keys.forEach(key => {
+      // Bottom Swipe Down takes over Reachability's swipe, which phones with a Home button don't have
+      if (key.startsWith('trigger_bottom_swipe_down_') && typeof serverCapabilities !== 'undefined' && serverCapabilities.home_button === true) return;
       rows.push({ label: `${defaultNameForKey(key)}${triggerIsAdded(key) ? ' ✓' : ''}`, action: () => addBuiltInTrigger(key) });
     });
   });

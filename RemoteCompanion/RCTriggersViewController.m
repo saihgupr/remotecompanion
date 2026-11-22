@@ -1167,7 +1167,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     for (NSString *key in @[@"trigger_edge_left_swipe_up", @"trigger_edge_left_swipe_down", @"trigger_edge_right_swipe_up", @"trigger_edge_right_swipe_down"]) {
         addBuiltIn(key, @"Edge Gestures");
     }
-    for (NSString *key in @[@"trigger_bottombar_swipe_left", @"trigger_bottombar_swipe_right", @"trigger_bottom_swipe_up_left", @"trigger_bottom_swipe_up_center", @"trigger_bottom_swipe_up_right", @"trigger_bottom_swipe_down_left", @"trigger_bottom_swipe_down_center", @"trigger_bottom_swipe_down_right"]) {
+    for (NSString *key in [RCConfigManager bottomBarTriggerKeys]) {
         addBuiltIn(key, @"Bottom Bar Gestures");
     }
     for (NSString *key in [RCConfigManager multiFingerTriggerKeys]) {

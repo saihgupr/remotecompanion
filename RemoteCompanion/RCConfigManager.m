@@ -2738,6 +2738,14 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
 
 // iPhones with Face ID are the ones without a Home button. biometryType is set by
 // canEvaluatePolicy: whatever it returns, so this holds without Face ID set up too.
+// The Bottom Bar Gestures that can be added. Bottom Swipe Down takes over Reachability's swipe
+// down on the bottom edge, which phones with a Home button don't have.
++ (NSArray<NSString *> *)bottomBarTriggerKeys {
+    NSMutableArray *keys = [@[@"trigger_bottombar_swipe_left", @"trigger_bottombar_swipe_right", @"trigger_bottom_swipe_up_left", @"trigger_bottom_swipe_up_center", @"trigger_bottom_swipe_up_right"] mutableCopy];
+    if (![self hasHomeButton]) [keys addObjectsFromArray:@[@"trigger_bottom_swipe_down_left", @"trigger_bottom_swipe_down_center", @"trigger_bottom_swipe_down_right"]];
+    return keys;
+}
+
 + (BOOL)hasHomeButton {
     static BOOL hasHomeButton;
     static dispatch_once_t once;
