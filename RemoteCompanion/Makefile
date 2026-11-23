@@ -41,6 +41,7 @@ RemoteCompanion_FILES += RCSequenceEditedTriggerViewController.m
 
 # Reorganized Settings submenus
 RemoteCompanion_FILES += RCAdvancedSettingsViewController.m
+RemoteCompanion_FILES += RCTweaksViewController.m
 RemoteCompanion_FILES += RCFocusTriggerViewController.m
 RemoteCompanion_FILES += RCControlCenterTriggerViewController.m
 RemoteCompanion_FILES += RCSSHSettingsViewController.m
