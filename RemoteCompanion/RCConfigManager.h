@@ -64,6 +64,9 @@
 // Stop iOS from playing the charging haptic/chime when external power connects.
 // Off by default (Settings > Tweaks).
 @property (nonatomic, assign) BOOL disablePowerConnectedHaptics;
+// Turn off notification vibration while the device is unlocked (banners and sounds still work).
+// Off by default (Settings > Tweaks).
+@property (nonatomic, assign) BOOL disableUnlockedNotificationVibration;
 @property (nonatomic, assign) BOOL haEnabled;
 @property (nonatomic, copy) NSString *haUrl;
 @property (nonatomic, copy) NSString *haToken;

@@ -277,6 +277,7 @@ extern Boolean MRMediaRemoteSendCommandToApp(MRMediaRemoteCommand command, NSDic
 
 @interface SBLockScreenManager : NSObject
 + (instancetype)sharedInstance;
++ (instancetype)sharedInstanceIfExists;
 - (BOOL)attemptUnlockWithPasscode:(NSString *)passcode;
 - (BOOL)_attemptUnlockWithPasscode:(NSString *)passcode mesa:(BOOL)mesa finishUIUnlock:(BOOL)finishUI;
 - (void)lockUIFromSource:(int)source withOptions:(id)options;
@@ -638,6 +639,38 @@ static int RC_ProximityManagerState(void) {
 + (instancetype)sharedInstance;
 - (BOOL)playSoundWithDefaultEnvironment:(id)sound;
 - (BOOL)playSound:(id)sound environments:(long long)environments completion:(id)completion;
+@end
+
+@interface TLAlertConfiguration : NSObject <NSCopying>
+@property (nonatomic, readonly) long long type;
+@property (nonatomic, copy) NSString *toneIdentifier;
+@property (nonatomic, copy) NSString *vibrationIdentifier;
+@property (nonatomic, copy) NSDictionary *externalVibrationPattern;
+@property (nonatomic, copy) NSURL *externalVibrationPatternFileURL;
+@end
+
+@interface TLAlert : NSObject
++ (instancetype)alertWithConfiguration:(TLAlertConfiguration *)configuration;
+- (id)_initWithConfiguration:(id)configuration toneIdentifier:(id)toneIdentifier vibrationIdentifier:(id)vibrationIdentifier hasSynchronizedVibrationUnmatchedWithTone:(BOOL)unmatched;
+@property (nonatomic, readonly) TLAlertConfiguration *configuration;
+@property (nonatomic, readonly) long long type;
+@property (nonatomic, readonly) NSString *toneIdentifier;
+@property (nonatomic, readonly) NSString *vibrationIdentifier;
+@end
+
+@interface SBUISound : NSObject
+@property (nonatomic) long long soundType;
+@property (nonatomic) unsigned int systemSoundID;
+@property (nonatomic) unsigned long long soundBehavior;
+@property (nonatomic, copy) NSString *songPath;
+@property (nonatomic, retain) TLAlert *toneAlert;
+@property (nonatomic, retain) NSDictionary *vibrationPattern;
+@end
+
+@interface SBNCSoundController : NSObject
+- (void)playSoundForNotificationRequest:(id)request presentingDestination:(id)destination;
+- (void)playSoundIfPossibleForNotificationRequest:(id)request presentingDestination:(id)destination;
+- (BOOL)_preventVibrations;
 @end
 
 @interface UISUserInterfaceStyleMode : NSObject
@@ -2109,11 +2142,13 @@ static NSObject *rc_trigger_config_lock(void) {
 static volatile uint32_t g_twoFingerConfiguredMask = 0;
 static volatile BOOL g_rcDisableWakeOnPower = NO;
 static volatile BOOL g_rcDisablePowerConnectedHaptics = NO;
+static volatile BOOL g_rcDisableUnlockedNotificationVibration = NO;
 static BOOL g_rcSoundControllerHookAlive = NO;
 static __thread int g_rcPowerChangeWakeGuardDepth = 0;
 static __thread int g_rcPowerChangeLogDepth = 0;
 static __thread int g_rcPowerChimeSuppressDepth = 0;
 static __thread int g_rcPowerChimeLogDepth = 0;
+static __thread int g_rcNotifVibeSuppressDepth = 0;
 
 static BOOL rc_screen_is_off_or_dim(void) {
     Class blClass = objc_getClass("SBBacklightController");
@@ -2161,6 +2196,7 @@ static void rc_set_trigger_config(NSDictionary *config) {
         g_twoFingerConfiguredMask = rc_two_finger_mask_for_config(config);
         g_rcDisableWakeOnPower = [config isKindOfClass:[NSDictionary class]] && [config[@"disableWakeOnPower"] boolValue];
         g_rcDisablePowerConnectedHaptics = [config isKindOfClass:[NSDictionary class]] && [config[@"disablePowerConnectedHaptics"] boolValue];
+        g_rcDisableUnlockedNotificationVibration = [config isKindOfClass:[NSDictionary class]] && [config[@"disableUnlockedNotificationVibration"] boolValue];
     }
     if (old) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(10 * NSEC_PER_SEC)), dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
@@ -19738,6 +19774,185 @@ static void setup_background_hid_listener() {
 
 %end
 
+static NSString *rc_tl_vibration_identifier_none(void) {
+    static NSString *noneID = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSString * __unsafe_unretained *sym = (NSString * __unsafe_unretained *)dlsym(RTLD_DEFAULT, "TLVibrationIdentifierNone");
+        if (!sym) {
+            void *handle = dlopen("/System/Library/PrivateFrameworks/ToneLibrary.framework/ToneLibrary", RTLD_LAZY);
+            if (handle) {
+                sym = (NSString * __unsafe_unretained *)dlsym(handle, "TLVibrationIdentifierNone");
+            }
+        }
+        if (sym && [*sym isKindOfClass:[NSString class]] && [*sym length] > 0) {
+            noneID = [*sym copy];
+        } else {
+            noneID = @"<none>";
+        }
+    });
+    return noneID;
+}
+
+static BOOL rc_tl_alert_type_keeps_vibration(long long type) {
+    // Keep vibration for incoming calls (1), alarms (13), timers (14), emergency (18), SOS (22).
+    return type == 1 || type == 13 || type == 14 || type == 18 || type == 22;
+}
+
+static BOOL rc_notif_request_keeps_vibration(id request) {
+    if (!request) return YES;
+    @try {
+        SEL criticalSel = NSSelectorFromString(@"isCriticalAlert");
+        if ([request respondsToSelector:criticalSel] && ((BOOL (*)(id, SEL))objc_msgSend)(request, criticalSel)) {
+            return YES;
+        }
+        SEL levelSel = NSSelectorFromString(@"interruptionLevel");
+        if ([request respondsToSelector:levelSel]) {
+            NSUInteger level = ((NSUInteger (*)(id, SEL))objc_msgSend)(request, levelSel);
+            if (level == 3) return YES;
+        }
+        SEL soundSel = NSSelectorFromString(@"sound");
+        id sound = [request respondsToSelector:soundSel] ? ((id (*)(id, SEL))objc_msgSend)(request, soundSel) : nil;
+        SEL alertCfgSel = NSSelectorFromString(@"alertConfiguration");
+        id alertCfg = (sound && [sound respondsToSelector:alertCfgSel]) ? ((id (*)(id, SEL))objc_msgSend)(sound, alertCfgSel) : nil;
+        if (alertCfg && [alertCfg respondsToSelector:@selector(type)]) {
+            if (rc_tl_alert_type_keeps_vibration([(TLAlertConfiguration *)alertCfg type])) {
+                return YES;
+            }
+        }
+    } @catch (NSException *e) {}
+    return NO;
+}
+
+static id rc_tl_configuration_without_vibration(id configuration) {
+    if (!configuration) return nil;
+    @try {
+        if ([configuration respondsToSelector:@selector(type)] &&
+            rc_tl_alert_type_keeps_vibration([(TLAlertConfiguration *)configuration type])) {
+            return configuration;
+        }
+        NSString *noneID = rc_tl_vibration_identifier_none();
+        NSString *curVib = [configuration respondsToSelector:@selector(vibrationIdentifier)]
+            ? [(TLAlertConfiguration *)configuration vibrationIdentifier] : nil;
+        NSDictionary *curExtPat = [configuration respondsToSelector:@selector(externalVibrationPattern)]
+            ? [(TLAlertConfiguration *)configuration externalVibrationPattern] : nil;
+        NSURL *curExtURL = [configuration respondsToSelector:@selector(externalVibrationPatternFileURL)]
+            ? [(TLAlertConfiguration *)configuration externalVibrationPatternFileURL] : nil;
+        if ([curVib isEqualToString:noneID] && !curExtPat && !curExtURL) {
+            return configuration;
+        }
+        id cfg = [configuration copy];
+        if (!cfg) return configuration;
+        if ([cfg respondsToSelector:@selector(setVibrationIdentifier:)]) {
+            [(TLAlertConfiguration *)cfg setVibrationIdentifier:noneID];
+        }
+        if ([cfg respondsToSelector:@selector(setExternalVibrationPattern:)]) {
+            [(TLAlertConfiguration *)cfg setExternalVibrationPattern:nil];
+        }
+        if ([cfg respondsToSelector:@selector(setExternalVibrationPatternFileURL:)]) {
+            [(TLAlertConfiguration *)cfg setExternalVibrationPatternFileURL:nil];
+        }
+        return cfg;
+    } @catch (NSException *e) {
+        return configuration;
+    }
+}
+
+static BOOL rc_device_unlocked_for_notification_vibration(void) {
+    Class lsmCls = objc_getClass("SBLockScreenManager");
+    if (!lsmCls) return NO;
+    SBLockScreenManager *lsm = [lsmCls respondsToSelector:@selector(sharedInstanceIfExists)]
+        ? [lsmCls sharedInstanceIfExists]
+        : [lsmCls sharedInstance];
+    if (!lsm || ![lsm respondsToSelector:@selector(isUILocked)]) return NO;
+    BOOL locked = g_lockStateInitialized ? rc_device_locked(lsm) : [lsm isUILocked];
+    if (locked) return NO;
+    Class blCls = objc_getClass("SBBacklightController");
+    SBBacklightController *bl = nil;
+    if (blCls) {
+        bl = [blCls respondsToSelector:@selector(sharedInstanceIfExists)]
+            ? [blCls sharedInstanceIfExists]
+            : [blCls sharedInstance];
+    }
+    if (bl && [bl respondsToSelector:@selector(screenIsOn)] && ![bl screenIsOn]) {
+        return NO;
+    }
+    return YES;
+}
+
+%hook SBNCSoundController
+
+- (void)playSoundIfPossibleForNotificationRequest:(id)request presentingDestination:(id)destination {
+    BOOL shouldSuppress = g_rcDisableUnlockedNotificationVibration &&
+        rc_device_unlocked_for_notification_vibration() &&
+        !rc_notif_request_keeps_vibration(request);
+    if (shouldSuppress) g_rcNotifVibeSuppressDepth++;
+    @try {
+        %orig;
+    } @finally {
+        if (shouldSuppress) g_rcNotifVibeSuppressDepth--;
+    }
+}
+
+- (void)playSoundForNotificationRequest:(id)request presentingDestination:(id)destination {
+    BOOL shouldSuppress = g_rcDisableUnlockedNotificationVibration &&
+        rc_device_unlocked_for_notification_vibration() &&
+        !rc_notif_request_keeps_vibration(request);
+    if (shouldSuppress) {
+        NSString *sectionID = [request respondsToSelector:@selector(sectionIdentifier)] ? [request sectionIdentifier] : nil;
+        SRLog(@"[NotifVib] Suppressing unlocked notification vibration for %@", sectionID ?: @"(unknown)");
+        g_rcNotifVibeSuppressDepth++;
+    }
+    @try {
+        %orig;
+    } @finally {
+        if (shouldSuppress) g_rcNotifVibeSuppressDepth--;
+    }
+}
+
+- (BOOL)_preventVibrations {
+    if (g_rcNotifVibeSuppressDepth > 0) {
+        return YES;
+    }
+    return %orig;
+}
+
+%end
+
+%hook TLAlert
+
++ (id)alertWithConfiguration:(id)configuration {
+    if (g_rcNotifVibeSuppressDepth > 0 && configuration) {
+        id quietCfg = rc_tl_configuration_without_vibration(configuration);
+        id alert = %orig(quietCfg);
+        if (alert) {
+            SRLog(@"[NotifVib] TLAlert +alertWithConfiguration -> %@", alert);
+        }
+        return alert;
+    }
+    return %orig;
+}
+
+- (id)_initWithConfiguration:(id)configuration toneIdentifier:(id)toneIdentifier vibrationIdentifier:(id)vibrationIdentifier hasSynchronizedVibrationUnmatchedWithTone:(BOOL)unmatched {
+    if (g_rcNotifVibeSuppressDepth > 0) {
+        BOOL keepVib = [configuration respondsToSelector:@selector(type)] &&
+            rc_tl_alert_type_keeps_vibration([(TLAlertConfiguration *)configuration type]);
+        if (!keepVib) {
+            id quietCfg = configuration ? rc_tl_configuration_without_vibration(configuration) : nil;
+            if (quietCfg && quietCfg != configuration) {
+                SEL freezeSel = NSSelectorFromString(@"_freeze");
+                if ([quietCfg respondsToSelector:freezeSel]) {
+                    ((void (*)(id, SEL))objc_msgSend)(quietCfg, freezeSel);
+                }
+            }
+            return %orig(quietCfg, toneIdentifier, rc_tl_vibration_identifier_none(), NO);
+        }
+    }
+    return %orig;
+}
+
+%end
+
 %hook SBSoundController
 
 - (BOOL)playSound:(id)sound environments:(long long)environments completion:(id)completion {
@@ -19747,6 +19962,42 @@ static void setup_background_hid_listener() {
     }
     if (g_rcPowerChimeLogDepth > 0) {
         SRLog(@"[PowerHaptics] Observed -[SBSoundController playSound:%@ environments:%lld] during charging chime", sound, environments);
+    }
+    if (g_rcNotifVibeSuppressDepth > 0 && sound) {
+        @try {
+            long long soundType = [sound respondsToSelector:@selector(soundType)] ? [(SBUISound *)sound soundType] : -1;
+            if (soundType == 3) {
+                TLAlert *toneAlert = [sound respondsToSelector:@selector(toneAlert)] ? [(SBUISound *)sound toneAlert] : nil;
+                TLAlertConfiguration *cfg = [toneAlert respondsToSelector:@selector(configuration)] ? [toneAlert configuration] : nil;
+                long long alertType = [cfg respondsToSelector:@selector(type)] ? [cfg type] : ([toneAlert respondsToSelector:@selector(type)] ? [toneAlert type] : 0);
+                NSString *noneID = rc_tl_vibration_identifier_none();
+                NSString *vibID = [toneAlert respondsToSelector:@selector(vibrationIdentifier)] ? [toneAlert vibrationIdentifier] : nil;
+                if (!rc_tl_alert_type_keeps_vibration(alertType) && ![vibID isEqualToString:noneID] && cfg) {
+                    Class tlAlertCls = objc_getClass("TLAlert");
+                    TLAlert *quietAlert = tlAlertCls ? [tlAlertCls alertWithConfiguration:rc_tl_configuration_without_vibration(cfg)] : nil;
+                    if (quietAlert && [sound respondsToSelector:@selector(setToneAlert:)]) {
+                        [(SBUISound *)sound setToneAlert:quietAlert];
+                        SRLog(@"[NotifVib] SBSoundController replaced ToneAlert with quiet vibration alert: %@", quietAlert);
+                    }
+                } else {
+                    SRLog(@"[NotifVib] SBSoundController playing ToneAlert: %@", toneAlert);
+                }
+            } else if (soundType == 0) {
+                unsigned int sysSoundID = [sound respondsToSelector:@selector(systemSoundID)] ? [(SBUISound *)sound systemSoundID] : 0;
+                NSString *songPath = [sound respondsToSelector:@selector(songPath)] ? [(SBUISound *)sound songPath] : nil;
+                if (sysSoundID == kSystemSoundID_Vibrate && songPath.length == 0) {
+                    SRLog(@"[NotifVib] Suppressed vibration-only SBUISound");
+                    return NO;
+                }
+                if ([sound respondsToSelector:@selector(setVibrationPattern:)]) {
+                    [(SBUISound *)sound setVibrationPattern:@{ @"VibePattern": @[ @NO, @0 ], @"Intensity": @0 }];
+                    SRLog(@"[NotifVib] Cleared vibrationPattern on SystemSound SBUISound");
+                }
+            } else if (soundType == 4) {
+                SRLog(@"[NotifVib] Suppressed Feedback SBUISound");
+                return NO;
+            }
+        } @catch (NSException *e) {}
     }
     return %orig;
 }
@@ -23575,6 +23826,17 @@ static NSTimeInterval s_last_camera_launch_notify = 0;
                   (soundCls && class_getInstanceMethod(soundCls, @selector(playSound:environments:completion:)) != NULL) ? 1 : 0,
                   g_rcDisableWakeOnPower ? 1 : 0,
                   g_rcDisablePowerConnectedHaptics ? 1 : 0);
+            Class ncSoundCls = objc_getClass("SBNCSoundController");
+            Class tlAlertCls = objc_getClass("TLAlert");
+            SRLog(@"[NotifVib] Hooks present: playIfPossible=%d playSound=%d preventVib=%d soundCtrl=%d tlAlertCfg=%d tlAlertInit=%d vibNone=%@ (disableUnlockedNotificationVibration=%d)",
+                  (ncSoundCls && class_getInstanceMethod(ncSoundCls, @selector(playSoundIfPossibleForNotificationRequest:presentingDestination:)) != NULL) ? 1 : 0,
+                  (ncSoundCls && class_getInstanceMethod(ncSoundCls, @selector(playSoundForNotificationRequest:presentingDestination:)) != NULL) ? 1 : 0,
+                  (ncSoundCls && class_getInstanceMethod(ncSoundCls, @selector(_preventVibrations)) != NULL) ? 1 : 0,
+                  (soundCls && class_getInstanceMethod(soundCls, @selector(playSound:environments:completion:)) != NULL) ? 1 : 0,
+                  (tlAlertCls && class_getClassMethod(tlAlertCls, @selector(alertWithConfiguration:)) != NULL) ? 1 : 0,
+                  (tlAlertCls && class_getInstanceMethod(tlAlertCls, @selector(_initWithConfiguration:toneIdentifier:vibrationIdentifier:hasSynchronizedVibrationUnmatchedWithTone:)) != NULL) ? 1 : 0,
+                  rc_tl_vibration_identifier_none(),
+                  g_rcDisableUnlockedNotificationVibration ? 1 : 0);
             register_config_observer();
             register_simulation_observers();
             register_system_event_observers(); // WiFi/BT Triggers

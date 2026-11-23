@@ -380,6 +380,12 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
             [self saveConfig];
         }
 
+        // Auto-add disableUnlockedNotificationVibration (default to NO: iOS vibrates for notifications as usual)
+        if (_config[@"disableUnlockedNotificationVibration"] == nil) {
+            _config[@"disableUnlockedNotificationVibration"] = @NO;
+            [self saveConfig];
+        }
+
     } else {
         // Default config: no triggers until one is added from the New Trigger screen
         NSLog(@"[RCConfigManager] Using default config");
@@ -393,6 +399,7 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
             @"developerMode": @NO,
             @"disableWakeOnPower": @NO,
             @"disablePowerConnectedHaptics": @NO,
+            @"disableUnlockedNotificationVibration": @NO,
             @"nfcEnabled": @YES,
             @"rootEnabled": @YES,
             @"sshHosts": [NSMutableArray array],
@@ -706,6 +713,15 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
 
 - (void)setDisablePowerConnectedHaptics:(BOOL)disablePowerConnectedHaptics {
     _config[@"disablePowerConnectedHaptics"] = @(disablePowerConnectedHaptics);
+    [self saveConfig];
+}
+
+- (BOOL)disableUnlockedNotificationVibration {
+    return [_config[@"disableUnlockedNotificationVibration"] boolValue];
+}
+
+- (void)setDisableUnlockedNotificationVibration:(BOOL)disableUnlockedNotificationVibration {
+    _config[@"disableUnlockedNotificationVibration"] = @(disableUnlockedNotificationVibration);
     [self saveConfig];
 }
 
