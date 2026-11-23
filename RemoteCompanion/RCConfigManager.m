@@ -653,6 +653,18 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
     [self saveConfig];
 }
 
+- (double)swipeSettingForKey:(NSString *)key defaultValue:(double)defaultValue {
+    id value = _config[key];
+    double number = [value isKindOfClass:[NSNumber class]] ? [value doubleValue] : 0;
+    return (number >= 5 && number <= 400) ? number : defaultValue;
+}
+
+- (void)setSwipeSetting:(double)value forKey:(NSString *)key defaultValue:(double)defaultValue {
+    if (fabs(value - defaultValue) < 0.5) [_config removeObjectForKey:key];
+    else _config[key] = @(value);
+    [self saveConfig];
+}
+
 - (double)volumeSequenceWindow {
     id value = _config[@"volumeSequenceWindow"];
     double window = [value isKindOfClass:[NSNumber class]] ? [value doubleValue] : 0.38;

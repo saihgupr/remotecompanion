@@ -21,6 +21,11 @@
 // The tweak's log: @"off", @"minimal" (the default: triggers, actions, conditions, errors)
 // or @"full" (every step, for chasing a bug)
 @property (nonatomic, copy) NSString *logLevel;
+// Swipe Triggers: a distance in points (how far a kind of swipe trigger needs a swipe to go, or
+// how close to the side a side-edge swipe has to start) under its config key. Setting the default
+// removes the key, so the tweak keeps its own default.
+- (double)swipeSettingForKey:(NSString *)key defaultValue:(double)defaultValue;
+- (void)setSwipeSetting:(double)value forKey:(NSString *)key defaultValue:(double)defaultValue;
 // Seconds after a volume press within which the other volume button completes an Up then Down
 // (or Down then Up) sequence: 0.15 to 0.8, default 0.38
 @property (nonatomic, assign) double volumeSequenceWindow;
