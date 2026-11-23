@@ -10,8 +10,10 @@
 @end
 
 typedef NS_ENUM(NSInteger, RCTweaksSection) {
-    RCTweaksSectionPower,
-    RCTweaksSectionNotifications,
+    RCTweaksSectionWakeOnPower,
+    RCTweaksSectionPowerHaptics,
+    RCTweaksSectionUnlockedVibration,
+    RCTweaksSectionWatchWhenUnlocked,
     RCTweaksSectionCount,
 };
 
@@ -99,8 +101,8 @@ typedef NS_ENUM(NSInteger, RCTweaksSection) {
 
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
     NSString *title = @"";
-    if (section == RCTweaksSectionPower) title = @"Power";
-    else if (section == RCTweaksSectionNotifications) title = @"Notifications";
+    if (section == RCTweaksSectionWakeOnPower) title = @"Power";
+    else if (section == RCTweaksSectionUnlockedVibration) title = @"Notifications";
 
     UIView *headerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, tableView.bounds.size.width, 40)];
     UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(20, 15, tableView.bounds.size.width - 40, 20)];
@@ -112,22 +114,26 @@ typedef NS_ENUM(NSInteger, RCTweaksSection) {
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section {
-    return 40.0f;
+    // The second switch in a group continues it without another header
+    return (section == RCTweaksSectionPowerHaptics || section == RCTweaksSectionWatchWhenUnlocked) ? 12.0f : 40.0f;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    if (section == RCTweaksSectionPower) {
-        return @"Disable Wake Screen On Power keeps the screen off when power connects or disconnects while the display is off or dimmed. Disable Power Connected Haptics stops the charging vibration and chime when power connects. Battery status and charging triggers still update normally.";
-    } else if (section == RCTweaksSectionNotifications) {
-        return @"Disable Vibration When Unlocked turns off notification vibration while the phone is unlocked (banners, sounds, alarms, timers, calls, and critical alerts still work normally). Send to Watch When Unlocked forwards notifications to your Apple Watch even while the iPhone is unlocked, respecting each app's Watch notification settings.";
+    // One description per switch, under its own row like the section footers above
+    if (section == RCTweaksSectionWakeOnPower) {
+        return @"Disable Wake Screen On Power keeps the screen off when power connects or disconnects while the display is off or dimmed.";
+    } else if (section == RCTweaksSectionPowerHaptics) {
+        return @"Disable Power Connected Haptics stops the charging vibration and chime when power connects. Battery status and charging triggers still update normally either way.";
+    } else if (section == RCTweaksSectionUnlockedVibration) {
+        return @"Disable Vibration When Unlocked turns off notification vibration while the phone is unlocked (banners, sounds, alarms, timers, calls, and critical alerts still work normally).";
+    } else if (section == RCTweaksSectionWatchWhenUnlocked) {
+        return @"Send to Watch When Unlocked forwards notifications to your Apple Watch even while the iPhone is unlocked, respecting each app's Watch notification settings.";
     }
     return nil;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    if (section == RCTweaksSectionPower) return 2;
-    if (section == RCTweaksSectionNotifications) return 2;
-    return 0;
+    return 1;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -146,28 +152,28 @@ typedef NS_ENUM(NSInteger, RCTweaksSection) {
     cell.layer.masksToBounds = YES;
     cell.textLabel.textColor = [UIColor labelColor];
 
-    if (indexPath.section == RCTweaksSectionPower && indexPath.row == 0) {
+    if (indexPath.section == RCTweaksSectionWakeOnPower) {
         cell.textLabel.text = @"Disable Wake Screen On Power";
         self.disableWakeOnPowerSwitch = [[UISwitch alloc] init];
         self.disableWakeOnPowerSwitch.on = cm.disableWakeOnPower;
         [self.disableWakeOnPowerSwitch addTarget:self action:@selector(disableWakeOnPowerChanged:) forControlEvents:UIControlEventValueChanged];
         cell.accessoryView = self.disableWakeOnPowerSwitch;
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
-    } else if (indexPath.section == RCTweaksSectionPower && indexPath.row == 1) {
+    } else if (indexPath.section == RCTweaksSectionPowerHaptics) {
         cell.textLabel.text = @"Disable Power Connected Haptics";
         self.disablePowerConnectedHapticsSwitch = [[UISwitch alloc] init];
         self.disablePowerConnectedHapticsSwitch.on = cm.disablePowerConnectedHaptics;
         [self.disablePowerConnectedHapticsSwitch addTarget:self action:@selector(disablePowerConnectedHapticsChanged:) forControlEvents:UIControlEventValueChanged];
         cell.accessoryView = self.disablePowerConnectedHapticsSwitch;
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
-    } else if (indexPath.section == RCTweaksSectionNotifications && indexPath.row == 0) {
+    } else if (indexPath.section == RCTweaksSectionUnlockedVibration) {
         cell.textLabel.text = @"Disable Vibration When Unlocked";
         self.disableUnlockedNotificationVibrationSwitch = [[UISwitch alloc] init];
         self.disableUnlockedNotificationVibrationSwitch.on = cm.disableUnlockedNotificationVibration;
         [self.disableUnlockedNotificationVibrationSwitch addTarget:self action:@selector(disableUnlockedNotificationVibrationChanged:) forControlEvents:UIControlEventValueChanged];
         cell.accessoryView = self.disableUnlockedNotificationVibrationSwitch;
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
-    } else if (indexPath.section == RCTweaksSectionNotifications && indexPath.row == 1) {
+    } else if (indexPath.section == RCTweaksSectionWatchWhenUnlocked) {
         cell.textLabel.text = @"Send to Watch When Unlocked";
         self.sendNotificationsToWatchWhenUnlockedSwitch = [[UISwitch alloc] init];
         self.sendNotificationsToWatchWhenUnlockedSwitch.on = cm.sendNotificationsToWatchWhenUnlocked;
