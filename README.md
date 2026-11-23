@@ -124,6 +124,7 @@ Access the desktop-class automation hub at `http://[DEVICE_IP]:8080` from any co
 - `rc screenrecord [toggle|start|stop|status]` - Native SpringBoard screen recording control.
 - `rc snapper [open|freeze|instant|close]` - Direct Snapper 2 / Snapper 3 overlay trigger.
 - `rc control-center` - Opens the system Control Center.
+- `rc notification-center` - Opens Notification Center, or closes it when it is open.
 - `rc switcher` - Opens/toggles the App Switcher.
 - `rc previous app` / `rc last app` - Returns to the previously active application.
 - `rc vibration [silent-toggle|ring-toggle]` - System "Vibrate on Silent/Ring" settings.

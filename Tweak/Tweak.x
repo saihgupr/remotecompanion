@@ -11583,6 +11583,7 @@ static NSArray *RCCommandHelpSections(void) {
             @[@"switcher", @"Open the App Switcher"],
             @[@"previous app", @"Switch to the previous app"],
             @[@"control-center", @"Open Control Center"],
+            @[@"notification-center", @"Open Notification Center"],
             @[@"url <url>", @"Open a link"],
             @[@"nav <panel>", @"triggers, settings, ha, km, mqtt, add"],
             @[@"type \"Text\"", @"Type text"],
@@ -13048,6 +13049,40 @@ static NSString *handle_command(NSString *cmd) {
             dispatch_sync(dispatch_get_main_queue(), ccBlock);
         }
         return opened ? @"Control Center opened\n" : @"Failed to open Control Center\n";
+    } else if ([cleanCmd isEqualToString:@"open notification center"] ||
+               [cleanCmd isEqualToString:@"notification center"] ||
+               [cleanCmd isEqualToString:@"open-notification-center"] ||
+               [cleanCmd isEqualToString:@"notification-center"]) {
+        // Notification Center is the cover sheet pulled down over the unlocked phone: show it, or
+        // put it away when it is already showing. While the phone is locked the cover sheet is the
+        // lock screen, and putting it away would start an unlock, so nothing happens then.
+        __block NSString *result = nil;
+        void (^ncBlock)(void) = ^{
+            SBLockScreenManager *lockScreen = [objc_getClass("SBLockScreenManager") sharedInstance];
+            if ([lockScreen respondsToSelector:@selector(isUILocked)] && rc_device_locked(lockScreen)) {
+                result = @"Notification Center not opened: the phone is locked\n";
+                return;
+            }
+            Class coverSheetClass = objc_getClass("SBCoverSheetPresentationManager");
+            id coverSheet = [coverSheetClass respondsToSelector:@selector(sharedInstance)] ? [coverSheetClass performSelector:@selector(sharedInstance)] : nil;
+            SEL setPresented = @selector(setCoverSheetPresented:animated:withCompletion:);
+            if (![coverSheet respondsToSelector:setPresented]) {
+                SRLog(@"Notification Center: cover sheet manager unavailable");
+                result = @"Failed to open Notification Center\n";
+                return;
+            }
+            BOOL visible = [coverSheet respondsToSelector:@selector(isVisible)] && ((BOOL (*)(id, SEL))objc_msgSend)(coverSheet, @selector(isVisible));
+            // Control Center sits above the cover sheet; put it away first so Notification Center shows
+            id controlCenter = visible ? nil : rc_control_center_presenter();
+            if ([controlCenter respondsToSelector:@selector(isVisible)] && [controlCenter isVisible] && [controlCenter respondsToSelector:@selector(dismissAnimated:)]) {
+                [controlCenter dismissAnimated:NO];
+            }
+            ((void (*)(id, SEL, BOOL, BOOL, id))objc_msgSend)(coverSheet, setPresented, !visible, YES, nil);
+            result = visible ? @"Notification Center closed\n" : @"Notification Center opened\n";
+        };
+        if ([NSThread isMainThread]) ncBlock();
+        else dispatch_sync(dispatch_get_main_queue(), ncBlock);
+        return result;
     } else if ([cleanCmd isEqualToString:@"previous app"] || [cleanCmd isEqualToString:@"last app"]) {
         if (g_previousAppBundleId) {
             SRLog(@"[RemoteCommand] Returning to previous app: %@", g_previousAppBundleId);
@@ -16934,6 +16969,7 @@ static void start_web_server() {
                                     @{@"command": @"snapper [open|freeze|instant|close]", @"desc": @"Integrations: Control Snapper 2 / Snapper 3"},
                                     @{@"command": @"camera video [zoom] [flash]", @"desc": @"Camera: Open Camera in Video mode (e.g. 2x, 2x flash)"},
                                     @{@"command": @"open control center", @"desc": @"System: Open Control Center"},
+                                    @{@"command": @"open notification center", @"desc": @"System: Open Notification Center"},
                                     @{@"command": @"app switcher", @"desc": @"System: Open App Switcher"},
                                     @{@"command": @"accessibility shortcut", @"desc": @"System: Run the Accessibility Shortcut"},
                                     @{@"command": @"open <bundleId>", @"desc": @"System: Launch an application by bundle identifier"},

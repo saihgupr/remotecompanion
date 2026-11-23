@@ -63,6 +63,7 @@ A sequence is a **JSON array** of actions. Each action is either:
 | `previous app` | Switch to previous app |
 | `kill current` | Force-close the currently focused app |
 | `open control center` | Open Control Center |
+| `open notification center` | Open Notification Center |
 | `screenshot` | Take a screenshot |
 | `camera photo 0.5x` | Open Camera in Photo mode (0.5x ultra-wide lens) |
 | `camera photo 2x` | Open Camera in Photo mode (2x telephoto zoom) |
