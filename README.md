@@ -150,6 +150,7 @@ The switches in Settings > Advanced Settings > Tweaks, also on the Web UI's Twea
 ### Connectivity
 - `rc wifi [on|off|toggle]` / `rc cellular [on|off|toggle]` / `rc bluetooth [on|off|toggle]` / `rc location [on|off|toggle]`
 - `rc bluetooth [connect|disconnect] <name>` - Manage paired devices.
+- `rc bluetooth list` - List the names of paired Bluetooth devices.
 - `rc airplay list` - See speakers and their UIDs.
 - `rc airplay connect <name|UID>` - Stream audio to an AirPlay receiver.
 - `rc airplay disconnect` - Stop AirPlay streaming.
