@@ -2461,7 +2461,16 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
                 result = [NSString stringWithFormat:@"Kill %@", bundleId];
             }
         } else {
-            result = cmd;
+            // A switch command the list has no fixed name for, such as "ringer toggle": name it
+            // the way the action editor and the Web UI do, "Silent Mode Toggle"
+            NSDictionary *toggle = [self toggleInfoForCommand:originalCmd];
+            NSString *toggleName = toggle[@"name"];
+            if (toggleName.length) {
+                NSString *value = toggle[@"currentDisplaySuffix"];
+                result = value.length ? [NSString stringWithFormat:@"%@ %@", toggleName, value] : toggleName;
+            } else {
+                result = originalCmd;
+            }
         }
     }
     
