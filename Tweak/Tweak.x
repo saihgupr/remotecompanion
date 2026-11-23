@@ -2143,6 +2143,8 @@ static volatile uint32_t g_twoFingerConfiguredMask = 0;
 static volatile BOOL g_rcDisableWakeOnPower = NO;
 static volatile BOOL g_rcDisablePowerConnectedHaptics = NO;
 static volatile BOOL g_rcDisableUnlockedNotificationVibration = NO;
+static volatile BOOL g_rcSendNotificationsToWatchWhenUnlocked = NO;
+#define kRCWatchNotifyUnlocked "com.pizzaman.rc.watch_notify_unlocked" // state 1: forward all notifications to Watch even while iPhone is unlocked
 static BOOL g_rcSoundControllerHookAlive = NO;
 static __thread int g_rcPowerChangeWakeGuardDepth = 0;
 static __thread int g_rcPowerChangeLogDepth = 0;
@@ -2188,8 +2190,23 @@ static uint32_t rc_two_finger_mask_for_config(NSDictionary *config) {
     return mask;
 }
 
+static void rc_sync_watch_notify_unlocked_state(BOOL enabled) {
+    static int token = NOTIFY_TOKEN_INVALID;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        int t = NOTIFY_TOKEN_INVALID;
+        if (notify_register_check(kRCWatchNotifyUnlocked, &t) == NOTIFY_STATUS_OK) {
+            token = t;
+        }
+    });
+    if (token != NOTIFY_TOKEN_INVALID) {
+        notify_set_state(token, enabled ? 1 : 0);
+    }
+}
+
 static void rc_set_trigger_config(NSDictionary *config) {
     NSDictionary *old;
+    BOOL watchNotifyUnlocked = NO;
     @synchronized (rc_trigger_config_lock()) {
         old = g_triggerConfig;
         g_triggerConfig = config;
@@ -2197,7 +2214,10 @@ static void rc_set_trigger_config(NSDictionary *config) {
         g_rcDisableWakeOnPower = [config isKindOfClass:[NSDictionary class]] && [config[@"disableWakeOnPower"] boolValue];
         g_rcDisablePowerConnectedHaptics = [config isKindOfClass:[NSDictionary class]] && [config[@"disablePowerConnectedHaptics"] boolValue];
         g_rcDisableUnlockedNotificationVibration = [config isKindOfClass:[NSDictionary class]] && [config[@"disableUnlockedNotificationVibration"] boolValue];
+        watchNotifyUnlocked = [config isKindOfClass:[NSDictionary class]] && [config[@"sendNotificationsToWatchWhenUnlocked"] boolValue];
+        g_rcSendNotificationsToWatchWhenUnlocked = watchNotifyUnlocked;
     }
+    rc_sync_watch_notify_unlocked_state(watchNotifyUnlocked);
     if (old) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(10 * NSEC_PER_SEC)), dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
             (void)old;
@@ -23837,6 +23857,7 @@ static NSTimeInterval s_last_camera_launch_notify = 0;
                   (tlAlertCls && class_getInstanceMethod(tlAlertCls, @selector(_initWithConfiguration:toneIdentifier:vibrationIdentifier:hasSynchronizedVibrationUnmatchedWithTone:)) != NULL) ? 1 : 0,
                   rc_tl_vibration_identifier_none(),
                   g_rcDisableUnlockedNotificationVibration ? 1 : 0);
+            SRLog(@"[WatchNotify] sendNotificationsToWatchWhenUnlocked=%d", g_rcSendNotificationsToWatchWhenUnlocked ? 1 : 0);
             register_config_observer();
             register_simulation_observers();
             register_system_event_observers(); // WiFi/BT Triggers

@@ -3216,8 +3216,14 @@
           <input type="checkbox" class="ios-toggle" id="setting-disable-unlocked-notif-vibration" onchange="config.disableUnlockedNotificationVibration=this.checked;saveConfig()">
         </div>
       </div>
+      <div class="settings-row">
+        <span class="settings-label">Send to Watch When Unlocked</span>
+        <div class="settings-btn">
+          <input type="checkbox" class="ios-toggle" id="setting-send-watch-when-unlocked" onchange="config.sendNotificationsToWatchWhenUnlocked=this.checked;saveConfig()">
+        </div>
+      </div>
     </div>
-    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 32px 0">Turns off notification vibration while the phone is unlocked. Banners and notification sounds still play normally, and alarms, timers, calls, and critical alerts still vibrate.</div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 32px 0">Disable Vibration When Unlocked turns off notification vibration while the phone is unlocked (banners, sounds, alarms, timers, calls, and critical alerts still work normally). Send to Watch When Unlocked forwards notifications to your Apple Watch even while the iPhone is unlocked, respecting each app's Watch notification settings.</div>
   </div>
 </div>
 
@@ -11101,6 +11107,8 @@ function openTweaksPanel() {
   if (hapticsEl) hapticsEl.checked = !!config.disablePowerConnectedHaptics;
   const notifVibEl = document.getElementById('setting-disable-unlocked-notif-vibration');
   if (notifVibEl) notifVibEl.checked = !!config.disableUnlockedNotificationVibration;
+  const watchUnlockedEl = document.getElementById('setting-send-watch-when-unlocked');
+  if (watchUnlockedEl) watchUnlockedEl.checked = !!config.sendNotificationsToWatchWhenUnlocked;
   document.getElementById('tweaks-panel').classList.add('active');
 }
 

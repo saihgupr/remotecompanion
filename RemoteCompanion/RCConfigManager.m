@@ -386,6 +386,12 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
             [self saveConfig];
         }
 
+        // Auto-add sendNotificationsToWatchWhenUnlocked (default to NO: iOS only alerts Watch while locked)
+        if (_config[@"sendNotificationsToWatchWhenUnlocked"] == nil) {
+            _config[@"sendNotificationsToWatchWhenUnlocked"] = @NO;
+            [self saveConfig];
+        }
+
     } else {
         // Default config: no triggers until one is added from the New Trigger screen
         NSLog(@"[RCConfigManager] Using default config");
@@ -400,6 +406,7 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
             @"disableWakeOnPower": @NO,
             @"disablePowerConnectedHaptics": @NO,
             @"disableUnlockedNotificationVibration": @NO,
+            @"sendNotificationsToWatchWhenUnlocked": @NO,
             @"nfcEnabled": @YES,
             @"rootEnabled": @YES,
             @"sshHosts": [NSMutableArray array],
@@ -722,6 +729,15 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
 
 - (void)setDisableUnlockedNotificationVibration:(BOOL)disableUnlockedNotificationVibration {
     _config[@"disableUnlockedNotificationVibration"] = @(disableUnlockedNotificationVibration);
+    [self saveConfig];
+}
+
+- (BOOL)sendNotificationsToWatchWhenUnlocked {
+    return [_config[@"sendNotificationsToWatchWhenUnlocked"] boolValue];
+}
+
+- (void)setSendNotificationsToWatchWhenUnlocked:(BOOL)sendNotificationsToWatchWhenUnlocked {
+    _config[@"sendNotificationsToWatchWhenUnlocked"] = @(sendNotificationsToWatchWhenUnlocked);
     [self saveConfig];
 }
 

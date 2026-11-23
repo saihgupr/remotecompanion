@@ -6,6 +6,7 @@
 @property (nonatomic, strong) UISwitch *disableWakeOnPowerSwitch;
 @property (nonatomic, strong) UISwitch *disablePowerConnectedHapticsSwitch;
 @property (nonatomic, strong) UISwitch *disableUnlockedNotificationVibrationSwitch;
+@property (nonatomic, strong) UISwitch *sendNotificationsToWatchWhenUnlockedSwitch;
 @end
 
 typedef NS_ENUM(NSInteger, RCTweaksSection) {
@@ -118,14 +119,14 @@ typedef NS_ENUM(NSInteger, RCTweaksSection) {
     if (section == RCTweaksSectionPower) {
         return @"Disable Wake Screen On Power keeps the screen off when power connects or disconnects while the display is off or dimmed. Disable Power Connected Haptics stops the charging vibration and chime when power connects. Battery status and charging triggers still update normally.";
     } else if (section == RCTweaksSectionNotifications) {
-        return @"Turns off notification vibration while the phone is unlocked. Banners and notification sounds still play normally, and alarms, timers, calls, and critical alerts still vibrate.";
+        return @"Disable Vibration When Unlocked turns off notification vibration while the phone is unlocked (banners, sounds, alarms, timers, calls, and critical alerts still work normally). Send to Watch When Unlocked forwards notifications to your Apple Watch even while the iPhone is unlocked, respecting each app's Watch notification settings.";
     }
     return nil;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if (section == RCTweaksSectionPower) return 2;
-    if (section == RCTweaksSectionNotifications) return 1;
+    if (section == RCTweaksSectionNotifications) return 2;
     return 0;
 }
 
@@ -166,6 +167,13 @@ typedef NS_ENUM(NSInteger, RCTweaksSection) {
         [self.disableUnlockedNotificationVibrationSwitch addTarget:self action:@selector(disableUnlockedNotificationVibrationChanged:) forControlEvents:UIControlEventValueChanged];
         cell.accessoryView = self.disableUnlockedNotificationVibrationSwitch;
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
+    } else if (indexPath.section == RCTweaksSectionNotifications && indexPath.row == 1) {
+        cell.textLabel.text = @"Send to Watch When Unlocked";
+        self.sendNotificationsToWatchWhenUnlockedSwitch = [[UISwitch alloc] init];
+        self.sendNotificationsToWatchWhenUnlockedSwitch.on = cm.sendNotificationsToWatchWhenUnlocked;
+        [self.sendNotificationsToWatchWhenUnlockedSwitch addTarget:self action:@selector(sendNotificationsToWatchWhenUnlockedChanged:) forControlEvents:UIControlEventValueChanged];
+        cell.accessoryView = self.sendNotificationsToWatchWhenUnlockedSwitch;
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
     }
 
     return cell;
@@ -183,6 +191,10 @@ typedef NS_ENUM(NSInteger, RCTweaksSection) {
 
 - (void)disableUnlockedNotificationVibrationChanged:(UISwitch *)sender {
     [RCConfigManager sharedManager].disableUnlockedNotificationVibration = sender.on;
+}
+
+- (void)sendNotificationsToWatchWhenUnlockedChanged:(UISwitch *)sender {
+    [RCConfigManager sharedManager].sendNotificationsToWatchWhenUnlocked = sender.on;
 }
 
 @end

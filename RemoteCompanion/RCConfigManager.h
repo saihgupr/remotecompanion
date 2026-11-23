@@ -67,6 +67,9 @@
 // Turn off notification vibration while the device is unlocked (banners and sounds still work).
 // Off by default (Settings > Tweaks).
 @property (nonatomic, assign) BOOL disableUnlockedNotificationVibration;
+// Forward notifications to a paired Apple Watch even while the iPhone is unlocked.
+// Off by default (Settings > Tweaks).
+@property (nonatomic, assign) BOOL sendNotificationsToWatchWhenUnlocked;
 @property (nonatomic, assign) BOOL haEnabled;
 @property (nonatomic, copy) NSString *haUrl;
 @property (nonatomic, copy) NSString *haToken;
