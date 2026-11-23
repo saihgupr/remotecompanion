@@ -308,6 +308,7 @@ extern Boolean MRMediaRemoteSendCommandToApp(MRMediaRemoteCommand command, NSDic
 @property (nonatomic, assign) BOOL isLeftEdge;
 @property (nonatomic, assign) BOOL isRightEdge;
 @property (nonatomic, assign) BOOL hasTriggered;
+@property (nonatomic, assign) CGPoint startPoint;
 @end
 
 // Bottom-up system recognizer (issue #81 follow-up). Unlike the sendEvent
@@ -20509,7 +20510,16 @@ static void RC_FreezeGestureScrolling(void) {
         if (!g_rcFrozenGestureRecognizers) g_rcFrozenGestureRecognizers = [NSHashTable weakObjectsHashTable];
         if (!g_rcFrozenInteractionWindows) g_rcFrozenInteractionWindows = [NSHashTable weakObjectsHashTable];
         @try {
-            NSArray *windows = [UIApplication sharedApplication].windows;
+            // Every window except iOS's system gesture window: the Home swipe, Control Center and
+            // other tweaks' screen-edge gestures recognize there, and turning it off cancelled them
+            // mid-swipe (a swipe up to close an app that drifted sideways took several tries, #189)
+            NSMutableArray *windows = [[UIApplication sharedApplication].windows mutableCopy];
+            id gestureManager = [%c(SBSystemGestureManager) mainDisplayManager];
+            SEL windowSel = NSSelectorFromString(@"windowForSystemGestures");
+            id systemGestureWindow = [gestureManager respondsToSelector:windowSel] ? ((id (*)(id, SEL))objc_msgSend)(gestureManager, windowSel) : nil;
+            for (UIWindow *w in [windows copy]) {
+                if (w == systemGestureWindow || [NSStringFromClass([w class]) containsString:@"SystemGesture"]) [windows removeObject:w];
+            }
             for (UIWindow *w in windows) {
                 NSMutableArray *found = [NSMutableArray array];
                 RC_CollectScrollViewsInView(w, found);
@@ -21643,11 +21653,26 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
 
     [super touchesBegan:touches withEvent:event];
     self.hasTriggered = NO;
+    self.startPoint = loc;
     RC_SnapshotGestureOffsets();
     SRLogMin(@"Edge Gesture touchesBegan: X=%.2f Y=%.2f orient=%ld", loc.x, loc.y, (long)orientation);
 }
 
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    // The edge triggers are swipes up and down along the edge. A swipe in from the edge is
+    // someone else's (a launcher tweak, an app's back swipe): step aside as soon as it's clear,
+    // so their recognizers get it instead of this one holding it (#189).
+    UITouch *touch = [touches anyObject];
+    if (touch && !self.hasTriggered) {
+        CGPoint loc = [touch locationInView:nil];
+        CGFloat dx = 0, dy = 0;
+        RC_UserDeltaForOrientation(loc.x - self.startPoint.x, loc.y - self.startPoint.y, get_current_interface_orientation(), &dx, &dy);
+        if (MAX(fabs(dx), fabs(dy)) > 10 && fabs(dx) > fabs(dy)) {
+            SRLog(@"Edge Gesture: sideways (dx %.1f dy %.1f), stepping aside", dx, dy);
+            self.state = (self.state == UIGestureRecognizerStatePossible) ? UIGestureRecognizerStateFailed : UIGestureRecognizerStateCancelled;
+            return;
+        }
+    }
     [super touchesMoved:touches withEvent:event];
     // State tracking and haptics now handled in handleEdgeGesture:
 }
@@ -21872,7 +21897,8 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
         // Early freeze: once vertical intent is clear and the matching
         // trigger is actionable, hold the list still for the rest of the
         // touch (firing itself happens at the 30pt threshold below).
-        if (!gesture.hasTriggered && verticalSwipeDistance > 10 && horizontalDrift < 100) {
+        BOOL mostlyVertical = verticalSwipeDistance > horizontalDrift * 1.5;
+        if (!gesture.hasTriggered && verticalSwipeDistance > 10 && mostlyVertical) {
             NSString *earlyKey = nil;
             if (gesture.isLeftEdge) {
                 earlyKey = (dy_u < 0) ? @"trigger_edge_left_swipe_up" : @"trigger_edge_left_swipe_down";
@@ -21883,7 +21909,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
         }
 
         // Threshold: 30pt for instant trigger
-        if (verticalSwipeDistance > 30 && horizontalDrift < 100) {
+        if (verticalSwipeDistance > 30 && mostlyVertical) {
             SRLogMin(@"Instant Edge Trigger! V=%.2f H=%.2f orient=%ld", verticalSwipeDistance, horizontalDrift, (long)orientation);
 
             gesture.hasTriggered = YES;
