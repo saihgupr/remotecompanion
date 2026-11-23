@@ -4,6 +4,7 @@
 
 @interface RCBatteryTriggerViewController ()
 @property (nonatomic, copy) NSString *triggerKey;
+@property (nonatomic, assign) BOOL isWatch;
 @property (nonatomic, assign) BOOL rises;
 @property (nonatomic, assign) NSInteger level;
 @property (nonatomic, strong) UILabel *levelLabel;
@@ -13,31 +14,44 @@
 
 @implementation RCBatteryTriggerViewController
 
-- (instancetype)initWithTriggerKey:(NSString *)triggerKey {
+- (instancetype)initWithTriggerKey:(NSString *)triggerKey isWatch:(BOOL)isWatch {
     self = [super initWithStyle:UITableViewStyleInsetGrouped];
     if (self) {
         _triggerKey = [triggerKey copy];
+        _isWatch = isWatch || [triggerKey hasPrefix:@"trigger_watch_battery_"];
         _level = 20;
-        if ([triggerKey hasPrefix:@"trigger_device_battery_below_"] || [triggerKey hasPrefix:@"trigger_device_battery_above_"]) {
-            _rises = [triggerKey hasPrefix:@"trigger_device_battery_above_"];
-            NSInteger level = [[triggerKey substringFromIndex:29] integerValue];
-            if (level >= 1 && level <= 100) _level = level;
+        NSString *belowPrefix = _isWatch ? @"trigger_watch_battery_below_" : @"trigger_device_battery_below_";
+        NSString *abovePrefix = _isWatch ? @"trigger_watch_battery_above_" : @"trigger_device_battery_above_";
+        if ([triggerKey hasPrefix:belowPrefix] || [triggerKey hasPrefix:abovePrefix]) {
+            _rises = [triggerKey hasPrefix:abovePrefix];
+            NSUInteger prefixLen = _rises ? abovePrefix.length : belowPrefix.length;
+            if (triggerKey.length > prefixLen) {
+                NSInteger level = [[triggerKey substringFromIndex:prefixLen] integerValue];
+                if (level >= 1 && level <= 100) _level = level;
+            }
         }
     }
     return self;
 }
 
-- (instancetype)init {
-    return [self initWithTriggerKey:nil];
+- (instancetype)initWithTriggerKey:(NSString *)triggerKey {
+    return [self initWithTriggerKey:triggerKey isWatch:[triggerKey hasPrefix:@"trigger_watch_battery_"]];
 }
 
-+ (NSString *)nameForRises:(BOOL)rises level:(NSInteger)level {
+- (instancetype)init {
+    return [self initWithTriggerKey:nil isWatch:NO];
+}
+
++ (NSString *)nameForRises:(BOOL)rises level:(NSInteger)level isWatch:(BOOL)isWatch {
+    if (isWatch) {
+        return [NSString stringWithFormat:rises ? @"Watch Battery Rises to %ld%%" : @"Watch Battery Drops to %ld%%", (long)level];
+    }
     return [NSString stringWithFormat:rises ? @"Battery Rises to %ld%%" : @"Battery Drops to %ld%%", (long)level];
 }
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"Battery Level";
+    self.title = self.isWatch ? @"Watch Battery Level" : @"Battery Level";
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:self.triggerKey ? @"Save" : @"Add"
                                                                               style:UIBarButtonItemStyleDone
                                                                              target:self
@@ -76,6 +90,10 @@
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section != 1) return nil;
+    if (self.isWatch) {
+        return self.rises ? @"Runs once each time your Apple Watch battery charges to this level."
+                          : @"Runs once each time your Apple Watch battery drains to this level.";
+    }
     return self.rises ? @"Runs once each time the battery charges to this level."
                       : @"Runs once each time the battery drains to this level.";
 }
@@ -163,8 +181,11 @@
 
 - (void)save {
     RCConfigManager *config = [RCConfigManager sharedManager];
-    NSString *key = [NSString stringWithFormat:@"%@%ld", self.rises ? @"trigger_device_battery_above_" : @"trigger_device_battery_below_", (long)self.level];
-    NSString *name = [RCBatteryTriggerViewController nameForRises:self.rises level:self.level];
+    NSString *prefix = self.isWatch
+        ? (self.rises ? @"trigger_watch_battery_above_" : @"trigger_watch_battery_below_")
+        : (self.rises ? @"trigger_device_battery_above_" : @"trigger_device_battery_below_");
+    NSString *key = [NSString stringWithFormat:@"%@%ld", prefix, (long)self.level];
+    NSString *name = [RCBatteryTriggerViewController nameForRises:self.rises level:self.level isWatch:self.isWatch];
 
     if (![key isEqualToString:self.triggerKey] && [config triggerDataForKey:key]) {
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Trigger Exists"

@@ -74,6 +74,8 @@ static NSDictionary<NSString *, NSDictionary *> *RCPhoneIconSpecs(void) {
             @"trigger_watch_ping_hold":      @{ @"symbol": @"applewatch", @"tall": @YES, @"mark": hold },
             @"trigger_watch_connect":        @{ @"symbol": @"applewatch", @"tall": @YES },
             @"trigger_watch_disconnect":     @{ @"symbol": ([UIImage systemImageNamed:@"applewatch.slash"] ? @"applewatch.slash" : @"applewatch"), @"tall": @YES },
+            @"trigger_watch_charging_start": @{ @"symbol": @"applewatch", @"tall": @YES, @"mark": @"sym:bolt.fill" },
+            @"trigger_watch_charging_stop":  @{ @"symbol": @"applewatch", @"tall": @YES, @"mark": @"sym:bolt.slash.fill" },
             @"trigger_watch_face":           @{ @"symbol": ([UIImage systemImageNamed:@"applewatch.watchface"] ? @"applewatch.watchface" : @"applewatch"), @"tall": @YES },
             // Physical orientation: the phone turned the way it is held, so all four are told
             // apart even with rotation lock on
@@ -384,6 +386,12 @@ UIImage *RCTriggerIconImage(NSString *triggerKey, CGFloat pointSize) {
     if ([triggerKey hasPrefix:@"notiftap_"]) {
         triggerKey = @"notiftap_";
         spec = @{ @"symbol": @"bell.fill", @"press": @YES };
+    } else if ([triggerKey hasPrefix:@"trigger_watch_battery_above_"]) {
+        triggerKey = @"trigger_watch_battery_above_";
+        spec = @{ @"symbol": @"applewatch", @"tall": @YES, @"mark": @"sym:arrow.up" };
+    } else if ([triggerKey hasPrefix:@"trigger_watch_battery_below_"]) {
+        triggerKey = @"trigger_watch_battery_below_";
+        spec = @{ @"symbol": @"applewatch", @"tall": @YES, @"mark": @"sym:arrow.down" };
     }
     if (!spec) return nil;
     NSString *cacheKey = [NSString stringWithFormat:@"%@@%.1f", triggerKey, pointSize];

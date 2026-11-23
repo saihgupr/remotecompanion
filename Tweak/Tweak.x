@@ -2546,6 +2546,10 @@ static NSString *get_human_name_for_trigger(NSString *key, NSDictionary *trigger
             @"trigger_ringer_toggle": @"Ringer Toggled",
             @"trigger_watch_ping": @"Ping iPhone",
             @"trigger_watch_ping_hold": @"Ping iPhone (Hold)",
+            @"trigger_watch_connect": @"Watch Connected",
+            @"trigger_watch_disconnect": @"Watch Disconnected",
+            @"trigger_watch_charging_start": @"Watch Started Charging",
+            @"trigger_watch_charging_stop": @"Watch Stopped Charging",
             @"trigger_bottombar_swipe_left": @"Bottom Bar Swipe Left",
             @"trigger_bottombar_swipe_right": @"Bottom Bar Swipe Right",
             @"trigger_bottom_swipe_up_left": @"Bottom Swipe Up (Left)",
@@ -2593,6 +2597,8 @@ static NSString *get_human_name_for_trigger(NSString *key, NSDictionary *trigger
     if ([key hasPrefix:@"notifbtn_"]) return @"Notification Button";
     if ([key hasPrefix:@"trigger_device_battery_below_"]) return [NSString stringWithFormat:@"Battery Drops to %@%%", [key substringFromIndex:29]];
     if ([key hasPrefix:@"trigger_device_battery_above_"]) return [NSString stringWithFormat:@"Battery Rises to %@%%", [key substringFromIndex:29]];
+    if ([key hasPrefix:@"trigger_watch_battery_below_"] && key.length > 28) return [NSString stringWithFormat:@"Watch Battery Drops to %@%%", [key substringFromIndex:28]];
+    if ([key hasPrefix:@"trigger_watch_battery_above_"] && key.length > 28) return [NSString stringWithFormat:@"Watch Battery Rises to %@%%", [key substringFromIndex:28]];
     if ([key hasPrefix:@"trigger_cc_button_"]) return [NSString stringWithFormat:@"Control Center Button %@", [key substringFromIndex:18]];
     
     return key;
@@ -2703,6 +2709,7 @@ static void rc_note_cc_buttons_change(NSDictionary *config) {
 }
 static void rc_watch_face_refresh_observer(NSDictionary *config);
 static void rc_watch_sync_observing(NSDictionary *config);
+static void rc_watch_battery_refresh_observer(NSDictionary *config);
 
 static void load_trigger_config() {
     @autoreleasepool {
@@ -2750,6 +2757,7 @@ static void load_trigger_config() {
                 dispatch_async(dispatch_get_main_queue(), ^{ RC_RefreshAXTriplePress(); });
                 rc_watch_face_refresh_observer(newConfig);
                 rc_watch_sync_observing(newConfig);
+                rc_watch_battery_refresh_observer(newConfig);
             } else {
                 SRLogMin(@"Failed to parse config at %@", path);
             }
@@ -4465,6 +4473,8 @@ static NSString *rc_normalized_name(NSString *name) {
 
 static BOOL rc_carplay_connected(void);
 static BOOL rc_watch_connected(void);
+static BOOL rc_watch_charging(void);
+static int rc_watch_battery_percent(void);
 
 // If conditions answered by reading the state directly rather than through a status
 // command. Sets *handled for the keys it knows. expected is already uppercased.
@@ -4487,6 +4497,11 @@ static BOOL rc_condition_direct_match(NSString *key, NSString *expected, BOOL *h
         actual = rc_carplay_connected() ? @"CONNECTED" : @"NOT_CONNECTED";
     } else if ([key isEqualToString:@"watch"]) {
         actual = rc_watch_connected() ? @"CONNECTED" : @"NOT_CONNECTED";
+    } else if ([key isEqualToString:@"watch_charging"]) {
+        actual = rc_watch_charging() ? @"CHARGING" : @"NOT_CHARGING";
+    } else if ([key isEqualToString:@"watch_battery"]) {
+        int level = rc_watch_battery_percent();
+        return level >= 0 && rc_threshold_matches(expected, (float)level);
     } else if ([key isEqualToString:@"charging"]) {
         UIDevice *device = [UIDevice currentDevice];
         device.batteryMonitoringEnabled = YES;
@@ -7527,6 +7542,229 @@ static BOOL rc_watch_connection_trigger_configured(NSDictionary *config) {
 static void rc_watch_sync_observing(NSDictionary *config) {
     if (!rc_watch_features_available() || !rc_watch_connection_trigger_configured(config)) return;
     rc_watch_start_observing();
+}
+
+@protocol RCBCBatteryDevice <NSObject>
+@optional
+- (NSString *)name;
+- (NSInteger)percentCharge;
+- (NSInteger)powerSourceState;
+- (unsigned long long)accessoryCategory;
+- (BOOL)isInternal;
+- (BOOL)isConnected;
+- (BOOL)isCharging;
+- (BOOL)isWirelesslyCharging;
+@end
+
+@protocol RCBCBatteryDeviceController <NSObject>
+@optional
++ (instancetype)sharedInstance;
+- (NSArray *)connectedDevices;
+- (void)addBatteryDeviceObserver:(id)observer queue:(dispatch_queue_t)queue;
+- (void)removeBatteryDeviceObserver:(id)observer;
+@end
+
+@interface RCWatchBatteryObserver : NSObject
+@end
+
+static id g_watchBatteryController = nil;
+static RCWatchBatteryObserver *g_watchBatteryObserver = nil;
+static BOOL g_watchBatteryObserving = NO;
+static BOOL g_watchChargingKnown = NO;
+static BOOL g_watchChargingLast = NO;
+static uint64_t g_watchChargingDebounceGen = 0;
+static int g_watchBatteryLastPercent = -1;
+
+// Must be called on the main queue
+static id rc_watch_battery_controller(void) {
+    if (!rc_watch_features_available()) return nil;
+    if (g_watchBatteryController) return g_watchBatteryController;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        dlopen("/System/Library/PrivateFrameworks/BatteryCenter.framework/BatteryCenter", RTLD_NOW);
+    });
+    Class ctrlCls = objc_getClass("BCBatteryDeviceController");
+    if (!ctrlCls) return nil;
+    id ctrl = [ctrlCls respondsToSelector:@selector(sharedInstance)]
+        ? ((id (*)(id, SEL))objc_msgSend)(ctrlCls, @selector(sharedInstance))
+        : nil;
+    if (!ctrl) ctrl = [[ctrlCls alloc] init];
+    g_watchBatteryController = ctrl;
+    return g_watchBatteryController;
+}
+
+static BOOL rc_bc_device_is_watch(id dev) {
+    if (!dev) return NO;
+    if ([dev respondsToSelector:@selector(isInternal)] && [(id<RCBCBatteryDevice>)dev isInternal]) return NO;
+    if ([dev respondsToSelector:@selector(accessoryCategory)]) {
+        unsigned long long cat = [(id<RCBCBatteryDevice>)dev accessoryCategory];
+        if (cat == 3) return YES;
+        if (cat != 0) return NO;
+    }
+    NSString *desc = [dev description];
+    return [desc isKindOfClass:[NSString class]] && [desc containsString:@"accessoryCategory = Watch"];
+}
+
+static id rc_watch_battery_device_in_list(NSArray *devices) {
+    if (![devices isKindOfClass:[NSArray class]]) return nil;
+    for (id dev in devices) {
+        if (!rc_bc_device_is_watch(dev)) continue;
+        if ([dev respondsToSelector:@selector(isConnected)] && ![(id<RCBCBatteryDevice>)dev isConnected]) continue;
+        return dev;
+    }
+    return nil;
+}
+
+static BOOL rc_bc_device_is_charging(id dev) {
+    if (!dev) return NO;
+    if ([dev respondsToSelector:@selector(isCharging)] && [(id<RCBCBatteryDevice>)dev isCharging]) return YES;
+    if ([dev respondsToSelector:@selector(isWirelesslyCharging)] && [(id<RCBCBatteryDevice>)dev isWirelesslyCharging]) return YES;
+    if ([dev respondsToSelector:@selector(powerSourceState)] && [(id<RCBCBatteryDevice>)dev powerSourceState] == 2) return YES;
+    return NO;
+}
+
+static int rc_bc_device_percent(id dev) {
+    if (!dev || ![dev respondsToSelector:@selector(percentCharge)]) return -1;
+    NSInteger pct = [(id<RCBCBatteryDevice>)dev percentCharge];
+    return (pct >= 0 && pct <= 100) ? (int)pct : -1;
+}
+
+static void rc_watch_battery_snapshot(BOOL *connectedOut, BOOL *chargingOut, int *percentOut) {
+    if (connectedOut) *connectedOut = NO;
+    if (chargingOut) *chargingOut = NO;
+    if (percentOut) *percentOut = -1;
+    if (!rc_watch_features_available()) return;
+    __block BOOL connected = NO;
+    __block BOOL charging = NO;
+    __block int pct = -1;
+    rc_dispatch_sync_main_safe(^{
+        id ctrl = rc_watch_battery_controller();
+        NSArray *devs = [ctrl respondsToSelector:@selector(connectedDevices)] ? [(id<RCBCBatteryDeviceController>)ctrl connectedDevices] : nil;
+        id dev = rc_watch_battery_device_in_list(devs);
+        if (dev) {
+            connected = YES;
+            charging = rc_bc_device_is_charging(dev);
+            pct = rc_bc_device_percent(dev);
+        }
+    });
+    if (connectedOut) *connectedOut = connected;
+    if (chargingOut) *chargingOut = charging;
+    if (percentOut) *percentOut = pct;
+}
+
+static BOOL rc_watch_charging(void) {
+    BOOL charging = NO;
+    rc_watch_battery_snapshot(NULL, &charging, NULL);
+    return charging;
+}
+
+static int rc_watch_battery_percent(void) {
+    int pct = -1;
+    rc_watch_battery_snapshot(NULL, NULL, &pct);
+    return pct;
+}
+
+static void rc_watch_battery_handle_devices(NSArray *devices, BOOL seedOnly, NSString *source) {
+    id watchDev = rc_watch_battery_device_in_list(devices);
+    if (!watchDev) {
+        g_watchChargingDebounceGen++;
+        return;
+    }
+    BOOL nowCharging = rc_bc_device_is_charging(watchDev);
+    int nowPct = rc_bc_device_percent(watchDev);
+
+    if (seedOnly || !g_watchChargingKnown) {
+        g_watchChargingKnown = YES;
+        g_watchChargingLast = nowCharging;
+        SRLog(@"⌚ [RCWatchBattery] Seeded Watch charging (%@): charging=%d battery=%d%%", source, nowCharging, nowPct);
+    } else if (nowCharging != g_watchChargingLast) {
+        uint64_t gen = ++g_watchChargingDebounceGen;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (gen != g_watchChargingDebounceGen || !g_watchBatteryObserving) return;
+            id curCtrl = rc_watch_battery_controller();
+            NSArray *curDevs = [curCtrl respondsToSelector:@selector(connectedDevices)] ? [(id<RCBCBatteryDeviceController>)curCtrl connectedDevices] : nil;
+            id curDev = rc_watch_battery_device_in_list(curDevs);
+            if (!curDev) return;
+            BOOL settled = rc_bc_device_is_charging(curDev);
+            if (settled == g_watchChargingLast) return;
+            g_watchChargingLast = settled;
+            SRLogMin(@"⌚ [RCWatchBattery] Transition detected (%@): WATCH %@", source, settled ? @"STARTED CHARGING" : @"STOPPED CHARGING");
+            RCExecuteTrigger(settled ? @"trigger_watch_charging_start" : @"trigger_watch_charging_stop");
+        });
+    } else {
+        g_watchChargingDebounceGen++;
+    }
+
+    if (nowPct >= 0 && nowPct != g_watchBatteryLastPercent) {
+        int beforePct = g_watchBatteryLastPercent;
+        g_watchBatteryLastPercent = nowPct;
+        if (!seedOnly && beforePct >= 0) {
+            NSDictionary *triggers = nil;
+            @synchronized (rc_trigger_config_lock()) {
+                NSDictionary *raw = [g_triggerConfig isKindOfClass:[NSDictionary class]] ? g_triggerConfig[@"triggers"] : nil;
+                if ([raw isKindOfClass:[NSDictionary class]]) triggers = [raw copy];
+            }
+            for (NSString *key in triggers) {
+                BOOL below = [key hasPrefix:@"trigger_watch_battery_below_"];
+                if (!below && ![key hasPrefix:@"trigger_watch_battery_above_"]) continue;
+                if (key.length <= 28) continue;
+                int level = [[key substringFromIndex:28] intValue];
+                if (level < 1 || level > 100) continue;
+                BOOL crossed = below ? (beforePct > level && nowPct <= level) : (beforePct < level && nowPct >= level);
+                if (!crossed) continue;
+                SRLogMin(@"⌚ [RCWatchBattery] Watch battery %d%% -> %d%%: %@.", beforePct, nowPct, key);
+                RCExecuteTrigger(key);
+            }
+        }
+    }
+}
+
+@implementation RCWatchBatteryObserver
+- (void)connectedDevicesDidChange:(NSArray *)devices {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (g_watchBatteryObserving) rc_watch_battery_handle_devices(devices, NO, @"connectedDevicesDidChange");
+    });
+}
+@end
+
+static BOOL rc_watch_battery_has_configured_trigger(NSDictionary *config) {
+    NSDictionary *triggers = [config isKindOfClass:[NSDictionary class]] ? config[@"triggers"] : nil;
+    if (![triggers isKindOfClass:[NSDictionary class]]) return NO;
+    if (triggers[@"trigger_watch_charging_start"] != nil || triggers[@"trigger_watch_charging_stop"] != nil) return YES;
+    for (NSString *key in triggers) {
+        if ([key hasPrefix:@"trigger_watch_battery_below_"] || [key hasPrefix:@"trigger_watch_battery_above_"]) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+static void rc_watch_battery_refresh_observer(NSDictionary *config) {
+    BOOL shouldObserve = rc_watch_features_available() && rc_watch_battery_has_configured_trigger(config);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (shouldObserve == g_watchBatteryObserving) return;
+        if (shouldObserve) {
+            id ctrl = rc_watch_battery_controller();
+            if (!ctrl) return;
+            if (!g_watchBatteryObserver) g_watchBatteryObserver = [RCWatchBatteryObserver new];
+            g_watchBatteryObserving = YES;
+            NSArray *devs = [ctrl respondsToSelector:@selector(connectedDevices)] ? [(id<RCBCBatteryDeviceController>)ctrl connectedDevices] : nil;
+            rc_watch_battery_handle_devices(devs, YES, @"arm");
+            if ([ctrl respondsToSelector:@selector(addBatteryDeviceObserver:queue:)]) {
+                [(id<RCBCBatteryDeviceController>)ctrl addBatteryDeviceObserver:g_watchBatteryObserver queue:dispatch_get_main_queue()];
+            }
+            SRLogMin(@"⌚ [RCWatchBattery] Armed Watch battery/charging observer");
+        } else {
+            g_watchBatteryObserving = NO;
+            g_watchChargingDebounceGen++;
+            if (g_watchBatteryController && g_watchBatteryObserver && [g_watchBatteryController respondsToSelector:@selector(removeBatteryDeviceObserver:)]) {
+                [(id<RCBCBatteryDeviceController>)g_watchBatteryController removeBatteryDeviceObserver:g_watchBatteryObserver];
+            }
+            g_watchChargingKnown = NO;
+            g_watchBatteryLastPercent = -1;
+            SRLogMin(@"⌚ [RCWatchBattery] Disarmed Watch battery/charging observer (no triggers configured)");
+        }
+    });
 }
 
 // Orientation triggers: the screen turning to landscape or back to portrait. SpringBoard says when
@@ -11840,6 +12078,8 @@ static NSArray *RCCommandHelpSections(void) {
             @[@"bluetooth connect|disconnect <name>", @"Manage paired devices"],
             @[@"carplay status", @"CarPlay connection state"],
             @[@"watch status", @"Apple Watch connection state"],
+            @[@"watch charging", @"Apple Watch charging state"],
+            @[@"watch battery", @"Apple Watch battery level and charging state"],
             @[@"battery status", @"Battery level and charging state"],
         ]},
         @{@"title": @"Automation", @"rows": @[
@@ -15027,6 +15267,19 @@ static NSString *handle_command(NSString *cmd) {
         return rc_carplay_connected() ? @"CarPlay: CONNECTED\n" : @"CarPlay: NOT_CONNECTED\n";
     } else if ([cleanCmd isEqualToString:@"watch"] || [cleanCmd isEqualToString:@"watch status"]) {
         return rc_watch_connected() ? @"Watch: CONNECTED\n" : @"Watch: NOT_CONNECTED\n";
+    } else if ([cleanCmd isEqualToString:@"watch charging"] || [cleanCmd isEqualToString:@"watch charging status"]) {
+        BOOL connected = NO, charging = NO;
+        int pct = -1;
+        rc_watch_battery_snapshot(&connected, &charging, &pct);
+        if (!connected) return @"Watch Charging: NOT_CONNECTED\n";
+        return charging ? @"Watch Charging: CHARGING\n" : @"Watch Charging: NOT_CHARGING\n";
+    } else if ([cleanCmd isEqualToString:@"watch battery"] || [cleanCmd isEqualToString:@"watch battery status"]) {
+        BOOL connected = NO, charging = NO;
+        int pct = -1;
+        rc_watch_battery_snapshot(&connected, &charging, &pct);
+        if (!connected || pct < 0) return @"Watch Battery: unknown\n";
+        NSString *suffix = charging ? (pct >= 100 ? @" (Full)" : @" (Charging)") : @"";
+        return [NSString stringWithFormat:@"Watch Battery: %d%%%@\n", pct, suffix];
     } else if ([cleanCmd isEqualToString:@"ringer"] || [cleanCmd hasPrefix:@"ringer "]) {
         NSString *sub = cleanCmd.length > 7 ? [cleanCmd substringFromIndex:7] : @"status";
         // Ringtone & alerts volume, separate from the media volume (set-vol)
@@ -16526,7 +16779,7 @@ static void start_web_server() {
                                 // The answers of the status commands Set Variable's command list offers, for
                                 // the Web UI to show next to them. Only these: they report, they change nothing.
                                 NSArray *commands = @[@"battery", @"volume", @"wifi status", @"bt status", @"cell status", @"airplane status",
-                                                      @"location status", @"carplay status", @"watch status", @"ringer status", @"vibration silent-status",
+                                                      @"location status", @"carplay status", @"watch status", @"watch charging", @"watch battery", @"ringer status", @"vibration silent-status",
                                                       @"haptics status", @"is-playing", @"lock status", @"low power status", @"flashlight status",
                                                       @"dnd status", @"focus status", @"screenrecord status", @"timer status", @"proximity status",
                                                       @"assistive touch status",

@@ -2267,6 +2267,7 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
                           [_triggerKey hasPrefix:@"bt_"] ||
                           [_triggerKey hasPrefix:@"output_"] ||
                           [_triggerKey hasPrefix:@"trigger_device_battery_"] ||
+                          [_triggerKey hasPrefix:@"trigger_watch_battery_"] ||
                           [_triggerKey hasPrefix:@"app_launch_"] ||
                           [_triggerKey hasPrefix:@"app_exit_"] ||
                           [_triggerKey hasPrefix:@"app_hold_"] ||
@@ -2543,7 +2544,7 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
 
 - (void)editTriggerSettings {
     UIViewController *vc = nil;
-    if ([_triggerKey hasPrefix:@"trigger_device_battery_"]) {
+    if ([_triggerKey hasPrefix:@"trigger_device_battery_"] || [_triggerKey hasPrefix:@"trigger_watch_battery_"]) {
         [self.navigationController pushViewController:[[RCBatteryTriggerViewController alloc] initWithTriggerKey:_triggerKey] animated:YES];
         return;
     }
@@ -3597,6 +3598,23 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             @"input": @"threshold"
         },
         @{
+            @"key": @"watch_charging",
+            @"title": @"Apple Watch Charging",
+            @"icon": @"applewatch",
+            @"section": @"Power",
+            @"values": @[
+                @{ @"value": @"CHARGING", @"title": @"Charging" },
+                @{ @"value": @"NOT_CHARGING", @"title": @"Not Charging" }
+            ]
+        },
+        @{
+            @"key": @"watch_battery",
+            @"title": @"Apple Watch Battery Level",
+            @"icon": @"applewatch",
+            @"section": @"Power",
+            @"input": @"threshold"
+        },
+        @{
             @"key": @"volume",
             @"title": @"Volume Level",
             @"icon": @"speaker.wave.2.fill",
@@ -3648,11 +3666,12 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             @"input": @"variable"
         }
     ] arrayByAddingObjectsFromArray:[self addOnConditionDefinitions]];
-    // The Watch condition only makes sense where the Apple Watch app is installed
+    // The Watch conditions only make sense where the Apple Watch app is installed
     if (![RCConfigManager watchFeaturesAvailable]) {
         NSMutableArray<NSDictionary *> *kept = [NSMutableArray array];
         for (NSDictionary *definition in definitions) {
-            if ([definition[@"key"] isEqualToString:@"watch"]) continue;
+            NSString *condKey = definition[@"key"];
+            if ([condKey isEqualToString:@"watch"] || [condKey hasPrefix:@"watch_"]) continue;
             [kept addObject:definition];
         }
         definitions = kept;

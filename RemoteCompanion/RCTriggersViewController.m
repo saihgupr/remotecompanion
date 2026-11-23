@@ -331,6 +331,10 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
         if (@available(iOS 15.0, *)) return @"applewatch.slash";
         return @"applewatch";
     }
+    if ([triggerKey isEqualToString:@"trigger_watch_charging_start"]) return @"bolt.fill";
+    if ([triggerKey isEqualToString:@"trigger_watch_charging_stop"]) return @"bolt.slash.fill";
+    if ([triggerKey hasPrefix:@"trigger_watch_battery_above_"]) return @"battery.100";
+    if ([triggerKey hasPrefix:@"trigger_watch_battery_below_"]) return @"battery.25";
     if ([triggerKey hasPrefix:@"trigger_watch_ping"]) {
         if (@available(iOS 14.0, *)) return @"applewatch.radiowaves.left.and.right";
         return @"bell.fill";
@@ -755,12 +759,24 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     addSection(@[@"trigger_ringer_mute", @"trigger_ringer_unmute", @"trigger_ringer_toggle"], @"Ringer Switch", YES);
     // Apple Watch Section (Only show if added)
     NSMutableArray *watchKeys = [NSMutableArray array];
-    for (NSString *key in @[@"trigger_watch_ping", @"trigger_watch_ping_hold", @"trigger_watch_connect", @"trigger_watch_disconnect", @"trigger_watch_face"]) {
+    for (NSString *key in @[@"trigger_watch_ping", @"trigger_watch_ping_hold", @"trigger_watch_connect", @"trigger_watch_disconnect", @"trigger_watch_charging_start", @"trigger_watch_charging_stop", @"trigger_watch_face"]) {
         if ([[RCConfigManager sharedManager] triggerDataForKey:key]) [watchKeys addObject:key];
     }
     for (NSString *key in [[RCConfigManager sharedManager] allConfiguredTriggerKeys]) {
         if ([key hasPrefix:@"trigger_watch_face_"]) [watchKeys addObject:key];
     }
+    NSMutableArray *watchBatteryKeys = [NSMutableArray array];
+    for (NSString *key in [[RCConfigManager sharedManager] allConfiguredTriggerKeys]) {
+        if ([key hasPrefix:@"trigger_watch_battery_"]) [watchBatteryKeys addObject:key];
+    }
+    [watchBatteryKeys sortUsingComparator:^NSComparisonResult(NSString *a, NSString *b) {
+        NSString *(^level)(NSString *) = ^NSString *(NSString *key) {
+            return key.length > 28 ? [key substringFromIndex:28] : @"";
+        };
+        NSComparisonResult byLevel = [@([level(a) integerValue]) compare:@([level(b) integerValue])];
+        return byLevel != NSOrderedSame ? byLevel : [b compare:a]; // "below" before "above"
+    }];
+    [watchKeys addObjectsFromArray:watchBatteryKeys];
     addSection(watchKeys, @"Apple Watch", YES);
     // Device State Section (Only show if configured, hide if empty)
     NSMutableArray *deviceStateKeys = [NSMutableArray array];
@@ -1080,6 +1096,9 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     ] mutableCopy];
     // Watch triggers only make sense where the Apple Watch app is installed
     if ([RCConfigManager watchFeaturesAvailable]) {
+        [items addObject:@{ @"title": @"Watch Battery Level", @"icon": ([UIImage systemImageNamed:@"battery.50"] ? @"battery.50" : @"battery.25"), @"section": @"Apple Watch", @"handler": ^{
+            push([[RCBatteryTriggerViewController alloc] initWithTriggerKey:nil isWatch:YES]);
+        } }];
         [items addObject:@{ @"title": @"Watch Face", @"icon": ([UIImage systemImageNamed:@"applewatch.watchface"] ? @"applewatch.watchface" : @"applewatch"), @"section": @"Apple Watch", @"handler": ^{
             RCDevicePickerViewController *vc = [[RCDevicePickerViewController alloc] initWithKind:RCDevicePickerKindWatchFace title:@"Watch Face Trigger"];
             vc.includeAnyOption = YES;
@@ -1197,7 +1216,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     }
     // Watch connection and ping triggers only make sense where the Apple Watch app is installed
     if ([RCConfigManager watchFeaturesAvailable]) {
-        for (NSString *key in @[@"trigger_watch_ping", @"trigger_watch_ping_hold", @"trigger_watch_connect", @"trigger_watch_disconnect"]) {
+        for (NSString *key in @[@"trigger_watch_ping", @"trigger_watch_ping_hold", @"trigger_watch_connect", @"trigger_watch_disconnect", @"trigger_watch_charging_start", @"trigger_watch_charging_stop"]) {
             addBuiltIn(key, @"Apple Watch");
         }
     }
@@ -1224,6 +1243,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
                                                           @"Long Press App Icon": @"app_hold_",
                                                           @"Notification": @"notif_", @"Scheduled Trigger": @"sched_",
                                                           @"Battery Level": @"trigger_device_battery_below_", @"Focus": @"trigger_device_focus_on",
+                                                          @"Watch Battery Level": @"trigger_watch_battery_below_", @"Watch Face": @"trigger_watch_face",
                                                           @"MQTT Topic": @"mqtt_" };
     for (NSUInteger i = 0; i < items.count; i++) {
         NSDictionary *item = items[i];
