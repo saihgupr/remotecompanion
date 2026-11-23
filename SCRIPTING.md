@@ -114,6 +114,8 @@ A sequence is a **JSON array** of actions. Each action is either:
 | Command | What it does |
 |---|---|
 | `flashlight toggle` | Toggle flashlight |
+| `flashlight <level>` | Set brightness: 0-100, `low`, `medium`, `high` or `max` |
+| `flashlight up [N]` / `down [N]` | Step brightness by N percent (default 25) |
 | `rotate toggle` | Toggle rotation lock |
 | `orientation set <mode>` | Set screen orientation: `portrait`, `landscape left`, `landscape right`, `portrait upside down`, `auto` |
 | `vibration silent-toggle` | Toggle silent vibration |

@@ -3095,6 +3095,12 @@ static BOOL rc_flashlight_is_on(void) {
     return on;
 }
 
+// The controller's level getter is a stored detent that _setFlashlightLevel: never moves, and
+// AVFoundation can't see a torch the controller holds. Remember the level this process set, so
+// "status" and "up"/"down" can report and step from it. A torch turned on elsewhere has no known
+// level, and status says just ON rather than inventing one.
+static float g_rc_flashlight_level = 0;
+
 // level 0 turns it off; 0.01-1 is the brightness. NO when there's no flashlight to use.
 static BOOL rc_flashlight_set(float level) {
     __block BOOL done = NO;
@@ -3127,7 +3133,118 @@ static BOOL rc_flashlight_set(float level) {
             done = YES;
         }
     });
+    if (done) g_rc_flashlight_level = (level <= 0) ? 0 : MIN(1.0f, level);
     return done;
+}
+
+// The level this process last set, 0 when it is off or was turned on elsewhere.
+static float rc_flashlight_known_level(void) {
+    return MAX(0.0f, MIN(1.0f, g_rc_flashlight_level));
+}
+
+// Named brightness levels. The four match the steps iOS's flashlight slider snaps to, so "low"
+// is the same amount a person gets by dragging it a quarter of the way up.
+static BOOL rc_flashlight_named_level(NSString *word, float *level) {
+    NSDictionary<NSString *, NSNumber *> *levels = @{
+        @"low": @0.25f, @"medium": @0.5f, @"med": @0.5f, @"high": @0.75f,
+        @"max": @1.0f, @"full": @1.0f, @"min": @0.01f, @"dim": @0.01f,
+    };
+    NSNumber *value = [levels objectForKey:word];
+    if (!value) return NO;
+    if (level) *level = value.floatValue;
+    return YES;
+}
+
+// A level is a percentage (50, 50%), a fraction (0.5) or one of the named levels.
+static BOOL rc_flashlight_parse_level(NSString *text, float *level) {
+    NSString *word = [text lowercaseString];
+    if (rc_flashlight_named_level(word, level)) return YES;
+    NSString *number = [word stringByReplacingOccurrencesOfString:@"%" withString:@""];
+    NSScanner *scanner = [NSScanner scannerWithString:number];
+    double parsed = 0;
+    if (![scanner scanDouble:&parsed] || !scanner.isAtEnd || parsed < 0) return NO;
+    float value = (float)parsed;
+    if (value > 1.0f) value /= 100.0f; // 50 means 50%, 0.5 already is one
+    if (value > 1.0f) value = 1.0f;
+    if (level) *level = value;
+    return YES;
+}
+
+static NSString *rc_flashlight_usage(void) {
+    return @"Usage: flashlight [on [low|medium|high|max|<0-100>]|off|toggle|status|low|medium|high|max|up|down [N]]\n";
+}
+
+static NSString *rc_flashlight_status_text(void) {
+    if (!rc_flashlight_is_on()) return @"Flashlight OFF\n";
+    float level = rc_flashlight_known_level();
+    if (level <= 0) return @"Flashlight ON\n";
+    return [NSString stringWithFormat:@"Flashlight ON (%.0f%%)\n", level * 100];
+}
+
+// flashlight, torch and flash all come here: on [level], off, toggle, status, a named level,
+// up/down [N] to step, or a bare level. Bare "flashlight" toggles.
+static NSString *rc_handle_flashlight_command(NSString *cmd) {
+    NSString *arg = @"";
+    NSRange space = [cmd rangeOfString:@" "];
+    if (space.location != NSNotFound) {
+        arg = [[cmd substringFromIndex:space.location + 1] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    }
+    NSString *verb = [arg lowercaseString];
+    NSString *value = @"";
+    NSRange valueSpace = [arg rangeOfString:@" "];
+    if (valueSpace.location != NSNotFound) {
+        verb = [[arg substringToIndex:valueSpace.location] lowercaseString];
+        value = [[arg substringFromIndex:valueSpace.location + 1] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    }
+
+    if (verb.length == 0 || [verb isEqualToString:@"toggle"]) {
+        BOOL wasOn = rc_flashlight_is_on();
+        SRLog(@"Toggling flashlight (was %@)", wasOn ? @"on" : @"off");
+        if (!rc_flashlight_set(wasOn ? 0 : get_flash_brightness())) return @"Error: Flashlight not available\n";
+        return wasOn ? @"Flashlight OFF\n" : @"Flashlight ON\n";
+    }
+    if ([verb isEqualToString:@"off"]) {
+        if (!rc_flashlight_set(0)) return @"Error: Flashlight not available\n";
+        return @"Flashlight OFF\n";
+    }
+    if ([verb isEqualToString:@"status"]) return rc_flashlight_status_text();
+    if ([verb isEqualToString:@"on"]) {
+        float level = get_flash_brightness();
+        if (value.length > 0 && !rc_flashlight_parse_level(value, &level)) return rc_flashlight_usage();
+        if (level < 0.01f) level = 0.01f; // "on 0" is still an on
+        if (level > 1.0f) level = 1.0f;
+        SRLog(@"Flashlight ON at level: %f", level);
+        if (!rc_flashlight_set(level)) return @"Error: Flashlight not available\n";
+        return [NSString stringWithFormat:@"Flashlight ON (%.0f%%)\n", level * 100];
+    }
+    if ([verb isEqualToString:@"up"] || [verb isEqualToString:@"down"]) {
+        float amount = 0.25f;
+        if (value.length > 0 && !rc_flashlight_parse_level(value, &amount)) return rc_flashlight_usage();
+        BOOL on = rc_flashlight_is_on();
+        float current = on ? rc_flashlight_known_level() : 0;
+        if (on && current <= 0) current = 0.5f; // on from Control Center: start from the middle
+        float level = [verb isEqualToString:@"up"] ? current + amount : current - amount;
+        if (level <= 0) {
+            if (!rc_flashlight_set(0)) return @"Error: Flashlight not available\n";
+            return @"Flashlight OFF\n";
+        }
+        level = MAX(0.01f, MIN(1.0f, level));
+        if (!rc_flashlight_set(level)) return @"Error: Flashlight not available\n";
+        return [NSString stringWithFormat:@"Flashlight set to %.0f%%\n", level * 100];
+    }
+    if (value.length == 0) {
+        float level = 0;
+        if (rc_flashlight_parse_level(verb, &level)) {
+            if (level <= 0) {
+                if (!rc_flashlight_set(0)) return @"Error: Flashlight not available\n";
+                return @"Flashlight OFF\n";
+            }
+            level = MAX(0.01f, MIN(1.0f, level));
+            if (!rc_flashlight_set(level)) return @"Error: Flashlight not available\n";
+            return [NSString stringWithFormat:@"Flashlight set to %.0f%%\n", level * 100];
+        }
+    }
+    return rc_flashlight_usage();
 }
 
 // Forward declarations for gesture management functions
@@ -11779,7 +11896,7 @@ static NSArray *RCCommandHelpSections(void) {
             @[@"button <name>", @"power, lock, home, volup, voldown, mute"],
             @[@"button triggers pause [min] | resume", @"Return buttons to stock behavior"],
             @[@"brightness <0-100>", @"Set screen brightness"],
-            @[@"flashlight [on|off|toggle|status]", @"Control the torch"],
+            @[@"flashlight [on|off|toggle|status|low|medium|high|max|up|down] [level]", @"Control the torch and its brightness"],
             @[@"rotate [lock|unlock|toggle|status]", @"Orientation lock"],
             @[@"orientation status", @"Print PORTRAIT or LANDSCAPE"],
             @[@"control center status", @"Print OPEN or CLOSED"],
@@ -13131,46 +13248,14 @@ static NSString *handle_command(NSString *cmd) {
         if ([NSThread isMainThread]) state = RCNFCScannerCommand(what);
         else dispatch_sync(dispatch_get_main_queue(), ^{ state = RCNFCScannerCommand(what); });
         return [NSString stringWithFormat:@"NFC scanner %@\n", state];
-    } else if ([cleanCmd isEqualToString:@"flashlight"] || [cleanCmd isEqualToString:@"torch"] || [cleanCmd isEqualToString:@"flashlight toggle"]) {
-        BOOL wasOn = rc_flashlight_is_on();
-        SRLog(@"Toggling flashlight (was %@)", wasOn ? @"on" : @"off");
-        if (!rc_flashlight_set(wasOn ? 0 : get_flash_brightness())) return @"Error: Flashlight not available\n";
-        return wasOn ? @"Flashlight OFF\n" : @"Flashlight ON\n";
-    } else if ([cleanCmd isEqualToString:@"flashlight status"] || [cleanCmd isEqualToString:@"torch status"]) {
-        return rc_flashlight_is_on() ? @"Flashlight ON\n" : @"Flashlight OFF\n";
-    } else if ([cleanCmd isEqualToString:@"flashlight off"] || [cleanCmd isEqualToString:@"torch off"] || [cleanCmd isEqualToString:@"flash off"]) {
-        if (!rc_flashlight_set(0)) return @"Error: Flashlight not available\n";
-        return @"Flashlight OFF\n";
-    } else if ([cleanCmd hasPrefix:@"flashlight on"] || [cleanCmd hasPrefix:@"flash on"] || [cleanCmd isEqualToString:@"torch on"]) {
-        float level = get_flash_brightness();
-        NSArray *parts = [cleanCmd componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-        if (parts.count >= 3) {
-            float customLevel = [parts[2] floatValue];
-            if (customLevel > 0) level = customLevel;
-            if (level > 1.0f) level /= 100.0f; // Handle percentage
-        }
-        if (level < 0.01f) level = 0.01f;
-        if (level > 1.0f) level = 1.0f;
-        SRLog(@"Flashlight ON at level: %f", level);
-        if (!rc_flashlight_set(level)) return @"Error: Flashlight not available\n";
-        return [NSString stringWithFormat:@"Flashlight ON (%.0f%%)\n", level * 100];
-    } else if ([cleanCmd hasPrefix:@"flashlight "] || [cleanCmd hasPrefix:@"flash "]) {
-        // "flashlight 0.5" or "flashlight 50": only a number, so a word ("flashlight status" once)
-        // isn't read as 0 and turns the light off
-        NSString *valStr = [[cleanCmd substringFromIndex:([cleanCmd hasPrefix:@"flashlight "] ? 11 : 6)] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-        double parsed = 0;
-        NSScanner *scanner = [NSScanner scannerWithString:[valStr stringByReplacingOccurrencesOfString:@"%" withString:@""]];
-        if (![scanner scanDouble:&parsed] || !scanner.isAtEnd) return @"Usage: flashlight [on|off|toggle|status|<level 0-100>]\n";
-        float level = (float)parsed;
-        if (level > 1.0f) level /= 100.0f;
-        if (level <= 0) {
-            if (!rc_flashlight_set(0)) return @"Error: Flashlight not available\n";
-            return @"Flashlight OFF\n";
-        }
-        if (level < 0.01f) level = 0.01f;
-        if (level > 1.0f) level = 1.0f;
-        if (!rc_flashlight_set(level)) return @"Error: Flashlight not available\n";
-        return [NSString stringWithFormat:@"Flashlight set to %.0f%%\n", level * 100];
+    } else if ([cleanCmd isEqualToString:@"flashlight"] || [cleanCmd isEqualToString:@"flashlight toggle"] ||
+               [cleanCmd isEqualToString:@"flashlight off"] || [cleanCmd isEqualToString:@"flashlight status"] ||
+               [cleanCmd isEqualToString:@"torch"] || [cleanCmd isEqualToString:@"torch on"] ||
+               [cleanCmd isEqualToString:@"torch off"] || [cleanCmd isEqualToString:@"torch status"] ||
+               [cleanCmd isEqualToString:@"flash on"] || [cleanCmd isEqualToString:@"flash off"] ||
+               [cleanCmd hasPrefix:@"flashlight "] || [cleanCmd hasPrefix:@"flash "] ||
+               [cleanCmd hasPrefix:@"torch "]) {
+        return rc_handle_flashlight_command(cleanCmd);
     } else if ([cleanCmd isEqualToString:@"notify clear"] || [cleanCmd hasPrefix:@"notify clear "] ||
                [cleanCmd isEqualToString:@"clear notification"] || [cleanCmd hasPrefix:@"clear notification "] ||
                [cleanCmd isEqualToString:@"clear notifications"] || [cleanCmd hasPrefix:@"clear notifications "] ||
