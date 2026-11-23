@@ -165,10 +165,20 @@ static NSString *RCFitOneLine(NSString *text, UIFont *font, CGFloat width) {
         addSection(@[@"trigger_home_double_click", @"trigger_home_triple_click", @"trigger_home_quadruple_click", @"trigger_home_hold", @"trigger_home_power", @"touchid_tap", @"touchid_hold"], @"Home Button");
     }
     addSection(@[@"trigger_ringer_mute", @"trigger_ringer_unmute", @"trigger_ringer_toggle"], @"Ringer Switch");
-    NSMutableArray<NSString *> *watchKeys = [@[@"trigger_watch_ping", @"trigger_watch_ping_hold", @"trigger_watch_connect", @"trigger_watch_disconnect", @"trigger_watch_face"] mutableCopy];
+    NSMutableArray<NSString *> *watchKeys = [@[@"trigger_watch_ping", @"trigger_watch_ping_hold", @"trigger_watch_connect", @"trigger_watch_disconnect", @"trigger_watch_charging_start", @"trigger_watch_charging_stop", @"trigger_watch_face"] mutableCopy];
+    NSMutableArray<NSString *> *watchBatteryKeys = [NSMutableArray array];
     for (NSString *key in [config allConfiguredTriggerKeys]) {
         if ([key hasPrefix:@"trigger_watch_face_"]) [watchKeys addObject:key];
+        else if ([key hasPrefix:@"trigger_watch_battery_"]) [watchBatteryKeys addObject:key];
     }
+    [watchBatteryKeys sortUsingComparator:^NSComparisonResult(NSString *a, NSString *b) {
+        NSString *(^level)(NSString *) = ^NSString *(NSString *key) {
+            return key.length > 28 ? [key substringFromIndex:28] : @"";
+        };
+        NSComparisonResult byLevel = [@([level(a) integerValue]) compare:@([level(b) integerValue])];
+        return byLevel != NSOrderedSame ? byLevel : [b compare:a];
+    }];
+    [watchKeys addObjectsFromArray:watchBatteryKeys];
     addSection(watchKeys, @"Apple Watch");
 
     // Device State, ordered as on the Triggers screen: Focus, Battery, then the

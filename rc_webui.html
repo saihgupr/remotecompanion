@@ -3660,7 +3660,7 @@ const TRIGGER_SECTIONS = [
   { title: 'Multi-Finger Gestures',  id: 'multifinger', keys: ['trigger_two_finger_tap','trigger_two_finger_swipe_left','trigger_two_finger_swipe_right','trigger_two_finger_swipe_up','trigger_two_finger_swipe_down','trigger_two_finger_rotate_cw','trigger_two_finger_rotate_ccw','trigger_statusbar_two_finger_swipe_down','trigger_bottom_two_finger_swipe_up'] },
   { title: 'Home Button',            id: 'home',      keys: ['trigger_home_double_click','trigger_home_triple_click','trigger_home_quadruple_click','trigger_home_hold','trigger_home_power','touchid_tap','touchid_hold'] },
   { title: 'Ringer Switch',          id: 'ringer',    keys: ['trigger_ringer_mute','trigger_ringer_unmute','trigger_ringer_toggle'] },
-  { title: 'Apple Watch',            id: 'watch',     keys: ['trigger_watch_ping','trigger_watch_ping_hold','trigger_watch_connect','trigger_watch_disconnect','trigger_watch_face'] },
+  { title: 'Apple Watch',            id: 'watch',     keys: ['trigger_watch_ping','trigger_watch_ping_hold','trigger_watch_connect','trigger_watch_disconnect','trigger_watch_charging_start','trigger_watch_charging_stop','trigger_watch_face'] },
   { title: 'Device State',           id: 'status',    keys: [], prefix: 'trigger_device_', prefix2: 'trigger_media_', deletable: true },
   { title: 'Physical Orientation',   id: 'orientation', keys: ['trigger_device_orientation_portrait_up','trigger_device_orientation_landscape_left','trigger_device_orientation_landscape_right','trigger_device_orientation_portrait_upside_down'] },
   { title: 'Motion Gestures',        id: 'motion',    keys: ['shake'] },
@@ -3698,6 +3698,7 @@ const TRIGGER_NAMES = {
   trigger_ringer_mute:'Ringer Muted', trigger_ringer_unmute:'Ringer Unmuted', trigger_ringer_toggle:'Ringer Toggled',
   trigger_watch_ping:'Ping iPhone', trigger_watch_ping_hold:'Ping iPhone (Hold)',
   trigger_watch_connect:'Watch Connected', trigger_watch_disconnect:'Watch Disconnected',
+  trigger_watch_charging_start:'Watch Started Charging', trigger_watch_charging_stop:'Watch Stopped Charging',
   trigger_watch_face:'Watch Face: Any',
   trigger_bottombar_swipe_left:'Bottom Bar Swipe Left', trigger_bottombar_swipe_right:'Bottom Bar Swipe Right',
   trigger_bottom_swipe_up_left:'Bottom Swipe Up (Left)', trigger_bottom_swipe_up_center:'Bottom Swipe Up (Center)', trigger_bottom_swipe_up_right:'Bottom Swipe Up (Right)',
@@ -3768,6 +3769,8 @@ const TRIGGER_ICONS = {
   trigger_watch_ping_hold: { icon:'dot_radiowaves_left_right', cls:'icon-blue' },
   trigger_watch_connect:   { icon:'dot_radiowaves_left_right', cls:'icon-green' },
   trigger_watch_disconnect:{ icon:'dot_radiowaves_left_right', cls:'icon-orange' },
+  trigger_watch_charging_start:{ icon:'bolt_fill', cls:'icon-green' },
+  trigger_watch_charging_stop: { icon:'bolt_slash_fill', cls:'icon-orange' },
   trigger_watch_face:      { icon:'timer', cls:'icon-blue' },
   trigger_device_lock:   { icon:'lock_fill',       cls:'icon-red' },
   trigger_device_unlock: { icon:'lock_open_fill',  cls:'icon-green' },
@@ -3996,6 +3999,8 @@ function iconForKey(key) {
   if (TRIGGER_ICONS[key]) return TRIGGER_ICONS[key];
   if (key.startsWith('trigger_cc_button_')) return { icon:'switch_2', cls:'icon-blue' };
   if (key.startsWith('trigger_watch_face_')) return { icon:'timer', cls:'icon-blue' };
+  if (key.startsWith('trigger_watch_battery_above_')) return { icon:'battery_100', cls:'icon-green' };
+  if (key.startsWith('trigger_watch_battery_below_')) return { icon:'battery_25', cls:'icon-orange' };
   if (key.startsWith('trigger_device_focus_on')) return { icon:'moon_fill', cls:'icon-indigo' };
   if (key.startsWith('trigger_device_focus_off')) return { icon:'moon', cls:'icon-indigo' };
   if (key.startsWith('nfc_'))        return { icon:'antenna_radiowaves_left_right', cls:'icon-cyan' };
@@ -4062,6 +4067,8 @@ function defaultNameForKey(key) {
   const t = config.triggers[key];
   if (t && t.name) return t.name;
   if (key.startsWith('trigger_watch_face_')) return 'Watch Face Changed';
+  if (key.startsWith('trigger_watch_battery_below_')) return `Watch Battery Drops to ${key.slice(28)}%`;
+  if (key.startsWith('trigger_watch_battery_above_')) return `Watch Battery Rises to ${key.slice(28)}%`;
   if (key === 'trigger_device_focus_on') return 'Focus On: Any';
   if (key === 'trigger_device_focus_off') return 'Focus Off: Any';
   if (key.startsWith('trigger_device_focus_on_')) return `Focus On: ${key.slice(24)}`;
@@ -4902,6 +4909,8 @@ const CONDITION_DEFS = [
   { key:'lpm',        title:'Low Power Mode', icon:'battery_25', section:'Power', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
   { key:'charging',   title:'Charging', icon:'bolt_fill', section:'Power', values:[{value:'CHARGING',title:'Charging'},{value:'NOT_CHARGING',title:'Not Charging'}] },
   { key:'battery',    title:'Battery Level', icon:'battery_100', section:'Power', threshold:true },
+  { key:'watch_charging', title:'Apple Watch Charging', icon:'bolt_fill', section:'Power', values:[{value:'CHARGING',title:'Charging'},{value:'NOT_CHARGING',title:'Not Charging'}] },
+  { key:'watch_battery',  title:'Apple Watch Battery Level', icon:'battery_100', section:'Power', threshold:true },
   { key:'player',     title:'Player Status',       icon:'play_fill', section:'Sound', values:[{value:'PLAYING',title:'Playing'},{value:'PAUSED',title:'Paused'},{value:'STOPPED',title:'Stopped'}] },
   { key:'dnd',        title:'Do Not Disturb', icon:'moon_fill', section:'Sound', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
   { key:'focus',      title:'Focus', icon:'moon_circle_fill', section:'Sound' },
@@ -5322,7 +5331,7 @@ function computeVisibleSections() {
     } else if (sec.id === 'favorites') {
       keys = favs.filter(k => triggerIsAdded(k));
     } else if (sec.id === 'watch') {
-      keys = (sec.keys || []).filter(k => triggerIsAdded(k)).concat(allKeys.filter(k => k.startsWith('trigger_watch_face_')));
+      keys = (sec.keys || []).filter(k => triggerIsAdded(k)).concat(allKeys.filter(k => k.startsWith('trigger_watch_face_') || k.startsWith('trigger_watch_battery_')));
     } else if (sec.dynamic) {
       keys = allKeys.filter(k => sectionMatches(sec, k));
     } else {
@@ -8481,7 +8490,7 @@ function saveTimeCondDialog() {
 // ── Condition picker (mirrors iOS RCConditionPickerViewController: grouped, ──
 // searchable sections; tapping a condition expands its options inline beneath it)
 const COND_SECTION_ORDER = ['Time', 'Device', 'Power', 'Sound', 'Connectivity', 'Variables', 'Other', 'Add-ons'];
-function allCondDefs() { return CONDITION_DEFS.filter(d => d.key !== 'watch' || watchAvailable()).concat(addOnConditionDefs); }
+function allCondDefs() { return CONDITION_DEFS.filter(d => (d.key !== 'watch' && !d.key.startsWith('watch_')) || watchAvailable()).concat(addOnConditionDefs); }
 const COND_DAY_CODES = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
 const COND_DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 let condPickerEditIdx = null;
@@ -9229,10 +9238,11 @@ function promptDelay(current, saveLabel, onSave, idx = null) {
 
 // ── Set Variable's RC Command: commands that answer with a value, with their answer now ──
 const VALUE_COMMANDS = [
-  ['Levels', [['Battery Level', 'battery', 'battery_100', true], ['Volume', 'volume', 'speaker_2_fill', true]]],
+  ['Levels', [['Battery Level', 'battery', 'battery_100', true], ['Volume', 'volume', 'speaker_2_fill', true], ['Apple Watch Battery', 'watch battery', 'battery_100', true]]],
   ['Connectivity', [['Wi-Fi', 'wifi status', 'wifi'], ['Bluetooth', 'bt status', 'antenna_radiowaves_left_right'],
     ['Cellular Data', 'cell status', 'antenna_radiowaves_left_right'], ['Airplane Mode', 'airplane status', 'airplane'],
-    ['Location Services', 'location status', 'location_fill'], ['CarPlay', 'carplay status', 'car_fill']]],
+    ['Location Services', 'location status', 'location_fill'], ['CarPlay', 'carplay status', 'car_fill'],
+    ['Apple Watch', 'watch status', 'timer'], ['Apple Watch Charging', 'watch charging', 'bolt_fill']]],
   ['Sound', [['Ringer', 'ringer status', 'bell_fill'], ['Silent Vibrate', 'vibration silent-status', 'iphone'],
     ['Haptics', 'haptics status', 'hand_draw'], ['Media Playing', 'is-playing', 'play_fill']]],
   ['Device', [['Lock State', 'lock status', 'lock_fill'], ['Low Power Mode', 'low power status', 'battery_25'],
@@ -9262,10 +9272,12 @@ function renderCommandPicker(current) {
   const list = document.getElementById('cmd-picker-list');
   list.innerHTML = '';
   VALUE_COMMANDS.forEach(([title, rows], si) => {
+    const visibleRows = rows.filter(([, cmd]) => !cmd.startsWith('watch ') || watchAvailable());
+    if (!visibleRows.length) return;
     list.insertAdjacentHTML('beforeend', `<div class="cmd-head">${title}</div>`);
     const card = document.createElement('div');
     card.className = 'cmd-card';
-    rows.forEach(([name, cmd, icon, number]) => {
+    visibleRows.forEach(([name, cmd, icon, number]) => {
       const row = document.createElement('div');
       row.className = 'cmd-row';
       const answer = commandPickerAnswers[cmd];
@@ -10888,35 +10900,6 @@ function selectHAEntity(item) {
 
   if (domain === 'scene' || domain === 'script' || domain === 'automation') {
     let cmd = `ha call ${domain}.turn_on ${entityId}`;
-    if (domain === 'script') cmd = `ha call script.${entityId.split('.')[1]} ${entityId}`;
-    apply(cmd, '');
-  } else {
-    // While editing, tick whichever action the old command already used
-    const actions = triggerData(currentKey).actions || [];
-    const oldAct = editIdx !== null ? actions[editIdx] : null;
-    const oldCmd = (typeof oldAct === 'object' && oldAct !== null) ? (oldAct.command || '') : oldAct;
-    const old = editIdx !== null ? parseHACommand(oldCmd) : null;
-    const tick = (svc, verb) => old && (old.service === svc || old.service.split('.').pop() === verb) ? ' ✓' : '';
-    showSheet(`Control ${friendlyName}`, [
-      { label: `Toggle (${friendlyName})${tick(`${domain}.toggle`, 'toggle')}`, action: () => apply(`ha toggle ${entityId}`, 'Toggle') },
-      { label: `Turn On (${friendlyName})${tick(`${domain}.turn_on`, 'turn_on')}`, action: () => apply(`ha turn_on ${entityId}`, 'Turn On') },
-      { label: `Turn Off (${friendlyName})${tick(`${domain}.turn_off`, 'turn_off')}`, action: () => apply(`ha turn_off ${entityId}`, 'Turn Off') }
-    ]);
-  }
-}
-
-function updateHAAction(idx, cmd, message) {
-  const actions = triggerData(currentKey).actions || [];
-  if (idx === null || idx < 0 || idx >= actions.length) {
-    addActionToCurrent(cmd);
-  } else {
-    storeCommandAt(actions, idx, cmd);
-    saveConfig();
-    renderActionList();
-  }
-  if (message) showToast(message);
-}
-
 function parseHACommand(cmd) {
   if (!cmd || typeof cmd !== 'string') return null;
   let raw = cmd.trim();
@@ -11514,19 +11497,23 @@ function promptSequenceEditedTrigger(editKey = null) {
 }
 
 // ── Battery Level Trigger Setup ─────────────────────────────────────────────
-function promptBatteryTrigger() {
-  showSheet('Battery Level', [
-    { label: 'Drops To', action: () => promptBatteryLevel('below') },
-    { label: 'Rises To', action: () => promptBatteryLevel('above') },
+function promptBatteryTrigger(isWatch = false) {
+  const title = isWatch ? 'Watch Battery Level' : 'Battery Level';
+  showSheet(title, [
+    { label: 'Drops To', action: () => promptBatteryLevel('below', isWatch) },
+    { label: 'Rises To', action: () => promptBatteryLevel('above', isWatch) },
   ]);
 }
-function promptBatteryLevel(mode) {
-  showDialog('Battery Level', 'Level (1-100%):', mode === 'below' ? '20' : '80', 'Add', val => {
+function promptBatteryLevel(mode, isWatch = false) {
+  const title = isWatch ? 'Watch Battery Level' : 'Battery Level';
+  const prefix = isWatch ? 'trigger_watch_battery_' : 'trigger_device_battery_';
+  const labelPrefix = isWatch ? 'Watch Battery' : 'Battery';
+  showDialog(title, 'Level (1-100%):', mode === 'below' ? '20' : '80', 'Add', val => {
     const level = parseInt(val, 10);
     if (!(level >= 1 && level <= 100)) return;
-    const key = `trigger_device_battery_${mode}_${level}`;
+    const key = `${prefix}${mode}_${level}`;
     if (!config.triggers[key]) {
-      config.triggers[key] = { enabled: true, actions: [], name: `Battery ${mode === 'below' ? 'Drops' : 'Rises'} to ${level}%` };
+      config.triggers[key] = { enabled: true, actions: [], name: `${labelPrefix} ${mode === 'below' ? 'Drops' : 'Rises'} to ${level}%` };
       saveConfig();
     }
     renderAll();
@@ -11543,7 +11530,10 @@ function showAddTriggerSheet() {
     { label: 'Audio Output Trigger', action: () => promptAudioOutputTrigger() },
     { label: 'Control Center Button', action: () => promptControlCenterTrigger() },
     { label: 'Focus Trigger', action: () => promptFocusTrigger() },
-    ...(watchAvailable() ? [{ label: 'Watch Face Trigger', action: () => promptWatchFaceTrigger() }] : []),
+    ...(watchAvailable() ? [
+      { label: 'Watch Face Trigger', action: () => promptWatchFaceTrigger() },
+      { label: 'Watch Battery Level Trigger', action: () => promptBatteryTrigger(true) },
+    ] : []),
     { label: 'Notification Trigger', action: () => promptNotifTrigger() },
     { label: 'App Launch Trigger', action: () => promptAppLaunchPicker() },
     { label: 'App Exit Trigger', action: () => promptAppLaunchPicker(null, 'exit') },
@@ -11573,7 +11563,7 @@ const BUILT_IN_TRIGGER_GROUPS = [
   { title: 'Physical Orientation', keys: ['trigger_device_orientation_portrait_up','trigger_device_orientation_landscape_left','trigger_device_orientation_landscape_right','trigger_device_orientation_portrait_upside_down'] },
   { title: 'Media', keys: ['trigger_media_play','trigger_media_pause','trigger_media_track_change'] },
   { title: 'Calls', keys: ['trigger_device_call_incoming','trigger_device_call_start','trigger_device_call_end'] },
-  { title: 'Apple Watch', keys: ['trigger_watch_ping','trigger_watch_ping_hold','trigger_watch_connect','trigger_watch_disconnect'] },
+  { title: 'Apple Watch', keys: ['trigger_watch_ping','trigger_watch_ping_hold','trigger_watch_connect','trigger_watch_disconnect','trigger_watch_charging_start','trigger_watch_charging_stop'] },
 ];
 
 function addBuiltInTrigger(key) {

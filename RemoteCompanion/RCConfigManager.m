@@ -514,6 +514,7 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
             // Apple Watch
             @"trigger_watch_ping", @"trigger_watch_ping_hold",
             @"trigger_watch_connect", @"trigger_watch_disconnect",
+            @"trigger_watch_charging_start", @"trigger_watch_charging_stop",
             // Motion Gestures
             @"shake",
             // Device State
@@ -1414,6 +1415,8 @@ static NSString *RCActionCommand(id item) {
         @"trigger_watch_ping_hold": @"Ping iPhone (Hold)",
         @"trigger_watch_connect": @"Watch Connected",
         @"trigger_watch_disconnect": @"Watch Disconnected",
+        @"trigger_watch_charging_start": @"Watch Started Charging",
+        @"trigger_watch_charging_stop": @"Watch Stopped Charging",
         @"trigger_watch_face": @"Watch Face: Any",
         @"trigger_bottombar_swipe_left": @"Bottom Bar Swipe Left",
         @"trigger_bottombar_swipe_right": @"Bottom Bar Swipe Right",
@@ -1449,6 +1452,12 @@ static NSString *RCActionCommand(id item) {
 
     if ([triggerKey hasPrefix:@"trigger_device_battery_"]) {
         return _config[@"triggers"][triggerKey][@"name"] ?: triggerKey;
+    }
+    if ([triggerKey hasPrefix:@"trigger_watch_battery_below_"] && triggerKey.length > 28) {
+        return _config[@"triggers"][triggerKey][@"name"] ?: [NSString stringWithFormat:@"Watch Battery Drops to %@%%", [triggerKey substringFromIndex:28]];
+    }
+    if ([triggerKey hasPrefix:@"trigger_watch_battery_above_"] && triggerKey.length > 28) {
+        return _config[@"triggers"][triggerKey][@"name"] ?: [NSString stringWithFormat:@"Watch Battery Rises to %@%%", [triggerKey substringFromIndex:28]];
     }
 
     if ([triggerKey hasPrefix:@"trigger_cc_button_"]) {

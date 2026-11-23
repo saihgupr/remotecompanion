@@ -8,10 +8,16 @@ static NSArray<NSArray *> *RCValueCommandSections(void) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         list = @[
-            @[@"Levels", @[
-                @{ @"title": @"Battery Level", @"command": @"battery", @"icon": @"battery.75", @"fallbackIcon": @"battery.100", @"number": @YES },
-                @{ @"title": @"Volume", @"command": @"volume", @"icon": @"speaker.wave.2.fill", @"number": @YES },
-            ]],
+            @[@"Levels", ({
+                NSMutableArray *rows = [@[
+                    @{ @"title": @"Battery Level", @"command": @"battery", @"icon": @"battery.75", @"fallbackIcon": @"battery.100", @"number": @YES },
+                    @{ @"title": @"Volume", @"command": @"volume", @"icon": @"speaker.wave.2.fill", @"number": @YES },
+                ] mutableCopy];
+                if ([RCConfigManager watchFeaturesAvailable]) {
+                    [rows addObject:@{ @"title": @"Apple Watch Battery", @"command": @"watch battery", @"icon": @"applewatch", @"number": @YES }];
+                }
+                rows;
+            })],
             @[@"Connectivity", ({
                 NSMutableArray *rows = [@[
                     @{ @"title": @"Wi-Fi", @"command": @"wifi status", @"icon": @"wifi" },
@@ -24,6 +30,7 @@ static NSArray<NSArray *> *RCValueCommandSections(void) {
                 // Watch status only makes sense where the Apple Watch app is installed
                 if ([RCConfigManager watchFeaturesAvailable]) {
                     [rows addObject:@{ @"title": @"Apple Watch", @"command": @"watch status", @"icon": @"applewatch" }];
+                    [rows addObject:@{ @"title": @"Apple Watch Charging", @"command": @"watch charging", @"icon": @"applewatch" }];
                 }
                 rows;
             })],
