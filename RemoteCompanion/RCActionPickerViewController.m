@@ -307,6 +307,7 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
             @{ @"name": @"Appearance", @"command": @"appearance toggle", @"icon": @"circle.lefthalf.fill" },
             @{ @"name": @"Set Brightness", @"command": @"__SET_BRIGHTNESS__", @"icon": @"sun.max.fill" },
             @{ @"name": @"Flashlight", @"command": @"flashlight toggle", @"icon": @"flashlight.on.fill" },
+            @{ @"name": @"Dance Party…", @"command": @"__DANCE_PARTY__", @"icon": @"bolt.fill", @"keywords": @"flashlight torch party music light dance" },
             @{ @"name": @"Rotation Lock", @"command": @"rotate toggle", @"icon": @"lock.rotation" },
             @{ @"name": @"Set Orientation...", @"command": @"__SET_ORIENTATION__", @"icon": @"rotate.right", @"keywords": @"rotate rotation landscape portrait orientation screen sideways" },
             @{ @"name": @"Lock Device", @"command": @"lock", @"icon": @"lock.fill" },
@@ -537,7 +538,8 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
                 @"__UNLOCK_DEVICE__", @"__LOCK_TOGGLE__", @"__TAP__", @"__HOLD__", @"__SWIPE__",
                 @"__PLAY_GESTURE__", @"__RECORD_GESTURE__", @"__AIRPLAY_CONNECT__",
                 @"__BT_CONNECT__", @"__BT_DISCONNECT__", @"__WATCH_FACE__", @"__FOCUS__", @"__HA_PICKER__",
-                @"__KM_TRIGGER__", @"__MQTT_PUBLISH__", @"__CAMERA_PICKER__", @"__CAMERA_VIDEO_PICKER__", @"__SET_ORIENTATION__"
+                @"__KM_TRIGGER__", @"__MQTT_PUBLISH__", @"__CAMERA_PICKER__", @"__CAMERA_VIDEO_PICKER__", @"__SET_ORIENTATION__",
+                @"__DANCE_PARTY__"
             ]];
         });
         NSMutableArray *remoteSections = [NSMutableArray array];
@@ -806,6 +808,11 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
 
     if ([command isEqualToString:@"__SET_ORIENTATION__"]) {
         [self handleSetOrientation];
+        return;
+    }
+
+    if ([command isEqualToString:@"__DANCE_PARTY__"]) {
+        [self handleDanceParty];
         return;
     }
 
@@ -1323,6 +1330,30 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
     [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(__unused UIAlertAction * _Nonnull action) {
         [weakSelf deselectTiles];
     }]];
+    sheet.popoverPresentationController.sourceView = self.view;
+    sheet.popoverPresentationController.sourceRect = CGRectMake(self.view.bounds.size.width / 2, self.view.bounds.size.height / 2, 1, 1);
+    [self presentViewController:sheet animated:YES completion:nil];
+}
+
+- (void)handleDanceParty {
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Dance Party"
+                                                                   message:@"Run the flashlight with the music. Toggle turns it on or off."
+                                                            preferredStyle:UIAlertControllerStyleActionSheet];
+    __weak typeof(self) weakSelf = self;
+    UIAlertAction *toggle = [UIAlertAction actionWithTitle:@"Toggle" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction * _Nonnull action) {
+        [weakSelf finishWithFocusCommand:@"dance party"];
+    }];
+    [sheet addAction:toggle];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"On" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction * _Nonnull action) {
+        [weakSelf finishWithFocusCommand:@"dance party on"];
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Off" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction * _Nonnull action) {
+        [weakSelf finishWithFocusCommand:@"dance party off"];
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(__unused UIAlertAction * _Nonnull action) {
+        [weakSelf deselectTiles];
+    }]];
+    sheet.preferredAction = toggle;
     sheet.popoverPresentationController.sourceView = self.view;
     sheet.popoverPresentationController.sourceRect = CGRectMake(self.view.bounds.size.width / 2, self.view.bounds.size.height / 2, 1, 1);
     [self presentViewController:sheet animated:YES completion:nil];

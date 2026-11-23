@@ -116,7 +116,7 @@ A sequence is a **JSON array** of actions. Each action is either:
 | `flashlight toggle` | Toggle flashlight |
 | `flashlight <level>` | Set brightness: 0-100, `low`, `medium`, `high` or `max` |
 | `flashlight up [N]` / `down [N]` | Step brightness by N percent (default 25) |
-| `flashlight party [pump|beat]` | Run the torch with nearby music; `stop` ends it |
+| `dance party [on|off]` | Run the torch with nearby music; bare toggles |
 | `rotate toggle` | Toggle rotation lock |
 | `orientation set <mode>` | Set screen orientation: `portrait`, `landscape left`, `landscape right`, `portrait upside down`, `auto` |
 | `vibration silent-toggle` | Toggle silent vibration |

@@ -4095,6 +4095,7 @@ const CMD_NAMES = {
   'volume up':'Volume Up','volume down':'Volume Down',
   'queuealbum':'Queue Current Album','queue album':'Queue Current Album','queueartist':'Queue Artist (Shuffle)','queue artist':'Queue Artist (Shuffle)','shuffleall':'Shuffle All Songs','shuffle all songs':'Shuffle All Songs','deletesong':'Delete Currently Playing Song','delete song':'Delete Currently Playing Song','delete current song':'Delete Currently Playing Song',
   'flashlight':'Flashlight Toggle','flashlight on':'Flashlight On','flashlight off':'Flashlight Off','flashlight toggle':'Flashlight Toggle',
+  'dance party':'Dance Party','dance party on':'Dance Party On','dance party off':'Dance Party Off',
   'button triggers pause 15':'Button Triggers Pause 15 Minutes','button triggers pause 60':'Button Triggers Pause 1 Hour','button triggers pause':'Button Triggers Pause Until Resumed','button triggers resume':'Button Triggers Resume',
   'appearance dark':'Appearance Dark','appearance light':'Appearance Light','appearance toggle':'Appearance Toggle',
   'rotate lock':'Rotate Lock','rotate unlock':'Rotate Unlock','rotate toggle':'Rotate Toggle',
@@ -4452,6 +4453,9 @@ function nameForCmd(cmd) {
   }
   if (lowCmd.startsWith('sneakycam photo') || lowCmd === 'sneakycam takephoto') return 'SneakyCam Photo';
   if (lowCmd.startsWith('sneakycam video') || lowCmd === 'sneakycam record' || lowCmd === 'sneakycam startstopvideo') return 'SneakyCam Video';
+  if (lowCmd === 'dance party') return 'Dance Party';
+  if (lowCmd === 'dance party on') return 'Dance Party On';
+  if (lowCmd === 'dance party off') return 'Dance Party Off';
   if (lowCmd.startsWith('flashlight ')) return `Flashlight ${cmd.slice(11)}%`;
   if (lowCmd.startsWith('lua:'))          return `Lua: ${cmd.slice(4)}`;
   if (lowCmd.startsWith('delay '))        return `Delay ${cmd.slice(6)}s`;
@@ -4670,6 +4674,7 @@ function iconForCmd(cmd) {
     'volume up':'speaker_3_fill','volume down':'speaker_1_fill',
     'queuealbum':'music_note_list','queue album':'music_note_list','queueartist':'music_mic','queue artist':'music_mic','shuffleall':'shuffle','shuffle all songs':'shuffle','deletesong':'trash','delete song':'trash','delete current song':'trash',
     'flashlight':'bolt_fill','flashlight on':'bolt_fill','flashlight off':'bolt_slash_fill','flashlight toggle':'bolt_fill',
+    'dance party':'bolt_fill','dance party on':'bolt_fill','dance party off':'bolt_slash_fill',
     'button triggers pause 15':'pause_circle','button triggers pause 60':'pause_circle','button triggers pause':'pause_circle','button triggers resume':'play_circle',
     'appearance dark':'moon_fill','appearance light':'sun_max_fill','appearance toggle':'circle_lefthalf_fill',
     'location on':'location_fill','location off':'location_slash','location toggle':'location_fill',
@@ -4806,6 +4811,7 @@ const ACTION_SECTIONS = [
     { name:'Set Brightness…',   cmd:'__SET_BRIGHTNESS__',icon:'sun_max_fill', needs_input:true },
     { name:'Flashlight',        cmd:'flashlight toggle', icon:'bolt_fill', is_toggle:true },
     { name:'Flashlight Intensity…', cmd:'__SET_FLASHLIGHT__', icon:'dial_fill', needs_input:true },
+    { name:'Dance Party…',      cmd:'__DANCE_PARTY__', icon:'bolt_fill', needs_input:true, keywords:'flashlight torch party music light dance' },
     { name:'Rotation Lock',     cmd:'rotate toggle',     icon:'lock_rotation', is_toggle:true },
     { name:'Set Orientation…',  cmd:'__SET_ORIENTATION__',icon:'rotate_right', needs_input:true, keywords:'rotate rotation landscape portrait orientation upside down screen sideways' },
     { name:'Button Triggers',   cmd:'button triggers pause 15', icon:'pause_circle', is_toggle:true },
@@ -8268,6 +8274,8 @@ function selectPickerAction(act) {
     promptLevelAction('brightness ', null);
   } else if (c === '__SET_ORIENTATION__') {
     promptOrientationPicker();
+  } else if (c === '__DANCE_PARTY__') {
+    promptDancePartyPicker();
   } else if (c === '__HA_PICKER__') {
     promptHAActionPicker();
   } else if (c === '__HA_TOGGLE__') {
@@ -8379,6 +8387,15 @@ function promptOrientationPicker() {
     icon: 'rotate_right',
     action: () => addActionToCurrent(`${toggleInfo.prefixes[0]}${s}`)
   }));
+  showContextMenu({ clientX: Math.max(10, window.innerWidth / 2 - 110), clientY: Math.max(10, window.innerHeight / 3), preventDefault: () => {} }, items);
+}
+
+function promptDancePartyPicker() {
+  const items = [
+    { label: 'Toggle', icon: 'bolt_fill', action: () => addActionToCurrent('dance party') },
+    { label: 'On', icon: 'bolt_fill', action: () => addActionToCurrent('dance party on') },
+    { label: 'Off', icon: 'bolt_slash_fill', action: () => addActionToCurrent('dance party off') },
+  ];
   showContextMenu({ clientX: Math.max(10, window.innerWidth / 2 - 110), clientY: Math.max(10, window.innerHeight / 3), preventDefault: () => {} }, items);
 }
 

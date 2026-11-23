@@ -3405,6 +3405,34 @@ static NSString *rc_party_command(NSString *argument) {
     return @"Usage: flashlight party [pump|beat|stop|status|sensitivity 1-10|cap 10-100|timeout 1-60]\n";
 }
 
+// The public face of the party: one command, pump style, on or off. The style and tuning words
+// on "flashlight party" stay for anyone who goes looking, but the help and README do not mention
+// them.
+static NSString *rc_dance_party_start(void) {
+    NSString *result = rc_party_start(@"pump");
+    return [result hasPrefix:@"Error:"] ? result : @"Dance party ON\n";
+}
+
+static NSString *rc_dance_party_command(NSString *argument) {
+    NSString *word = [argument stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]].lowercaseString;
+    if (word.length == 0) {
+        if (g_rcPartyOn) {
+            rc_party_stop();
+            return @"Dance party OFF\n";
+        }
+        return rc_dance_party_start();
+    }
+    if ([word isEqualToString:@"on"] || [word isEqualToString:@"start"]) {
+        return rc_dance_party_start();
+    }
+    if ([word isEqualToString:@"off"] || [word isEqualToString:@"stop"]) {
+        if (g_rcPartyOn) rc_party_stop();
+        return @"Dance party OFF\n";
+    }
+    if ([word isEqualToString:@"status"]) return g_rcPartyOn ? @"Dance party ON\n" : @"Dance party OFF\n";
+    return @"Usage: dance party [on|off|status]\n";
+}
+
 // flashlight, torch and flash all come here: on [level], off, toggle, status, a named level,
 // up/down [N] to step, or a bare level. Bare "flashlight" toggles.
 static NSString *rc_handle_flashlight_command(NSString *cmd) {
@@ -12125,7 +12153,7 @@ static NSArray *RCCommandHelpSections(void) {
             @[@"button triggers pause [min] | resume", @"Return buttons to stock behavior"],
             @[@"brightness <0-100>", @"Set screen brightness"],
             @[@"flashlight [on|off|toggle|status|low|medium|high|max|up|down] [level]", @"Control the torch and its brightness"],
-            @[@"flashlight party [pump|beat|stop|status]", @"Run the torch in time with the music"],
+            @[@"dance party [on|off|status]", @"Run the torch in time with the music"],
             @[@"rotate [lock|unlock|toggle|status]", @"Orientation lock"],
             @[@"orientation status", @"Print PORTRAIT or LANDSCAPE"],
             @[@"control center status", @"Print OPEN or CLOSED"],
@@ -13477,6 +13505,9 @@ static NSString *handle_command(NSString *cmd) {
         if ([NSThread isMainThread]) state = RCNFCScannerCommand(what);
         else dispatch_sync(dispatch_get_main_queue(), ^{ state = RCNFCScannerCommand(what); });
         return [NSString stringWithFormat:@"NFC scanner %@\n", state];
+    } else if ([cleanCmd isEqualToString:@"dance party"] || [cleanCmd hasPrefix:@"dance party "]) {
+        NSString *arg = [cleanCmd isEqualToString:@"dance party"] ? @"" : [cleanCmd substringFromIndex:12];
+        return rc_dance_party_command(arg);
     } else if ([cleanCmd isEqualToString:@"flashlight"] || [cleanCmd isEqualToString:@"flashlight toggle"] ||
                [cleanCmd isEqualToString:@"flashlight off"] || [cleanCmd isEqualToString:@"flashlight status"] ||
                [cleanCmd isEqualToString:@"torch"] || [cleanCmd isEqualToString:@"torch on"] ||

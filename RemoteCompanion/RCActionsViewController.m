@@ -1447,6 +1447,11 @@ static NSArray *RCActionSnapshot(NSArray *actions) {
             baseText = @"Flashlight ";
             paramText = [NSString stringWithFormat:@"%@%%", val];
         }
+    } else if ([lower isEqualToString:@"dance party"]) {
+        baseText = @"Dance Party";
+    } else if ([lower isEqualToString:@"dance party on"] || [lower isEqualToString:@"dance party off"]) {
+        baseText = @"Dance Party ";
+        paramText = [lower hasSuffix:@"on"] ? @"On" : @"Off";
     } else if ([lower hasPrefix:@"stop trigger "]) {
         baseText = @"Stop: ";
         paramText = [[RCConfigManager sharedManager] displayNameForTrigger:[cmd substringFromIndex:13]];
