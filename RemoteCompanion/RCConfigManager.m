@@ -1967,6 +1967,7 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         @"flashlight off": @"Flashlight Off",
         @"flashlight toggle": @"Flashlight Toggle",
         @"dance party": @"Dance Party",
+        @"dance party toggle": @"Dance Party Toggle",
         @"dance party on": @"Dance Party On",
         @"dance party off": @"Dance Party Off",
         @"appearance dark": @"Appearance Dark",
@@ -2661,6 +2662,8 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         if ([cmd containsString:@"auto"]) return ([UIImage systemImageNamed:@"gyroscope"] ? @"gyroscope" : @"rotate.right");
         return ([UIImage systemImageNamed:@"rectangle.portrait.rotate"] ? @"rectangle.portrait.rotate" : @"rotate.right");
     }
+    if ([cmd isEqualToString:@"dance party off"]) return @"flashlight.off.fill";
+    if ([cmd hasPrefix:@"dance party"]) return @"flashlight.on.fill";
     if ([cmd hasPrefix:@"flashlight "] || [cmd hasPrefix:@"flash "]) return @"flashlight.on.fill";
     if ([cmd hasPrefix:@"Lua "] || [cmd hasPrefix:@"lua_eval "] || [cmd hasPrefix:@"lua-eval "] || [cmd hasPrefix:@"lua "]) return @"scroll.fill";
     if ([cmd hasPrefix:@"spotify "]) return @"music.note";
@@ -2855,6 +2858,8 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         if ([cmd hasPrefix:@"delay "]) return @"hourglass";
         if ([cmd hasPrefix:@"stop trigger "]) return @"stop.circle";
         if ([cmd hasPrefix:@"exec "]) return @"chevron.right.square";
+        if ([cmd hasPrefix:@"dance party off"]) return @"flashlight.off.fill";
+        if ([cmd hasPrefix:@"dance party"]) return @"flashlight.on.fill";
         if ([cmd hasPrefix:@"flashlight "] || [cmd hasPrefix:@"flash "]) return @"flashlight.on.fill";
         if ([cmd hasPrefix:@"low power "]) return @"battery.100.bolt";
         if ([cmd hasPrefix:@"autolock "] || [cmd hasPrefix:@"auto-lock "] || [cmd hasPrefix:@"display sleep "] || [cmd hasPrefix:@"display timeout "] || [cmd hasPrefix:@"display time off "]) return @"timer";
@@ -3145,6 +3150,15 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
             @"prefixes": @[@"flashlight ", @"flash "],
             @"suffixes": @[@"on", @"off", @"toggle"],
             @"displaySuffixes": @[@"On", @"Off", @"Toggle"]
+        },
+        @{
+            @"key": @"dance_party",
+            @"name": @"Dance Party",
+            @"icon": @"flashlight.on.fill",
+            @"prefixes": @[@"dance party "],
+            @"suffixes": @[@"on", @"off", @"toggle"],
+            @"displaySuffixes": @[@"On", @"Off", @"Toggle"],
+            @"exactMatches": @{ @"dance party": @"toggle" }
         },
         @{
             @"key": @"nfcscanner",

@@ -1447,7 +1447,7 @@ static NSArray *RCActionSnapshot(NSArray *actions) {
             baseText = @"Flashlight ";
             paramText = [NSString stringWithFormat:@"%@%%", val];
         }
-    } else if ([lower isEqualToString:@"dance party"]) {
+    } else if ([lower isEqualToString:@"dance party"] || [lower isEqualToString:@"dance party toggle"]) {
         baseText = @"Dance Party";
     } else if ([lower isEqualToString:@"dance party on"] || [lower isEqualToString:@"dance party off"]) {
         baseText = @"Dance Party ";

@@ -3425,6 +3425,13 @@ static NSString *rc_dance_party_command(NSString *argument) {
     if ([word isEqualToString:@"on"] || [word isEqualToString:@"start"]) {
         return rc_dance_party_start();
     }
+    if ([word isEqualToString:@"toggle"]) {
+        if (g_rcPartyOn) {
+            rc_party_stop();
+            return @"Dance party OFF\n";
+        }
+        return rc_dance_party_start();
+    }
     if ([word isEqualToString:@"off"] || [word isEqualToString:@"stop"]) {
         if (g_rcPartyOn) rc_party_stop();
         return @"Dance party OFF\n";
