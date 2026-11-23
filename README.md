@@ -214,7 +214,7 @@ Configure these in the `RemoteCompanion` app for custom action sequences. Tip: *
 - **Gestures**: 
   - **Status Bar**: Hold (Left/Center/Right), Double-Tap, Swipe Left/Right, or a two-finger slide down.
   - **Edge Gestures**: Vertical swipe on left/right edges.
-  - **Bottom Bar Gestures**: Swipe Left/Right, **3-Zone Swipe Up** (Left 33%, Center 34%, Right 33%), or a two-finger slide up.
+  - **Bottom Bar Gestures**: Swipe Left/Right, **3-Zone Swipe Up** (Left 33%, Center 34%, Right 33%), **3-Zone Swipe Down** in place of Reachability (needs Reachability on in Settings > Accessibility > Touch), or a two-finger slide up.
 - **Motion Gestures**:
   - **Shake**: Fire actions when the device is physically shaken.
 - **System Events**:

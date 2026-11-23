@@ -1689,10 +1689,10 @@ static NSArray *RCActionSnapshot(NSArray *actions) {
     NSMutableArray *menuActions = [NSMutableArray arrayWithObject:whenFiredAction];
     // Triggers that take over what iOS normally does can keep it as well: the ping sound, and with a
     // Home button the Accessibility Shortcut, App Switcher, Siri and screenshot, otherwise Siri, the
-    // Accessibility Shortcut, a screenshot and Wallet
+    // Accessibility Shortcut, a screenshot, Wallet and Reachability
     NSArray *keepsDefault = [RCConfigManager hasHomeButton]
         ? @[@"trigger_device_findmy_sound", @"trigger_watch_ping", @"trigger_watch_ping_hold", @"trigger_home_triple_click", @"trigger_home_double_click", @"trigger_home_hold", @"trigger_home_power"]
-        : @[@"trigger_device_findmy_sound", @"trigger_watch_ping", @"trigger_watch_ping_hold", @"power_long_press", @"power_triple_click", @"power_volume_up", @"power_double_tap"];
+        : @[@"trigger_device_findmy_sound", @"trigger_watch_ping", @"trigger_watch_ping_hold", @"power_long_press", @"power_triple_click", @"power_volume_up", @"power_double_tap", @"trigger_bottom_swipe_down_left", @"trigger_bottom_swipe_down_center", @"trigger_bottom_swipe_down_right"];
     if ([keepsDefault containsObject:_triggerKey]) {
         id stored = [[RCConfigManager sharedManager] triggerDataForKey:_triggerKey][@"keepDefault"];
         BOOL keep = stored ? [stored boolValue] : [_triggerKey isEqualToString:@"trigger_device_findmy_sound"];

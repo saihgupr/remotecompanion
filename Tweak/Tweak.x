@@ -2412,6 +2412,9 @@ static NSString *get_human_name_for_trigger(NSString *key, NSDictionary *trigger
             @"trigger_bottom_swipe_up_left": @"Bottom Swipe Up (Left)",
             @"trigger_bottom_swipe_up_center": @"Bottom Swipe Up (Center)",
             @"trigger_bottom_swipe_up_right": @"Bottom Swipe Up (Right)",
+            @"trigger_bottom_swipe_down_left": @"Bottom Swipe Down (Left)",
+            @"trigger_bottom_swipe_down_center": @"Bottom Swipe Down (Center)",
+            @"trigger_bottom_swipe_down_right": @"Bottom Swipe Down (Right)",
             @"trigger_statusbar_two_finger_swipe_down": @"2-Finger Top Slide Down",
             @"trigger_bottom_two_finger_swipe_up": @"2-Finger Bottom Slide Up",
             @"trigger_two_finger_tap": @"2-Finger Tap",
@@ -17938,7 +17941,7 @@ static BOOL RC_DefaultHapticsForTrigger(NSString *triggerKey) {
     if ([triggerKey hasPrefix:@"trigger_home_"]) return YES;
     if ([triggerKey hasPrefix:@"trigger_statusbar_"]) return YES;
     if ([triggerKey hasPrefix:@"trigger_bottombar_"]) return YES;
-    if ([triggerKey hasPrefix:@"trigger_bottom_swipe_up_"]) return YES;
+    if ([triggerKey hasPrefix:@"trigger_bottom_swipe_"]) return YES;
     if ([triggerKey hasPrefix:@"trigger_edge_"]) return YES;
     return NO;
 }
@@ -22731,6 +22734,57 @@ static BOOL RC_ShouldKeepBottomBarSideSwipe(void) {
         }
     }
     %orig;
+}
+
+%end
+
+// BOTTOM SWIPE DOWN TRIGGERS
+// A swipe down on the bottom edge is iOS's Reachability gesture. The triggers reuse iOS's own
+// recognizer instead of reading touches, so they react exactly where Reachability does: when one
+// with actions is set up for the part of the edge the swipe started in, it runs instead of
+// Reachability (or as well, with Keep Default Action). Reachability must be on in Settings >
+// Accessibility > Touch for iOS to report the swipe.
+static inline NSString *RC_BottomSwipeDownTriggerForProgress(CGFloat progress) {
+    if (progress < 0.33) return @"trigger_bottom_swipe_down_left";
+    if (progress > 0.67) return @"trigger_bottom_swipe_down_right";
+    return @"trigger_bottom_swipe_down_center";
+}
+
+// The trigger that took the current Reachability swipe: iOS reports the swipe when it begins and
+// again when it ends, and both belong to that trigger
+static NSString *g_rcReachabilitySwipeKey = nil;
+
+%hook SBReachabilityManager
+
+- (void)_activateReachability:(id)sender {
+    UIGestureRecognizer *recognizer = [sender isKindOfClass:[UIGestureRecognizer class]] ? sender : nil;
+    if (!recognizer || recognizer != [self reachabilityGestureRecognizer] || !recognizer.view) {
+        %orig;
+        return;
+    }
+    UIGestureRecognizerState state = recognizer.state;
+    if (state == UIGestureRecognizerStateBegan || !g_rcReachabilitySwipeKey) {
+        g_rcReachabilitySwipeKey = nil;
+        SEL initialSel = NSSelectorFromString(@"initialTouchLocation"); // where the swipe started
+        CGPoint start = [recognizer respondsToSelector:initialSel]
+            ? ((CGPoint (*)(id, SEL))objc_msgSend)(recognizer, initialSel)
+            : [recognizer locationInView:recognizer.view];
+        CGFloat width = CGRectGetWidth(recognizer.view.bounds);
+        NSString *key = RC_BottomSwipeDownTriggerForProgress(width > 0 ? start.x / width : 0.5);
+        if (!RC_TriggerIsActionable(key)) {
+            %orig;
+            return;
+        }
+        if (state == UIGestureRecognizerStateBegan) g_rcReachabilitySwipeKey = key;
+        SRLogMin(@"[RCBottom] %@ (Reachability swipe at x=%.0f)", key, start.x);
+        RCTriggerHapticFor(key);
+        RCExecuteTrigger(key);
+        if (RC_TriggerKeepsDefault(key)) %orig;
+        return;
+    }
+    // The rest of a swipe a trigger took: iOS only sees it with Keep Default Action
+    if (RC_TriggerKeepsDefault(g_rcReachabilitySwipeKey)) %orig;
+    if (state != UIGestureRecognizerStateChanged) g_rcReachabilitySwipeKey = nil;
 }
 
 %end
