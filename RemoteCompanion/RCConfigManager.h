@@ -58,6 +58,18 @@
 // Unlocks Developer Mode actions in the action picker (Settings > Advanced Settings > Developer).
 // Off by default.
 @property (nonatomic, assign) BOOL developerMode;
+// Prevent the display from waking when external power connects or disconnects while the
+// screen is off or dimmed. Off by default (Settings > Tweaks).
+@property (nonatomic, assign) BOOL disableWakeOnPower;
+// Stop iOS from playing the charging haptic/chime when external power connects.
+// Off by default (Settings > Tweaks).
+@property (nonatomic, assign) BOOL disablePowerConnectedHaptics;
+// Turn off notification vibration while the device is unlocked (banners and sounds still work).
+// Off by default (Settings > Tweaks).
+@property (nonatomic, assign) BOOL disableUnlockedNotificationVibration;
+// Forward notifications to a paired Apple Watch even while the iPhone is unlocked.
+// Off by default (Settings > Tweaks).
+@property (nonatomic, assign) BOOL sendNotificationsToWatchWhenUnlocked;
 @property (nonatomic, assign) BOOL haEnabled;
 @property (nonatomic, copy) NSString *haUrl;
 @property (nonatomic, copy) NSString *haToken;

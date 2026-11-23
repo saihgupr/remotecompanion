@@ -15,6 +15,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
+#include <sys/stat.h>
 
 static NSDictionary *RCNativeQuickShortcutRequest(NSString *command) {
     if (![command hasPrefix:@"quickactions run "] || command.length > 32785) return nil;
@@ -33,7 +34,19 @@ NSString *const RCConfigChangedNotification = @"RCConfigChangedNotification";
 @property (nonatomic, strong) NSMutableDictionary *config;
 // notificationActionEntries, kept until the config is next loaded or saved
 @property (nonatomic, copy) NSArray<NSDictionary *> *notificationEntriesCache;
+// The config file as this app last read or wrote it. The tweak writes the same file for the
+// CLI, the Web UI and trigger runs; comparing the file's time against this tells those
+// changes apart from this app's own save.
+@property (nonatomic, assign) struct timespec lastConfigFileStamp;
+@property (nonatomic, assign) BOOL hasConfigFileStamp;
 @end
+
+static BOOL RCConfigFileStamp(NSString *path, struct timespec *stamp) {
+    struct stat st;
+    if (stat(path.fileSystemRepresentation, &st) != 0) return NO;
+    *stamp = st.st_mtimespec;
+    return YES;
+}
 
 // JSON null is not a plist value, so a hand-edited file with nulls would fail to
 // save. Drop them instead of refusing the whole import.
@@ -75,11 +88,38 @@ static void RCRemoveNulls(id object) {
                                                  selector:@selector(handleAppDidBecomeActive:) 
                                                      name:UIApplicationDidBecomeActiveNotification 
                                                    object:nil];
+
+        // The tweak saves the same config for the CLI, the Web UI and trigger runs. Reload when
+        // that copy changes, so an open screen (and the next save from this app) uses the new
+        // value instead of writing the old one back.
+        static int configChangedToken;
+        if (notify_register_dispatch(kConfigChangedNotification, &configChangedToken,
+                                     dispatch_get_main_queue(), ^(int token) {
+            [[RCConfigManager sharedManager] configChangedOutsideApp];
+        }) != NOTIFY_STATUS_OK) {
+            NSLog(@"[RCConfigManager] Could not watch for config changes from the tweak");
+        }
     }
     return self;
 }
 
 - (void)handleAppDidBecomeActive:(NSNotification *)note {
+    [self loadConfig];
+    [[NSNotificationCenter defaultCenter] postNotificationName:RCConfigChangedNotification object:nil];
+}
+
+// A change from the tweak (CLI, Web UI, a trigger) posts the config notification too. Only
+// reload when the file is newer than this app's own last read or save, or the app would reload
+// after every switch it saves itself.
+- (void)configChangedOutsideApp {
+    struct timespec stamp;
+    if (!RCConfigFileStamp(kConfigPath, &stamp)) return;
+    if (self.hasConfigFileStamp &&
+        stamp.tv_sec == self.lastConfigFileStamp.tv_sec &&
+        stamp.tv_nsec == self.lastConfigFileStamp.tv_nsec) {
+        return;
+    }
+    NSLog(@"[RCConfigManager] Config changed outside the app, reloading");
     [self loadConfig];
     [[NSNotificationCenter defaultCenter] postNotificationName:RCConfigChangedNotification object:nil];
 }
@@ -231,6 +271,11 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
     saved = [NSDictionary dictionaryWithContentsOfFile:kConfigPath];
     if (saved) {
         NSLog(@"[RCConfigManager] Loaded from shared path: %@", kConfigPath);
+        struct timespec stamp;
+        if (RCConfigFileStamp(kConfigPath, &stamp)) {
+            self.lastConfigFileStamp = stamp;
+            self.hasConfigFileStamp = YES;
+        }
     } else {
         // 2. Try app Documents (container)
         NSString *appDocsPath = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
@@ -368,6 +413,30 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
             [self saveConfig];
         }
 
+        // Auto-add disableWakeOnPower (default to NO: iOS wakes the screen on power changes as usual)
+        if (_config[@"disableWakeOnPower"] == nil) {
+            _config[@"disableWakeOnPower"] = @NO;
+            [self saveConfig];
+        }
+
+        // Auto-add disablePowerConnectedHaptics (default to NO: iOS plays power-connected feedback as usual)
+        if (_config[@"disablePowerConnectedHaptics"] == nil) {
+            _config[@"disablePowerConnectedHaptics"] = @NO;
+            [self saveConfig];
+        }
+
+        // Auto-add disableUnlockedNotificationVibration (default to NO: iOS vibrates for notifications as usual)
+        if (_config[@"disableUnlockedNotificationVibration"] == nil) {
+            _config[@"disableUnlockedNotificationVibration"] = @NO;
+            [self saveConfig];
+        }
+
+        // Auto-add sendNotificationsToWatchWhenUnlocked (default to NO: iOS only alerts Watch while locked)
+        if (_config[@"sendNotificationsToWatchWhenUnlocked"] == nil) {
+            _config[@"sendNotificationsToWatchWhenUnlocked"] = @NO;
+            [self saveConfig];
+        }
+
     } else {
         // Default config: no triggers until one is added from the New Trigger screen
         NSLog(@"[RCConfigManager] Using default config");
@@ -379,6 +448,10 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
             @"allowDirectRootHelper": @NO,
             @"onlyUnlockOutOfPocket": @NO,
             @"developerMode": @NO,
+            @"disableWakeOnPower": @NO,
+            @"disablePowerConnectedHaptics": @NO,
+            @"disableUnlockedNotificationVibration": @NO,
+            @"sendNotificationsToWatchWhenUnlocked": @NO,
             @"nfcEnabled": @YES,
             @"rootEnabled": @YES,
             @"sshHosts": [NSMutableArray array],
@@ -675,6 +748,42 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
 
 - (void)setOnlyUnlockOutOfPocket:(BOOL)onlyUnlockOutOfPocket {
     _config[@"onlyUnlockOutOfPocket"] = @(onlyUnlockOutOfPocket);
+    [self saveConfig];
+}
+
+- (BOOL)disableWakeOnPower {
+    return [_config[@"disableWakeOnPower"] boolValue];
+}
+
+- (void)setDisableWakeOnPower:(BOOL)disableWakeOnPower {
+    _config[@"disableWakeOnPower"] = @(disableWakeOnPower);
+    [self saveConfig];
+}
+
+- (BOOL)disablePowerConnectedHaptics {
+    return [_config[@"disablePowerConnectedHaptics"] boolValue];
+}
+
+- (void)setDisablePowerConnectedHaptics:(BOOL)disablePowerConnectedHaptics {
+    _config[@"disablePowerConnectedHaptics"] = @(disablePowerConnectedHaptics);
+    [self saveConfig];
+}
+
+- (BOOL)disableUnlockedNotificationVibration {
+    return [_config[@"disableUnlockedNotificationVibration"] boolValue];
+}
+
+- (void)setDisableUnlockedNotificationVibration:(BOOL)disableUnlockedNotificationVibration {
+    _config[@"disableUnlockedNotificationVibration"] = @(disableUnlockedNotificationVibration);
+    [self saveConfig];
+}
+
+- (BOOL)sendNotificationsToWatchWhenUnlocked {
+    return [_config[@"sendNotificationsToWatchWhenUnlocked"] boolValue];
+}
+
+- (void)setSendNotificationsToWatchWhenUnlocked:(BOOL)sendNotificationsToWatchWhenUnlocked {
+    _config[@"sendNotificationsToWatchWhenUnlocked"] = @(sendNotificationsToWatchWhenUnlocked);
     [self saveConfig];
 }
 
@@ -1526,6 +1635,11 @@ static NSString *RCActionCommand(id item) {
     if (fd >= 0) {
         write(fd, [data bytes], [data length]);
         close(fd);
+        struct timespec stamp;
+        if (RCConfigFileStamp(kConfigPath, &stamp)) {
+            self.lastConfigFileStamp = stamp;
+            self.hasConfigFileStamp = YES;
+        }
         NSLog(@"[RCConfigManager] Saved to shared path: %@", kConfigPath);
     } else {
         NSLog(@"[RCConfigManager] Could not open shared path (errno=%d): %@", errno, kConfigPath);
@@ -2414,7 +2528,16 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
                 result = [NSString stringWithFormat:@"Kill %@", bundleId];
             }
         } else {
-            result = cmd;
+            // A switch command the list has no fixed name for, such as "ringer toggle": name it
+            // the way the action editor and the Web UI do, "Silent Mode Toggle"
+            NSDictionary *toggle = [self toggleInfoForCommand:originalCmd];
+            NSString *toggleName = toggle[@"name"];
+            if (toggleName.length) {
+                NSString *value = toggle[@"currentDisplaySuffix"];
+                result = value.length ? [NSString stringWithFormat:@"%@ %@", toggleName, value] : toggleName;
+            } else {
+                result = originalCmd;
+            }
         }
     }
     

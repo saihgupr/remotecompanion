@@ -3,14 +3,16 @@
 RemoteCompanion provides fast, scriptable system control for modern rootless jailbreaks. It lets you bind physical gestures and hardware buttons, or send commands remotely from your computer, to trigger system actions, control media playback, and run custom scripts.
 
 > [!IMPORTANT]
-> **What’s New in v4.5.0**
-> - **Full Configuration Export & IAmLazy Tweak Backups**: Export Configuration writes one file with everything on this device, including settings, integrations, triggers, add-ons, gestures, notification filters and variables (`rc export` / `rc import`), while `rc backup` runs an IAmLazy tweak backup on the device and moves the `.tar.gz` archive to your Mac.
-> - **Triggers only when added**: the Triggers screen starts empty and every built-in trigger lives in the + menu, so the list holds only what you use. Removing a trigger puts it back in the menu.
-> - **Remote RC actions**: add another device under Settings > Integrations > Remote RC Clients, then run any RC command on it over its Web UI, with the same pickers and editors as local actions.
-> - **Duplicate actions**: the long-press action menu can duplicate a row in place, whole If and Repeat blocks included, and the Web UI's right-click menu has the same.
-> - **AudioStream auto-start is opt-in**: `/api/audiostream/start` now returns 403 unless you turn it on in Settings > Integrations > AudioStream, so a client timing out can no longer wake the streaming daemon.
-> - **iOS 18 and 26 fixes**: Control Center and App Switcher work on iOS 18, Quick Shortcuts and Camera modes work on iOS 26, and `objc_call` with arguments no longer crashes SpringBoard.
-> - **Smaller fixes**: a trigger's title updates as soon as its schedule changes, two-finger slides and Bluetooth triggers have their own icons, and Test Kit finds Spotlight and the Today view on iOS 26.
+> **What's New in v4.7.0**
+> - **Annotate and send to your editor**: freeze a screenshot, mark it up, and send it with a note to OpenCode or Antigravity over SSH. OpenCode Auto-Send queues it in the active session.
+> - **Apple Watch actions and triggers**: Theater, Silent, Wake on Raise, Water Lock, Always On, and face switching, with Connected, Disconnected, and Face Changed triggers plus Watch Only notifications.
+> - **Real touch gestures and screen text**: new gesture commands drive the touchscreen itself, and Copy, Tap, and Wait actions work on any text drawn on screen.
+> - **Control Center buttons**: create named buttons with icons that run action sequences straight from Control Center. Needs CCSupport and iOS 17 or earlier.
+> - **Native Apple timers**: real Clock timers that sync with the Lock Screen, Control Center, and Apple Watch, with pause, resume, stop, and status.
+> - **New triggers**: Airplane Mode On and Off, physical orientation from the accelerometer, Long Press App Icon, Set Orientation action, and Action Sequence Edited.
+> - **Add-ons and full backup**: one JSON file per add-on in the AddOns folder, plus Export and Import that carry the whole config to a new device (`rc export` / `rc import`).
+> - **Smaller polish**: standard iOS notifications with buttons and tap triggers, compact trigger menu, remote control of a second device, and clearer Home Assistant names.
+> - **Sequence editor**: undo and redo up to 50 steps, swipe a row to copy, paste or cut, nested cards that indent to their block, and a Test button on SSH hosts.
 
 <p align="center">
   <a href="https://saihgupr.github.io/remotecompanion/">Official Website</a> •
@@ -24,10 +26,11 @@ RemoteCompanion provides fast, scriptable system control for modern rootless jai
 </p>
 
 <p align="center">
-  <img src="docs/images/4.1.0/01_dashboard.png" width="200" alt="Main Dashboard" />
-  <img src="docs/images/4.1.0/02_add_trigger.png" width="200" alt="Add Trigger" />
-  <img src="docs/images/4.1.0/03_action_conditions.png" width="200" alt="Conditional Logic" />
-  <img src="docs/images/4.1.0/04_settings.png" width="200" alt="Settings & Web UI" />
+  <img src="docs/images/4.7.0/reddit-01-annotate-editor.png" width="160" alt="Annotate and Send setup" />
+  <img src="docs/images/4.7.0/reddit-02-annotate-actions.png" width="160" alt="Annotate actions in a sequence" />
+  <img src="docs/images/4.7.0/reddit-03-watch-actions.png" width="160" alt="Apple Watch actions" />
+  <img src="docs/images/4.7.0/reddit-04-timer-editor.png" width="160" alt="Timer editor" />
+  <img src="docs/images/4.7.0/reddit-05-screen-text.png" width="160" alt="Screen text actions" />
 </p>
 
 ## Features
@@ -124,6 +127,14 @@ Access the desktop-class automation hub at `http://[DEVICE_IP]:8080` from any co
 - `rc switcher` - Opens/toggles the App Switcher.
 - `rc previous app` / `rc last app` - Returns to the previously active application.
 - `rc vibration [silent-toggle|ring-toggle]` - System "Vibrate on Silent/Ring" settings.
+
+### Tweaks
+The switches in Settings > Advanced Settings > Tweaks, also on the Web UI's Tweaks screen. Every switch is off by default.
+- `rc tweaks` - List every Tweaks switch and whether it is on.
+- `rc tweaks wake-on-power [on|off|toggle]` - Keep the screen dark when a charger connects or disconnects while the display is off or dimmed.
+- `rc tweaks power-haptics [on|off|toggle]` - Stop the charging vibration and chime when power connects.
+- `rc tweaks unlocked-vibration [on|off|toggle]` - Stop notification vibration while the phone is unlocked; banners, sounds, and urgent alerts still work.
+- `rc tweaks all on|off` - Set every switch at once.
 
 ### Apps, URLs & Shortcuts
 - `rc nav <triggers|settings|ha|km|mqtt|add|advanced|testkit>` - Navigate directly to any RemoteCompanion panel or trigger editor (supports `remotecompanion://` deep linking URL scheme).
@@ -401,7 +412,7 @@ To run something there, add a **Remote RC: Run Command...** action to any trigge
 1. In the RemoteCompanion iOS App, go to **Settings &rarr; Integrations &rarr; SSH Hosts** and tap **+**.
 2. Enter a name, the address (an IP or a `.local` name), the port, and the login user.
 3. Pick an auth type:
-   - **Password**: needs the `sshpass` package on the device. Install it once with `sudo apt-get install sshpass`. It ships in Procursus, the default rootless bootstrap.
+   - **Password**: uses `sshpass`, which RemoteCompanion installs as a dependency. If it is ever missing after a jailbreak rebuild, `sudo apt-get install sshpass` puts it back.
    - **Key**: needs a private key file on the device. Put its path in the host editor; `~` is expanded.
 
 ### Running a command from a trigger
@@ -414,7 +425,7 @@ rc "ssh-run <hostId> uptime"
 
 The device runs `ssh` itself with `StrictHostKeyChecking=no`, `UserKnownHostsFile=/dev/null` and a five second connect timeout. The remote command is single-quoted, so it reaches the other machine untouched.
 
-**If an SSH action does nothing:** it still reports "Executing SSH command on ..." even when the command is dropped, so check the logs (`rc logs`, or the Logs view in the app or Web UI) for `[RCSSH]`. The usual causes are a missing `sshpass` on password hosts (reinstall it with `sudo apt-get install sshpass` after a jailbreak rebuild) and a missing or unreadable key file on key hosts.
+**If an SSH action does nothing:** it still reports "Executing SSH command on ..." even when the command is dropped, so check the logs (`rc logs`, or the Logs view in the app or Web UI) for `[RCSSH]`. The usual causes are a missing `sshpass` on password hosts (it comes with the package; reinstall it with `sudo apt-get install sshpass` after a jailbreak rebuild) and a missing or unreadable key file on key hosts.
 
 </details>
 

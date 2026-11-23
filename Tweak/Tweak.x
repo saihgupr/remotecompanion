@@ -277,10 +277,11 @@ extern Boolean MRMediaRemoteSendCommandToApp(MRMediaRemoteCommand command, NSDic
 
 @interface SBLockScreenManager : NSObject
 + (instancetype)sharedInstance;
++ (instancetype)sharedInstanceIfExists;
 - (BOOL)attemptUnlockWithPasscode:(NSString *)passcode;
 - (BOOL)_attemptUnlockWithPasscode:(NSString *)passcode mesa:(BOOL)mesa finishUIUnlock:(BOOL)finishUI;
 - (void)lockUIFromSource:(int)source withOptions:(id)options;
-- (void)unlockUIFromSource:(int)source withOptions:(id)options;
+- (BOOL)unlockUIFromSource:(int)source withOptions:(id)options;
 - (void)_setUILocked:(BOOL)locked animated:(BOOL)animated withReason:(id)reason;
 - (BOOL)isUILocked;
 - (id)lockScreenViewController;
@@ -288,8 +289,11 @@ extern Boolean MRMediaRemoteSendCommandToApp(MRMediaRemoteCommand command, NSDic
 
 @interface SBBacklightController : NSObject
 + (id)sharedInstance;
++ (id)sharedInstanceIfExists;
 - (BOOL)screenIsOn;
+- (BOOL)screenIsDim;
 - (float)backlightLevel;
+- (void)turnOnScreenFullyWithBacklightSource:(long long)source;
 @end
 
 @interface BKOperation : NSObject
@@ -623,8 +627,50 @@ static int RC_ProximityManagerState(void) {
 - (BOOL)isACPowerConnected;
 - (BOOL)isOnAC;
 - (void)ACPowerChanged;
+- (void)possiblyWakeForPowerStatusChangeWithUnlockSource:(int)source;
+- (void)setIsConnectedToUnsupportedChargingAccessory:(BOOL)arg1;
+- (void)playChargingChimeIfAppropriate;
+- (BOOL)_powerSourceWantsToPlayChime;
 - (void)updateBatteryState:(id)arg1;
 - (void)setIsACPowerConnected:(BOOL)arg1;
+@end
+
+@interface SBSoundController : NSObject
++ (instancetype)sharedInstance;
+- (BOOL)playSoundWithDefaultEnvironment:(id)sound;
+- (BOOL)playSound:(id)sound environments:(long long)environments completion:(id)completion;
+@end
+
+@interface TLAlertConfiguration : NSObject <NSCopying>
+@property (nonatomic, readonly) long long type;
+@property (nonatomic, copy) NSString *toneIdentifier;
+@property (nonatomic, copy) NSString *vibrationIdentifier;
+@property (nonatomic, copy) NSDictionary *externalVibrationPattern;
+@property (nonatomic, copy) NSURL *externalVibrationPatternFileURL;
+@end
+
+@interface TLAlert : NSObject
++ (instancetype)alertWithConfiguration:(TLAlertConfiguration *)configuration;
+- (id)_initWithConfiguration:(id)configuration toneIdentifier:(id)toneIdentifier vibrationIdentifier:(id)vibrationIdentifier hasSynchronizedVibrationUnmatchedWithTone:(BOOL)unmatched;
+@property (nonatomic, readonly) TLAlertConfiguration *configuration;
+@property (nonatomic, readonly) long long type;
+@property (nonatomic, readonly) NSString *toneIdentifier;
+@property (nonatomic, readonly) NSString *vibrationIdentifier;
+@end
+
+@interface SBUISound : NSObject
+@property (nonatomic) long long soundType;
+@property (nonatomic) unsigned int systemSoundID;
+@property (nonatomic) unsigned long long soundBehavior;
+@property (nonatomic, copy) NSString *songPath;
+@property (nonatomic, retain) TLAlert *toneAlert;
+@property (nonatomic, retain) NSDictionary *vibrationPattern;
+@end
+
+@interface SBNCSoundController : NSObject
+- (void)playSoundForNotificationRequest:(id)request presentingDestination:(id)destination;
+- (void)playSoundIfPossibleForNotificationRequest:(id)request presentingDestination:(id)destination;
+- (BOOL)_preventVibrations;
 @end
 
 @interface UISUserInterfaceStyleMode : NSObject
@@ -2094,6 +2140,30 @@ static NSObject *rc_trigger_config_lock(void) {
 }
 
 static volatile uint32_t g_twoFingerConfiguredMask = 0;
+static volatile BOOL g_rcDisableWakeOnPower = NO;
+static volatile BOOL g_rcDisablePowerConnectedHaptics = NO;
+static volatile BOOL g_rcDisableUnlockedNotificationVibration = NO;
+static volatile BOOL g_rcSendNotificationsToWatchWhenUnlocked = NO;
+#define kRCWatchNotifyUnlocked "com.pizzaman.rc.watch_notify_unlocked" // state 1: forward all notifications to Watch even while iPhone is unlocked
+static BOOL g_rcSoundControllerHookAlive = NO;
+static __thread int g_rcPowerChangeWakeGuardDepth = 0;
+static __thread int g_rcPowerChangeLogDepth = 0;
+static __thread int g_rcPowerChimeSuppressDepth = 0;
+static __thread int g_rcPowerChimeLogDepth = 0;
+static __thread int g_rcNotifVibeSuppressDepth = 0;
+
+static BOOL rc_screen_is_off_or_dim(void) {
+    Class blClass = objc_getClass("SBBacklightController");
+    if (!blClass) return NO;
+    SBBacklightController *bl = [blClass respondsToSelector:@selector(sharedInstanceIfExists)]
+        ? [blClass sharedInstanceIfExists]
+        : [blClass sharedInstance];
+    if (!bl) return NO;
+    BOOL screenOn = [bl respondsToSelector:@selector(screenIsOn)] ? [bl screenIsOn] : YES;
+    if (!screenOn) return YES;
+    BOOL screenDim = [bl respondsToSelector:@selector(screenIsDim)] ? [bl screenIsDim] : NO;
+    return screenDim;
+}
 
 static uint32_t rc_two_finger_mask_for_config(NSDictionary *config) {
     if (![config isKindOfClass:[NSDictionary class]] || ![config[@"masterEnabled"] boolValue]) return 0;
@@ -2120,13 +2190,34 @@ static uint32_t rc_two_finger_mask_for_config(NSDictionary *config) {
     return mask;
 }
 
+static void rc_sync_watch_notify_unlocked_state(BOOL enabled) {
+    static int token = NOTIFY_TOKEN_INVALID;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        int t = NOTIFY_TOKEN_INVALID;
+        if (notify_register_check(kRCWatchNotifyUnlocked, &t) == NOTIFY_STATUS_OK) {
+            token = t;
+        }
+    });
+    if (token != NOTIFY_TOKEN_INVALID) {
+        notify_set_state(token, enabled ? 1 : 0);
+    }
+}
+
 static void rc_set_trigger_config(NSDictionary *config) {
     NSDictionary *old;
+    BOOL watchNotifyUnlocked = NO;
     @synchronized (rc_trigger_config_lock()) {
         old = g_triggerConfig;
         g_triggerConfig = config;
         g_twoFingerConfiguredMask = rc_two_finger_mask_for_config(config);
+        g_rcDisableWakeOnPower = [config isKindOfClass:[NSDictionary class]] && [config[@"disableWakeOnPower"] boolValue];
+        g_rcDisablePowerConnectedHaptics = [config isKindOfClass:[NSDictionary class]] && [config[@"disablePowerConnectedHaptics"] boolValue];
+        g_rcDisableUnlockedNotificationVibration = [config isKindOfClass:[NSDictionary class]] && [config[@"disableUnlockedNotificationVibration"] boolValue];
+        watchNotifyUnlocked = [config isKindOfClass:[NSDictionary class]] && [config[@"sendNotificationsToWatchWhenUnlocked"] boolValue];
+        g_rcSendNotificationsToWatchWhenUnlocked = watchNotifyUnlocked;
     }
+    rc_sync_watch_notify_unlocked_state(watchNotifyUnlocked);
     if (old) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(10 * NSEC_PER_SEC)), dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
             (void)old;
@@ -2748,17 +2839,18 @@ static NSDictionary *rc_backup_file_entry(NSString *path) {
     return @{ @"data": [data base64EncodedStringWithOptions:0], @"mode": mode };
 }
 
+// Not in it: rc_addons.json, which RemoteCompanion rebuilds from the add-on files, and
+// rc_addons_root.json, the add-ons allowed to run as root, which are turned on again on each
+// device (a backup from elsewhere must not be able to grant root)
 static NSArray<NSString *> *rc_backup_document_names(void) {
-    return @[@"rc_addons.json", @"rc_addons_root.json", @"rc_gestures.plist",
-             @"rc_notify.plist", @"rc_variables.json"];
+    return @[@"rc_addons_off.json", @"rc_gestures.plist", @"rc_notify.plist", @"rc_variables.json"];
 }
 
 // Add-on definitions are root-owned, so they are read from the same folders the
 // add-on loader uses and written back through rc-root.
+// By jailbreak, not by which folder exists: a new rootless device may have no add-on folder yet
 static NSArray<NSString *> *rc_backup_addon_folders(void) {
-    NSString *rootless = @"/var/jb/Library/RemoteCompanion/AddOns";
-    NSString *rootful = @"/Library/RemoteCompanion/AddOns";
-    return [[NSFileManager defaultManager] fileExistsAtPath:rootless] ? @[rootless] : @[rootful];
+    return @[[root_prefix() stringByAppendingString:@"/Library/RemoteCompanion/AddOns"]];
 }
 
 static NSString *rc_backup_json(void) {
@@ -2781,7 +2873,8 @@ static NSString *rc_backup_json(void) {
 
     for (NSString *folder in rc_backup_addon_folders()) {
         for (NSString *name in [[NSFileManager defaultManager] contentsOfDirectoryAtPath:folder error:NULL]) {
-            if (![name.pathExtension.lowercaseString isEqualToString:@"json"]) continue;
+            // The definitions and the icon images beside them
+            if (![@[@"json", @"png", @"jpg", @"jpeg"] containsObject:name.pathExtension.lowercaseString]) continue;
             NSDictionary *entry = rc_backup_file_entry([folder stringByAppendingPathComponent:name]);
             if (entry) files[[@"addons/" stringByAppendingString:name]] = entry;
         }
@@ -2891,11 +2984,15 @@ static NSString *rc_restore_backup(void) {
             BOOL ok = NO;
             if ([key hasPrefix:@"documents/"]) {
                 NSString *name = [key substringFromIndex:10];
+                // Only the files a backup holds (older backups also carried the two left out above)
+                if (![rc_backup_document_names() containsObject:name]) continue;
                 if (rc_backup_name_is_safe(name)) {
                     ok = rc_write_file([@"/var/mobile/Documents" stringByAppendingPathComponent:name], fileData, mode);
                 }
             } else if ([key hasPrefix:@"preferences/"]) {
                 NSString *name = [key substringFromIndex:12];
+                // Only RemoteCompanion's own app blacklist, never another app's preferences
+                if (![name isEqualToString:@"com.saihgupr.remotecompanion.blacklist.plist"]) continue;
                 if (rc_backup_name_is_safe(name)) {
                     ok = rc_write_file([@"/var/mobile/Library/Preferences" stringByAppendingPathComponent:name], fileData, mode);
                 }
@@ -5139,6 +5236,9 @@ static BOOL rc_command_needs_token(NSString *cmd, int depth) {
            [trimmed hasPrefix:@"sudo "] || [trimmed isEqualToString:@"sudo"] ||
            [trimmed hasPrefix:@"exec "] || [trimmed isEqualToString:@"exec"] ||
            [trimmed hasPrefix:@"backup config"] || [trimmed hasPrefix:@"restore backup"] ||
+           [trimmed hasPrefix:@"read file "] ||
+           // A request from SpringBoard reaches this server over loopback, which is trusted
+           [trimmed hasPrefix:@"http-request"] ||
            [trimmed hasPrefix:@"lua "] || [trimmed hasPrefix:@"lua_eval "] || [trimmed hasPrefix:@"Lua "] ||
            [trimmed hasPrefix:@"ssh-run "] ||
            [trimmed isEqualToString:@"dev-annotate"] || [trimmed hasPrefix:@"dev-annotate "] ||
@@ -11308,7 +11408,8 @@ BOOL RCCommandFromLocalSocket(void) {
 // REST API Call: makes one HTTP request, as the action's JSON says. It runs in the background,
 // so the actions after it go on right away; the reply is written to the log.
 //   http-request {"method":"POST","url":"https://example.com/hook","headers":{"X-Key":"…"},"body":"…"}
-// A bare URL is a GET, and "body" can be a JSON object instead of text.
+// A bare URL is a GET, and "body" can be a JSON object instead of text. HTTPS certificates are
+// checked; "insecure": true accepts any (a self-signed one on a home server).
 static NSString *rc_handle_http_request(NSString *action) {
     NSString *problem = nil;
     NSDictionary *request = rc_http_request_parse(action, &problem);
@@ -11371,7 +11472,7 @@ static NSString *rc_handle_http_request(NSString *action) {
     sessionConfig.timeoutIntervalForRequest = timeout;
     sessionConfig.timeoutIntervalForResource = timeout;
     NSURLSession *session = [NSURLSession sessionWithConfiguration:sessionConfig
-                                                         delegate:[RCInsecureSessionDelegate sharedDelegate]
+                                                         delegate:([request[@"insecure"] boolValue] ? [RCInsecureSessionDelegate sharedDelegate] : nil)
                                                     delegateQueue:nil];
     NSURLSessionDataTask *task = [session dataTaskWithRequest:httpRequest completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         if (error) {
@@ -11563,6 +11664,13 @@ static NSArray *RCCommandHelpSections(void) {
             @[@"camera [mode] [zoom] [front] [flash]", @"photo, video, portrait, slomo, timelapse"],
             @[@"camera shutter | snap", @"Press the Camera shutter"],
             @[@"camera record-toggle", @"Start or stop video recording"],
+        ]},
+        @{@"title": @"Tweaks", @"rows": @[
+            @[@"tweaks", @"List the Tweaks switches and whether each is on"],
+            @[@"tweaks wake-on-power [on|off|toggle]", @"Keep the screen dark when power connects or disconnects"],
+            @[@"tweaks power-haptics [on|off|toggle]", @"Stop the charging vibration and chime"],
+            @[@"tweaks unlocked-vibration [on|off|toggle]", @"Stop notification vibration while unlocked"],
+            @[@"tweaks all on|off", @"Set every Tweaks switch at once"],
         ]},
         @{@"title": @"Apps & Input", @"rows": @[
             @[@"open <alias|bundleID>", @"Launch an app"],
@@ -12261,6 +12369,245 @@ static NSString *rc_handle_watch_setting_command(NSString *cleanCmd) {
     return [NSString stringWithFormat:@"%s toggled\n", spec->label];
 }
 
+// ssh-test <hostId>: run a quick command over the saved host's SSH settings and report whether
+// the connection and login worked. The command socket handles each command off the main thread.
+static NSString *rc_ssh_test_host(NSString *hostId) {
+    load_trigger_config();
+    NSDictionary *targetHost = nil;
+    for (NSDictionary *h in (g_triggerConfig[@"sshHosts"] ?: @[])) {
+        if ([h[@"id"] isEqualToString:hostId]) { targetHost = h; break; }
+    }
+    if (!targetHost) return [NSString stringWithFormat:@"Error: SSH Host '%@' not found\n", hostId];
+
+    NSString *host = targetHost[@"host"] ?: @"";
+    NSString *user = targetHost[@"user"] ?: @"mobile";
+    if (host.length == 0) return @"Error: Host address is empty\n";
+    if ([host hasPrefix:@"-"] || [host rangeOfString:@" "].location != NSNotFound ||
+        [user hasPrefix:@"-"] || [user rangeOfString:@" "].location != NSNotFound) {
+        return @"Error: Invalid host or user\n";
+    }
+    NSInteger port = [targetHost[@"port"] integerValue] > 0 ? [targetHost[@"port"] integerValue] : 22;
+    NSString *authType = targetHost[@"authType"] ?: @"password";
+    NSString *password = targetHost[@"password"] ?: @"";
+    NSString *keyPath = targetHost[@"keyPath"] ?: @"";
+    NSString *destination = user.length > 0 ? [NSString stringWithFormat:@"%@@%@", user, host] : host;
+    NSString *remoteCmd = @"echo RC_SSH_OK";
+
+    BOOL useSSHPass = NO;
+    NSString *fullSSHCmd = nil;
+    if ([authType isEqualToString:@"key"] && keyPath.length > 0) {
+        fullSSHCmd = [NSString stringWithFormat:@"ssh -i %@ -p %ld -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -o BatchMode=yes %@ %@",
+                      rc_sh_quote([keyPath stringByExpandingTildeInPath]), (long)port,
+                      rc_sh_quote(destination), rc_sh_quote(remoteCmd)];
+    } else if (password.length > 0) {
+        useSSHPass = YES;
+        fullSSHCmd = [NSString stringWithFormat:@"sshpass -e ssh -p %ld -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 %@ %@",
+                      (long)port, rc_sh_quote(destination), rc_sh_quote(remoteCmd)];
+    } else {
+        fullSSHCmd = [NSString stringWithFormat:@"ssh -p %ld -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -o BatchMode=yes %@ %@",
+                      (long)port, rc_sh_quote(destination), rc_sh_quote(remoteCmd)];
+    }
+
+    NSString *basePath = @"/var/jb/usr/local/bin:/var/jb/usr/bin:/var/jb/bin:/var/jb/usr/sbin:/var/jb/sbin:/usr/bin:/bin:/usr/sbin:/sbin";
+    extern char **environ;
+    NSMutableArray *envArray = [NSMutableArray array];
+    for (char **env = environ; *env != NULL; env++) {
+        NSString *envStr = [NSString stringWithUTF8String:*env];
+        if (envStr && ![envStr hasPrefix:@"PATH="] && ![envStr hasPrefix:@"SSHPASS="]) {
+            [envArray addObject:envStr];
+        }
+    }
+    [envArray addObject:[NSString stringWithFormat:@"PATH=%@", basePath]];
+    if (useSSHPass && password.length > 0) {
+        [envArray addObject:[NSString stringWithFormat:@"SSHPASS=%@", password]];
+    }
+    char **newEnviron = malloc(sizeof(char*) * (envArray.count + 1));
+    for (NSUInteger i = 0; i < envArray.count; i++) newEnviron[i] = strdup([envArray[i] UTF8String]);
+    newEnviron[envArray.count] = NULL;
+
+    int fds[2];
+    if (pipe(fds) != 0) {
+        for (NSUInteger i = 0; i < envArray.count; i++) { memset(newEnviron[i], 0, strlen(newEnviron[i])); free(newEnviron[i]); }
+        free(newEnviron);
+        return @"Error: Could not start the connection test\n";
+    }
+    posix_spawn_file_actions_t fileActions;
+    posix_spawn_file_actions_init(&fileActions);
+    posix_spawn_file_actions_adddup2(&fileActions, fds[1], STDOUT_FILENO);
+    posix_spawn_file_actions_adddup2(&fileActions, fds[1], STDERR_FILENO);
+    posix_spawn_file_actions_addclose(&fileActions, fds[0]);
+    posix_spawn_file_actions_addclose(&fileActions, fds[1]);
+
+    const char *sh = rc_shell_path();
+    char *args[] = {(char *)sh, "-c", (char *)[fullSSHCmd UTF8String], NULL};
+    pid_t pid = 0;
+    int spawnResult = rc_posix_spawn(&pid, sh, &fileActions, NULL, args, newEnviron);
+    posix_spawn_file_actions_destroy(&fileActions);
+    close(fds[1]);
+
+    NSMutableData *testOutput = [NSMutableData data];
+    int code = -1;
+    if (spawnResult == 0) {
+        char buf[512];
+        time_t deadline = time(NULL) + 12;
+        while (time(NULL) < deadline) {
+            fd_set set;
+            FD_ZERO(&set);
+            FD_SET(fds[0], &set);
+            struct timeval wait;
+            wait.tv_sec = 1;
+            wait.tv_usec = 0;
+            int ready = select(fds[0] + 1, &set, NULL, NULL, &wait);
+            if (ready < 0) break;
+            if (ready == 0) continue;
+            ssize_t n = read(fds[0], buf, sizeof(buf));
+            if (n <= 0) break;
+            [testOutput appendBytes:buf length:n];
+        }
+        close(fds[0]);
+        int status = 0;
+        if (waitpid(pid, &status, WNOHANG) == 0) {
+            kill(pid, SIGKILL);
+            waitpid(pid, &status, 0);
+        }
+        code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+    } else {
+        close(fds[0]);
+    }
+
+    for (NSUInteger i = 0; i < envArray.count; i++) {
+        if (newEnviron[i]) { memset(newEnviron[i], 0, strlen(newEnviron[i])); free(newEnviron[i]); }
+    }
+    free(newEnviron);
+
+    if (code == 0) return [NSString stringWithFormat:@"Connected to %@\n", host];
+
+    NSString *detail = [[[NSString alloc] initWithData:testOutput encoding:NSUTF8StringEncoding] ?: @"" stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (detail.length > 300) detail = [detail substringFromIndex:detail.length - 300];
+    if (detail.length == 0) detail = [NSString stringWithFormat:@"ssh exited with code %d", code];
+    return [NSString stringWithFormat:@"Error: %@\n", detail];
+}
+
+// Settings > Advanced Settings > Tweaks holds iOS behavior tweaks that are off by default.
+// Each is one config key, so the switches in the app, the Web UI, and here all agree.
+static NSArray<NSDictionary *> *rc_tweaks_specs(void) {
+    return @[
+        @{@"key": @"wake-on-power", @"aliases": @[@"wake", @"wake screen", @"wake screen on power"],
+          @"config": @"disableWakeOnPower", @"name": @"Disable Wake Screen On Power"},
+        @{@"key": @"power-haptics", @"aliases": @[@"power haptics", @"charging haptics", @"power connected haptics"],
+          @"config": @"disablePowerConnectedHaptics", @"name": @"Disable Power Connected Haptics"},
+        @{@"key": @"unlocked-vibration", @"aliases": @[@"unlocked vibration", @"notification vibration", @"notif vibration"],
+          @"config": @"disableUnlockedNotificationVibration", @"name": @"Disable Vibration When Unlocked"},
+    ];
+}
+
+// A name matches however it is typed: "wake-on-power", "wake on power" and "WAKE_ON_POWER" are one.
+static NSString *rc_tweaks_normalized(NSString *word) {
+    NSString *lower = [word lowercaseString] ?: @"";
+    NSCharacterSet *drop = [NSCharacterSet characterSetWithCharactersInString:@" \t\r\n-_"];
+    return [[lower componentsSeparatedByCharactersInSet:drop] componentsJoinedByString:@""];
+}
+
+static NSDictionary *rc_tweaks_spec_for(NSString *word) {
+    NSString *wanted = rc_tweaks_normalized(word);
+    if (wanted.length == 0) return nil;
+    for (NSDictionary *spec in rc_tweaks_specs()) {
+        if ([rc_tweaks_normalized(spec[@"key"]) isEqualToString:wanted]) return spec;
+        for (NSString *alias in spec[@"aliases"]) {
+            if ([rc_tweaks_normalized(alias) isEqualToString:wanted]) return spec;
+        }
+    }
+    return nil;
+}
+
+// 1 when the word is a state ("on", "off", "toggle"), so the word before it is the tweak name
+static BOOL rc_tweaks_is_state_word(NSString *word) {
+    static NSSet *states;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        states = [NSSet setWithArray:@[@"on", @"off", @"toggle", @"enable", @"disable", @"enabled", @"disabled",
+                                       @"true", @"false", @"1", @"0"]];
+    });
+    return [states containsObject:[word lowercaseString]];
+}
+
+static BOOL rc_tweaks_state_is_on(NSString *word) {
+    NSString *lower = [word lowercaseString];
+    return [lower isEqualToString:@"on"] || [lower isEqualToString:@"enable"] || [lower isEqualToString:@"enabled"] ||
+           [lower isEqualToString:@"true"] || [lower isEqualToString:@"1"];
+}
+
+// tweaks                          every Tweaks switch and its state
+// tweaks <name>                   one switch's state
+// tweaks <name> on|off|toggle     set it (on is the switch on, so the tweak is active)
+// tweaks all on|off               every switch at once
+static NSString *rc_handle_tweaks_command(NSString *cmd) {
+    load_trigger_config();
+    NSString *args = cmd.length > @"tweaks".length ? [cmd substringFromIndex:@"tweaks".length] : @"";
+    NSMutableArray *words = [NSMutableArray array];
+    for (NSString *word in [args componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]) {
+        if (word.length) [words addObject:word];
+    }
+
+    NSDictionary *config;
+    @synchronized (rc_trigger_config_lock()) { config = [g_triggerConfig copy] ?: @{}; }
+
+    NSString *firstWord = words.count ? [words[0] lowercaseString] : @"";
+    if (words.count == 0 || (words.count == 1 && ([firstWord isEqualToString:@"list"] || [firstWord isEqualToString:@"status"]))) {
+        NSMutableString *listing = [NSMutableString stringWithString:@"Tweaks\n"];
+        for (NSDictionary *spec in rc_tweaks_specs()) {
+            BOOL on = [config[spec[@"config"]] boolValue];
+            NSString *key = spec[@"key"];
+            NSUInteger pad = key.length < 20 ? 20 - key.length : 1;
+            NSString *padding = [@" " stringByPaddingToLength:pad withString:@" " startingAtIndex:0];
+            [listing appendFormat:@"  %@%@%@  %@\n", key, padding, on ? @"ON" : @"OFF", spec[@"name"]];
+        }
+        return listing;
+    }
+
+    NSString *stateWord = words.lastObject;
+    BOOL hasState = rc_tweaks_is_state_word(stateWord);
+    if (hasState) [words removeLastObject];
+    if (words.count == 0) return @"Error: usage: tweaks <name> [on|off|toggle]\n";
+
+    NSString *nameArg = [words componentsJoinedByString:@" "];
+    if (!hasState && words.count > 1) {
+        // A known name followed by a word that isn't a state is a typo in the state, not the name
+        NSString *nameOnly = [[words subarrayWithRange:NSMakeRange(0, words.count - 1)] componentsJoinedByString:@" "];
+        NSDictionary *spec = rc_tweaks_spec_for(nameOnly);
+        if (spec) return [NSString stringWithFormat:@"Error: usage: tweaks %@ [on|off|toggle]\n", spec[@"key"]];
+    }
+
+    if ([rc_tweaks_normalized(nameArg) isEqualToString:@"all"]) {
+        if (!hasState || [stateWord.lowercaseString isEqualToString:@"toggle"]) {
+            return @"Error: usage: tweaks all on|off\n";
+        }
+        BOOL on = rc_tweaks_state_is_on(stateWord);
+        NSMutableDictionary *mConfig = [config mutableCopy];
+        for (NSDictionary *spec in rc_tweaks_specs()) mConfig[spec[@"config"]] = @(on);
+        rc_set_trigger_config([mConfig copy]);
+        save_trigger_config();
+        return [NSString stringWithFormat:@"All tweaks %@\n", on ? @"enabled" : @"disabled"];
+    }
+
+    NSDictionary *spec = rc_tweaks_spec_for(nameArg);
+    if (!spec) {
+        return [NSString stringWithFormat:@"Error: unknown tweak '%@'. Use: wake-on-power, power-haptics, unlocked-vibration\n", nameArg];
+    }
+
+    BOOL current = [config[spec[@"config"]] boolValue];
+    if (!hasState) return [NSString stringWithFormat:@"%@: %@\n", spec[@"name"], current ? @"ON" : @"OFF"];
+
+    BOOL wanted = [stateWord.lowercaseString isEqualToString:@"toggle"] ? !current : rc_tweaks_state_is_on(stateWord);
+    if (wanted != current) {
+        NSMutableDictionary *mConfig = [config mutableCopy];
+        mConfig[spec[@"config"]] = @(wanted);
+        rc_set_trigger_config([mConfig copy]);
+        save_trigger_config();
+    }
+    return [NSString stringWithFormat:@"%@: %@\n", spec[@"name"], wanted ? @"ON" : @"OFF"];
+}
+
 static NSString *handle_command(NSString *cmd) {
     if (!cmd || ![cmd isKindOfClass:[NSString class]]) {
         SRLogMin(@"ERROR: handle_command received nil or invalid command string");
@@ -12272,6 +12619,9 @@ static NSString *handle_command(NSString *cmd) {
         [cleanCmd isEqualToString:@"-h"] || [cleanCmd isEqualToString:@"--help"]) {
         NSString *topic = [cleanCmd hasPrefix:@"help "] ? [cleanCmd substringFromIndex:5] : @"";
         return RCCommandHelp(topic);
+    }
+    if ([cleanCmd isEqualToString:@"tweaks"] || [cleanCmd hasPrefix:@"tweaks "]) {
+        return rc_handle_tweaks_command(cleanCmd);
     }
     // Resolve app-owned native shortcut payloads afresh; do not log encoded data.
     if ([cleanCmd hasPrefix:@"quickactions "]) return RCQACommand(cleanCmd);
@@ -14937,7 +15287,7 @@ static NSString *handle_command(NSString *cmd) {
         sessionConfig.timeoutIntervalForRequest = 8.0;
         sessionConfig.timeoutIntervalForResource = 8.0;
         NSURLSession *session = [NSURLSession sessionWithConfiguration:sessionConfig
-                                                             delegate:[RCInsecureSessionDelegate sharedDelegate]
+                                                             delegate:nil
                                                         delegateQueue:nil];
         NSURLSessionDataTask *task = [session dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
             if (error) {
@@ -15081,6 +15431,12 @@ static NSString *handle_command(NSString *cmd) {
         });
         
         return [NSString stringWithFormat:@"Executing SSH command on %@: %@\n", host, remoteCmd];
+
+    // ssh-test <hostId>: run a quick command over the saved host's settings and return the result
+    } else if ([cleanCmd hasPrefix:@"ssh-test "]) {
+        NSString *testHostId = [[cleanCmd substringFromIndex:9] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (testHostId.length == 0) return @"Usage: ssh-test <hostId>\n";
+        return rc_ssh_test_host(testHostId);
 
     // -- Touch gesture commands ------------------------------------------------
     // gesture record|play|list|delete|rename ... (RCGestures.m)
@@ -15748,6 +16104,26 @@ static NSDictionary* get_system_diagnostics(void) {
     };
 }
 
+// Whether a page's host is this device, a .local name or a private-network address. Addresses are
+// parsed, not matched as text: "10.example.com" is a public name, not 10.x.x.x.
+static BOOL rc_origin_host_is_local(NSString *host) {
+    host = host.lowercaseString;
+    if ([host hasPrefix:@"["] && [host hasSuffix:@"]"]) host = [host substringWithRange:NSMakeRange(1, host.length - 2)];
+    if (host.length == 0) return NO;
+    if ([host isEqualToString:@"localhost"] || [host hasSuffix:@".local"]) return YES;
+    struct in_addr v4;
+    if (inet_pton(AF_INET, host.UTF8String, &v4) == 1) {
+        uint32_t a = ntohl(v4.s_addr);
+        return (a >> 24) == 127 || (a >> 24) == 10 || (a >> 16) == 0xC0A8 || (a >> 16) == 0xA9FE ||
+               (a >> 20) == 0xAC1; // 127/8, 10/8, 192.168/16, 169.254/16, 172.16/12
+    }
+    struct in6_addr v6;
+    if (inet_pton(AF_INET6, host.UTF8String, &v6) == 1) {
+        return IN6_IS_ADDR_LOOPBACK(&v6) || IN6_IS_ADDR_LINKLOCAL(&v6) || (v6.s6_addr[0] & 0xFE) == 0xFC; // ::1, fe80::/10, fc00::/7
+    }
+    return NO;
+}
+
 static NSString *rc_cors_headers_for_request(NSString *requestString, BOOL *outOriginBlocked) {
     if (outOriginBlocked) *outOriginBlocked = NO;
     NSString *origin = nil;
@@ -15765,22 +16141,8 @@ static NSString *rc_cors_headers_for_request(NSString *requestString, BOOL *outO
         return @"Access-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization, X-API-Key\r\n";
     }
     
-    BOOL isAllowedOrigin = NO;
     NSURL *originUrl = [NSURL URLWithString:origin];
-    NSString *host = originUrl.host.lowercaseString;
-    if (host.length > 0) {
-        if ([host isEqualToString:@"localhost"] || [host isEqualToString:@"127.0.0.1"] || [host isEqualToString:@"::1"] || [host hasSuffix:@".local"]) {
-            isAllowedOrigin = YES;
-        } else if ([host hasPrefix:@"192.168."] || [host hasPrefix:@"10."] || [host hasPrefix:@"169.254."]) {
-            isAllowedOrigin = YES;
-        } else if ([host hasPrefix:@"172."]) {
-            NSArray *parts = [host componentsSeparatedByString:@"."];
-            if (parts.count >= 2) {
-                int secondOctet = [parts[1] intValue];
-                if (secondOctet >= 16 && secondOctet <= 31) isAllowedOrigin = YES;
-            }
-        }
-    }
+    BOOL isAllowedOrigin = rc_origin_host_is_local(originUrl.host);
     
     if (isAllowedOrigin) {
         return [NSString stringWithFormat:@"Access-Control-Allow-Origin: %@\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization, X-API-Key\r\n", origin];
@@ -16030,6 +16392,9 @@ static void start_web_server() {
                                         if (mConfig[@"mqttPassword"] && [mConfig[@"mqttPassword"] length] > 0) {
                                             mConfig[@"mqttPassword"] = @"••••••••";
                                         }
+                                        if (mConfig[@"kmPassword"] && [mConfig[@"kmPassword"] length] > 0) {
+                                            mConfig[@"kmPassword"] = @"••••••••";
+                                        }
                                         NSArray *sshHosts = mConfig[@"sshHosts"];
                                         if ([sshHosts isKindOfClass:[NSArray class]]) {
                                             NSMutableArray *mHosts = [NSMutableArray array];
@@ -16108,6 +16473,9 @@ static void start_web_server() {
                                                 }
                                                 if ([incoming[@"mqttPassword"] isEqualToString:@"••••••••"]) {
                                                     incoming[@"mqttPassword"] = g_triggerConfig[@"mqttPassword"];
+                                                }
+                                                if ([incoming[@"kmPassword"] isEqualToString:@"••••••••"]) {
+                                                    incoming[@"kmPassword"] = g_triggerConfig[@"kmPassword"];
                                                 }
                                                 NSArray *newHosts = incoming[@"sshHosts"];
                                                 NSArray *oldHosts = g_triggerConfig[@"sshHosts"];
@@ -16824,6 +17192,7 @@ static void start_web_server() {
                                     @{@"command": @"mute", @"desc": @"Toggles: System mute/silent mode"},
                                     @{@"command": @"rotate lock/unlock", @"desc": @"Toggles: Orientation lock state"},
                                     @{@"command": @"haptic", @"desc": @"System: Play a subtle haptic feedback vibe"},
+                                    @{@"command": @"tweaks [name] [on|off|toggle]", @"desc": @"Tweaks: iOS behavior switches (wake on power, charging haptics, unlocked vibration)"},
 
                                     // Automations & Discovery
                                     @{@"command": @"shortcut \"Name\"", @"desc": @"Automation: Run a Siri Shortcut"},
@@ -19528,6 +19897,262 @@ static void setup_background_hid_listener() {
     return result;
 }
 
+- (BOOL)unlockUIFromSource:(int)source withOptions:(id)options {
+    if (g_rcPowerChangeWakeGuardDepth > 0) {
+        SRLog(@"[PowerWake] Suppressed -[SBLockScreenManager unlockUIFromSource:%d withOptions:%@]", source, options);
+        return NO;
+    }
+    if (g_rcPowerChangeLogDepth > 0) {
+        SRLog(@"[PowerWake] Observed -[SBLockScreenManager unlockUIFromSource:%d withOptions:%@] during power change", source, options);
+    }
+    return %orig;
+}
+
+%end
+
+%hook SBBacklightController
+
+- (void)turnOnScreenFullyWithBacklightSource:(long long)source {
+    if (g_rcPowerChangeWakeGuardDepth > 0) {
+        SRLog(@"[PowerWake] Suppressed -[SBBacklightController turnOnScreenFullyWithBacklightSource:%lld]", source);
+        return;
+    }
+    if (g_rcPowerChangeLogDepth > 0) {
+        SRLog(@"[PowerWake] Observed -[SBBacklightController turnOnScreenFullyWithBacklightSource:%lld] during power change", source);
+    }
+    %orig;
+}
+
+%end
+
+static NSString *rc_tl_vibration_identifier_none(void) {
+    static NSString *noneID = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSString * __unsafe_unretained *sym = (NSString * __unsafe_unretained *)dlsym(RTLD_DEFAULT, "TLVibrationIdentifierNone");
+        if (!sym) {
+            void *handle = dlopen("/System/Library/PrivateFrameworks/ToneLibrary.framework/ToneLibrary", RTLD_LAZY);
+            if (handle) {
+                sym = (NSString * __unsafe_unretained *)dlsym(handle, "TLVibrationIdentifierNone");
+            }
+        }
+        if (sym && [*sym isKindOfClass:[NSString class]] && [*sym length] > 0) {
+            noneID = [*sym copy];
+        } else {
+            noneID = @"<none>";
+        }
+    });
+    return noneID;
+}
+
+static BOOL rc_tl_alert_type_keeps_vibration(long long type) {
+    // Keep vibration for incoming calls (1), alarms (13), timers (14), emergency (18), SOS (22).
+    return type == 1 || type == 13 || type == 14 || type == 18 || type == 22;
+}
+
+static BOOL rc_notif_request_keeps_vibration(id request) {
+    if (!request) return YES;
+    @try {
+        SEL criticalSel = NSSelectorFromString(@"isCriticalAlert");
+        if ([request respondsToSelector:criticalSel] && ((BOOL (*)(id, SEL))objc_msgSend)(request, criticalSel)) {
+            return YES;
+        }
+        SEL levelSel = NSSelectorFromString(@"interruptionLevel");
+        if ([request respondsToSelector:levelSel]) {
+            NSUInteger level = ((NSUInteger (*)(id, SEL))objc_msgSend)(request, levelSel);
+            if (level == 3) return YES;
+        }
+        SEL soundSel = NSSelectorFromString(@"sound");
+        id sound = [request respondsToSelector:soundSel] ? ((id (*)(id, SEL))objc_msgSend)(request, soundSel) : nil;
+        SEL alertCfgSel = NSSelectorFromString(@"alertConfiguration");
+        id alertCfg = (sound && [sound respondsToSelector:alertCfgSel]) ? ((id (*)(id, SEL))objc_msgSend)(sound, alertCfgSel) : nil;
+        if (alertCfg && [alertCfg respondsToSelector:@selector(type)]) {
+            if (rc_tl_alert_type_keeps_vibration([(TLAlertConfiguration *)alertCfg type])) {
+                return YES;
+            }
+        }
+    } @catch (NSException *e) {}
+    return NO;
+}
+
+static id rc_tl_configuration_without_vibration(id configuration) {
+    if (!configuration) return nil;
+    @try {
+        if ([configuration respondsToSelector:@selector(type)] &&
+            rc_tl_alert_type_keeps_vibration([(TLAlertConfiguration *)configuration type])) {
+            return configuration;
+        }
+        NSString *noneID = rc_tl_vibration_identifier_none();
+        NSString *curVib = [configuration respondsToSelector:@selector(vibrationIdentifier)]
+            ? [(TLAlertConfiguration *)configuration vibrationIdentifier] : nil;
+        NSDictionary *curExtPat = [configuration respondsToSelector:@selector(externalVibrationPattern)]
+            ? [(TLAlertConfiguration *)configuration externalVibrationPattern] : nil;
+        NSURL *curExtURL = [configuration respondsToSelector:@selector(externalVibrationPatternFileURL)]
+            ? [(TLAlertConfiguration *)configuration externalVibrationPatternFileURL] : nil;
+        if ([curVib isEqualToString:noneID] && !curExtPat && !curExtURL) {
+            return configuration;
+        }
+        id cfg = [configuration copy];
+        if (!cfg) return configuration;
+        if ([cfg respondsToSelector:@selector(setVibrationIdentifier:)]) {
+            [(TLAlertConfiguration *)cfg setVibrationIdentifier:noneID];
+        }
+        if ([cfg respondsToSelector:@selector(setExternalVibrationPattern:)]) {
+            [(TLAlertConfiguration *)cfg setExternalVibrationPattern:nil];
+        }
+        if ([cfg respondsToSelector:@selector(setExternalVibrationPatternFileURL:)]) {
+            [(TLAlertConfiguration *)cfg setExternalVibrationPatternFileURL:nil];
+        }
+        return cfg;
+    } @catch (NSException *e) {
+        return configuration;
+    }
+}
+
+static BOOL rc_device_unlocked_for_notification_vibration(void) {
+    Class lsmCls = objc_getClass("SBLockScreenManager");
+    if (!lsmCls) return NO;
+    SBLockScreenManager *lsm = [lsmCls respondsToSelector:@selector(sharedInstanceIfExists)]
+        ? [lsmCls sharedInstanceIfExists]
+        : [lsmCls sharedInstance];
+    if (!lsm || ![lsm respondsToSelector:@selector(isUILocked)]) return NO;
+    BOOL locked = g_lockStateInitialized ? rc_device_locked(lsm) : [lsm isUILocked];
+    if (locked) return NO;
+    Class blCls = objc_getClass("SBBacklightController");
+    SBBacklightController *bl = nil;
+    if (blCls) {
+        bl = [blCls respondsToSelector:@selector(sharedInstanceIfExists)]
+            ? [blCls sharedInstanceIfExists]
+            : [blCls sharedInstance];
+    }
+    if (bl && [bl respondsToSelector:@selector(screenIsOn)] && ![bl screenIsOn]) {
+        return NO;
+    }
+    return YES;
+}
+
+%hook SBNCSoundController
+
+- (void)playSoundIfPossibleForNotificationRequest:(id)request presentingDestination:(id)destination {
+    BOOL shouldSuppress = g_rcDisableUnlockedNotificationVibration &&
+        rc_device_unlocked_for_notification_vibration() &&
+        !rc_notif_request_keeps_vibration(request);
+    if (shouldSuppress) g_rcNotifVibeSuppressDepth++;
+    @try {
+        %orig;
+    } @finally {
+        if (shouldSuppress) g_rcNotifVibeSuppressDepth--;
+    }
+}
+
+- (void)playSoundForNotificationRequest:(id)request presentingDestination:(id)destination {
+    BOOL shouldSuppress = g_rcDisableUnlockedNotificationVibration &&
+        rc_device_unlocked_for_notification_vibration() &&
+        !rc_notif_request_keeps_vibration(request);
+    if (shouldSuppress) {
+        NSString *sectionID = [request respondsToSelector:@selector(sectionIdentifier)] ? [request sectionIdentifier] : nil;
+        SRLog(@"[NotifVib] Suppressing unlocked notification vibration for %@", sectionID ?: @"(unknown)");
+        g_rcNotifVibeSuppressDepth++;
+    }
+    @try {
+        %orig;
+    } @finally {
+        if (shouldSuppress) g_rcNotifVibeSuppressDepth--;
+    }
+}
+
+- (BOOL)_preventVibrations {
+    if (g_rcNotifVibeSuppressDepth > 0) {
+        return YES;
+    }
+    return %orig;
+}
+
+%end
+
+%hook TLAlert
+
++ (id)alertWithConfiguration:(id)configuration {
+    if (g_rcNotifVibeSuppressDepth > 0 && configuration) {
+        id quietCfg = rc_tl_configuration_without_vibration(configuration);
+        id alert = %orig(quietCfg);
+        if (alert) {
+            SRLog(@"[NotifVib] TLAlert +alertWithConfiguration -> %@", alert);
+        }
+        return alert;
+    }
+    return %orig;
+}
+
+- (id)_initWithConfiguration:(id)configuration toneIdentifier:(id)toneIdentifier vibrationIdentifier:(id)vibrationIdentifier hasSynchronizedVibrationUnmatchedWithTone:(BOOL)unmatched {
+    if (g_rcNotifVibeSuppressDepth > 0) {
+        BOOL keepVib = [configuration respondsToSelector:@selector(type)] &&
+            rc_tl_alert_type_keeps_vibration([(TLAlertConfiguration *)configuration type]);
+        if (!keepVib) {
+            id quietCfg = configuration ? rc_tl_configuration_without_vibration(configuration) : nil;
+            if (quietCfg && quietCfg != configuration) {
+                SEL freezeSel = NSSelectorFromString(@"_freeze");
+                if ([quietCfg respondsToSelector:freezeSel]) {
+                    ((void (*)(id, SEL))objc_msgSend)(quietCfg, freezeSel);
+                }
+            }
+            return %orig(quietCfg, toneIdentifier, rc_tl_vibration_identifier_none(), NO);
+        }
+    }
+    return %orig;
+}
+
+%end
+
+%hook SBSoundController
+
+- (BOOL)playSound:(id)sound environments:(long long)environments completion:(id)completion {
+    if (g_rcPowerChimeSuppressDepth > 0) {
+        SRLog(@"[PowerHaptics] Suppressed -[SBSoundController playSound:%@ environments:%lld]", sound, environments);
+        return NO;
+    }
+    if (g_rcPowerChimeLogDepth > 0) {
+        SRLog(@"[PowerHaptics] Observed -[SBSoundController playSound:%@ environments:%lld] during charging chime", sound, environments);
+    }
+    if (g_rcNotifVibeSuppressDepth > 0 && sound) {
+        @try {
+            long long soundType = [sound respondsToSelector:@selector(soundType)] ? [(SBUISound *)sound soundType] : -1;
+            if (soundType == 3) {
+                TLAlert *toneAlert = [sound respondsToSelector:@selector(toneAlert)] ? [(SBUISound *)sound toneAlert] : nil;
+                TLAlertConfiguration *cfg = [toneAlert respondsToSelector:@selector(configuration)] ? [toneAlert configuration] : nil;
+                long long alertType = [cfg respondsToSelector:@selector(type)] ? [cfg type] : ([toneAlert respondsToSelector:@selector(type)] ? [toneAlert type] : 0);
+                NSString *noneID = rc_tl_vibration_identifier_none();
+                NSString *vibID = [toneAlert respondsToSelector:@selector(vibrationIdentifier)] ? [toneAlert vibrationIdentifier] : nil;
+                if (!rc_tl_alert_type_keeps_vibration(alertType) && ![vibID isEqualToString:noneID] && cfg) {
+                    Class tlAlertCls = objc_getClass("TLAlert");
+                    TLAlert *quietAlert = tlAlertCls ? [tlAlertCls alertWithConfiguration:rc_tl_configuration_without_vibration(cfg)] : nil;
+                    if (quietAlert && [sound respondsToSelector:@selector(setToneAlert:)]) {
+                        [(SBUISound *)sound setToneAlert:quietAlert];
+                        SRLog(@"[NotifVib] SBSoundController replaced ToneAlert with quiet vibration alert: %@", quietAlert);
+                    }
+                } else {
+                    SRLog(@"[NotifVib] SBSoundController playing ToneAlert: %@", toneAlert);
+                }
+            } else if (soundType == 0) {
+                unsigned int sysSoundID = [sound respondsToSelector:@selector(systemSoundID)] ? [(SBUISound *)sound systemSoundID] : 0;
+                NSString *songPath = [sound respondsToSelector:@selector(songPath)] ? [(SBUISound *)sound songPath] : nil;
+                if (sysSoundID == kSystemSoundID_Vibrate && songPath.length == 0) {
+                    SRLog(@"[NotifVib] Suppressed vibration-only SBUISound");
+                    return NO;
+                }
+                if ([sound respondsToSelector:@selector(setVibrationPattern:)]) {
+                    [(SBUISound *)sound setVibrationPattern:@{ @"VibePattern": @[ @NO, @0 ], @"Intensity": @0 }];
+                    SRLog(@"[NotifVib] Cleared vibrationPattern on SystemSound SBUISound");
+                }
+            } else if (soundType == 4) {
+                SRLog(@"[NotifVib] Suppressed Feedback SBUISound");
+                return NO;
+            }
+        } @catch (NSException *e) {}
+    }
+    return %orig;
+}
+
 %end
 
 %hook SBProximitySensorManager
@@ -21944,11 +22569,55 @@ static void update_edge_gestures() {
 
 %hook SBUIController
 
-- (void)ACPowerChanged {
+- (void)possiblyWakeForPowerStatusChangeWithUnlockSource:(int)source {
+    BOOL offOrDim = (g_rcDisableWakeOnPower || g_rcLogLevel >= 2) ? rc_screen_is_off_or_dim() : NO;
+    BOOL suppress = g_rcDisableWakeOnPower && offOrDim;
+    if (suppress || g_rcLogLevel >= 2) {
+        SRLog(@"[PowerWake] possiblyWakeForPowerStatusChangeWithUnlockSource:%d disable=%d offOrDim=%d -> %@",
+              source, g_rcDisableWakeOnPower ? 1 : 0, offOrDim ? 1 : 0,
+              suppress ? @"SUPPRESSED" : @"allow");
+    }
+    if (suppress) return;
     %orig;
+}
+
+- (void)ACPowerChanged {
+    BOOL observing = (g_rcLogLevel >= 2);
+    BOOL offOrDim = (g_rcDisableWakeOnPower || observing) ? rc_screen_is_off_or_dim() : NO;
+    BOOL shouldGuard = g_rcDisableWakeOnPower && offOrDim;
+    if (observing) {
+        SRLog(@"[PowerWake] ACPowerChanged begin (disable=%d offOrDim=%d)",
+              g_rcDisableWakeOnPower ? 1 : 0, offOrDim ? 1 : 0);
+        g_rcPowerChangeLogDepth++;
+    }
+    if (shouldGuard) g_rcPowerChangeWakeGuardDepth++;
+    @try {
+        %orig;
+    } @finally {
+        if (shouldGuard) g_rcPowerChangeWakeGuardDepth--;
+        if (observing) g_rcPowerChangeLogDepth--;
+    }
     dispatch_async(dispatch_get_main_queue(), ^{
         handle_power_state_transition(is_device_power_connected(), @"SBUIController ACPowerChanged");
     });
+}
+
+- (void)setIsConnectedToUnsupportedChargingAccessory:(BOOL)arg1 {
+    BOOL observing = (g_rcLogLevel >= 2);
+    BOOL offOrDim = (g_rcDisableWakeOnPower || observing) ? rc_screen_is_off_or_dim() : NO;
+    BOOL shouldGuard = arg1 && g_rcDisableWakeOnPower && offOrDim;
+    if (observing) {
+        SRLog(@"[PowerWake] setIsConnectedToUnsupportedChargingAccessory:%d (disable=%d offOrDim=%d)",
+              arg1 ? 1 : 0, g_rcDisableWakeOnPower ? 1 : 0, offOrDim ? 1 : 0);
+        g_rcPowerChangeLogDepth++;
+    }
+    if (shouldGuard) g_rcPowerChangeWakeGuardDepth++;
+    @try {
+        %orig;
+    } @finally {
+        if (shouldGuard) g_rcPowerChangeWakeGuardDepth--;
+        if (observing) g_rcPowerChangeLogDepth--;
+    }
 }
 
 - (void)updateBatteryState:(id)arg1 {
@@ -21963,6 +22632,30 @@ static void update_edge_gestures() {
     dispatch_async(dispatch_get_main_queue(), ^{
         handle_power_state_transition(arg1, @"SBUIController setIsACPowerConnected");
     });
+}
+
+- (void)playChargingChimeIfAppropriate {
+    BOOL suppress = g_rcDisablePowerConnectedHaptics;
+    BOOL observing = (g_rcLogLevel >= 2);
+    if (observing) {
+        SRLog(@"[PowerHaptics] playChargingChimeIfAppropriate (disable=%d soundHook=%d)",
+              suppress ? 1 : 0, g_rcSoundControllerHookAlive ? 1 : 0);
+    }
+    if (suppress && !g_rcSoundControllerHookAlive) {
+        if ([self respondsToSelector:@selector(_powerSourceWantsToPlayChime)]) {
+            (void)[self _powerSourceWantsToPlayChime];
+        }
+        SRLog(@"[PowerHaptics] Suppressed -[SBUIController playChargingChimeIfAppropriate] directly");
+        return;
+    }
+    if (suppress) g_rcPowerChimeSuppressDepth++;
+    if (observing) g_rcPowerChimeLogDepth++;
+    @try {
+        %orig;
+    } @finally {
+        if (suppress) g_rcPowerChimeSuppressDepth--;
+        if (observing) g_rcPowerChimeLogDepth--;
+    }
 }
 
 %end
@@ -23245,6 +23938,10 @@ static NSTimeInterval s_last_camera_launch_notify = 0;
             class_getInstanceMethod(volActions, @selector(volumeDecreasePressDownWithModifiers:))) {
             g_volHookAlive = YES;
         }
+        Class soundClsAtLoad = objc_getClass("SBSoundController");
+        if (soundClsAtLoad && class_getInstanceMethod(soundClsAtLoad, @selector(playSound:environments:completion:))) {
+            g_rcSoundControllerHookAlive = YES;
+        }
         SRLog(@"[Power] Hooks live at load: power=%d volume=%d", g_powerHookAlive, g_volHookAlive);
 
         CFNotificationCenterAddObserver(
@@ -23267,6 +23964,31 @@ static NSTimeInterval s_last_camera_launch_notify = 0;
             SRLog(@"Delayed Initialization & Gesture Setup...");
             
             load_trigger_config();
+            Class uiCls = objc_getClass("SBUIController");
+            Class lsmCls = objc_getClass("SBLockScreenManager");
+            Class blCls = objc_getClass("SBBacklightController");
+            Class soundCls = objc_getClass("SBSoundController");
+            SRLog(@"[PowerWake] Hooks present: possiblyWake=%d ACPowerChanged=%d unlockUI=%d turnOnScreen=%d playChime=%d soundCtrl=%d (disableWakeOnPower=%d disablePowerConnectedHaptics=%d)",
+                  (uiCls && class_getInstanceMethod(uiCls, @selector(possiblyWakeForPowerStatusChangeWithUnlockSource:)) != NULL) ? 1 : 0,
+                  (uiCls && class_getInstanceMethod(uiCls, @selector(ACPowerChanged)) != NULL) ? 1 : 0,
+                  (lsmCls && class_getInstanceMethod(lsmCls, @selector(unlockUIFromSource:withOptions:)) != NULL) ? 1 : 0,
+                  (blCls && class_getInstanceMethod(blCls, @selector(turnOnScreenFullyWithBacklightSource:)) != NULL) ? 1 : 0,
+                  (uiCls && class_getInstanceMethod(uiCls, @selector(playChargingChimeIfAppropriate)) != NULL) ? 1 : 0,
+                  (soundCls && class_getInstanceMethod(soundCls, @selector(playSound:environments:completion:)) != NULL) ? 1 : 0,
+                  g_rcDisableWakeOnPower ? 1 : 0,
+                  g_rcDisablePowerConnectedHaptics ? 1 : 0);
+            Class ncSoundCls = objc_getClass("SBNCSoundController");
+            Class tlAlertCls = objc_getClass("TLAlert");
+            SRLog(@"[NotifVib] Hooks present: playIfPossible=%d playSound=%d preventVib=%d soundCtrl=%d tlAlertCfg=%d tlAlertInit=%d vibNone=%@ (disableUnlockedNotificationVibration=%d)",
+                  (ncSoundCls && class_getInstanceMethod(ncSoundCls, @selector(playSoundIfPossibleForNotificationRequest:presentingDestination:)) != NULL) ? 1 : 0,
+                  (ncSoundCls && class_getInstanceMethod(ncSoundCls, @selector(playSoundForNotificationRequest:presentingDestination:)) != NULL) ? 1 : 0,
+                  (ncSoundCls && class_getInstanceMethod(ncSoundCls, @selector(_preventVibrations)) != NULL) ? 1 : 0,
+                  (soundCls && class_getInstanceMethod(soundCls, @selector(playSound:environments:completion:)) != NULL) ? 1 : 0,
+                  (tlAlertCls && class_getClassMethod(tlAlertCls, @selector(alertWithConfiguration:)) != NULL) ? 1 : 0,
+                  (tlAlertCls && class_getInstanceMethod(tlAlertCls, @selector(_initWithConfiguration:toneIdentifier:vibrationIdentifier:hasSynchronizedVibrationUnmatchedWithTone:)) != NULL) ? 1 : 0,
+                  rc_tl_vibration_identifier_none(),
+                  g_rcDisableUnlockedNotificationVibration ? 1 : 0);
+            SRLog(@"[WatchNotify] sendNotificationsToWatchWhenUnlocked=%d", g_rcSendNotificationsToWatchWhenUnlocked ? 1 : 0);
             register_config_observer();
             register_simulation_observers();
             register_system_event_observers(); // WiFi/BT Triggers

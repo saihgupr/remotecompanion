@@ -10,6 +10,8 @@ static NSString *const kRCActionsPasteboardType = @"com.saihgupr.remotecompanion
 - (UIBarButtonItem *)moreButton;
 - (UIMenu *)moreMenu;
 - (void)saveActions;
+- (void)updatePasteButton;
+- (void)updateUndoButtons;
 - (NSRange)ifBlockRangeForIndex:(NSInteger)index;
 - (BOOL)isIfActionItem:(id)item;
 - (BOOL)isElseActionItem:(id)item;
@@ -41,6 +43,13 @@ static NSString *RCActionCountText(NSUInteger count) {
     if (!data) return nil;
     id actions = [NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingMutableContainers error:nil];
     return [actions isKindOfClass:[NSArray class]] && [actions count] ? actions : nil;
+}
+
++ (void)rc_putActionsOnPasteboard:(NSArray *)actions {
+    if (actions.count == 0) return;
+    NSData *data = [NSJSONSerialization dataWithJSONObject:actions options:0 error:nil];
+    if (!data) return;
+    [[UIPasteboard generalPasteboard] setItems:@[ @{ kRCActionsPasteboardType: data } ] options:@{}];
 }
 
 - (void)rc_addActionsSectionToMenuItems:(NSMutableArray<UIMenuElement *> *)menuItems {
@@ -138,6 +147,8 @@ static NSString *RCActionCountText(NSUInteger count) {
         self.toolbarItems = nil;
     }
     [self rc_selectionChanged];
+    [self updatePasteButton];
+    [self updateUndoButtons];
 }
 
 - (void)rc_endSelecting {
@@ -212,14 +223,11 @@ static NSString *RCActionCountText(NSUInteger count) {
     NSIndexSet *indexes = [self rc_selectedIndexes];
     if (indexes.count == 0) return;
     NSArray *selected = [self.actions objectsAtIndexes:indexes];
-    NSData *data = [NSJSONSerialization dataWithJSONObject:selected options:0 error:nil];
-    if (!data) return;
-    [[UIPasteboard generalPasteboard] setItems:@[ @{ kRCActionsPasteboardType: data } ] options:@{}];
+    [RCActionsViewController rc_putActionsOnPasteboard:selected];
     [self rc_setSelecting:NO];
     if (@available(iOS 15.0, *)) {} else {
         self.moreButton.menu = [self moreMenu]; // shows Paste
     }
-    [self showHUDToast:[NSString stringWithFormat:@"Copied %@", RCActionCountText(indexes.count)] subtitle:nil icon:@"doc.on.doc"];
 }
 
 - (void)rc_deleteSelected {

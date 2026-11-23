@@ -12,6 +12,8 @@
 	<true/>
 	<key>com.apple.coreaudio.CanRecordWithoutSessionActivation</key>
 	<true/>
+	<key>com.apple.assistant.dictation.prerecorded</key>
+	<true/>
 	<key>com.apple.private.tcc.allow</key>
 	<array>
 		<string>kTCCServiceMicrophone</string>

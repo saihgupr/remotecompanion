@@ -2250,7 +2250,13 @@
         <div class="action-row-text">Advanced Settings</div>
         <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
       </div>
+      <div class="action-list-row" onclick="openTweaksPanel()">
+        <div class="action-row-icon icon-cyan"><i class="f7-icons">slider_horizontal_3</i></div>
+        <div class="action-row-text" style="flex:1">Tweaks</div>
+        <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
+      </div>
     </div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 32px 0">Advanced Settings holds NFC, banners, logging and display options. Tweaks changes how iOS behaves.</div>
 
     <div class="action-list-header">Diagnostics</div>
     <div class="action-list-card">
@@ -3173,6 +3179,57 @@
   <div class="panel-content">
     <div style="color:var(--rc-label-2);font-size:13px;margin:20px 16px 0">Checked actions show a banner whenever a trigger runs them. Toggles show their new state; other actions show their name.</div>
     <div id="banners-list"></div>
+  </div>
+</div>
+
+<!-- ══ TWEAKS PANEL (Settings > Advanced Settings > Tweaks) ═══════════════════ -->
+<div class="rc-panel" id="tweaks-panel">
+  <div class="panel-navbar">
+    <button class="panel-back" onclick="closeTweaksPanel()">
+      <i class="f7-icons">chevron_left</i> Settings
+    </button>
+    <div class="panel-title">Tweaks</div>
+    <div style="width:80px"></div>
+  </div>
+  <div class="panel-content">
+    <div class="action-list-header" style="margin-top:28px">Power</div>
+    <div class="action-list-card">
+      <div class="settings-row">
+        <span class="settings-label">Disable Wake Screen On Power</span>
+        <div class="settings-btn">
+          <input type="checkbox" class="ios-toggle" id="setting-disable-wake-on-power" onchange="config.disableWakeOnPower=this.checked;saveConfig()">
+        </div>
+      </div>
+    </div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 32px 0">Disable Wake Screen On Power keeps the screen off when power connects or disconnects while the display is off or dimmed.</div>
+    <div class="action-list-card" style="margin-top:10px">
+      <div class="settings-row">
+        <span class="settings-label">Disable Power Connected Haptics</span>
+        <div class="settings-btn">
+          <input type="checkbox" class="ios-toggle" id="setting-disable-power-haptics" onchange="config.disablePowerConnectedHaptics=this.checked;saveConfig()">
+        </div>
+      </div>
+    </div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 32px 0">Disable Power Connected Haptics stops the charging vibration and chime when power connects. Battery status and charging triggers still update normally either way.</div>
+    <div class="action-list-header" style="margin-top:28px">Notifications</div>
+    <div class="action-list-card">
+      <div class="settings-row">
+        <span class="settings-label">Disable Vibration When Unlocked</span>
+        <div class="settings-btn">
+          <input type="checkbox" class="ios-toggle" id="setting-disable-unlocked-notif-vibration" onchange="config.disableUnlockedNotificationVibration=this.checked;saveConfig()">
+        </div>
+      </div>
+    </div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 32px 0">Disable Vibration When Unlocked turns off notification vibration while the phone is unlocked (banners, sounds, alarms, timers, calls, and critical alerts still work normally).</div>
+    <div class="action-list-card" style="margin-top:10px">
+      <div class="settings-row">
+        <span class="settings-label">Send to Watch When Unlocked</span>
+        <div class="settings-btn">
+          <input type="checkbox" class="ios-toggle" id="setting-send-watch-when-unlocked" onchange="config.sendNotificationsToWatchWhenUnlocked=this.checked;saveConfig()">
+        </div>
+      </div>
+    </div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 32px 0">Send to Watch When Unlocked forwards notifications to your Apple Watch even while the iPhone is unlocked, respecting each app's Watch notification settings.</div>
   </div>
 </div>
 
@@ -5865,7 +5922,8 @@ function renderActionList() {
     if (rowIndent > 0) {
       let guides = '';
       for (let i = 1; i <= rowIndent; i++) {
-        const leftPx = 16 + (i - 1) * 20 + 8;
+        // The rail is the start of that level's indent: it sits at the parent level's content edge
+        const leftPx = 16 + (i - 1) * 20;
         const isInner = (i === rowIndent);
         guides += `<div class="indent-line ${isInner ? 'active-level' : ''}" style="left:${leftPx}px"></div>`;
         if (isInner) {
@@ -9977,6 +10035,7 @@ function openAdvancedPanel() {
   updateNFCScreenOffLabel();
   updateNFCFooter();
   updateBannersCount();
+  updateTweaksCount();
   populateTimingSelects();
   document.getElementById('advanced-panel').classList.add('active');
 }
@@ -10887,17 +10946,6 @@ function editHAAction(idx) {
       buttons.push({ label: `Trigger Automation${mark('automation.trigger')}`, action: () => updateHAAction(idx, `ha call automation.trigger ${parsed.entityId}`, '✓ Home Assistant Action Updated') });
     } else {
       standard = [`${domain}.toggle`, `${domain}.turn_on`, `${domain}.turn_off`].includes(parsed.service);
-      buttons.push({ label: `Toggle${mark(`${domain}.toggle`)}`, action: () => updateHAAction(idx, `ha toggle ${parsed.entityId}`, '✓ Home Assistant Action Updated') });
-      buttons.push({ label: `Turn On${mark(`${domain}.turn_on`)}`, action: () => updateHAAction(idx, `ha turn_on ${parsed.entityId}`, '✓ Home Assistant Action Updated') });
-      buttons.push({ label: `Turn Off${mark(`${domain}.turn_off`)}`, action: () => updateHAAction(idx, `ha turn_off ${parsed.entityId}`, '✓ Home Assistant Action Updated') });
-    }
-  }
-
-  if (!parsed || !standard) {
-    buttons.push({ label: 'Edit Command…', action: () => promptTerminalModal(cmd, idx, true) });
-  }
-  buttons.push({ label: 'Change Entity…', action: () => { g_haEditIdx = idx; promptHAActionPicker(); } });
-
   showSheet(parsed ? friendlyHAEntityName(parsed.entityId) : formatHACommandName(cmd), buttons);
 }
 
@@ -11059,10 +11107,28 @@ function closeBannersPanel() {
   updateBannersCount();
 }
 
+function openTweaksPanel() {
+  const wakeEl = document.getElementById('setting-disable-wake-on-power');
+  if (wakeEl) wakeEl.checked = !!config.disableWakeOnPower;
+  const hapticsEl = document.getElementById('setting-disable-power-haptics');
+  if (hapticsEl) hapticsEl.checked = !!config.disablePowerConnectedHaptics;
+  const notifVibEl = document.getElementById('setting-disable-unlocked-notif-vibration');
+  if (notifVibEl) notifVibEl.checked = !!config.disableUnlockedNotificationVibration;
+  const watchUnlockedEl = document.getElementById('setting-send-watch-when-unlocked');
+  if (watchUnlockedEl) watchUnlockedEl.checked = !!config.sendNotificationsToWatchWhenUnlocked;
+  document.getElementById('tweaks-panel').classList.add('active');
+}
+
+function closeTweaksPanel() {
+  document.getElementById('tweaks-panel').classList.remove('active');
+}
+
 function closeSettings() {
   document.getElementById('settings-panel').classList.remove('active');
   const accessPanel = document.getElementById('access-panel');
   if (accessPanel) accessPanel.classList.remove('active');
+  const tweaksPanel = document.getElementById('tweaks-panel');
+  if (tweaksPanel) tweaksPanel.classList.remove('active');
   document.getElementById('footer-settings-fixed').style.display = 'none';
 }
 

@@ -433,6 +433,11 @@ body {
   box-shadow: 0 4px 16px rgba(163, 106, 59, 0.3);
 }
 
+.btn-havoc {
+  background: linear-gradient(135deg, #8b5cf6 0%, #5b21b6 100%);
+  box-shadow: 0 4px 16px rgba(139, 92, 246, 0.3);
+}
+
 .btn-releases {
   background: linear-gradient(135deg, #5856d6 0%, #3634a3 100%);
   box-shadow: 0 4px 16px rgba(88, 86, 214, 0.3);

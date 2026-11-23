@@ -269,6 +269,12 @@
   {"command": "var delete <name>", "args": "name", "description": "Delete a variable", "category": "Variables", "example": "var delete mood", "status": ""},
   {"command": "var clear", "args": "", "description": "Delete every variable", "category": "Variables", "example": "var clear", "status": ""},
 
+  {"command": "tweaks", "args": "", "description": "Every Tweaks switch and whether it is on", "category": "Tweaks", "example": "tweaks", "status": ""},
+  {"command": "tweaks wake-on-power <on|off|toggle>", "args": "on|off|toggle", "description": "Keep the screen dark when power connects or disconnects", "category": "Tweaks", "example": "tweaks wake-on-power on", "status": "tweaks wake-on-power"},
+  {"command": "tweaks power-haptics <on|off|toggle>", "args": "on|off|toggle", "description": "Stop the charging vibration and chime", "category": "Tweaks", "example": "tweaks power-haptics on", "status": "tweaks power-haptics"},
+  {"command": "tweaks unlocked-vibration <on|off|toggle>", "args": "on|off|toggle", "description": "Stop notification vibration while unlocked", "category": "Tweaks", "example": "tweaks unlocked-vibration on", "status": "tweaks unlocked-vibration"},
+  {"command": "tweaks all <on|off>", "args": "on|off", "description": "Set every Tweaks switch at once", "category": "Tweaks", "example": "tweaks all off", "status": "tweaks"},
+
   {"command": "read file <path>", "args": "path", "description": "Read a file on the phone as base64", "category": "Files & Shell", "example": "read file /var/mobile/Documents/rc_triggers.plist", "status": ""},
   {"command": "exec <command>", "args": "shell command", "description": "Run a shell command as the mobile user", "category": "Files & Shell", "example": "exec ls /var/mobile", "status": ""},
   {"command": "root <command>", "args": "shell command", "description": "Run a shell command as root", "category": "Files & Shell", "example": "root ls /var/jb", "status": ""},

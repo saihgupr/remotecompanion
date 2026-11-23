@@ -4,7 +4,6 @@
 #import "RCMQTTSettingsViewController.h"
 #import "RCSSHSettingsViewController.h"
 #import "RCRCClientSettingsViewController.h"
-#import "RCAudioStreamSettingsViewController.h"
 #import "RCIAmLazySettingsViewController.h"
 #import "RCConfigManager.h"
 #import "RCUITweaker.h"
@@ -90,20 +89,15 @@
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     NSInteger rows = 5;
-    if ([self audioStreamRow] >= 0) rows++;
     if ([self iAmLazyRow] >= 0) rows++;
     return rows;
 }
 
 // Integrations that only appear when their app or tool is installed keep their
 // place at the end of the list, in this order.
-- (NSInteger)audioStreamRow {
-    return [RCAudioStreamSettingsViewController isAudioStreamInstalled] ? 5 : -1;
-}
-
 - (NSInteger)iAmLazyRow {
     if (![RCIAmLazySettingsViewController isIAmLazyInstalled]) return -1;
-    return 5 + ([RCAudioStreamSettingsViewController isAudioStreamInstalled] ? 1 : 0);
+    return 5;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
@@ -158,11 +152,6 @@
         cell.detailTextLabel.text = count > 0 ? [NSString stringWithFormat:@"%lu Client%@", (unsigned long)count, count == 1 ? @"" : @"s"] : @"None Configured";
         cell.imageView.image = [UIImage systemImageNamed:@"iphone.radiowaves.left.and.right"];
         cell.imageView.tintColor = count > 0 ? [UIColor systemGreenColor] : [UIColor secondaryLabelColor];
-    } else if (indexPath.row == [self audioStreamRow]) {
-        cell.textLabel.text = @"AudioStream";
-        cell.detailTextLabel.text = cm.audiostreamAutoStart ? @"Auto-start enabled" : @"Auto-start disabled";
-        cell.imageView.image = [UIImage systemImageNamed:@"music.note"];
-        cell.imageView.tintColor = cm.audiostreamAutoStart ? [UIColor systemPinkColor] : [UIColor secondaryLabelColor];
     } else if (indexPath.row == [self iAmLazyRow]) {
         cell.textLabel.text = @"IAmLazy";
         cell.detailTextLabel.text = @"Back up the installed tweaks";
@@ -190,9 +179,6 @@
     } else if (indexPath.row == 4) {
         RCRCClientSettingsViewController *clientsVC = [[RCRCClientSettingsViewController alloc] init];
         [self.navigationController pushViewController:clientsVC animated:YES];
-    } else if (indexPath.row == [self audioStreamRow]) {
-        RCAudioStreamSettingsViewController *audioVC = [[RCAudioStreamSettingsViewController alloc] init];
-        [self.navigationController pushViewController:audioVC animated:YES];
     } else if (indexPath.row == [self iAmLazyRow]) {
         RCIAmLazySettingsViewController *backupVC = [[RCIAmLazySettingsViewController alloc] init];
         [self.navigationController pushViewController:backupVC animated:YES];

@@ -1,21 +1,30 @@
 // Loaded into bulletindistributord, which forwards iOS notifications to a paired Apple Watch.
-// When an RC notification carries userInfo[@"rcWatch"] ("always" or "only"), this lets it
-// alert the Watch even while the iPhone is unlocked or in use, without changing any other app's
-// notifications.
+// Supports both:
+//   1. Per-notification RC flags: userInfo[@"rcWatch"] ("always" or "only"), forcing delivery
+//      to the Watch even while the iPhone is unlocked or in use.
+//   2. Global Tweaks toggle (kRCWatchNotifyUnlocked == 1): forwards all interrupting
+//      notifications to the Watch even while the iPhone is unlocked, respecting each app's
+//      Watch notification settings.
 //
 // Compatible with iOS 14 through iOS 17+. Classes and methods are looked up at run time.
 
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
+#import <notify.h>
 #import <os/log.h>
 #import <fcntl.h>
 #import <unistd.h>
 #import <sys/stat.h>
 
 #define kRCAppBundleID @"com.saihgupr.remotecompanion"
+#define kRCWatchNotifyUnlocked "com.pizzaman.rc.watch_notify_unlocked"
+#define kRCSpringBoardLockState "com.apple.springboard.lockstate"
 
 static __thread int t_rcForceWatchDepth = 0;
+static char kRCPromotedUnlockedKey;
+static BOOL (*g_origShouldSuppress)(id, SEL) = NULL;
+static SEL g_suppressSel = NULL;
 
 static void RCLog(NSString *format, ...) {
     va_list args;
@@ -35,6 +44,69 @@ static void RCLog(NSString *format, ...) {
             break;
         }
     }
+}
+
+static BOOL RCWatchNotifyUnlockedEnabled(void) {
+    static int token = NOTIFY_TOKEN_INVALID;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        int t = NOTIFY_TOKEN_INVALID;
+        if (notify_register_check(kRCWatchNotifyUnlocked, &t) == NOTIFY_STATUS_OK) {
+            token = t;
+        }
+    });
+    if (token == NOTIFY_TOKEN_INVALID) return NO;
+    uint64_t state = 0;
+    if (notify_get_state(token, &state) != NOTIFY_STATUS_OK) return NO;
+    return state == 1;
+}
+
+static BOOL RCPhoneIsUnlocked(void) {
+    static int token = NOTIFY_TOKEN_INVALID;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        int t = NOTIFY_TOKEN_INVALID;
+        if (notify_register_check(kRCSpringBoardLockState, &t) == NOTIFY_STATUS_OK) {
+            token = t;
+        }
+    });
+    if (token == NOTIFY_TOKEN_INVALID) return NO;
+    uint64_t locked = 1;
+    if (notify_get_state(token, &locked) != NOTIFY_STATUS_OK) return NO;
+    return locked == 0;
+}
+
+static NSString *RCBulletinSectionID(id bulletin) {
+    if (!bulletin) return nil;
+    SEL sectionSel = NSSelectorFromString(@"sectionID");
+    NSString *sectionID = [bulletin respondsToSelector:sectionSel] ? ((id (*)(id, SEL))objc_msgSend)(bulletin, sectionSel) : nil;
+    if ([sectionID isKindOfClass:[NSString class]] && sectionID.length) return sectionID;
+    SEL univSel = NSSelectorFromString(@"universalSectionID");
+    NSString *univ = [bulletin respondsToSelector:univSel] ? ((id (*)(id, SEL))objc_msgSend)(bulletin, univSel) : nil;
+    return [univ isKindOfClass:[NSString class]] && univ.length ? univ : nil;
+}
+
+static void RCMarkPromotedUnlockedBulletin(id bulletin) {
+    if (!bulletin) return;
+    objc_setAssociatedObject(bulletin, &kRCPromotedUnlockedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+static BOOL RCIsPromotedUnlockedBulletin(id bulletin) {
+    if (!bulletin) return NO;
+    return [objc_getAssociatedObject(bulletin, &kRCPromotedUnlockedKey) boolValue];
+}
+
+static BOOL RCShouldForwardUnlockedBulletin(id receiver, id bulletin, NSUInteger feed, BOOL playLightsAndSirens) {
+    if (!bulletin || playLightsAndSirens) return NO;
+    if ((feed & 0x817E) == 0) return NO;
+    if (!RCWatchNotifyUnlockedEnabled()) return NO;
+    if (!RCPhoneIsUnlocked()) return NO;
+    if (g_origShouldSuppress && g_suppressSel && g_origShouldSuppress(receiver, g_suppressSel)) return NO;
+    SEL turnsOnDisplaySel = NSSelectorFromString(@"turnsOnDisplay");
+    if ([bulletin respondsToSelector:turnsOnDisplaySel]) {
+        if (!((BOOL (*)(id, SEL))objc_msgSend)(bulletin, turnsOnDisplaySel)) return NO;
+    }
+    return YES;
 }
 
 static NSString *RCWatchModeForBulletin(id bulletin) {
@@ -107,7 +179,10 @@ __attribute__((constructor)) static void RCWatchNotifyStart(void) {
                     }
                     return;
                 }
-                ((void (*)(id, SEL, id, id, NSUInteger, BOOL, id))prev)(receiver, add5Sel, observer, bulletin, feed, playLightsAndSirens, reply);
+                BOOL promote = NO;
+                @try { promote = RCShouldForwardUnlockedBulletin(receiver, bulletin, feed, playLightsAndSirens); } @catch (NSException *e) {}
+                if (promote) RCMarkPromotedUnlockedBulletin(bulletin);
+                ((void (*)(id, SEL, id, id, NSUInteger, BOOL, id))prev)(receiver, add5Sel, observer, bulletin, feed, promote ? YES : playLightsAndSirens, reply);
             }));
         }
 
@@ -128,7 +203,10 @@ __attribute__((constructor)) static void RCWatchNotifyStart(void) {
                     }
                     return;
                 }
-                ((void (*)(id, SEL, id, id, NSUInteger, BOOL, id, NSInteger, BOOL, id))prev)(receiver, add8Sel, observer, bulletin, feed, playLightsAndSirens, attachment, attachmentType, alwaysSend, reply);
+                BOOL promote = NO;
+                @try { promote = RCShouldForwardUnlockedBulletin(receiver, bulletin, feed, playLightsAndSirens); } @catch (NSException *e) {}
+                if (promote) RCMarkPromotedUnlockedBulletin(bulletin);
+                ((void (*)(id, SEL, id, id, NSUInteger, BOOL, id, NSInteger, BOOL, id))prev)(receiver, add8Sel, observer, bulletin, feed, promote ? YES : playLightsAndSirens, attachment, attachmentType, alwaysSend, reply);
             }));
         }
 
@@ -149,7 +227,10 @@ __attribute__((constructor)) static void RCWatchNotifyStart(void) {
                     }
                     return;
                 }
-                ((void (*)(id, SEL, id, NSUInteger, BOOL, id, NSInteger, BOOL, id))prev)(receiver, internalAddSel, bulletin, feed, playLightsAndSirens, attachment, attachmentType, alwaysSend, completion);
+                BOOL promote = NO;
+                @try { promote = RCShouldForwardUnlockedBulletin(receiver, bulletin, feed, playLightsAndSirens); } @catch (NSException *e) {}
+                if (promote) RCMarkPromotedUnlockedBulletin(bulletin);
+                ((void (*)(id, SEL, id, NSUInteger, BOOL, id, NSInteger, BOOL, id))prev)(receiver, internalAddSel, bulletin, feed, promote ? YES : playLightsAndSirens, attachment, attachmentType, alwaysSend, completion);
             }));
         }
 
@@ -180,6 +261,8 @@ __attribute__((constructor)) static void RCWatchNotifyStart(void) {
         Method suppress = RCExactMethodWithSignature(cls, @"shouldSuppressLightsAndSirensNow", 2, 'B');
         if (suppress) {
             IMP prev = method_getImplementation(suppress);
+            g_origShouldSuppress = (BOOL (*)(id, SEL))prev;
+            g_suppressSel = suppressSel;
             method_setImplementation(suppress, imp_implementationWithBlock(^BOOL(id receiver) {
                 if (t_rcForceWatchDepth > 0) return NO;
                 return ((BOOL (*)(id, SEL))prev)(receiver, suppressSel);
@@ -188,10 +271,10 @@ __attribute__((constructor)) static void RCWatchNotifyStart(void) {
 
         // 7) _notifyGizmoOfBulletin:forFeed:updateType:playLightsAndSirens:shouldSendReplyIfNeeded:attachment:attachmentType:replyToken:
         SEL notifySel = NSSelectorFromString(@"_notifyGizmoOfBulletin:forFeed:updateType:playLightsAndSirens:shouldSendReplyIfNeeded:attachment:attachmentType:replyToken:");
-        Method notifyM = RCExactMethodWithSignature(cls, @"_notifyGizmoOfBulletin:forFeed:updateType:playLightsAndSirens:shouldSendReplyIfNeeded:attachment:attachmentType:replyToken:", 10, 'B');
-        if (notifyM) {
-            IMP prev = method_getImplementation(notifyM);
-            method_setImplementation(notifyM, imp_implementationWithBlock(^BOOL(id receiver, id bulletin, NSUInteger feed, NSUInteger updateType, BOOL playLightsAndSirens, BOOL shouldReply, id attachment, NSInteger attachmentType, id replyToken) {
+        Method notifyMB = RCExactMethodWithSignature(cls, @"_notifyGizmoOfBulletin:forFeed:updateType:playLightsAndSirens:shouldSendReplyIfNeeded:attachment:attachmentType:replyToken:", 10, 'B');
+        if (notifyMB) {
+            IMP prev = method_getImplementation(notifyMB);
+            method_setImplementation(notifyMB, imp_implementationWithBlock(^BOOL(id receiver, id bulletin, NSUInteger feed, NSUInteger updateType, BOOL playLightsAndSirens, BOOL shouldReply, id attachment, NSInteger attachmentType, id replyToken) {
                 NSString *mode = nil;
                 @try { mode = RCWatchModeForBulletin(bulletin); } @catch (NSException *e) {}
                 if (mode) {
@@ -199,8 +282,34 @@ __attribute__((constructor)) static void RCWatchNotifyStart(void) {
                     RCLog(@"Forwarded Watch notification (%@): sent=%d", mode, sent);
                     return sent;
                 }
-                return ((BOOL (*)(id, SEL, id, NSUInteger, NSUInteger, BOOL, BOOL, id, NSInteger, id))prev)(receiver, notifySel, bulletin, feed, updateType, playLightsAndSirens, shouldReply, attachment, attachmentType, replyToken);
+                BOOL promoted = NO;
+                @try { promoted = RCIsPromotedUnlockedBulletin(bulletin); } @catch (NSException *e) {}
+                BOOL sent = ((BOOL (*)(id, SEL, id, NSUInteger, NSUInteger, BOOL, BOOL, id, NSInteger, id))prev)(receiver, notifySel, bulletin, feed, updateType, playLightsAndSirens, shouldReply, attachment, attachmentType, replyToken);
+                if (promoted) {
+                    RCLog(@"Forwarded unlocked Watch notification (%@): play=%d sent=%d", RCBulletinSectionID(bulletin) ?: @"?", playLightsAndSirens, sent);
+                }
+                return sent;
             }));
+        } else {
+            Method notifyMV = RCExactMethodWithSignature(cls, @"_notifyGizmoOfBulletin:forFeed:updateType:playLightsAndSirens:shouldSendReplyIfNeeded:attachment:attachmentType:replyToken:", 10, 'v');
+            if (notifyMV) {
+                IMP prev = method_getImplementation(notifyMV);
+                method_setImplementation(notifyMV, imp_implementationWithBlock(^(id receiver, id bulletin, NSUInteger feed, NSUInteger updateType, BOOL playLightsAndSirens, BOOL shouldReply, id attachment, NSInteger attachmentType, id replyToken) {
+                    NSString *mode = nil;
+                    @try { mode = RCWatchModeForBulletin(bulletin); } @catch (NSException *e) {}
+                    if (mode) {
+                        ((void (*)(id, SEL, id, NSUInteger, NSUInteger, BOOL, BOOL, id, NSInteger, id))prev)(receiver, notifySel, bulletin, feed, updateType, YES, shouldReply, attachment, attachmentType, replyToken);
+                        RCLog(@"Forwarded Watch notification (%@): sent=1", mode);
+                        return;
+                    }
+                    BOOL promoted = NO;
+                    @try { promoted = RCIsPromotedUnlockedBulletin(bulletin); } @catch (NSException *e) {}
+                    ((void (*)(id, SEL, id, NSUInteger, NSUInteger, BOOL, BOOL, id, NSInteger, id))prev)(receiver, notifySel, bulletin, feed, updateType, playLightsAndSirens, shouldReply, attachment, attachmentType, replyToken);
+                    if (promoted) {
+                        RCLog(@"Forwarded unlocked Watch notification (%@): play=%d", RCBulletinSectionID(bulletin) ?: @"?", playLightsAndSirens);
+                    }
+                }));
+            }
         }
 
         // 8) _sendPBBulletin:forBulletin:feed:updateType:playLightsAndSirens:shouldSendReplyIfNeeded:
@@ -229,10 +338,20 @@ __attribute__((constructor)) static void RCWatchNotifyStart(void) {
                     ((void (*)(id, SEL, id, id, NSUInteger, NSUInteger, BOOL, BOOL))prev)(receiver, sendPBSel, pbBulletin, bulletin, feed, updateType, YES, shouldReply);
                     return;
                 }
+                BOOL promoted = NO;
+                @try { promoted = playLightsAndSirens && RCIsPromotedUnlockedBulletin(bulletin); } @catch (NSException *e) {}
+                if (promoted) {
+                    SEL noDelaySel = NSSelectorFromString(@"setSuppressDelayForForwardedBulletins:");
+                    if ([pbBulletin respondsToSelector:noDelaySel]) {
+                        ((void (*)(id, SEL, BOOL))objc_msgSend)(pbBulletin, noDelaySel, YES);
+                    }
+                    ((void (*)(id, SEL, id, id, NSUInteger, NSUInteger, BOOL, BOOL))prev)(receiver, sendPBSel, pbBulletin, bulletin, feed, updateType, YES, shouldReply);
+                    return;
+                }
                 ((void (*)(id, SEL, id, id, NSUInteger, NSUInteger, BOOL, BOOL))prev)(receiver, sendPBSel, pbBulletin, bulletin, feed, updateType, playLightsAndSirens, shouldReply);
             }));
         }
 
-        RCLog(@"bulletindistributord: Watch notification hooks installed");
+        RCLog(@"bulletindistributord: Watch notification hooks installed (unlockedEnabled=%d)", RCWatchNotifyUnlockedEnabled() ? 1 : 0);
     }
 }

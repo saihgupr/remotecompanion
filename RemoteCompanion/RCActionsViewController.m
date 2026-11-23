@@ -206,6 +206,11 @@ static inline UIFont *RCActionCellTitleFont(void) {
 @property (nonatomic, strong) UIColor *borderColor;
 @property (nonatomic, assign) CGFloat borderWidth;
 @property (nonatomic, assign) BOOL squareTrailingCorners;
+// A leading swipe (Copy / Paste / Cut) squares the other end, so the card still meets the buttons
+@property (nonatomic, assign) BOOL squareLeadingCorners;
+// A nested row's card starts at its guide line: the card keeps its right edge and gives up this
+// much on the left only
+@property (nonatomic, assign) CGFloat leftInset;
 @end
 
 @interface UITableViewCell (RCActionSwipeSync)
@@ -240,7 +245,16 @@ static inline UIFont *RCActionCellTitleFont(void) {
     CACornerMask leadingCorners = isRTL
         ? (kCALayerMaxXMinYCorner | kCALayerMaxXMaxYCorner)
         : (kCALayerMinXMinYCorner | kCALayerMinXMaxYCorner);
-    _cardView.layer.maskedCorners = self.squareTrailingCorners ? leadingCorners : allCorners;
+    CACornerMask trailingCorners = isRTL
+        ? (kCALayerMinXMinYCorner | kCALayerMinXMaxYCorner)
+        : (kCALayerMaxXMinYCorner | kCALayerMaxXMaxYCorner);
+    if (self.squareLeadingCorners) {
+        _cardView.layer.maskedCorners = trailingCorners; // square where a leading swipe's buttons meet it
+    } else if (self.squareTrailingCorners) {
+        _cardView.layer.maskedCorners = leadingCorners;
+    } else {
+        _cardView.layer.maskedCorners = allCorners;
+    }
 }
 
 - (void)setFillColor:(UIColor *)fillColor {
@@ -278,6 +292,18 @@ static inline UIFont *RCActionCellTitleFont(void) {
     [self applyAppearance];
 }
 
+- (void)setSquareLeadingCorners:(BOOL)squareLeadingCorners {
+    if (_squareLeadingCorners == squareLeadingCorners) return;
+    _squareLeadingCorners = squareLeadingCorners;
+    [self applyAppearance];
+}
+
+- (void)setLeftInset:(CGFloat)leftInset {
+    if (_leftInset == leftInset) return;
+    _leftInset = leftInset;
+    [self setNeedsLayout];
+}
+
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
     [super traitCollectionDidChange:previousTraitCollection];
     if (@available(iOS 13.0, *)) {
@@ -290,10 +316,12 @@ static inline UIFont *RCActionCellTitleFont(void) {
 - (void)layoutSubviews {
     [super layoutSubviews];
 
-    // The card is as wide as the cell and inset from its top and bottom, the same breath the
-    // folded rows' cards keep from their cells, so the open card lines up with its neighbours
-    CGRect card = CGRectMake(0.0, RCActionCellCardGap,
-                              self.bounds.size.width,
+    // The card keeps the cell's right edge and is inset from its top and bottom, the same breath
+    // the folded rows' cards keep from their cells. A nested row's leftInset moves its left edge
+    // to the guide line, so the card itself is what looks indented.
+    CGFloat left = MAX(0.0, MIN(self.leftInset, self.bounds.size.width));
+    CGRect card = CGRectMake(left, RCActionCellCardGap,
+                              self.bounds.size.width - left,
                               self.bounds.size.height - 2.0 * RCActionCellCardGap);
     if (CGRectGetWidth(card) <= 0 || CGRectGetHeight(card) <= 0) {
         _cardView.hidden = YES;
@@ -332,6 +360,10 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
 // YES while the cell sits in a trailing swipe wrapper, so its card squares off cleanly where it
 // meets the red delete button
 @property (nonatomic, assign, readonly) BOOL rcSwipingTrailing;
+// YES while the cell sits in a leading swipe wrapper (Copy, Paste, Cut)
+@property (nonatomic, assign, readonly) BOOL rcSwipingLeading;
+// How far the row's card starts from the cell's left edge (its nesting indent)
+@property (nonatomic, assign) CGFloat rcCardLeftInset;
 // Shows the value editor under the row (nil takes it away)
 - (void)rc_showInlinePanel:(UIView *)panel rowContentHeight:(CGFloat)rowContentHeight;
 // Whether a point in the cell's own coordinates lands in the open editor
@@ -354,6 +386,7 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
 @property (nonatomic, strong) NSLayoutConstraint *rcValueChipWidth;
 @property (nonatomic, assign) CGFloat rcValueChipWidthValue;
 @property (nonatomic, assign, readwrite) BOOL rcSwipingTrailing;
+@property (nonatomic, assign, readwrite) BOOL rcSwipingLeading;
 @property (nonatomic, assign) CGFloat rcSavedDimmedAlpha;
 - (void)rc_buildValueChipIfNeeded;
 - (void)rc_buildIconTileIfNeeded;
@@ -413,13 +446,16 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
 - (void)rc_syncSwipeAppearance {
     UIView *container = [self rc_swipeContainerView];
     if (!container) {
-        if (self.rcSwipingTrailing) {
+        if (self.rcSwipingTrailing || self.rcSwipingLeading) {
             self.rcSwipingTrailing = NO;
+            self.rcSwipingLeading = NO;
             if ([self.backgroundView isKindOfClass:[RCActionCardBackgroundView class]]) {
                 ((RCActionCardBackgroundView *)self.backgroundView).squareTrailingCorners = NO;
+                ((RCActionCardBackgroundView *)self.backgroundView).squareLeadingCorners = NO;
             }
             if ([self.selectedBackgroundView isKindOfClass:[RCActionCardBackgroundView class]]) {
                 ((RCActionCardBackgroundView *)self.selectedBackgroundView).squareTrailingCorners = NO;
+                ((RCActionCardBackgroundView *)self.selectedBackgroundView).squareLeadingCorners = NO;
             }
         }
         if (self.rcSavedDimmedAlpha > 0.0) {
@@ -439,6 +475,12 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
             sibling.layer.cornerRadius = 0.0;
         }
     }
+    // The wrapper carries both directions: the cell sits shifted right for a leading swipe (Copy,
+    // Paste, Cut) and left for a trailing one (Delete). The card squares the edge that meets them.
+    BOOL leading = self.rcSwipingLeading;
+    if (!leading && !self.rcSwipingTrailing) {
+        leading = CGRectGetMinX([self convertRect:self.bounds toView:container]) > 0.5;
+    }
     CGRect maskFrame = CGRectMake(0.0, RCActionCellCardGap,
                                   container.bounds.size.width,
                                   MAX(0.0, container.bounds.size.height - 2.0 * RCActionCellCardGap));
@@ -456,18 +498,24 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
         } else if (!CGRectEqualToRect(mask.frame, maskFrame)) {
             mask.frame = maskFrame;
         }
+        mask.layer.maskedCorners = leading
+            ? (kCALayerMaxXMinYCorner | kCALayerMaxXMaxYCorner)
+            : (kCALayerMinXMinYCorner | kCALayerMinXMaxYCorner);
     }
 
-    self.rcSwipingTrailing = YES;
+    self.rcSwipingLeading = leading;
+    self.rcSwipingTrailing = !leading;
     if (self.alpha < 0.99 && self.rcSavedDimmedAlpha == 0.0) {
         self.rcSavedDimmedAlpha = self.alpha;
         self.alpha = 1.0;
     }
     if ([self.backgroundView isKindOfClass:[RCActionCardBackgroundView class]]) {
-        ((RCActionCardBackgroundView *)self.backgroundView).squareTrailingCorners = YES;
+        ((RCActionCardBackgroundView *)self.backgroundView).squareLeadingCorners = leading;
+        ((RCActionCardBackgroundView *)self.backgroundView).squareTrailingCorners = !leading;
     }
     if ([self.selectedBackgroundView isKindOfClass:[RCActionCardBackgroundView class]]) {
-        ((RCActionCardBackgroundView *)self.selectedBackgroundView).squareTrailingCorners = YES;
+        ((RCActionCardBackgroundView *)self.selectedBackgroundView).squareLeadingCorners = leading;
+        ((RCActionCardBackgroundView *)self.selectedBackgroundView).squareTrailingCorners = !leading;
     }
 }
 
@@ -521,7 +569,7 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
     // the card's inset on both sides, and the card closes just below the panel
     CGFloat side = RCActionCellInlineSideInset;
     [NSLayoutConstraint activateConstraints:@[
-        [container.leadingAnchor constraintEqualToAnchor:self.leadingAnchor],
+        [container.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:self.rcCardLeftInset],
         [container.trailingAnchor constraintEqualToAnchor:self.trailingAnchor],
         [container.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:rowContentHeight],
         [container.bottomAnchor constraintEqualToAnchor:self.bottomAnchor],
@@ -787,6 +835,16 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
 @property (nonatomic, assign) BOOL titleInHeader;
 @property (nonatomic, assign) BOOL namePromptShown;
 @property (nonatomic, strong) UIBarButtonItem *moreButton;
+// Shown left of Play on an empty sequence when an action has been copied, so the copy can land
+// without a row to long-press
+@property (nonatomic, strong) UIBarButtonItem *pasteButton;
+// Undo/redo for the sequence: snapshots of the states before the latest change
+@property (nonatomic, strong) NSMutableArray<NSArray *> *actionsUndoStack;
+@property (nonatomic, strong) NSMutableArray<NSArray *> *actionsRedoStack;
+@property (nonatomic, copy) NSArray *actionsBaseline;
+@property (nonatomic, strong) UIBarButtonItem *playButton;
+@property (nonatomic, strong) UIBarButtonItem *undoButton;
+@property (nonatomic, strong) UIBarButtonItem *redoButton;
 // The action picker while it's open for an action that leads to another screen; closed once
 // that action is added
 @property (nonatomic, weak) UINavigationController *addingNav;
@@ -1306,6 +1364,55 @@ static UIImage *RCGrabberImage(void) {
 
 static id g_actionClipboard = nil;
 
+// The clipboard holds one action, or a whole block as its rows in order. Everything that pastes
+// goes through the array, so a copied If / Repeat block arrives complete. The shared pasteboard is
+// read too: a multi-select copy, or a JSON action put there by a script or the Web UI, can land here.
+static NSArray *RCActionClipboardItems(void) {
+    if ([g_actionClipboard isKindOfClass:[NSArray class]]) return g_actionClipboard;
+    if (g_actionClipboard) return @[g_actionClipboard];
+    NSArray *pasted = [RCActionsViewController rc_actionsOnPasteboard];
+    if (pasted.count > 0) return pasted;
+    if (@available(iOS 16.0, *)) {
+        // A plain string on the pasteboard would need the user's paste permission; the app's own
+        // type above is the copy that matters
+    } else {
+        NSString *text = [UIPasteboard generalPasteboard].string;
+        if (text.length) {
+            id parsed = [NSJSONSerialization JSONObjectWithData:[text dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+            if ([parsed isKindOfClass:[NSArray class]] && [parsed count] > 0) return parsed;
+        }
+    }
+    return nil;
+}
+
+static void RCActionClipboardSetItems(NSArray *items) {
+    if (items.count == 0) {
+        g_actionClipboard = nil;
+        return;
+    }
+    g_actionClipboard = items.count == 1
+        ? [items.firstObject copy]
+        : [[NSArray alloc] initWithArray:items copyItems:YES];
+    // The shared pasteboard keeps the copy across launches and lets the ••• menu offer Paste
+    [RCActionsViewController rc_putActionsOnPasteboard:items];
+}
+
+static NSString *RCActionClipboardCountText(NSUInteger count) {
+    return count == 1 ? @"1 Action" : [NSString stringWithFormat:@"%lu Actions", (unsigned long)count];
+}
+
+// A detached copy of the action sequence, for undo/redo snapshots. JSON keeps every string,
+// number and dictionary isolated from the live array; a shallow copy is the fallback.
+static NSArray *RCActionSnapshot(NSArray *actions) {
+    if (!actions) return @[];
+    NSData *data = [NSJSONSerialization dataWithJSONObject:actions options:0 error:nil];
+    if (data) {
+        id copy = [NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingMutableContainers error:nil];
+        if ([copy isKindOfClass:[NSArray class]]) return copy;
+    }
+    return [[NSArray alloc] initWithArray:actions copyItems:YES];
+}
+
 - (NSString *)displayNameForCommand:(id)cmd {
     return [[RCConfigManager sharedManager] nameForCommand:cmd truncate:YES];
 }
@@ -1693,6 +1800,8 @@ static void RCSetRunWatching(BOOL watching) {
         if (saved != wasSaved) [weakSelf.tableView reloadData];
     }];
     [self refreshTitle];
+    [self updatePasteButton];
+    [self updateUndoButtons];
 }
 
 // The name can change while this screen is open: a trigger's editor (Edit Schedule) saves it and
@@ -2174,12 +2283,12 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
         [rightItems addObject:settingsButton];
     }
     
-    UIBarButtonItem *playButton = [[UIBarButtonItem alloc] 
+    self.playButton = [[UIBarButtonItem alloc]
         initWithImage:[UIImage systemImageNamed:@"play"] 
         style:UIBarButtonItemStylePlain 
         target:self 
         action:@selector(runSequence)];
-    [rightItems addObject:playButton];
+    [rightItems addObject:self.playButton];
     
     self.navigationItem.rightBarButtonItems = rightItems;
     if (self.debugRunID) {
@@ -2211,6 +2320,9 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
     
     // Load actions
     _actions = [[[RCConfigManager sharedManager] actionsForTrigger:_triggerKey] mutableCopy];
+    self.actionsUndoStack = [NSMutableArray array];
+    self.actionsRedoStack = [NSMutableArray array];
+    self.actionsBaseline = RCActionSnapshot(_actions);
     [self updateWrappedTitle];
     
     // Non-editing mode to allow swipe actions
@@ -2231,6 +2343,8 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
     // Long names wrap and the row grows with them, never below the usual 70
     self.tableView.rowHeight = [[NSUserDefaults standardUserDefaults] boolForKey:@"RCWrapLongNamesEnabled"] ? UITableViewAutomaticDimension : 70.0;
     self.tableView.estimatedRowHeight = 70;
+    [self updatePasteButton];
+    [self updateUndoButtons];
 }
 
 - (void)wrapLongNamesSettingChanged:(NSNotification *)note {
@@ -2365,8 +2479,14 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
 
 - (void)handleConfigChanged:(NSNotification *)note {
     dispatch_async(dispatch_get_main_queue(), ^{
-        _actions = [[[RCConfigManager sharedManager] actionsForTrigger:_triggerKey] mutableCopy];
-        [self.tableView reloadData];
+        NSArray *fresh = [[RCConfigManager sharedManager] actionsForTrigger:_triggerKey];
+        // Our own save echoes back here; the sequence on screen is already that one, and its
+        // undo history must survive.
+        if (![fresh isEqualToArray:_actions ?: @[]]) {
+            _actions = [fresh mutableCopy];
+            [self resetUndoHistory]; // an edit from elsewhere starts a fresh history
+            [self.tableView reloadData];
+        }
         [self refreshTitle];
     });
 }
@@ -2459,6 +2579,7 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
             self.triggerKey = newKey;
             self.title = [config displayNameForTrigger:newKey];
             self.actions = [[config actionsForTrigger:newKey] mutableCopy];
+            [self resetUndoHistory];
             [self.tableView reloadData];
             [self updateWrappedTitle];
             // The picker closes itself once this returns (popping here too went back a screen too far)
@@ -2637,8 +2758,10 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
     
     [alert addAction:[UIAlertAction actionWithTitle:@"Clear All Actions" style:UIAlertActionStyleDestructive handler:^(UIAlertAction * _Nonnull action) {
         [self.actions removeAllObjects];
+        [self recordActionsForUndo];
         [[RCConfigManager sharedManager] setActions:self.actions forTrigger:self.triggerKey];
         [self.tableView reloadData];
+        [self updatePasteButton];
     }]];
     
     [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
@@ -2994,8 +3117,10 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
     // A Remote RC action edited as its inner command gets its client wrapper back
     [self finishPendingRemoteEdit];
     [self finishAdding]; // closes the picker once this save is done
+    [self recordActionsForUndo];
     [[RCConfigManager sharedManager] setActions:_actions forTrigger:_triggerKey];
     if (self.namePromptShown && _actions.count > 0) [self updateWrappedTitle];
+    [self updatePasteButton];
 }
 
 - (NSString *)actionTypeForItem:(id)item {
@@ -4245,7 +4370,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         if (!path) continue;
         BOOL dragged = self.reorderSnapshot && NSLocationInRange(path.row, self.reorderRange);
         BOOL dimmed = (openRow != NSNotFound && path.row != openRow);
-        BOOL swiping = [cell isKindOfClass:[RCActionCell class]] && ((RCActionCell *)cell).rcSwipingTrailing;
+        BOOL swiping = [cell isKindOfClass:[RCActionCell class]] && (((RCActionCell *)cell).rcSwipingTrailing || ((RCActionCell *)cell).rcSwipingLeading);
         if (swiping) {
             ((RCActionCell *)cell).rcSavedDimmedAlpha = dimmed ? RCActionCellDimmedAlpha : 0.0;
         }
@@ -4504,9 +4629,10 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             [self.tableView reloadData];
         }]];
         
-        // Copy option
+        // Copy option: a whole If / Repeat block when the row is one. The phone's own clipboard
+        // notice is the confirmation, so the app doesn't add a second toast.
         [alert addAction:[UIAlertAction actionWithTitle:@"Copy" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-            g_actionClipboard = [item copy];
+            [self copyActionRangeForRow:indexPath.row];
         }]];
         
         // Duplicate option: a copy right below the row (a whole block for block rows)
@@ -4525,16 +4651,12 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         }
 
         // Paste Above/Below options
-        if (g_actionClipboard) {
+        if (RCActionClipboardItems().count > 0) {
             [alert addAction:[UIAlertAction actionWithTitle:@"Paste Above" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-                [self.actions insertObject:[RCNotifyCommand copyOfActionWithNewIDs:g_actionClipboard] atIndex:indexPath.row];
-                [self saveActions];
-                [self.tableView reloadData];
+                [self insertClipboardActionsAtIndex:indexPath.row];
             }]];
             [alert addAction:[UIAlertAction actionWithTitle:@"Paste Below" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-                [self.actions insertObject:[RCNotifyCommand copyOfActionWithNewIDs:g_actionClipboard] atIndex:indexPath.row + 1];
-                [self saveActions];
-                [self.tableView reloadData];
+                [self insertClipboardActionsAtIndex:indexPath.row + 1];
             }]];
         }
         
@@ -4728,6 +4850,197 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     if ([self.tableView numberOfSections] > 0 && last.row < [self.tableView numberOfRowsInSection:0]) {
         [self.tableView scrollToRowAtIndexPath:last atScrollPosition:UITableViewScrollPositionMiddle animated:YES];
     }
+}
+
+// The whole If / Repeat block a row belongs to, or just the row. An Else or Else If row brings
+// its block, since those rows only mean something inside one.
+- (NSRange)wholeBlockRangeForRow:(NSInteger)row {
+    if (row < 0 || row >= (NSInteger)self.actions.count) return NSMakeRange(NSNotFound, 0);
+    id item = self.actions[row];
+    NSInteger start = row;
+    if ([self isElseIfActionItem:item] || [self isElseActionItem:item]) {
+        NSInteger depth = 0;
+        for (NSInteger i = row - 1; i >= 0; i--) {
+            id check = self.actions[i];
+            if ([self isEndIfActionItem:check]) depth++;
+            else if ([self isIfActionItem:check]) {
+                if (depth == 0) { start = i; break; }
+                depth--;
+            }
+        }
+    }
+    NSRange range = [self ifBlockRangeForIndex:start];
+    if (range.location == NSNotFound || range.length == 0 || NSMaxRange(range) > self.actions.count) {
+        return NSMakeRange(row, 1);
+    }
+    return range;
+}
+
+- (void)copyActionRangeForRow:(NSInteger)row {
+    NSRange range = [self wholeBlockRangeForRow:row];
+    if (range.location == NSNotFound || range.length == 0 || NSMaxRange(range) > self.actions.count) return;
+    RCActionClipboardSetItems([self.actions subarrayWithRange:range]);
+}
+
+// Puts the clipboard at an index, each action with IDs of its own. Returns how many were pasted.
+- (NSInteger)insertClipboardActionsAtIndex:(NSInteger)index {
+    NSArray *items = RCActionClipboardItems();
+    if (items.count == 0) return 0;
+    NSInteger at = MAX(0, MIN(index, (NSInteger)self.actions.count));
+    for (id item in items) {
+        [self.actions insertObject:[RCNotifyCommand copyOfActionWithNewIDs:item] atIndex:at++];
+    }
+    [self saveActions];
+    [self.tableView reloadData];
+    [self updatePasteButton];
+    return items.count;
+}
+
+// The bar's paste button: left of Play, on an empty sequence, while the clipboard has something
+- (UIBarButtonItem *)pasteButton {
+    if (!_pasteButton) {
+        // A touch smaller than the bar's own glyphs, so it reads as a secondary action beside Play
+        UIImageSymbolConfiguration *symbol = [UIImageSymbolConfiguration configurationWithPointSize:14 weight:UIImageSymbolWeightRegular];
+        _pasteButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"doc.on.clipboard" withConfiguration:symbol]
+                                                       style:UIBarButtonItemStylePlain
+                                                      target:self
+                                                      action:@selector(pasteClipboardToSequence)];
+        _pasteButton.accessibilityLabel = @"Paste Copied Action";
+    }
+    return _pasteButton;
+}
+
+- (void)updatePasteButton {
+    if (!self.isViewLoaded || self.debugRunID || self.rc_isSelectingActions) return;
+    BOOL show = self.actions.count == 0 && RCActionClipboardItems().count > 0;
+    NSMutableArray *items = [self.navigationItem.rightBarButtonItems mutableCopy] ?: [NSMutableArray array];
+    UIBarButtonItem *paste = self.pasteButton;
+    if (show) {
+        if (![items containsObject:paste]) [items addObject:paste]; // leftmost, so left of Play
+    } else {
+        [items removeObject:paste];
+    }
+    self.navigationItem.rightBarButtonItems = items;
+}
+
+- (void)pasteClipboardToSequence {
+    NSInteger count = [self insertClipboardActionsAtIndex:self.actions.count];
+    if (count == 0) return;
+    [self showHUDToast:[NSString stringWithFormat:@"Pasted %@", RCActionClipboardCountText(count)]
+              subtitle:nil
+                  icon:@"doc.on.clipboard"];
+}
+
+// Called by saveActions: the first save keeps the loaded sequence as the undo baseline, and each
+// later save pushes the state before that change. Equal saves add nothing.
+- (void)recordActionsForUndo {
+    if (!self.actionsUndoStack) self.actionsUndoStack = [NSMutableArray array];
+    if (!self.actionsRedoStack) self.actionsRedoStack = [NSMutableArray array];
+    NSArray *current = _actions ?: @[];
+    if (!self.actionsBaseline) {
+        self.actionsBaseline = RCActionSnapshot(current);
+        [self updateUndoButtons];
+        return;
+    }
+    if ([current isEqualToArray:self.actionsBaseline]) {
+        [self updateUndoButtons];
+        return;
+    }
+    [self.actionsUndoStack addObject:self.actionsBaseline];
+    if (self.actionsUndoStack.count > 50) [self.actionsUndoStack removeObjectAtIndex:0];
+    [self.actionsRedoStack removeAllObjects];
+    self.actionsBaseline = RCActionSnapshot(current);
+    [self updateUndoButtons];
+}
+
+// An edit from outside this screen (another device, the tweak): keep it as the new starting point
+- (void)resetUndoHistory {
+    [self.actionsUndoStack removeAllObjects];
+    [self.actionsRedoStack removeAllObjects];
+    self.actionsBaseline = RCActionSnapshot(_actions ?: @[]);
+    [self updateUndoButtons];
+}
+
+- (UIBarButtonItem *)undoButton {
+    if (!_undoButton) {
+        _undoButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"arrow.uturn.backward"]
+                                                       style:UIBarButtonItemStylePlain
+                                                      target:self
+                                                      action:@selector(undoActionChange)];
+        _undoButton.accessibilityLabel = @"Undo";
+    }
+    return _undoButton;
+}
+
+- (UIBarButtonItem *)redoButton {
+    if (!_redoButton) {
+        _redoButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"arrow.uturn.forward"]
+                                                       style:UIBarButtonItemStylePlain
+                                                      target:self
+                                                      action:@selector(redoActionChange)];
+        _redoButton.accessibilityLabel = @"Redo";
+    }
+    return _redoButton;
+}
+
+// Undo and Redo sit immediately left of Play; Paste stays left of both
+- (void)updateUndoButtons {
+    if (!self.isViewLoaded || self.debugRunID || self.rc_isSelectingActions) return;
+    NSMutableArray *items = [self.navigationItem.rightBarButtonItems mutableCopy] ?: [NSMutableArray array];
+    [items removeObject:self.undoButton];
+    [items removeObject:self.redoButton];
+    NSUInteger playIndex = self.playButton ? [items indexOfObject:self.playButton] : NSNotFound;
+    if (playIndex == NSNotFound) {
+        self.navigationItem.rightBarButtonItems = items;
+        return;
+    }
+    BOOL canUndo = self.actionsUndoStack.count > 0 && ![self runShown];
+    BOOL canRedo = self.actionsRedoStack.count > 0 && ![self runShown];
+    NSUInteger insert = playIndex + 1;
+    if (canUndo) [items insertObject:self.undoButton atIndex:insert++];
+    if (canRedo) [items insertObject:self.redoButton atIndex:insert++];
+    self.navigationItem.rightBarButtonItems = items;
+}
+
+- (void)undoActionChange {
+    if ([self runShown] || self.debugRunID || self.rc_isSelectingActions) return;
+    if (self.actionsUndoStack.count == 0) return;
+    NSArray *previous = self.actionsUndoStack.lastObject;
+    [self.actionsUndoStack removeLastObject];
+    [self.actionsRedoStack addObject:RCActionSnapshot(_actions ?: @[])];
+    [self restoreActionsSnapshot:previous];
+}
+
+- (void)redoActionChange {
+    if ([self runShown] || self.debugRunID || self.rc_isSelectingActions) return;
+    if (self.actionsRedoStack.count == 0) return;
+    NSArray *next = self.actionsRedoStack.lastObject;
+    [self.actionsRedoStack removeLastObject];
+    [self.actionsUndoStack addObject:RCActionSnapshot(_actions ?: @[])];
+    [self restoreActionsSnapshot:next];
+}
+
+- (void)restoreActionsSnapshot:(NSArray *)snapshot {
+    [self resetInlineEditorForActionsReplace];
+    self.actions = [RCActionSnapshot(snapshot) mutableCopy];
+    self.actionsBaseline = RCActionSnapshot(self.actions);
+    // Write directly: this is the restored state, not a new change to record
+    [[RCConfigManager sharedManager] setActions:self.actions forTrigger:self.triggerKey];
+    if (self.namePromptShown && self.actions.count > 0) [self updateWrappedTitle];
+    [self.tableView reloadData];
+    [self updatePasteButton];
+    [self updateUndoButtons];
+}
+
+// A row's open editor belongs to the sequence it was opened in; a restored sequence has none
+- (void)resetInlineEditorForActionsReplace {
+    [self.view endEditing:YES];
+    self.inlineEditorIndex = NSNotFound;
+    self.inlineEditorCommand = nil;
+    self.inlineEditorRowHeight = 0;
+    self.inlineRowItem = nil;
+    self.inlineRowEditor = nil;
+    self.inlineRowCommitting = NO;
 }
 
 #pragma mark - Table View Data Source
@@ -5687,6 +6000,16 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     card.squareTrailingCorners = squareTrailing;
     selectedCard.squareTrailingCorners = squareTrailing;
 
+    // Nested rows' cards start at their guide line: the rail sits on the parent level's content
+    // edge and the card's left edge moves out to meet it. The content inside keeps its inset, so
+    // only the left side of the row is indented.
+    NSInteger level = [self indentationLevelForRow:indexPath.row];
+    CGFloat indentWidth = cell.indentationWidth > 0 ? cell.indentationWidth : 14.0f;
+    CGFloat cardLeft = level > 0 ? RCActionCellIconTileInset + (level - 1) * indentWidth : 0.0;
+    card.leftInset = cardLeft;
+    selectedCard.leftInset = cardLeft;
+    if ([cell isKindOfClass:[RCActionCell class]]) ((RCActionCell *)cell).rcCardLeftInset = cardLeft;
+
     cell.backgroundColor = [UIColor clearColor];
     cell.contentView.backgroundColor = [UIColor clearColor];
     if (cell.backgroundView != card) cell.backgroundView = card;
@@ -5805,7 +6128,11 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     // (not the content view's: the accessory narrows that one, and the panel keeps the card's insets)
     UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
     CGFloat cellWidth = cell ? cell.bounds.size.width : tableView.bounds.size.width - 40.0;
-    CGFloat panelWidth = cellWidth - 2.0 * RCActionCellInlineSideInset;
+    // The open card keeps the row's nesting indent on its left, so the editor is measured inside it
+    NSInteger level = [self indentationLevelForRow:indexPath.row];
+    CGFloat indentWidth = cell.indentationWidth > 0 ? cell.indentationWidth : 14.0f;
+    CGFloat cardLeft = level > 0 ? RCActionCellIconTileInset + (level - 1) * indentWidth : 0.0;
+    CGFloat panelWidth = cellWidth - cardLeft - 2.0 * RCActionCellInlineSideInset;
     UIView *panel = self.inlineRowEditor;
     CGFloat panelHeight = [(id)panel preferredHeightForWidth:panelWidth];
     return ceil(self.inlineEditorRowHeight + 1.0 / [UIScreen mainScreen].scale + RCActionCellInlineTopGap + panelHeight + RCActionCellCardGap + RCActionCellInlineBottomGap);
@@ -6093,54 +6420,16 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     return cell;
 }
 
-- (void)applyIndentGuidesToCell:(UITableViewCell *)cell level:(NSInteger)indentationLevel {
-    for (UIView *subview in [cell.contentView.subviews copy]) {
-        if (subview.tag == 998811) {
-            [subview removeFromSuperview];
-        }
-    }
-    
-    if (indentationLevel <= 0) return;
-    
-    // The guides stay within the row's own card, so they never cross the breath between cards
-    CGRect guideFrame = CGRectInset(cell.contentView.bounds, 0.0, RCActionCellCardGap);
-    UIView *container = [[UIView alloc] initWithFrame:guideFrame];
-    container.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    container.userInteractionEnabled = NO;
-    container.tag = 998811;
-    
-    CGFloat indentWidth = cell.indentationWidth > 0 ? cell.indentationWidth : 14.0f;
-    CGFloat baseMargin = 16.0f;
-    CGFloat lineW = 1.0f / [UIScreen mainScreen].scale;
-    
-    RCConfigManager *config = [RCConfigManager sharedManager];
-    UIColor *lineColor = [config tweakColorForKey:@"separators" defaultVal:0.25];
-    
-    for (NSInteger i = 1; i <= indentationLevel; i++) {
-        CGFloat x = baseMargin + (i - 1) * indentWidth + 6.0f;
-        
-        UIView *line = [[UIView alloc] initWithFrame:CGRectMake(x, 0, lineW, cell.contentView.bounds.size.height)];
-        line.autoresizingMask = UIViewAutoresizingFlexibleHeight;
-        line.backgroundColor = lineColor;
-        line.userInteractionEnabled = NO;
-        [container addSubview:line];
-    }
-    
-    [cell.contentView addSubview:container];
-}
-
 - (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath {
     [self applySectionCardStyleToCell:cell atIndexPath:indexPath];
     if ([self runShown]) cell.accessoryView.hidden = YES; // no drag handles while it runs
     else cell.accessoryView.hidden = NO;
-    NSInteger level = [self indentationLevelForRow:indexPath.row];
-    [self applyIndentGuidesToCell:cell level:level];
     // Rows being dragged stay dimmed as they scroll back into view (and a reused cell doesn't),
     // and the rows around an open value editor step back a little
     BOOL dragged = self.reorderSnapshot && NSLocationInRange(indexPath.row, self.reorderRange);
     NSInteger openRow = [self inlineEditorOpenRow];
     BOOL dimmed = (openRow != NSNotFound && openRow != indexPath.row);
-    BOOL swiping = [cell isKindOfClass:[RCActionCell class]] && ((RCActionCell *)cell).rcSwipingTrailing;
+    BOOL swiping = [cell isKindOfClass:[RCActionCell class]] && (((RCActionCell *)cell).rcSwipingTrailing || ((RCActionCell *)cell).rcSwipingLeading);
     if (swiping) {
         ((RCActionCell *)cell).rcSavedDimmedAlpha = dimmed ? RCActionCellDimmedAlpha : 0.0;
     }
@@ -6505,6 +6794,73 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         [(RCActionCell *)cell rc_syncSwipeAppearance];
     }
     [self updateInlineEditorDimming];
+}
+
+- (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView leadingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
+    if ([self runShown]) return [UISwipeActionsConfiguration configurationWithActions:@[]];
+
+    NSRange block = [self wholeBlockRangeForRow:indexPath.row];
+    BOOL isBlock = block.length > 1;
+    __weak typeof(self) weakSelf = self;
+
+    UIContextualAction *copy = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal
+                                                                       title:isBlock ? @"Copy Block" : @"Copy"
+                                                                     handler:^(UIContextualAction * _Nonnull action, __kindof UIView * _Nonnull sourceView, void (^ _Nonnull completionHandler)(BOOL)) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) { completionHandler(NO); return; }
+        [strongSelf copyActionRangeForRow:indexPath.row]; // the phone's clipboard notice confirms it
+        completionHandler(YES);
+    }];
+    copy.image = [UIImage systemImageNamed:@"doc.on.doc"];
+    copy.backgroundColor = [UIColor systemBlueColor];
+
+    NSMutableArray<UIContextualAction *> *actions = [NSMutableArray arrayWithObject:copy];
+
+    NSArray *clipboard = RCActionClipboardItems();
+    if (clipboard.count > 0) {
+        UIContextualAction *paste = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal
+                                                                           title:@"Paste"
+                                                                         handler:^(UIContextualAction * _Nonnull action, __kindof UIView * _Nonnull sourceView, void (^ _Nonnull completionHandler)(BOOL)) {
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) { completionHandler(NO); return; }
+            [strongSelf insertClipboardActionsAtIndex:NSMaxRange(block)];
+            [strongSelf showHUDToast:[NSString stringWithFormat:@"Pasted %@", RCActionClipboardCountText(clipboard.count)]
+                          subtitle:nil
+                              icon:@"doc.on.clipboard"];
+            completionHandler(YES);
+        }];
+        paste.image = [UIImage systemImageNamed:@"doc.on.clipboard"];
+        paste.backgroundColor = [UIColor systemGreenColor];
+        [actions addObject:paste];
+    }
+
+    UIContextualAction *cut = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleDestructive
+                                                                     title:isBlock ? @"Cut Block" : @"Cut"
+                                                                   handler:^(UIContextualAction * _Nonnull action, __kindof UIView * _Nonnull sourceView, void (^ _Nonnull completionHandler)(BOOL)) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) { completionHandler(NO); return; }
+        NSRange range = [strongSelf wholeBlockRangeForRow:indexPath.row];
+        if (range.location == NSNotFound || range.length == 0 || NSMaxRange(range) > strongSelf.actions.count) {
+            completionHandler(NO);
+            return;
+        }
+        [strongSelf copyActionRangeForRow:indexPath.row];
+        NSIndexSet *removed = [NSIndexSet indexSetWithIndexesInRange:range];
+        [strongSelf.actions removeObjectsInRange:range];
+        [strongSelf adjustInlineEditorForRemovedIndexes:removed];
+        [strongSelf saveActions];
+        [tableView reloadData];
+        [strongSelf showHUDToast:(isBlock ? @"Cut Block" : [NSString stringWithFormat:@"Cut %@", RCActionClipboardCountText(range.length)])
+                      subtitle:nil
+                          icon:@"scissors"];
+        completionHandler(YES);
+    }];
+    cut.image = [UIImage systemImageNamed:@"scissors"];
+    [actions addObject:cut];
+
+    UISwipeActionsConfiguration *configuration = [UISwipeActionsConfiguration configurationWithActions:actions];
+    configuration.performsFirstActionWithFullSwipe = NO; // a full swipe must not copy or cut by accident
+    return configuration;
 }
 
 - (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {

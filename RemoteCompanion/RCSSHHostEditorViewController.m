@@ -1,5 +1,6 @@
 #import "RCSSHHostEditorViewController.h"
 #import "RCConfigManager.h"
+#import "RCServerClient.h"
 
 @interface RCSSHHostEditorViewController () <UITableViewDelegate, UITableViewDataSource, UITextFieldDelegate>
 @property (nonatomic, strong) UITableView *tableView;
@@ -16,6 +17,8 @@
 @property (nonatomic, strong) UITextField *passwordField;
 @property (nonatomic, strong) UITextField *keyPathField;
 @property (nonatomic, strong) UISegmentedControl *authSegment;
+@property (nonatomic, strong) UIBarButtonItem *saveButton;
+@property (nonatomic, strong) UIActivityIndicatorView *testSpinner;
 @end
 
 @implementation RCSSHHostEditorViewController
@@ -39,9 +42,10 @@
     self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc]
         initWithBarButtonSystemItem:UIBarButtonSystemItemCancel
         target:self action:@selector(cancelTapped)];
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
+    self.saveButton = [[UIBarButtonItem alloc]
         initWithBarButtonSystemItem:UIBarButtonSystemItemSave
         target:self action:@selector(saveTapped)];
+    self.navigationItem.rightBarButtonItem = self.saveButton;
 
     [self buildFields];
 
@@ -191,7 +195,15 @@
 
 - (void)saveTapped {
     [self.view endEditing:YES];
+    NSDictionary *hostDict = [self hostDictionaryFromFields];
+    if (!hostDict) return;
+    [[RCConfigManager sharedManager] addOrUpdateSSHHost:hostDict];
+    [self.navigationController popViewControllerAnimated:YES];
+}
 
+// The host as it would be saved, or nil after telling the user what's missing. The Test button
+// saves through the same path, since the tweak's ssh-test reads the saved host by id.
+- (NSDictionary *)hostDictionaryFromFields {
     NSString *name = [self.nameField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     NSString *host = [self.hostField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     NSString *portStr = [self.portField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
@@ -201,19 +213,19 @@
 
     if (host.length == 0) {
         [self showErrorWithTitle:@"Host Required" message:@"Enter a hostname or IP address."];
-        return;
+        return nil;
     }
     if ([host hasPrefix:@"-"] || [host rangeOfString:@" "].location != NSNotFound) {
         [self showErrorWithTitle:@"Invalid Host" message:@"Hostname may not start with - or contain spaces."];
-        return;
+        return nil;
     }
     if ([user hasPrefix:@"-"] || [user rangeOfString:@" "].location != NSNotFound) {
         [self showErrorWithTitle:@"Invalid Username" message:@"Username may not start with - or contain spaces."];
-        return;
+        return nil;
     }
     if (self.useKeyAuth && keyInput.length == 0) {
         [self showErrorWithTitle:@"Key Path Required" message:@"Enter the path to the private key, e.g. ~/.ssh/id_rsa."];
-        return;
+        return nil;
     }
 
     NSInteger port = [portStr integerValue];
@@ -238,7 +250,7 @@
     }
 
     NSString *hostId = self.isEditingHost ? self.existingHost[@"id"] : [[NSUUID UUID] UUIDString];
-    NSDictionary *hostDict = @{
+    return @{
         @"id": hostId,
         @"name": name,
         @"host": host,
@@ -248,9 +260,57 @@
         @"password": password,
         @"keyPath": keyPath
     };
+}
 
+- (void)testTapped {
+    [self.view endEditing:YES];
+    NSDictionary *hostDict = [self hostDictionaryFromFields];
+    if (!hostDict) return;
+    // The test runs on the phone, which reads the saved host by id
     [[RCConfigManager sharedManager] addOrUpdateSSHHost:hostDict];
-    [self.navigationController popViewControllerAnimated:YES];
+    self.existingHost = hostDict;
+    self.isEditingHost = YES;
+    [self setTesting:YES];
+
+    __weak typeof(self) weakSelf = self;
+    NSString *command = [NSString stringWithFormat:@"ssh-test %@", hostDict[@"id"]];
+    [[RCServerClient sharedClient] executeCommand:command timeout:15.0 completion:^(NSString *output, NSError *error) {
+        __strong typeof(weakSelf) self = weakSelf;
+        if (!self) return;
+        [self setTesting:NO];
+        if (error) {
+            [self showErrorWithTitle:@"Connection Failed" message:error.localizedDescription];
+            return;
+        }
+        NSString *text = [output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if ([text.lowercaseString hasPrefix:@"error"]) {
+            NSString *detail = text;
+            if (detail.length > 6) detail = [[detail substringFromIndex:6] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            [self showErrorWithTitle:@"Connection Failed" message:(detail.length ? detail : @"The connection test failed.")];
+        } else if ([text.lowercaseString containsString:@"connected"]) {
+            [self showErrorWithTitle:@"Connection OK" message:text];
+        } else {
+            [self showErrorWithTitle:@"Connection Failed" message:(text.length ? text : @"No response from ssh.")];
+        }
+    }];
+}
+
+- (void)setTesting:(BOOL)testing {
+    if (testing) {
+        self.saveButton.enabled = NO;
+        if (!self.testSpinner) {
+            self.testSpinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
+        }
+        [self.testSpinner startAnimating];
+    } else {
+        [self.testSpinner stopAnimating];
+        self.testSpinner = nil;
+        self.saveButton.enabled = YES;
+    }
+    if (self.isViewLoaded) {
+        [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:2]
+                      withRowAnimation:UITableViewRowAnimationNone];
+    }
 }
 
 - (void)showErrorWithTitle:(NSString *)title message:(NSString *)message {
@@ -276,20 +336,23 @@
 #pragma mark - Table View
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    return 2;
+    return 3;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if (section == 0) return 4; // Name, Host, Port, Username
-    return 2; // Auth picker + one credential field
+    if (section == 1) return 2; // Auth picker + one credential field
+    return 1; // Test Connection
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    return section == 0 ? @"Server" : @"Authentication";
+    if (section == 0) return @"Server";
+    if (section == 1) return @"Authentication";
+    return nil;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    if (section == 0) return nil;
+    if (section != 1) return nil;
     if (self.useKeyAuth) {
         return @"The key file must already exist on this iPhone. A path starting with ~ expands to the home directory.";
     }
@@ -302,7 +365,33 @@
     return @"Saved passwords are never shown once stored. Leave empty for key-agent logins.";
 }
 
+// The Test button sits in its own card below Authentication, like a Settings action row
+- (UITableViewCell *)testConnectionCell {
+    UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
+    cell.backgroundColor = [[RCConfigManager sharedManager] tweakColorForKey:@"blockBackground" defaultVal:0.12];
+    cell.textLabel.textAlignment = NSTextAlignmentCenter;
+    cell.textLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightMedium];
+    if (self.testSpinner) {
+        cell.textLabel.text = @"Testing…";
+        cell.textLabel.textColor = [UIColor secondaryLabelColor];
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        cell.accessoryView = self.testSpinner;
+    } else {
+        cell.textLabel.text = @"Test Connection";
+        cell.textLabel.textColor = [UIColor systemBlueColor];
+        cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+    }
+    return cell;
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    if (indexPath.section == 2 && !self.testSpinner) [self testTapped];
+}
+
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (indexPath.section == 2) return [self testConnectionCell];
+
     if (indexPath.section == 0) {
         NSArray *labels = @[@"Name", @"Host", @"Port", @"Username"];
         NSArray *fields = @[self.nameField, self.hostField, self.portField, self.userField];
