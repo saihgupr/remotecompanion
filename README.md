@@ -113,7 +113,7 @@ Access the desktop-class automation hub at `http://[DEVICE_IP]:8080` from any co
 - `rc timer <duration|stop|pause|resume|status> [--label "Name"]` - Start (e.g. `20m`, `1h30m`, `45s`, `20:00`), pause, resume, stop, or inspect a real Apple Clock timer (mirrors to Lock Screen and Apple Watch).
 - `rc button [power|lock|home|volup|voldown|mute]` - Simulate physical button presses.
 - `rc brightness 0-100` - Set screen brightness.
-- `rc flashlight [on|off|toggle]` - Control the torch.
+- `rc flashlight [on|off|toggle|status] [level]` - Control the torch. A level is 0-100, a fraction like 0.5, or `low`, `medium`, `high`, `max`; `up [N]` and `down [N]` step it from the current level (25 by default). `torch` and `flash` take the same options.
 - `rc rotate [lock|unlock|toggle]` - Orientation lock control.
 - `rc orientation set <portrait|landscape left|landscape right|portrait upside down|auto>` - Turn the screen to that orientation; it holds while rotation lock is on, otherwise the phone takes over when moved.
 - `rc appearance [dark|light|toggle]` - Set light/dark appearance.
@@ -184,7 +184,7 @@ The switches in Settings > Advanced Settings > Tweaks, also on the Web UI's Twea
 - `rc lpm status` - Returns Low Power Mode state.
 - `rc airplane status` - Returns Airplane Mode state.
 - `rc wifi status` / `rc cellular status` / `rc bt status` / `rc location status` - Returns connectivity and GPS states.
-- `rc flashlight status` - Returns torch state.
+- `rc flashlight status` - Returns torch state and brightness, e.g. `Flashlight ON (75%)`.
 - `rc proximity` - Returns `near` or `far`. *(Note: iOS powers off the sensor when the screen is asleep. To test manually while the screen is awake, run `rc proximity on` to force it active, then `rc proximity off` to disable it.)*
 
 ### System & Diagnostics
