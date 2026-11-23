@@ -114,6 +114,7 @@ Access the desktop-class automation hub at `http://[DEVICE_IP]:8080` from any co
 - `rc button [power|lock|home|volup|voldown|mute]` - Simulate physical button presses.
 - `rc brightness 0-100` - Set screen brightness.
 - `rc flashlight [on|off|toggle|status] [level]` - Control the torch. A level is 0-100, a fraction like 0.5, or `low`, `medium`, `high`, `max`; `up [N]` and `down [N]` step it from the current level (25 by default). `torch` and `flash` take the same options.
+- `rc flashlight party [pump|beat]` - Run the torch with the music playing in the room, or `party stop` / `party status`. `pump` follows the bass smoothly, `beat` flashes on each kick. Tune with `party sensitivity 1-10`, `party cap 10-100` and `party timeout 1-60` (minutes). It hears the room through the microphone, so headphones or Bluetooth mean nothing to follow, and it stops after 15 seconds of quiet or the timeout.
 - `rc rotate [lock|unlock|toggle]` - Orientation lock control.
 - `rc orientation set <portrait|landscape left|landscape right|portrait upside down|auto>` - Turn the screen to that orientation; it holds while rotation lock is on, otherwise the phone takes over when moved.
 - `rc appearance [dark|light|toggle]` - Set light/dark appearance.

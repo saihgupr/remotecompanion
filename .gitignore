@@ -1,5 +1,6 @@
 .DS_Store
 .theos/
+*.ldid.entitlements.plist
 packages/
 *.deb
 !docs/*.deb
