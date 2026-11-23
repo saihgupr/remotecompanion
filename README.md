@@ -136,6 +136,7 @@ The switches in Settings > Advanced Settings > Tweaks, also on the Web UI's Twea
 - `rc tweaks wake-on-power [on|off|toggle]` - Keep the screen dark when a charger connects or disconnects while the display is off or dimmed.
 - `rc tweaks power-haptics [on|off|toggle]` - Stop the charging vibration and chime when power connects.
 - `rc tweaks unlocked-vibration [on|off|toggle]` - Stop notification vibration while the phone is unlocked; banners, sounds, and urgent alerts still work.
+- `rc tweaks watch-notify [on|off|toggle]` - Send notifications to the Apple Watch while the iPhone is unlocked.
 - `rc tweaks all on|off` - Set every switch at once.
 
 ### Apps, URLs & Shortcuts
@@ -150,8 +151,8 @@ The switches in Settings > Advanced Settings > Tweaks, also on the Web UI's Twea
 
 ### Connectivity
 - `rc wifi [on|off|toggle]` / `rc cellular [on|off|toggle]` / `rc bluetooth [on|off|toggle]` / `rc location [on|off|toggle]`
-- `rc bluetooth [connect|disconnect] <name>` - Manage paired devices.
-- `rc bluetooth list` - List the names of paired Bluetooth devices.
+- `rc bluetooth [connect|disconnect] <name>` - Manage paired classic Bluetooth devices. Low-energy devices (the Apple Watch, an AssistiveTouch mouse or pointer) can't be disconnected from the CLI: forget one in Settings > Bluetooth, or use `rc bluetooth off` and `on`.
+- `rc bluetooth list` - List the names of paired Bluetooth devices, classic and low-energy.
 - `rc airplay list` - See speakers and their UIDs.
 - `rc airplay connect <name|UID>` - Stream audio to an AirPlay receiver.
 - `rc airplay disconnect` - Stop AirPlay streaming.

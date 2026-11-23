@@ -277,6 +277,7 @@
   {"command": "tweaks wake-on-power <on|off|toggle>", "args": "on|off|toggle", "description": "Keep the screen dark when power connects or disconnects", "category": "Tweaks", "example": "tweaks wake-on-power on", "status": "tweaks wake-on-power"},
   {"command": "tweaks power-haptics <on|off|toggle>", "args": "on|off|toggle", "description": "Stop the charging vibration and chime", "category": "Tweaks", "example": "tweaks power-haptics on", "status": "tweaks power-haptics"},
   {"command": "tweaks unlocked-vibration <on|off|toggle>", "args": "on|off|toggle", "description": "Stop notification vibration while unlocked", "category": "Tweaks", "example": "tweaks unlocked-vibration on", "status": "tweaks unlocked-vibration"},
+  {"command": "tweaks watch-notify <on|off|toggle>", "args": "on|off|toggle", "description": "Send notifications to the Apple Watch while unlocked", "category": "Tweaks", "example": "tweaks watch-notify on", "status": "tweaks watch-notify"},
   {"command": "tweaks all <on|off>", "args": "on|off", "description": "Set every Tweaks switch at once", "category": "Tweaks", "example": "tweaks all off", "status": "tweaks"},
 
   {"command": "read file <path>", "args": "path", "description": "Read a file on the phone as base64", "category": "Files & Shell", "example": "read file /var/mobile/Documents/rc_triggers.plist", "status": ""},

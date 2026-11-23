@@ -3,6 +3,7 @@
 #import "RCScreen.h"
 #import "RCDevAnnotate.h"
 #import <UIKit/UIKit.h>
+#import <CoreBluetooth/CoreBluetooth.h>
 #import <netinet/in.h>
 #import <sys/socket.h>
 #import <sys/un.h>
@@ -12632,6 +12633,8 @@ static NSArray<NSDictionary *> *rc_tweaks_specs(void) {
           @"config": @"disablePowerConnectedHaptics", @"name": @"Disable Power Connected Haptics"},
         @{@"key": @"unlocked-vibration", @"aliases": @[@"unlocked vibration", @"notification vibration", @"notif vibration"],
           @"config": @"disableUnlockedNotificationVibration", @"name": @"Disable Vibration When Unlocked"},
+        @{@"key": @"watch-notify", @"aliases": @[@"watch notify", @"send to watch", @"watch notifications", @"notifications to watch"],
+          @"config": @"sendNotificationsToWatchWhenUnlocked", @"name": @"Send to Watch When Unlocked"},
     ];
 }
 
@@ -12726,7 +12729,9 @@ static NSString *rc_handle_tweaks_command(NSString *cmd) {
 
     NSDictionary *spec = rc_tweaks_spec_for(nameArg);
     if (!spec) {
-        return [NSString stringWithFormat:@"Error: unknown tweak '%@'. Use: wake-on-power, power-haptics, unlocked-vibration\n", nameArg];
+        NSMutableArray *keys = [NSMutableArray array];
+        for (NSDictionary *spec in rc_tweaks_specs()) [keys addObject:spec[@"key"]];
+        return [NSString stringWithFormat:@"Error: unknown tweak '%@'. Use: %@\n", nameArg, [keys componentsJoinedByString:@", "]];
     }
 
     BOOL current = [config[spec[@"config"]] boolValue];
@@ -12740,6 +12745,48 @@ static NSString *rc_handle_tweaks_command(NSString *cmd) {
         save_trigger_config();
     }
     return [NSString stringWithFormat:@"%@: %@\n", spec[@"name"], wanted ? @"ON" : @"OFF"];
+}
+
+// Low-energy Bluetooth. BluetoothManager's pairedDevices is the classic list only, so
+// the Apple Watch and low-energy accessories (an AssistiveTouch mouse, say) never show
+// up there. CoreBluetooth sees what the system has connected and fills that gap. It
+// cannot drop one: cancelPeripheralConnection: only cancels a link this process opened,
+// and iOS keeps the system's own client connected.
+static CBCentralManager *g_rcLECentral = nil;
+
+static CBCentralManager *rc_le_central(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        // No delegate needed: only the state and the connected list are read.
+        g_rcLECentral = [[CBCentralManager alloc] initWithDelegate:nil queue:nil];
+    });
+    return g_rcLECentral;
+}
+
+static NSArray<CBPeripheral *> *rc_connected_le_peripherals(void) {
+    CBCentralManager *central = rc_le_central();
+    // The state arrives from bluetoothd a moment after the manager is made (about two
+    // seconds), and the connected list is empty until it reads powered on.
+    for (int i = 0; i < 50 && central.state != CBManagerStatePoweredOn; i++) {
+        usleep(50 * 1000);
+    }
+    if (central.state != CBManagerStatePoweredOn) return @[];
+
+    // HID is mice, keyboards and pointers; the rest are the generic services every
+    // accessory carries, so the list doesn't depend on one kind of device.
+    static NSArray<CBUUID *> *services;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        services = @[
+            [CBUUID UUIDWithString:@"1812"], // Human Interface Device
+            [CBUUID UUIDWithString:@"1800"], // Generic Access
+            [CBUUID UUIDWithString:@"1801"], // Generic Attribute
+            [CBUUID UUIDWithString:@"180A"], // Device Information
+            [CBUUID UUIDWithString:@"180F"], // Battery
+        ];
+    });
+    NSArray *connected = [central retrieveConnectedPeripheralsWithServices:services];
+    return connected ?: @[];
 }
 
 static NSString *handle_command(NSString *cmd) {
@@ -14672,6 +14719,7 @@ static NSString *handle_command(NSString *cmd) {
         return @"Error: BluetoothManager not found\n";
     } else if ([cleanCmd isEqualToString:@"bluetooth list"] || [cleanCmd isEqualToString:@"bt list"]) {
         NSMutableString *output = [NSMutableString string];
+        NSMutableSet *listed = [NSMutableSet set];
         void *btHandle = dlopen("/System/Library/PrivateFrameworks/BluetoothManager.framework/BluetoothManager", RTLD_NOW);
         if (btHandle) {
             Class BluetoothManagerClass = objc_getClass("BluetoothManager");
@@ -14680,8 +14728,17 @@ static NSString *handle_command(NSString *cmd) {
                 for (BluetoothDevice *device in [btManager pairedDevices]) {
                     NSString *name = [device name] ?: @"Unknown Device";
                     [output appendFormat:@"%@\n", name];
+                    [listed addObject:name.lowercaseString];
                 }
             }
+        }
+        // Low-energy devices the classic list leaves out. A headset that pairs both ways
+        // can be in both lists, so skip names already printed.
+        for (CBPeripheral *peripheral in rc_connected_le_peripherals()) {
+            NSString *name = peripheral.name;
+            if (name.length == 0 || [listed containsObject:name.lowercaseString]) continue;
+            [output appendFormat:@"%@\n", name];
+            [listed addObject:name.lowercaseString];
         }
         return output.length > 0 ? output : @"No paired Bluetooth devices found\n";
     } else if ([cleanCmd hasPrefix:@"bt-connect "] || [cleanCmd hasPrefix:@"bt connect "] || [cleanCmd hasPrefix:@"bluetooth connect "]) {
@@ -14705,6 +14762,11 @@ static NSString *handle_command(NSString *cmd) {
                 }
             }
         }
+        for (CBPeripheral *peripheral in rc_connected_le_peripherals()) {
+            if ([[peripheral name] localizedCaseInsensitiveContainsString:deviceName]) {
+                return [NSString stringWithFormat:@"%@ is a low-energy device and is already connected\n", [peripheral name]];
+            }
+        }
         return @"Error: Device not found or BluetoothManager failed\n";
     } else if ([cleanCmd hasPrefix:@"bt-disconnect "] || [cleanCmd hasPrefix:@"bt disconnect "] || [cleanCmd hasPrefix:@"bluetooth disconnect "]) {
         NSString *deviceName;
@@ -14725,6 +14787,11 @@ static NSString *handle_command(NSString *cmd) {
                         return [NSString stringWithFormat:@"Disconnecting %@\n", [device name]];
                     }
                 }
+            }
+        }
+        for (CBPeripheral *peripheral in rc_connected_le_peripherals()) {
+            if ([[peripheral name] localizedCaseInsensitiveContainsString:deviceName]) {
+                return [NSString stringWithFormat:@"%@ is a low-energy device, which iOS doesn't let apps disconnect. Forget it in Settings > Bluetooth, or turn Bluetooth off and on with rc bt off and rc bt on.\n", [peripheral name]];
             }
         }
         return @"Error: Device not found or BluetoothManager failed\n";
