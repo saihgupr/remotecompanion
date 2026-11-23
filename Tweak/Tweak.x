@@ -20888,6 +20888,25 @@ static inline void RC_UserDeltaForOrientation(CGFloat dx_phys, CGFloat dy_phys, 
 // Logical left/right edges follow the interface as the user sees it. In
 // landscape these are the short side edges: UI-left/UI-right = device
 // bottom/device top (or vice versa). y spans L here, x spans S.
+// Swipe Triggers (Advanced Settings): how far each kind of swipe trigger needs a swipe to go before
+// it runs, and how close to the side a side-edge swipe has to start, in points. A setting that
+// isn't there (or isn't a number in range) is the distance the triggers always used. Longer
+// distances and a narrower strip leave more room for the Home swipe and other tweaks' gestures
+// (#189). A trigger that also fires on lift does so a little sooner, at the same proportion as
+// before (40 of 50 for the status bar, 35 of 45 for the top and bottom).
+static CGFloat RC_SwipeSetting(NSString *key, CGFloat normal) {
+    id value = g_triggerConfig[key];
+    double number = [value isKindOfClass:[NSNumber class]] ? [value doubleValue] : 0;
+    return (number >= 5 && number <= 400) ? number : normal;
+}
+
+#define RC_EDGE_STRIP() RC_SwipeSetting(@"swipeEdgeStrip", 25)
+#define RC_EDGE_DISTANCE() RC_SwipeSetting(@"swipeEdgeDistance", 30)
+#define RC_STATUS_BAR_DISTANCE() RC_SwipeSetting(@"swipeStatusBarDistance", 50)
+#define RC_TOP_DOWN_DISTANCE() RC_SwipeSetting(@"swipeTopDownDistance", 45)
+#define RC_BOTTOM_BAR_DISTANCE() RC_SwipeSetting(@"swipeBottomBarDistance", 60)
+#define RC_BOTTOM_UP_DISTANCE() RC_SwipeSetting(@"swipeBottomUpDistance", 45)
+
 static inline void RC_EdgeZonesForLoc(CGPoint loc, UIInterfaceOrientation orientation, CGFloat S, CGFloat L, CGFloat edgeThreshold, CGFloat margin, BOOL *outNearLeft, BOOL *outNearRight, BOOL *outWithinBounds) {
     BOOL nearLeft = NO, nearRight = NO, within = NO;
     if (orientation == UIInterfaceOrientationPortrait) {
@@ -21463,7 +21482,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                         g_statusBarSwipeHapticFired = YES;
                     }
                     
-                    if (!g_statusBarSwipeTriggered && !g_topSwipeDownTriggered && isHoz && abs_udx > 50) {
+                    if (!g_statusBarSwipeTriggered && !g_topSwipeDownTriggered && isHoz && abs_udx > RC_STATUS_BAR_DISTANCE()) {
                         NSString *trigger = (user_dx > 0) ? @"trigger_statusbar_swipe_right" : @"trigger_statusbar_swipe_left";
                         RCExecuteTrigger(trigger);
                         g_statusBarSwipeTriggered = YES;
@@ -21475,7 +21494,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                             RC_FreezeGestureScrolling();
                         }
                     }
-                    if (!g_statusBarSwipeTriggered && !g_topSwipeDownTriggered && isVertDown && abs_udy > 45) {
+                    if (!g_statusBarSwipeTriggered && !g_topSwipeDownTriggered && isVertDown && abs_udy > RC_TOP_DOWN_DISTANCE()) {
                         rc_fire_top_swipe_down_if_enabled(@"during move");
                     }
                 }
@@ -21503,13 +21522,13 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                 // Bottom Bar Swipe Up (3-Zone) during Move
                 // Early freeze: once upward intent is clear and the zoned
                 // trigger is actionable, hold the list still for the rest
-                // of the touch (firing itself happens at 45pt below).
+                // of the touch (firing itself happens at the Bottom Swipe Up distance below, 45pt by default).
                 if (g_bottomBarTouchActive && !g_bottomBarSwipeUpTriggered && isVertUp && abs_udy > 10) {
                     if (g_pendingBottomBarSwipeUpTrigger && RC_TriggerIsActionable(g_pendingBottomBarSwipeUpTrigger)) {
                         RC_FreezeGestureScrolling();
                     }
                 }
-                if (g_bottomBarTouchActive && !g_bottomBarSwipeUpTriggered && isVertUp && abs_udy > 45) {
+                if (g_bottomBarTouchActive && !g_bottomBarSwipeUpTriggered && isVertUp && abs_udy > RC_BOTTOM_UP_DISTANCE()) {
                     if (g_pendingBottomBarSwipeUpTrigger) {
                         load_trigger_config();
                         BOOL enabled = RC_MasterEnabled() && 
@@ -21534,15 +21553,15 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                     g_pendingStatusBarTrigger = nil;
 
                     if (g_statusBarTouchActive && !g_statusBarHoldTriggered && !g_statusBarSwipeTriggered && !g_topSwipeDownTriggered) {
-                        if (isVertDown && abs_udy > 35) {
+                        if (isVertDown && abs_udy > RC_TOP_DOWN_DISTANCE() * 35.0 / 45.0) {
                             rc_fire_top_swipe_down_if_enabled(@"on ended");
                         }
-                        if (!g_topSwipeDownTriggered && isHoz && abs_udx > 40) {
+                        if (!g_topSwipeDownTriggered && isHoz && abs_udx > RC_STATUS_BAR_DISTANCE() * 0.8) {
                             NSString *trigger = (user_dx > 0) ? @"trigger_statusbar_swipe_right" : @"trigger_statusbar_swipe_left";
                             RCExecuteTrigger(trigger);
                         }
                     }
-                    if (g_bottomBarTouchActive && !g_bottomBarSwipeUpTriggered && isVertUp && abs_udy > 35) {
+                    if (g_bottomBarTouchActive && !g_bottomBarSwipeUpTriggered && isVertUp && abs_udy > RC_BOTTOM_UP_DISTANCE() * 35.0 / 45.0) {
                         if (g_pendingBottomBarSwipeUpTrigger) {
                             load_trigger_config();
                             BOOL enabled = RC_MasterEnabled() && 
@@ -21558,7 +21577,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                         }
                     }
                     if (g_bottomBarTouchActive && !g_bottomBarSwipeUpTriggered) {
-                        if (isHoz && abs_udx > 60) {
+                        if (isHoz && abs_udx > RC_BOTTOM_BAR_DISTANCE()) {
                             NSString *trigger = (user_dx > 0) ? @"trigger_bottombar_swipe_right" : @"trigger_bottombar_swipe_left";
                             RCExecuteTrigger(trigger);
                         }
@@ -21630,18 +21649,23 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
     // Logical left/right edges follow the interface (orientation central).
     // In landscape the logical left/right zones are strips along y (the short
     // axis) bounded on x (the long axis); see RC_EdgeZonesForLoc.
-    CGFloat edgeThreshold = 25.0;
+    CGFloat edgeThreshold = RC_EDGE_STRIP();
     CGFloat margin = 100.0;
 
     BOOL nearLogicalLeft = NO, nearLogicalRight = NO, withinBounds = NO;
     RC_EdgeZonesForLoc(loc, orientation, S, L, edgeThreshold, margin, &nearLogicalLeft, &nearLogicalRight, &withinBounds);
 
     if (!withinBounds) {
+        SRLog(@"Edge Gesture: X=%.1f Y=%.1f is above or below the edge zones", loc.x, loc.y);
         self.state = UIGestureRecognizerStateFailed;
         return;
     }
 
+    // Only one recognizer of the pair logs, so a touch on one side isn't reported by the other
     if (self.isLeftEdge && !nearLogicalLeft) {
+        BOOL nearMissLeft = NO, nearMissRight = NO, nearMissBounds = NO;
+        RC_EdgeZonesForLoc(loc, orientation, S, L, 60.0, margin, &nearMissLeft, &nearMissRight, &nearMissBounds);
+        if (!nearLogicalRight && (nearMissLeft || nearMissRight)) SRLog(@"Edge Gesture: X=%.1f Y=%.1f is outside the %.0f pt edge strip", loc.x, loc.y, edgeThreshold);
         self.state = UIGestureRecognizerStateFailed;
         return;
     }
@@ -21896,9 +21920,9 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
 
         // Early freeze: once vertical intent is clear and the matching
         // trigger is actionable, hold the list still for the rest of the
-        // touch (firing itself happens at the 30pt threshold below).
+        // touch (firing itself happens at the Side Edge distance below, 30pt by default).
         BOOL mostlyVertical = verticalSwipeDistance > horizontalDrift * 1.5;
-        if (!gesture.hasTriggered && verticalSwipeDistance > 10 && mostlyVertical) {
+        if (!gesture.hasTriggered && verticalSwipeDistance > RC_EDGE_DISTANCE() / 3.0 && mostlyVertical) {
             NSString *earlyKey = nil;
             if (gesture.isLeftEdge) {
                 earlyKey = (dy_u < 0) ? @"trigger_edge_left_swipe_up" : @"trigger_edge_left_swipe_down";
@@ -21908,8 +21932,8 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
             if (earlyKey && RC_TriggerIsActionable(earlyKey)) RC_FreezeGestureScrolling();
         }
 
-        // Threshold: 30pt for instant trigger
-        if (verticalSwipeDistance > 30 && mostlyVertical) {
+        // Threshold: the Side Edge distance (30pt by default; see RC_SwipeSetting)
+        if (verticalSwipeDistance > RC_EDGE_DISTANCE() && mostlyVertical) {
             SRLogMin(@"Instant Edge Trigger! V=%.2f H=%.2f orient=%ld", verticalSwipeDistance, horizontalDrift, (long)orientation);
 
             gesture.hasTriggered = YES;

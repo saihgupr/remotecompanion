@@ -19,6 +19,7 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
     RCAdvancedSettingsSectionOptions,
     RCAdvancedSettingsSectionLayout,
     RCAdvancedSettingsSectionButtons,
+    RCAdvancedSettingsSectionSwipes,
     RCAdvancedSettingsSectionSecurity,
     RCAdvancedSettingsSectionDeveloper,
     RCAdvancedSettingsSectionCount,
@@ -114,6 +115,7 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
     else if (section == RCAdvancedSettingsSectionOptions) title = @"Options";
     else if (section == RCAdvancedSettingsSectionLayout) title = @"Layout";
     else if (section == RCAdvancedSettingsSectionButtons) title = @"Buttons";
+    else if (section == RCAdvancedSettingsSectionSwipes) title = @"Swipe Triggers";
     else if (section == RCAdvancedSettingsSectionSecurity) title = @"Security";
     else title = @"Developer";
     
@@ -145,6 +147,8 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
         return @"Compact shows a grid of tiles instead of a list. Triggers per Row applies to Triggers in Compact.";
     } else if (section == RCAdvancedSettingsSectionButtons) {
         return @"How long a press waits for the next one before it counts. A shorter time responds sooner and needs quicker presses.";
+    } else if (section == RCAdvancedSettingsSectionSwipes) {
+        return @"How far a swipe goes before a swipe trigger runs, and how close to the side an edge swipe starts. Longer distances and a narrower strip leave more room for the Home swipe and other gestures.";
     } else if (section == RCAdvancedSettingsSectionSecurity) {
         return @"Lets scripts, terminals and other tools call the root helper directly. Any app on this device can then get root, so leave it off unless you need it.";
     } else if (section == RCAdvancedSettingsSectionDeveloper) {
@@ -157,10 +161,11 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
     if (section == RCAdvancedSettingsSectionBanners) return 2; // Banners, Wake Screen
     if (section == RCAdvancedSettingsSectionNFC) return 3;
     if (section == RCAdvancedSettingsSectionButtons) return (NSInteger)[self timingRows].count;
+    if (section == RCAdvancedSettingsSectionSwipes) return (NSInteger)[self swipeRows].count;
     if (section == RCAdvancedSettingsSectionLayout) return (NSInteger)RCLayoutScreens().count;
     if (section == RCAdvancedSettingsSectionSecurity) return 1;
     if (section == RCAdvancedSettingsSectionDeveloper) return 1;
-    return 5; // Excluded Apps, Wrap Long Names, Logging, Freeze Lists During Gestures, Only Unlock Out of Pocket
+    return 5; // Excluded Apps, Wrap Long Names, Logging, Lock Scrolling During Gestures, Only Unlock Out of Pocket
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -173,7 +178,8 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
     BOOL isValueRow = (indexPath.section == RCAdvancedSettingsSectionBanners) ||
                       (indexPath.section == RCAdvancedSettingsSectionNFC && indexPath.row == 2) ||
                       (indexPath.section == RCAdvancedSettingsSectionOptions && (indexPath.row == 2 || indexPath.row == 0)) ||
-                      (indexPath.section == RCAdvancedSettingsSectionButtons);
+                      (indexPath.section == RCAdvancedSettingsSectionButtons) ||
+                      (indexPath.section == RCAdvancedSettingsSectionSwipes);
     UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:isValueRow ? UITableViewCellStyleValue1 : UITableViewCellStyleDefault reuseIdentifier:nil];
     cell.backgroundColor = [cm tweakColorForKey:@"blockBackground" defaultVal:0.12];
     
@@ -264,6 +270,11 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
         cell.textLabel.text = row[@"title"];
         cell.detailTextLabel.text = [NSString stringWithFormat:@"%.2f s", get()];
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    } else if (indexPath.section == RCAdvancedSettingsSectionSwipes) {
+        NSDictionary *row = [self swipeRows][indexPath.row];
+        cell.textLabel.text = row[@"title"];
+        cell.detailTextLabel.text = [NSString stringWithFormat:@"%.0f pt", [cm swipeSettingForKey:row[@"key"] defaultValue:[row[@"default"] doubleValue]]];
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     } else if (indexPath.section == RCAdvancedSettingsSectionSecurity) {
         cell.textLabel.text = @"Allow Direct Root Helper Calls";
         UISwitch *directRootSwitch = [[UISwitch alloc] init];
@@ -299,7 +310,14 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
         double (^get)(void) = row[@"get"];
         void (^set)(double) = row[@"set"];
         [self chooseTimingNamed:row[@"title"] message:row[@"message"] values:row[@"values"] defaultValue:[row[@"default"] doubleValue]
-                        current:get() from:[tableView cellForRowAtIndexPath:indexPath] apply:set];
+                        current:get() from:[tableView cellForRowAtIndexPath:indexPath] apply:set];    } else if (indexPath.section == RCAdvancedSettingsSectionSwipes) {
+        NSDictionary *row = [self swipeRows][indexPath.row];
+        RCConfigManager *cm = [RCConfigManager sharedManager];
+        NSString *key = row[@"key"];
+        double defaultValue = [row[@"default"] doubleValue];
+        [self chooseValueNamed:row[@"title"] message:row[@"message"] values:row[@"values"] defaultValue:defaultValue
+                       current:[cm swipeSettingForKey:key defaultValue:defaultValue] format:@"%.0f pt" from:[tableView cellForRowAtIndexPath:indexPath]
+                         apply:^(double value) { [cm setSwipeSetting:value forKey:key defaultValue:defaultValue]; }];
     }
 }
 
@@ -335,6 +353,31 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
         @"values": @[@0.30, @0.40, @0.50, @0.60, @0.75], @"default": @0.50,
         @"get": ^double{ return cm.powerHoldTime; }, @"set": ^(double v) { cm.powerHoldTime = v; } }];
     return rows;
+}
+
+// The Swipe Triggers rows: each a config key, its default (the distance the tweak always used) and
+// the values to pick from, in points
+- (NSArray<NSDictionary *> *)swipeRows {
+    return @[
+        @{ @"title": @"Edge Strip", @"key": @"swipeEdgeStrip", @"default": @25,
+           @"message": @"How close to the left or right side an edge swipe has to start.",
+           @"values": @[@15, @20, @25, @30, @35, @40] },
+        @{ @"title": @"Edge Swipe", @"key": @"swipeEdgeDistance", @"default": @30,
+           @"message": @"How far an edge swipe slides up or down before its trigger runs.",
+           @"values": @[@20, @30, @40, @50, @60, @80] },
+        @{ @"title": @"Status Bar Swipe", @"key": @"swipeStatusBarDistance", @"default": @50,
+           @"message": @"How far a swipe left or right along the status bar goes before its trigger runs.",
+           @"values": @[@30, @40, @50, @60, @80, @100] },
+        @{ @"title": @"Top Swipe Down", @"key": @"swipeTopDownDistance", @"default": @45,
+           @"message": @"How far a swipe down from the top goes before its trigger runs.",
+           @"values": @[@30, @45, @60, @80, @100] },
+        @{ @"title": @"Bottom Bar Swipe", @"key": @"swipeBottomBarDistance", @"default": @60,
+           @"message": @"How far a swipe left or right along the bottom of the screen goes before its trigger runs.",
+           @"values": @[@40, @60, @80, @100, @120] },
+        @{ @"title": @"Bottom Swipe Up", @"key": @"swipeBottomUpDistance", @"default": @45,
+           @"message": @"How far a swipe up from the bottom goes before its trigger runs.",
+           @"values": @[@30, @45, @60, @80, @100] },
+    ];
 }
 
 #pragma mark - Actions
@@ -403,11 +446,17 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
 // A list of times in seconds, the current one ticked, for one of the Button Timing rows
 - (void)chooseTimingNamed:(NSString *)name message:(NSString *)message values:(NSArray<NSNumber *> *)values defaultValue:(double)defaultValue
                   current:(double)current from:(UIView *)sourceView apply:(void (^)(double value))apply {
+    [self chooseValueNamed:name message:message values:values defaultValue:defaultValue current:current format:@"%.2f s" from:sourceView apply:apply];
+}
+
+// A list of values in a unit (format: @"%.2f s", @"%.0f pt"), the current one ticked and the default marked
+- (void)chooseValueNamed:(NSString *)name message:(NSString *)message values:(NSArray<NSNumber *> *)values defaultValue:(double)defaultValue
+                 current:(double)current format:(NSString *)format from:(UIView *)sourceView apply:(void (^)(double value))apply {
     UIAlertController *sheet = [UIAlertController alertControllerWithTitle:name message:message preferredStyle:UIAlertControllerStyleActionSheet];
     for (NSNumber *value in values) {
         BOOL isCurrent = fabs(value.doubleValue - current) < 0.005;
         BOOL isDefault = fabs(value.doubleValue - defaultValue) < 0.005;
-        NSString *title = [NSString stringWithFormat:@"%.2f s%@%@", value.doubleValue, isDefault ? @" (Default)" : @"", isCurrent ? @" \u2713" : @""];
+        NSString *title = [NSString stringWithFormat:@"%@%@%@", [NSString stringWithFormat:format, value.doubleValue], isDefault ? @" (Default)" : @"", isCurrent ? @" \u2713" : @""];
         [sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
             apply(value.doubleValue);
             [self.tableView reloadData];
