@@ -3530,6 +3530,26 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             ]
         },
         @{
+            @"key": @"control_center",
+            @"title": @"Control Center",
+            @"icon": @"switch.2",
+            @"section": @"Device",
+            @"values": @[
+                @{ @"value": @"OPEN", @"title": @"Open" },
+                @{ @"value": @"CLOSED", @"title": @"Closed" }
+            ]
+        },
+        @{
+            @"key": @"notification_center",
+            @"title": @"Notification Center",
+            @"icon": @"bell.badge",
+            @"section": @"Device",
+            @"values": @[
+                @{ @"value": @"OPEN", @"title": @"Open" },
+                @{ @"value": @"CLOSED", @"title": @"Closed" }
+            ]
+        },
+        @{
             @"key": @"appearance",
             @"title": @"Appearance",
             @"icon": @"circle.lefthalf.fill",

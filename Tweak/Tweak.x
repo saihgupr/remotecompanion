@@ -4222,6 +4222,25 @@ static BOOL rc_is_current_time_in_range(NSString *rangeString) {
 }
 
 static void rc_dispatch_sync_main_safe(dispatch_block_t block);
+static BOOL rc_device_locked(SBLockScreenManager *lsm);
+
+// Control Center showing, over the home screen, an app or the lock screen. Main thread.
+static BOOL rc_control_center_open(void) {
+    for (id controlCenter in @[rc_shared_instance("SBControlCenterController") ?: [NSNull null], rc_control_center_presenter() ?: [NSNull null]]) {
+        if ([controlCenter respondsToSelector:@selector(isVisible)] && ((BOOL (*)(id, SEL))objc_msgSend)(controlCenter, @selector(isVisible))) return YES;
+    }
+    return NO;
+}
+
+// Notification Center showing: the cover sheet pulled down over the unlocked phone. While the
+// phone is locked the cover sheet is the lock screen, so that counts as closed. Main thread.
+static BOOL rc_notification_center_open(void) {
+    SBLockScreenManager *lockScreen = [objc_getClass("SBLockScreenManager") sharedInstance];
+    if ([lockScreen respondsToSelector:@selector(isUILocked)] && rc_device_locked(lockScreen)) return NO;
+    Class coverSheetClass = objc_getClass("SBCoverSheetPresentationManager");
+    id coverSheet = [coverSheetClass respondsToSelector:@selector(sharedInstance)] ? [coverSheetClass performSelector:@selector(sharedInstance)] : nil;
+    return [coverSheet respondsToSelector:@selector(isVisible)] && ((BOOL (*)(id, SEL))objc_msgSend)(coverSheet, @selector(isVisible));
+}
 
 // "ABOVE 20" / "BELOW 80" against a 0-100 level
 static BOOL rc_threshold_matches(NSString *expected, float level) {
@@ -4312,7 +4331,7 @@ static BOOL rc_condition_direct_match(NSString *key, NSString *expected, BOOL *h
             if ([device connected] && [rc_normalized_name([device name]) isEqualToString:rc_normalized_name(expected)]) return YES;
         }
         return NO;
-    } else if ([@[@"ringer", @"rotation_lock", @"appearance", @"screen", @"wifi_network"] containsObject:key]) {
+    } else if ([@[@"ringer", @"rotation_lock", @"appearance", @"screen", @"wifi_network", @"control_center", @"notification_center"] containsObject:key]) {
         // SpringBoard UI state - read on the main thread
         rc_dispatch_sync_main_safe(^{
             if ([key isEqualToString:@"ringer"]) {
@@ -4326,6 +4345,10 @@ static BOOL rc_condition_direct_match(NSString *key, NSString *expected, BOOL *h
                 actual = [[objc_getClass("SBBacklightController") sharedInstance] screenIsOn] ? @"ON" : @"OFF";
             } else if ([key isEqualToString:@"wifi_network"]) {
                 actual = [[objc_getClass("SBWiFiManager") sharedInstance] currentNetworkName];
+            } else if ([key isEqualToString:@"control_center"]) {
+                actual = rc_control_center_open() ? @"OPEN" : @"CLOSED";
+            } else if ([key isEqualToString:@"notification_center"]) {
+                actual = rc_notification_center_open() ? @"OPEN" : @"CLOSED";
             }
         });
         if ([key isEqualToString:@"wifi_network"]) {
@@ -11560,6 +11583,8 @@ static NSArray *RCCommandHelpSections(void) {
             @[@"flashlight [on|off|toggle|status]", @"Control the torch"],
             @[@"rotate [lock|unlock|toggle|status]", @"Orientation lock"],
             @[@"orientation status", @"Print PORTRAIT or LANDSCAPE"],
+            @[@"control center status", @"Print OPEN or CLOSED"],
+            @[@"notification center status", @"Print OPEN or CLOSED"],
             @[@"orientation set <mode>", @"Rotate screen (portrait, landscape left/right, upside down, auto)"],
             @[@"appearance [dark|light|toggle]", @"Light or dark appearance"],
             @[@"dnd [on|off|toggle|status]", @"Do Not Disturb"],
@@ -13763,6 +13788,11 @@ static NSString *handle_command(NSString *cmd) {
             toggle_lpm(!current);
             return [NSString stringWithFormat:@"Low Power Mode %@\n", !current ? @"Enabled" : @"Disabled"];
         }
+    } else if ([cleanCmd isEqualToString:@"control center status"] || [cleanCmd isEqualToString:@"notification center status"]) {
+        BOOL controlCenter = [cleanCmd hasPrefix:@"control"];
+        __block BOOL open = NO;
+        rc_dispatch_sync_main_safe(^{ open = controlCenter ? rc_control_center_open() : rc_notification_center_open(); });
+        return open ? @"OPEN\n" : @"CLOSED\n";
     } else if ([cleanCmd isEqualToString:@"orientation status"]) {
         __block NSString *result = nil;
         void (^orientationBlock)(void) = ^{

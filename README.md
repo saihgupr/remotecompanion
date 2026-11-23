@@ -165,6 +165,8 @@ Access the desktop-class automation hub at `http://[DEVICE_IP]:8080` from any co
 - `rc logs` - Stream live debug logs from the device (tail `/tmp/remotecommand.log`).
 - `rc vibration [silent-status|ring-status]` - Check current system vibration state.
 - `rc orientation status` - Returns `PORTRAIT` or `LANDSCAPE`.
+- `rc control center status` - Returns `OPEN` or `CLOSED`.
+- `rc notification center status` - Returns `OPEN` or `CLOSED` (`CLOSED` on the lock screen).
 - `rc rotate status` - Returns orientation lock state.
 - `rc dnd status` - Returns Do Not Disturb state.
 - `rc lpm status` - Returns Low Power Mode state.
