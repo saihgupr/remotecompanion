@@ -3,6 +3,8 @@
 #import <objc/runtime.h>
 
 static NSString *const kRCActionsPasteboardType = @"com.saihgupr.remotecompanion.actions";
+// The app's own copy of the actions, so menus and buttons never have to read clipboard content
+static NSString *const kRCActionClipboardDefaultsKey = @"RCActionClipboardItems";
 
 // Methods of the actions screen this file uses
 @interface RCActionsViewController (SelectionHost)
@@ -36,13 +38,57 @@ static NSString *RCActionCountText(NSUInteger count) {
 
 #pragma mark - Clipboard
 
-+ (NSArray *)rc_actionsOnPasteboard {
-    UIPasteboard *pasteboard = [UIPasteboard generalPasteboard];
-    if (![pasteboard containsPasteboardTypes:@[kRCActionsPasteboardType]]) return nil;
-    NSData *data = [pasteboard dataForPasteboardType:kRCActionsPasteboardType];
+// The app's own copy, kept as JSON data in NSUserDefaults. Menus and buttons read this instead of
+// the pasteboard: reading clipboard content there makes iOS show its "pasted from" banner for a
+// Universal Clipboard copy even though nobody pasted anything.
++ (NSArray *)rc_storedActionClipboard {
+    NSData *data = [[NSUserDefaults standardUserDefaults] dataForKey:kRCActionClipboardDefaultsKey];
     if (!data) return nil;
     id actions = [NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingMutableContainers error:nil];
     return [actions isKindOfClass:[NSArray class]] && [actions count] ? actions : nil;
+}
+
++ (void)rc_storeActionClipboard:(NSArray *)actions {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    if (actions.count == 0) {
+        [defaults removeObjectForKey:kRCActionClipboardDefaultsKey];
+        return;
+    }
+    NSData *data = [NSJSONSerialization dataWithJSONObject:actions options:0 error:nil];
+    if (data) [defaults setObject:data forKey:kRCActionClipboardDefaultsKey];
+    // Copy still goes on the system pasteboard too, so it pastes outside the app and scripts
+    // reading the app's own pasteboard type keep working
+    [self rc_putActionsOnPasteboard:actions];
+}
+
+// Whether Paste should be offered, without reading any clipboard content. The app's own type on
+// the pasteboard is a safe check (it reveals no content); a plain string is not on iOS 16+, where
+// reading it would need the person's paste permission.
++ (BOOL)rc_hasPasteableActions {
+    if ([self rc_storedActionClipboard].count > 0) return YES;
+    if ([[UIPasteboard generalPasteboard] containsPasteboardTypes:@[kRCActionsPasteboardType]]) return YES;
+    if (@available(iOS 16.0, *)) return NO;
+    return [UIPasteboard generalPasteboard].hasStrings;
+}
+
+// The actions on the shared pasteboard, or nil. Only called from an actual Paste (the insert and
+// ••• menu handlers), which is why reading clipboard content is fine here; menus never call it.
++ (NSArray *)rc_actionsOnPasteboard {
+    UIPasteboard *pasteboard = [UIPasteboard generalPasteboard];
+    if ([pasteboard containsPasteboardTypes:@[kRCActionsPasteboardType]]) {
+        NSData *data = [pasteboard dataForPasteboardType:kRCActionsPasteboardType];
+        if (data) {
+            id actions = [NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingMutableContainers error:nil];
+            if ([actions isKindOfClass:[NSArray class]] && [actions count] > 0) return actions;
+        }
+    }
+    // A script or the Web UI can leave the actions as plain JSON text instead. On iOS 16+ reading
+    // a string would need the person's paste permission, so only iOS 15 and earlier can do this.
+    if (@available(iOS 16.0, *)) return nil;
+    NSString *text = [pasteboard string];
+    if (text.length == 0) return nil;
+    id parsed = [NSJSONSerialization JSONObjectWithData:[text dataUsingEncoding:NSUTF8StringEncoding] options:NSJSONReadingMutableContainers error:nil];
+    return [parsed isKindOfClass:[NSArray class]] && [parsed count] ? parsed : nil;
 }
 
 + (void)rc_putActionsOnPasteboard:(NSArray *)actions {
@@ -55,7 +101,7 @@ static NSString *RCActionCountText(NSUInteger count) {
 - (void)rc_addActionsSectionToMenuItems:(NSMutableArray<UIMenuElement *> *)menuItems {
     __weak typeof(self) weakSelf = self;
     // Both checked each time the menu opens (iOS 15): the menu is built before the actions load,
-    // and a copy from another trigger should show up
+    // and a copy made in another trigger should show up
     NSArray<UIMenuElement *> *(^items)(void) = ^NSArray<UIMenuElement *> * {
         __strong typeof(weakSelf) strongSelf = weakSelf;
         NSMutableArray *list = [NSMutableArray array];
@@ -66,9 +112,16 @@ static NSString *RCActionCountText(NSUInteger count) {
             if (strongSelf.actions.count == 0) select.attributes = UIMenuElementAttributesDisabled;
         }
         [list addObject:select];
-        NSArray *copied = [RCActionsViewController rc_actionsOnPasteboard];
-        if (copied) {
-            [list addObject:[UIAction actionWithTitle:[NSString stringWithFormat:@"Paste %@", RCActionCountText(copied.count)]
+        // The store gives the exact count; a copy that only lives on the pasteboard (from a
+        // script or the Web UI) is offered without reading it, so no banner appears
+        NSArray *stored = [RCActionsViewController rc_storedActionClipboard];
+        if (stored.count > 0) {
+            [list addObject:[UIAction actionWithTitle:[NSString stringWithFormat:@"Paste %@", RCActionCountText(stored.count)]
+                                                image:[UIImage systemImageNamed:@"doc.on.clipboard"]
+                                           identifier:nil
+                                              handler:^(__kindof UIAction *a) { [weakSelf rc_pasteActions]; }]];
+        } else if ([RCActionsViewController rc_hasPasteableActions]) {
+            [list addObject:[UIAction actionWithTitle:@"Paste Actions"
                                                 image:[UIImage systemImageNamed:@"doc.on.clipboard"]
                                            identifier:nil
                                               handler:^(__kindof UIAction *a) { [weakSelf rc_pasteActions]; }]];
@@ -92,7 +145,9 @@ static NSString *RCActionCountText(NSUInteger count) {
 }
 
 - (void)rc_pasteActions {
-    NSArray *copied = [RCActionsViewController rc_actionsOnPasteboard];
+    // The store first; the pasteboard is only read here, because the person chose Paste
+    NSArray *copied = [RCActionsViewController rc_storedActionClipboard];
+    if (!copied) copied = [RCActionsViewController rc_actionsOnPasteboard];
     if (!copied) return;
     // A pasted Notification action gets IDs of its own (its own tap and button triggers)
     for (id item in copied) [self.actions addObject:[RCNotifyCommand copyOfActionWithNewIDs:item]];
@@ -223,7 +278,9 @@ static NSString *RCActionCountText(NSUInteger count) {
     NSIndexSet *indexes = [self rc_selectedIndexes];
     if (indexes.count == 0) return;
     NSArray *selected = [self.actions objectsAtIndexes:indexes];
-    [RCActionsViewController rc_putActionsOnPasteboard:selected];
+    // Into the app's own store too, so the ••• menu and the paste button offer it right away;
+    // the same call also keeps the system pasteboard copy for other apps and scripts
+    [RCActionsViewController rc_storeActionClipboard:selected];
     [self rc_setSelecting:NO];
     if (@available(iOS 15.0, *)) {} else {
         self.moreButton.menu = [self moreMenu]; // shows Paste
