@@ -996,6 +996,53 @@ static BOOL get_dnd_state() {
     return NO;
 }
 
+// AssistiveTouch: the on-screen button under Settings > Accessibility > Touch. AXSettings holds
+// the preference Settings and Siri write, so its getter is the state; the Accessibility Shortcut's
+// own helper is what starts and stops the button.
+static Class rc_axsettings_class(void) {
+    static Class cls = Nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        dlopen("/System/Library/PrivateFrameworks/AccessibilityUtilities.framework/AccessibilityUtilities", RTLD_NOW);
+        cls = objc_getClass("AXSettings");
+    });
+    return cls;
+}
+
+static id rc_axsettings_shared(void) {
+    Class cls = rc_axsettings_class();
+    if (!cls || ![cls respondsToSelector:@selector(sharedInstance)]) return nil;
+    return ((id (*)(id, SEL))objc_msgSend)(cls, @selector(sharedInstance));
+}
+
+static BOOL rc_assistive_touch_is_on(void) {
+    id settings = rc_axsettings_shared();
+    if (settings && [settings respondsToSelector:@selector(assistiveTouchEnabled)]) {
+        return ((BOOL (*)(id, SEL))objc_msgSend)(settings, @selector(assistiveTouchEnabled));
+    }
+    return UIAccessibilityIsAssistiveTouchRunning();
+}
+
+// AXTripleClickHelpers is what the Accessibility Shortcut itself uses. It starts and stops the
+// AssistiveTouch scene, which writing the preference alone does not do (the daemon starts but the
+// button never appears). It only toggles, so the state is checked first.
+static BOOL rc_assistive_touch_set(BOOL on) {
+    if (rc_assistive_touch_is_on() == on) return YES;
+    Class helper = objc_getClass("AXTripleClickHelpers");
+    if (!helper) {
+        rc_axsettings_class();
+        helper = objc_getClass("AXTripleClickHelpers");
+    }
+    if (helper && [helper respondsToSelector:@selector(_toggleAssistiveTouch)]) {
+        ((void (*)(id, SEL))objc_msgSend)(helper, @selector(_toggleAssistiveTouch));
+        return YES;
+    }
+    id settings = rc_axsettings_shared();
+    if (!settings || ![settings respondsToSelector:@selector(setAssistiveTouchEnabled:)]) return NO;
+    ((void (*)(id, SEL, BOOL))objc_msgSend)(settings, @selector(setAssistiveTouchEnabled:), on);
+    return YES;
+}
+
 #pragma mark - Focus (iOS 15+)
 
 // A Focus is a Do Not Disturb mode with its own identifier. One is turned on the way Control
@@ -4994,6 +5041,7 @@ static void rc_banner_show_toggle_state(NSString *cmd, NSString *title, NSString
             @{ @"key": @"airplane", @"prefixes": @[@"airplane "], @"status": @"airplane status" },
             @{ @"key": @"lpm", @"prefixes": @[@"low power mode ", @"low power ", @"lpm "] },
             @{ @"key": @"dnd", @"prefixes": @[@"dnd "], @"status": @"dnd status" },
+            @{ @"key": @"assistivetouch", @"prefixes": @[@"assistive touch ", @"assistive-touch ", @"assistivetouch "], @"status": @"assistive touch status" },
             @{ @"key": @"location", @"prefixes": @[@"location services ", @"locationservices ", @"location ", @"gps "], @"status": @"location status" },
             @{ @"key": @"rotate", @"prefixes": @[@"rotate "] },
             @{ @"key": @"appearance", @"prefixes": @[@"appearance "] },
@@ -11738,6 +11786,7 @@ static NSArray *RCCommandHelpSections(void) {
             @[@"orientation set <mode>", @"Rotate screen (portrait, landscape left/right, upside down, auto)"],
             @[@"appearance [dark|light|toggle]", @"Light or dark appearance"],
             @[@"dnd [on|off|toggle|status]", @"Do Not Disturb"],
+            @[@"assistive touch [on|off|toggle|status]", @"AssistiveTouch on-screen button"],
             @[@"low power mode [on|off|toggle|status]", @"Low Power Mode"],
             @[@"haptic", @"Play a haptic tap"],
             @[@"screenshot", @"Take a screenshot"],
@@ -14009,6 +14058,27 @@ static NSString *handle_command(NSString *cmd) {
             toggle_dnd(!current);
             return [NSString stringWithFormat:@"DND %@\n", !current ? @"Enabled" : @"Disabled"];
         }
+    } else if ([cleanCmd isEqualToString:@"assistive touch"] || [cleanCmd isEqualToString:@"assistive-touch"] || [cleanCmd isEqualToString:@"assistivetouch"] ||
+               [cleanCmd hasPrefix:@"assistive touch "] || [cleanCmd hasPrefix:@"assistive-touch "] || [cleanCmd hasPrefix:@"assistivetouch "]) {
+        NSString *subCmd = @"toggle";
+        for (NSString *prefix in @[@"assistive touch ", @"assistive-touch ", @"assistivetouch "]) {
+            if ([cleanCmd hasPrefix:prefix]) {
+                subCmd = [[cleanCmd substringFromIndex:prefix.length] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+                break;
+            }
+        }
+        if ([subCmd isEqualToString:@"on"] || [subCmd isEqualToString:@"off"] || [subCmd isEqualToString:@"toggle"]) {
+            BOOL want = [subCmd isEqualToString:@"on"] ? YES : ([subCmd isEqualToString:@"off"] ? NO : !rc_assistive_touch_is_on());
+            __block BOOL set = NO;
+            void (^applyBlock)(void) = ^{ set = rc_assistive_touch_set(want); };
+            if ([NSThread isMainThread]) applyBlock();
+            else dispatch_sync(dispatch_get_main_queue(), applyBlock);
+            if (!set) return @"Error: AssistiveTouch not available\n";
+            return want ? @"AssistiveTouch ON\n" : @"AssistiveTouch OFF\n";
+        } else if ([subCmd isEqualToString:@"status"]) {
+            return rc_assistive_touch_is_on() ? @"AssistiveTouch ON\n" : @"AssistiveTouch OFF\n";
+        }
+        return @"Usage: assistive touch [on|off|toggle|status]\n";
     } else if ([cleanCmd hasPrefix:@"location "] || [cleanCmd hasPrefix:@"location-"] ||
                [cleanCmd hasPrefix:@"locationservices "] || [cleanCmd hasPrefix:@"locationservices-"] ||
                [cleanCmd hasPrefix:@"location services "] ||
@@ -16392,6 +16462,7 @@ static void start_web_server() {
                                                       @"location status", @"carplay status", @"watch status", @"ringer status", @"vibration silent-status",
                                                       @"haptics status", @"is-playing", @"lock status", @"low power status", @"flashlight status",
                                                       @"dnd status", @"focus status", @"screenrecord status", @"timer status", @"proximity status",
+                                                      @"assistive touch status",
                                                       @"orientation status", @"appearance status", @"autolock status"];
                                 NSMutableDictionary *answers = [NSMutableDictionary dictionary];
                                 for (NSString *command in commands) {
@@ -17245,6 +17316,7 @@ static void start_web_server() {
                                     @{@"command": @"location on/off/toggle/status", @"desc": @"Toggles: Location Services (GPS)"},
                                     @{@"command": @"airplane on/off", @"desc": @"Toggles: Airplane Mode power"},
                                     @{@"command": @"dnd on/off", @"desc": @"Toggles: Do Not Disturb Mode"},
+                                    @{@"command": @"assistive touch on/off/toggle", @"desc": @"Toggles: AssistiveTouch on-screen button"},
                                     @{@"command": @"focus on/toggle <name>, focus off", @"desc": @"Focus: turns a Focus on or off (iOS 15+)"},
                                     @{@"command": @"focus status/list", @"desc": @"Focus: the active Focus, or the Focus modes"},
                                     @{@"command": @"audiomix on/off", @"desc": @"Toggles: AudioMix simultaneous playback"},

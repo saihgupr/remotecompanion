@@ -79,6 +79,7 @@ A sequence is a **JSON array** of actions. Each action is either:
 | `haptic` | Trigger haptic feedback |
 | `siri` | Activate Siri |
 | `accessibility shortcut` | Run the Accessibility Shortcut |
+| `assistive touch [on|off|toggle|status]` | AssistiveTouch on-screen button |
 | `respring` | Respring (restart SpringBoard) |
 | `safemode` | Enter Safe Mode (restart SpringBoard with tweaks disabled) |
 | `ldrestart` | Soft reboot |
