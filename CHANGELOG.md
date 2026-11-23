@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **`previous` as an alias for `prev`**: `rc previous` skips to the previous track, the same as `rc prev`, in scripts and the CLI.
+
 ### Fixed
 - **`rc bluetooth list` shows low-energy devices**: the Apple Watch and low-energy accessories such as an AssistiveTouch mouse or pointer were missing, because the command read BluetoothManager's paired list, which holds classic pairings only. The list now adds the devices CoreBluetooth reports as connected. `bt disconnect` on one of those says plainly that iOS doesn't allow apps to disconnect it, and points at Forget This Device in Settings > Bluetooth or `rc bt off` and `rc bt on`.
 

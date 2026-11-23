@@ -47,7 +47,7 @@ A sequence is a **JSON array** of actions. Each action is either:
 | `pause` | Pause media |
 | `playpause` | Toggle play/pause |
 | `next` | Next track |
-| `prev` | Previous track |
+| `prev` / `previous` | Previous track |
 | `volume up` | Volume up one step |
 | `volume down` | Volume down one step |
 | `set-vol 75` | Set volume to 75% (0–100) |

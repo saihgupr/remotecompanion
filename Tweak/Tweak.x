@@ -11750,7 +11750,7 @@ static NSArray *RCCommandHelpSections(void) {
     return @[
         @{@"title": @"Media", @"rows": @[
             @[@"play | pause | playpause", @"Play, pause, or toggle playback"],
-            @[@"next | prev", @"Next or previous track"],
+            @[@"next | prev | previous", @"Next or previous track"],
             @[@"volume <0-100>", @"Set the volume"],
             @[@"volume up|down [N]", @"Step the volume up or down"],
             @[@"mute [on|off|toggle|status]", @"Media mute"],
@@ -13117,7 +13117,7 @@ static NSString *handle_command(NSString *cmd) {
     } else if ([cleanCmd isEqualToString:@"next"]) {
         MRMediaRemoteSendCommand(kMRNextTrack, nil);
         return @"Next track\n";
-    } else if ([cleanCmd isEqualToString:@"prev"]) {
+    } else if ([cleanCmd isEqualToString:@"prev"] || [cleanCmd isEqualToString:@"previous"]) {
         MRMediaRemoteSendCommand(kMRPreviousTrack, nil);
         return @"Previous track\n";
     } else if ([cleanCmd isEqualToString:@"button triggers"] || [cleanCmd hasPrefix:@"button triggers "]) {

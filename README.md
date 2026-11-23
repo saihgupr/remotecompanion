@@ -96,7 +96,7 @@ Access the desktop-class automation hub at `http://[DEVICE_IP]:8080` from any co
 > Run `rc help` (or `rc -h`) for this whole list in the terminal, and `rc help <word>` to show only matching commands.
 
 ### Media, Sound & Volume
-- `rc play` / `rc pause` / `rc playpause` / `rc next` / `rc prev` - Control media playback.
+- `rc play` / `rc pause` / `rc playpause` / `rc next` / `rc prev` (or `rc previous`) - Control media playback.
 - `rc volume 0-100` - Set volume level.
 - `rc volume up [N]` / `rc volume down [N]` - Step volume up or down by N percent (default is 1 native step) and return the resulting volume percentage (e.g. `Volume: 45%`).
 - `rc mute [on|off|toggle|status]` - Control media mute state.
