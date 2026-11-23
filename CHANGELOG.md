@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Flashlight Dance Party**: `rc flashlight party [pump|beat]` listens through the microphone and runs the torch with the music. `pump` follows the bass smoothly, `beat` flashes on each kick. `rc flashlight party stop|status` controls it, `sensitivity 1-10`, `cap 10-100` and `timeout 1-60` tune it, and it stops by itself after 15 seconds of quiet or the timeout (15 minutes by default). `torch party` and `flash party` work too. Headphones or Bluetooth mean the microphone hears nothing to follow.
 - **Flashlight brightness options**: `rc flashlight low|medium|high|max` sets one of the four levels iOS's own slider uses, `rc flashlight up|down [N]` steps from the current level (25 by default), and `rc flashlight status` now prints the level, e.g. `Flashlight ON (75%)`. `on` takes the same names or a percentage, and `torch` and `flash` accept everything `flashlight` does.
 - **`previous` as an alias for `prev`**: `rc previous` skips to the previous track, the same as `rc prev`, in scripts and the CLI.
 

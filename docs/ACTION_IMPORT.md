@@ -68,6 +68,7 @@ Here is the complete list of valid commands you can write, along with parameters
 | `flashlight toggle` | Toggle flashlight on/off | `flashlight toggle` |
 | `flashlight <0-100>` | Turn flashlight on at that brightness (also `low`, `medium`, `high`, `max`) | `flashlight 50` |
 | `flashlight up [N]` / `down [N]` | Step brightness by N percent, 25 by default | `flashlight up 10` |
+| `flashlight party [pump|beat]` | Run the torch with music the mic hears | `flashlight party beat` |
 | `flashlight on` / `flashlight off` | Turn flashlight solid ON or OFF | `flashlight on` |
 | `brightness <0-100>` | Set screen brightness percentage | `brightness 75` |
 | `bt on` / `bt off` / `bt toggle` | Turn Bluetooth on, off, or toggle state | `bt toggle` |

@@ -78,5 +78,6 @@ SUBPROJECTS += rc-client
 SUBPROJECTS += rc-notify
 SUBPROJECTS += rc-ocr
 SUBPROJECTS += rc-dictate
+SUBPROJECTS += rc-party
 SUBPROJECTS += rc-ccmodule
 include $(THEOS_MAKE_PATH)/aggregate.mk

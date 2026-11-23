@@ -130,6 +130,7 @@
 
   {"command": "flashlight toggle", "args": "toggle|on|off|status|low|medium|high|max|up|down", "description": "Toggle the flashlight", "category": "Device Controls", "example": "flashlight toggle", "status": "flashlight status"},
   {"command": "flashlight <level>", "args": "0-100, low, medium, high, max", "description": "Set the flashlight brightness", "category": "Device Controls", "example": "flashlight low", "status": "flashlight status"},
+  {"command": "flashlight party", "args": "pump|beat|stop|status", "description": "Run the flashlight in time with the music", "category": "Device Controls", "example": "flashlight party beat", "status": "flashlight party status"},
   {"command": "flashlight up", "args": "up|down [N]", "description": "Step the flashlight brightness by N percent", "category": "Device Controls", "example": "flashlight up 10", "status": "flashlight status"},
   {"command": "flashlight on", "args": "", "description": "Turn the flashlight on", "category": "Device Controls", "example": "flashlight on", "status": "flashlight status"},
   {"command": "flashlight off", "args": "", "description": "Turn the flashlight off", "category": "Device Controls", "example": "flashlight off", "status": "flashlight status"},
