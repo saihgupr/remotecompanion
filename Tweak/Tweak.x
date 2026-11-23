@@ -11665,6 +11665,13 @@ static NSArray *RCCommandHelpSections(void) {
             @[@"camera shutter | snap", @"Press the Camera shutter"],
             @[@"camera record-toggle", @"Start or stop video recording"],
         ]},
+        @{@"title": @"Tweaks", @"rows": @[
+            @[@"tweaks", @"List the Tweaks switches and whether each is on"],
+            @[@"tweaks wake-on-power [on|off|toggle]", @"Keep the screen dark when power connects or disconnects"],
+            @[@"tweaks power-haptics [on|off|toggle]", @"Stop the charging vibration and chime"],
+            @[@"tweaks unlocked-vibration [on|off|toggle]", @"Stop notification vibration while unlocked"],
+            @[@"tweaks all on|off", @"Set every Tweaks switch at once"],
+        ]},
         @{@"title": @"Apps & Input", @"rows": @[
             @[@"open <alias|bundleID>", @"Launch an app"],
             @[@"uiopen <bundleID>", @"Launch an app by bundle ID"],
@@ -12481,6 +12488,126 @@ static NSString *rc_ssh_test_host(NSString *hostId) {
     return [NSString stringWithFormat:@"Error: %@\n", detail];
 }
 
+// Settings > Advanced Settings > Tweaks holds iOS behavior tweaks that are off by default.
+// Each is one config key, so the switches in the app, the Web UI, and here all agree.
+static NSArray<NSDictionary *> *rc_tweaks_specs(void) {
+    return @[
+        @{@"key": @"wake-on-power", @"aliases": @[@"wake", @"wake screen", @"wake screen on power"],
+          @"config": @"disableWakeOnPower", @"name": @"Disable Wake Screen On Power"},
+        @{@"key": @"power-haptics", @"aliases": @[@"power haptics", @"charging haptics", @"power connected haptics"],
+          @"config": @"disablePowerConnectedHaptics", @"name": @"Disable Power Connected Haptics"},
+        @{@"key": @"unlocked-vibration", @"aliases": @[@"unlocked vibration", @"notification vibration", @"notif vibration"],
+          @"config": @"disableUnlockedNotificationVibration", @"name": @"Disable Vibration When Unlocked"},
+    ];
+}
+
+// A name matches however it is typed: "wake-on-power", "wake on power" and "WAKE_ON_POWER" are one.
+static NSString *rc_tweaks_normalized(NSString *word) {
+    NSString *lower = [word lowercaseString] ?: @"";
+    NSCharacterSet *drop = [NSCharacterSet characterSetWithCharactersInString:@" \t\r\n-_"];
+    return [[lower componentsSeparatedByCharactersInSet:drop] componentsJoinedByString:@""];
+}
+
+static NSDictionary *rc_tweaks_spec_for(NSString *word) {
+    NSString *wanted = rc_tweaks_normalized(word);
+    if (wanted.length == 0) return nil;
+    for (NSDictionary *spec in rc_tweaks_specs()) {
+        if ([rc_tweaks_normalized(spec[@"key"]) isEqualToString:wanted]) return spec;
+        for (NSString *alias in spec[@"aliases"]) {
+            if ([rc_tweaks_normalized(alias) isEqualToString:wanted]) return spec;
+        }
+    }
+    return nil;
+}
+
+// 1 when the word is a state ("on", "off", "toggle"), so the word before it is the tweak name
+static BOOL rc_tweaks_is_state_word(NSString *word) {
+    static NSSet *states;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        states = [NSSet setWithArray:@[@"on", @"off", @"toggle", @"enable", @"disable", @"enabled", @"disabled",
+                                       @"true", @"false", @"1", @"0"]];
+    });
+    return [states containsObject:[word lowercaseString]];
+}
+
+static BOOL rc_tweaks_state_is_on(NSString *word) {
+    NSString *lower = [word lowercaseString];
+    return [lower isEqualToString:@"on"] || [lower isEqualToString:@"enable"] || [lower isEqualToString:@"enabled"] ||
+           [lower isEqualToString:@"true"] || [lower isEqualToString:@"1"];
+}
+
+// tweaks                          every Tweaks switch and its state
+// tweaks <name>                   one switch's state
+// tweaks <name> on|off|toggle     set it (on is the switch on, so the tweak is active)
+// tweaks all on|off               every switch at once
+static NSString *rc_handle_tweaks_command(NSString *cmd) {
+    load_trigger_config();
+    NSString *args = cmd.length > @"tweaks".length ? [cmd substringFromIndex:@"tweaks".length] : @"";
+    NSMutableArray *words = [NSMutableArray array];
+    for (NSString *word in [args componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]) {
+        if (word.length) [words addObject:word];
+    }
+
+    NSDictionary *config;
+    @synchronized (rc_trigger_config_lock()) { config = [g_triggerConfig copy] ?: @{}; }
+
+    NSString *firstWord = words.count ? [words[0] lowercaseString] : @"";
+    if (words.count == 0 || (words.count == 1 && ([firstWord isEqualToString:@"list"] || [firstWord isEqualToString:@"status"]))) {
+        NSMutableString *listing = [NSMutableString stringWithString:@"Tweaks\n"];
+        for (NSDictionary *spec in rc_tweaks_specs()) {
+            BOOL on = [config[spec[@"config"]] boolValue];
+            NSString *key = spec[@"key"];
+            NSUInteger pad = key.length < 20 ? 20 - key.length : 1;
+            NSString *padding = [@" " stringByPaddingToLength:pad withString:@" " startingAtIndex:0];
+            [listing appendFormat:@"  %@%@%@  %@\n", key, padding, on ? @"ON" : @"OFF", spec[@"name"]];
+        }
+        return listing;
+    }
+
+    NSString *stateWord = words.lastObject;
+    BOOL hasState = rc_tweaks_is_state_word(stateWord);
+    if (hasState) [words removeLastObject];
+    if (words.count == 0) return @"Error: usage: tweaks <name> [on|off|toggle]\n";
+
+    NSString *nameArg = [words componentsJoinedByString:@" "];
+    if (!hasState && words.count > 1) {
+        // A known name followed by a word that isn't a state is a typo in the state, not the name
+        NSString *nameOnly = [[words subarrayWithRange:NSMakeRange(0, words.count - 1)] componentsJoinedByString:@" "];
+        NSDictionary *spec = rc_tweaks_spec_for(nameOnly);
+        if (spec) return [NSString stringWithFormat:@"Error: usage: tweaks %@ [on|off|toggle]\n", spec[@"key"]];
+    }
+
+    if ([rc_tweaks_normalized(nameArg) isEqualToString:@"all"]) {
+        if (!hasState || [stateWord.lowercaseString isEqualToString:@"toggle"]) {
+            return @"Error: usage: tweaks all on|off\n";
+        }
+        BOOL on = rc_tweaks_state_is_on(stateWord);
+        NSMutableDictionary *mConfig = [config mutableCopy];
+        for (NSDictionary *spec in rc_tweaks_specs()) mConfig[spec[@"config"]] = @(on);
+        rc_set_trigger_config([mConfig copy]);
+        save_trigger_config();
+        return [NSString stringWithFormat:@"All tweaks %@\n", on ? @"enabled" : @"disabled"];
+    }
+
+    NSDictionary *spec = rc_tweaks_spec_for(nameArg);
+    if (!spec) {
+        return [NSString stringWithFormat:@"Error: unknown tweak '%@'. Use: wake-on-power, power-haptics, unlocked-vibration\n", nameArg];
+    }
+
+    BOOL current = [config[spec[@"config"]] boolValue];
+    if (!hasState) return [NSString stringWithFormat:@"%@: %@\n", spec[@"name"], current ? @"ON" : @"OFF"];
+
+    BOOL wanted = [stateWord.lowercaseString isEqualToString:@"toggle"] ? !current : rc_tweaks_state_is_on(stateWord);
+    if (wanted != current) {
+        NSMutableDictionary *mConfig = [config mutableCopy];
+        mConfig[spec[@"config"]] = @(wanted);
+        rc_set_trigger_config([mConfig copy]);
+        save_trigger_config();
+    }
+    return [NSString stringWithFormat:@"%@: %@\n", spec[@"name"], wanted ? @"ON" : @"OFF"];
+}
+
 static NSString *handle_command(NSString *cmd) {
     if (!cmd || ![cmd isKindOfClass:[NSString class]]) {
         SRLogMin(@"ERROR: handle_command received nil or invalid command string");
@@ -12492,6 +12619,9 @@ static NSString *handle_command(NSString *cmd) {
         [cleanCmd isEqualToString:@"-h"] || [cleanCmd isEqualToString:@"--help"]) {
         NSString *topic = [cleanCmd hasPrefix:@"help "] ? [cleanCmd substringFromIndex:5] : @"";
         return RCCommandHelp(topic);
+    }
+    if ([cleanCmd isEqualToString:@"tweaks"] || [cleanCmd hasPrefix:@"tweaks "]) {
+        return rc_handle_tweaks_command(cleanCmd);
     }
     // Resolve app-owned native shortcut payloads afresh; do not log encoded data.
     if ([cleanCmd hasPrefix:@"quickactions "]) return RCQACommand(cleanCmd);
@@ -17062,6 +17192,7 @@ static void start_web_server() {
                                     @{@"command": @"mute", @"desc": @"Toggles: System mute/silent mode"},
                                     @{@"command": @"rotate lock/unlock", @"desc": @"Toggles: Orientation lock state"},
                                     @{@"command": @"haptic", @"desc": @"System: Play a subtle haptic feedback vibe"},
+                                    @{@"command": @"tweaks [name] [on|off|toggle]", @"desc": @"Tweaks: iOS behavior switches (wake on power, charging haptics, unlocked vibration)"},
 
                                     // Automations & Discovery
                                     @{@"command": @"shortcut \"Name\"", @"desc": @"Automation: Run a Siri Shortcut"},

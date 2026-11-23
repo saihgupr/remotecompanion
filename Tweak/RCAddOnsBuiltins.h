@@ -109,6 +109,7 @@ static NSString *const kRCAOBuiltinPrefixes[] = {
     @"toast ",
     @"trigger ",
     @"trigger:",
+    @"tweaks ",
     @"type ",
     @"uiopen ",
     @"unlock ",

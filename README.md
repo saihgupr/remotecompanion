@@ -128,6 +128,14 @@ Access the desktop-class automation hub at `http://[DEVICE_IP]:8080` from any co
 - `rc previous app` / `rc last app` - Returns to the previously active application.
 - `rc vibration [silent-toggle|ring-toggle]` - System "Vibrate on Silent/Ring" settings.
 
+### Tweaks
+The switches in Settings > Advanced Settings > Tweaks, also on the Web UI's Tweaks screen. Every switch is off by default.
+- `rc tweaks` - List every Tweaks switch and whether it is on.
+- `rc tweaks wake-on-power [on|off|toggle]` - Keep the screen dark when a charger connects or disconnects while the display is off or dimmed.
+- `rc tweaks power-haptics [on|off|toggle]` - Stop the charging vibration and chime when power connects.
+- `rc tweaks unlocked-vibration [on|off|toggle]` - Stop notification vibration while the phone is unlocked; banners, sounds, and urgent alerts still work.
+- `rc tweaks all on|off` - Set every switch at once.
+
 ### Apps, URLs & Shortcuts
 - `rc nav <triggers|settings|ha|km|mqtt|add|advanced|testkit>` - Navigate directly to any RemoteCompanion panel or trigger editor (supports `remotecompanion://` deep linking URL scheme).
 - `rc open <alias|bundleID>` (e.g., `youtube`, `spotify`, `settings`, `messages`, `home`, `photos`, `camera`, `clock`, `maps`, `calendar`, `weather`, `notes`, `reminders`, `appstore`, `mail`, `music`, `phone`, `stocks`, `calculator`, `tv`, `wallet`, `facetime`, `files`).
