@@ -22019,9 +22019,37 @@ static inline BOOL RC_InTopRegion(CGPoint loc, UIInterfaceOrientation orientatio
     return (loc.y < threshold);
 }
 
+// Swipe Triggers (Advanced Settings): how far each kind of swipe trigger needs a swipe to go before
+// it runs, and how close to the side a side-edge swipe has to start, in points. A setting that
+// isn't there (or isn't a number in range) is the distance the triggers always used. Longer
+// distances and a narrower strip leave more room for the Home swipe and other tweaks' gestures
+// (#189). A trigger that also fires on lift does so a little sooner, at the same proportion as
+// before (40 of 50 for the status bar, 35 of 45 for the top and bottom).
+static CGFloat RC_SwipeSetting(NSString *key, CGFloat normal) {
+    id value = g_triggerConfig[key];
+    double number = [value isKindOfClass:[NSNumber class]] ? [value doubleValue] : 0;
+    return (number >= 5 && number <= 400) ? number : normal;
+}
+
+#define RC_EDGE_STRIP() RC_SwipeSetting(@"swipeEdgeStrip", 25)
+#define RC_EDGE_DISTANCE() RC_SwipeSetting(@"swipeEdgeDistance", 30)
+#define RC_STATUS_BAR_DISTANCE() RC_SwipeSetting(@"swipeStatusBarDistance", 50)
+#define RC_TOP_DOWN_DISTANCE() RC_SwipeSetting(@"swipeTopDownDistance", 45)
+#define RC_BOTTOM_BAR_DISTANCE() RC_SwipeSetting(@"swipeBottomBarDistance", 60)
+#define RC_BOTTOM_UP_DISTANCE() RC_SwipeSetting(@"swipeBottomUpDistance", 45)
+// The bottom strip (bottom bar swipes and the bottom swipe-up zones), and how much of the bottom
+// edge the left and right swipe-up zones take, in percent (the center has the rest)
+#define RC_BOTTOM_ZONE_HEIGHT() RC_SwipeSetting(@"swipeBottomZoneHeight", 25)
+
+static CGFloat RC_BottomZoneShare(NSString *key) {
+    id value = g_triggerConfig[key];
+    double percent = [value isKindOfClass:[NSNumber class]] ? [value doubleValue] : 0;
+    return (percent >= 5 && percent <= 60) ? percent / 100.0 : 0.33;
+}
+
 static inline BOOL RC_InBottomRegion(CGPoint loc, UIInterfaceOrientation orientation, CGFloat S, CGFloat L) {
     (void)S; (void)L;
-    CGFloat threshold = 25.0;
+    CGFloat threshold = RC_BOTTOM_ZONE_HEIGHT();
     if (orientation == UIInterfaceOrientationPortrait) return (loc.y > L - threshold);
     if (orientation == UIInterfaceOrientationPortraitUpsideDown) return (loc.y < threshold);
     if (orientation == UIInterfaceOrientationLandscapeLeft) return (loc.x > S - threshold);  // home left: UI-bottom = device right
@@ -22197,8 +22225,10 @@ static inline NSString *RC_StatusHoldTriggerForProgress(CGFloat progress) {
 }
 
 static inline NSString *RC_BottomSwipeTriggerForProgress(CGFloat progress) {
-    if (progress < 0.33) return @"trigger_bottom_swipe_up_left";
-    if (progress > 0.67) return @"trigger_bottom_swipe_up_right";
+    CGFloat left = RC_BottomZoneShare(@"swipeBottomLeftZone"), right = RC_BottomZoneShare(@"swipeBottomRightZone");
+    if (left + right > 0.9) { CGFloat scale = 0.9 / (left + right); left *= scale; right *= scale; } // a center is always left
+    if (progress < left) return @"trigger_bottom_swipe_up_left";
+    if (progress > 1.0 - right) return @"trigger_bottom_swipe_up_right";
     return @"trigger_bottom_swipe_up_center";
 }
 
@@ -22228,24 +22258,6 @@ static inline void RC_UserDeltaForOrientation(CGFloat dx_phys, CGFloat dy_phys, 
 // Logical left/right edges follow the interface as the user sees it. In
 // landscape these are the short side edges: UI-left/UI-right = device
 // bottom/device top (or vice versa). y spans L here, x spans S.
-// Swipe Triggers (Advanced Settings): how far each kind of swipe trigger needs a swipe to go before
-// it runs, and how close to the side a side-edge swipe has to start, in points. A setting that
-// isn't there (or isn't a number in range) is the distance the triggers always used. Longer
-// distances and a narrower strip leave more room for the Home swipe and other tweaks' gestures
-// (#189). A trigger that also fires on lift does so a little sooner, at the same proportion as
-// before (40 of 50 for the status bar, 35 of 45 for the top and bottom).
-static CGFloat RC_SwipeSetting(NSString *key, CGFloat normal) {
-    id value = g_triggerConfig[key];
-    double number = [value isKindOfClass:[NSNumber class]] ? [value doubleValue] : 0;
-    return (number >= 5 && number <= 400) ? number : normal;
-}
-
-#define RC_EDGE_STRIP() RC_SwipeSetting(@"swipeEdgeStrip", 25)
-#define RC_EDGE_DISTANCE() RC_SwipeSetting(@"swipeEdgeDistance", 30)
-#define RC_STATUS_BAR_DISTANCE() RC_SwipeSetting(@"swipeStatusBarDistance", 50)
-#define RC_TOP_DOWN_DISTANCE() RC_SwipeSetting(@"swipeTopDownDistance", 45)
-#define RC_BOTTOM_BAR_DISTANCE() RC_SwipeSetting(@"swipeBottomBarDistance", 60)
-#define RC_BOTTOM_UP_DISTANCE() RC_SwipeSetting(@"swipeBottomUpDistance", 45)
 
 static inline void RC_EdgeZonesForLoc(CGPoint loc, UIInterfaceOrientation orientation, CGFloat S, CGFloat L, CGFloat edgeThreshold, CGFloat margin, BOOL *outNearLeft, BOOL *outNearRight, BOOL *outWithinBounds) {
     BOOL nearLeft = NO, nearRight = NO, within = NO;
