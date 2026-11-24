@@ -377,6 +377,9 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
         @{ @"title": @"Bottom Swipe Up", @"key": @"swipeBottomUpDistance", @"default": @45,
            @"message": @"How far a swipe up from the bottom goes before its trigger runs.",
            @"values": @[@30, @45, @60, @80, @100] },
+        @{ @"title": @"Status Bar Height", @"key": @"swipeStatusBarHeight", @"default": @25,
+           @"message": @"How close to the top a status bar tap, hold or swipe has to start. Phones with the Dynamic Island have a taller status bar, where 40 or more suits.",
+           @"values": @[@20, @25, @30, @35, @40, @45, @50] },
     ];
 }
 

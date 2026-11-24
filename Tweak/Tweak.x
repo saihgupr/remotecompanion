@@ -22004,9 +22004,14 @@ static inline void RC_ScreenSL(CGFloat *outS, CGFloat *outL) {
     if (outL) *outL = l;
 }
 
+static CGFloat RC_SwipeSetting(NSString *key, CGFloat normal);
+
+// The status bar strip: how close to the top a status bar gesture (tap, hold, swipe, top swipe
+// down) has to start. Swipe Triggers > Status Bar Height, 25 by default; phones with the Dynamic
+// Island have a taller status bar, where taps land 25-35 points down.
 static inline BOOL RC_InTopRegion(CGPoint loc, UIInterfaceOrientation orientation, CGFloat S, CGFloat L) {
     (void)S; (void)L;
-    CGFloat threshold = 25.0;
+    CGFloat threshold = RC_SwipeSetting(@"swipeStatusBarHeight", 25);
     if (orientation == UIInterfaceOrientationPortrait) return (loc.y < threshold);
     if (orientation == UIInterfaceOrientationPortraitUpsideDown) return (loc.y > L - threshold);
     if (orientation == UIInterfaceOrientationLandscapeLeft) return (loc.x < threshold);  // home left: UI-top = device left
