@@ -148,7 +148,7 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
     } else if (section == RCAdvancedSettingsSectionButtons) {
         return @"How long a press waits for the next one before it counts. A shorter time responds sooner and needs quicker presses.";
     } else if (section == RCAdvancedSettingsSectionSwipes) {
-        return @"How far a swipe goes before a swipe trigger runs, and how close to the side an edge swipe starts. Longer distances and a narrower strip leave more room for the Home swipe and other gestures.";
+        return @"How far a swipe goes before a swipe trigger runs, and where an edge or bottom swipe has to start. Longer distances and smaller zones leave more room for the Home swipe and other gestures.";
     } else if (section == RCAdvancedSettingsSectionSecurity) {
         return @"Lets scripts, terminals and other tools call the root helper directly. Any app on this device can then get root, so leave it off unless you need it.";
     } else if (section == RCAdvancedSettingsSectionDeveloper) {
@@ -273,7 +273,7 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
     } else if (indexPath.section == RCAdvancedSettingsSectionSwipes) {
         NSDictionary *row = [self swipeRows][indexPath.row];
         cell.textLabel.text = row[@"title"];
-        cell.detailTextLabel.text = [NSString stringWithFormat:@"%.0f pt", [cm swipeSettingForKey:row[@"key"] defaultValue:[row[@"default"] doubleValue]]];
+        cell.detailTextLabel.text = [NSString stringWithFormat:row[@"format"] ?: @"%.0f pt", [cm swipeSettingForKey:row[@"key"] defaultValue:[row[@"default"] doubleValue]]];
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     } else if (indexPath.section == RCAdvancedSettingsSectionSecurity) {
         cell.textLabel.text = @"Allow Direct Root Helper Calls";
@@ -316,7 +316,7 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
         NSString *key = row[@"key"];
         double defaultValue = [row[@"default"] doubleValue];
         [self chooseValueNamed:row[@"title"] message:row[@"message"] values:row[@"values"] defaultValue:defaultValue
-                       current:[cm swipeSettingForKey:key defaultValue:defaultValue] format:@"%.0f pt" from:[tableView cellForRowAtIndexPath:indexPath]
+                       current:[cm swipeSettingForKey:key defaultValue:defaultValue] format:row[@"format"] ?: @"%.0f pt" from:[tableView cellForRowAtIndexPath:indexPath]
                          apply:^(double value) { [cm setSwipeSetting:value forKey:key defaultValue:defaultValue]; }];
     }
 }
@@ -355,8 +355,8 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
     return rows;
 }
 
-// The Swipe Triggers rows: each a config key, its default (the distance the tweak always used) and
-// the values to pick from, in points
+// The Swipe Triggers rows: each a config key, its default (the size the tweak always used) and
+// the values to pick from, in points unless the row has its own format (the zone shares, in percent)
 - (NSArray<NSDictionary *> *)swipeRows {
     return @[
         @{ @"title": @"Edge Strip", @"key": @"swipeEdgeStrip", @"default": @25,
@@ -377,6 +377,15 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
         @{ @"title": @"Bottom Swipe Up", @"key": @"swipeBottomUpDistance", @"default": @45,
            @"message": @"How far a swipe up from the bottom goes before its trigger runs.",
            @"values": @[@30, @45, @60, @80, @100] },
+        @{ @"title": @"Bottom Zone Height", @"key": @"swipeBottomZoneHeight", @"default": @25,
+           @"message": @"How close to the bottom a bottom bar swipe or a bottom swipe up has to start.",
+           @"values": @[@15, @20, @25, @30, @40, @50] },
+        @{ @"title": @"Bottom Left Zone", @"key": @"swipeBottomLeftZone", @"default": @33, @"format": @"%.0f%%",
+           @"message": @"How much of the bottom edge, from the left, starts a Bottom Swipe Up (Left). The center zone has what the left and right zones leave.",
+           @"values": @[@15, @20, @25, @33, @40, @50] },
+        @{ @"title": @"Bottom Right Zone", @"key": @"swipeBottomRightZone", @"default": @33, @"format": @"%.0f%%",
+           @"message": @"How much of the bottom edge, from the right, starts a Bottom Swipe Up (Right). The center zone has what the left and right zones leave.",
+           @"values": @[@15, @20, @25, @33, @40, @50] },
     ];
 }
 

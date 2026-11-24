@@ -2619,7 +2619,7 @@
 
     <div class="action-list-header">Swipe Triggers</div>
     <div class="action-list-card" id="swipe-settings-card"></div>
-    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">How far a swipe goes before a swipe trigger runs, and how close to the side an edge swipe starts. Longer distances and a narrower strip leave more room for the Home swipe and other gestures.</div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">How far a swipe goes before a swipe trigger runs, and where an edge or bottom swipe has to start. Longer distances and smaller zones leave more room for the Home swipe and other gestures.</div>
     <div class="action-list-header">Buttons</div>
     <div class="action-list-card">
       <div class="settings-row">
@@ -9644,8 +9644,8 @@ function onApiTokenChange(val) {
   loadData();
 }
 
-// Swipe Triggers: each a config key, its default (the distance the tweak always used) and the
-// values to pick from, in points. The default removes the key, so the tweak keeps its own default.
+// Swipe Triggers: each a config key, its default (the size the tweak always used) and the
+// values to pick from, in points unless unit says percent (the bottom zones' shares). The default removes the key, so the tweak keeps its own default.
 const SWIPE_SETTINGS = [
   { key: 'swipeEdgeStrip', title: 'Edge Strip', def: 25, values: [15, 20, 25, 30, 35, 40] },
   { key: 'swipeEdgeDistance', title: 'Edge Swipe', def: 30, values: [20, 30, 40, 50, 60, 80] },
@@ -9653,6 +9653,9 @@ const SWIPE_SETTINGS = [
   { key: 'swipeTopDownDistance', title: 'Top Swipe Down', def: 45, values: [30, 45, 60, 80, 100] },
   { key: 'swipeBottomBarDistance', title: 'Bottom Bar Swipe', def: 60, values: [40, 60, 80, 100, 120] },
   { key: 'swipeBottomUpDistance', title: 'Bottom Swipe Up', def: 45, values: [30, 45, 60, 80, 100] },
+  { key: 'swipeBottomZoneHeight', title: 'Bottom Zone Height', def: 25, values: [15, 20, 25, 30, 40, 50] },
+  { key: 'swipeBottomLeftZone', title: 'Bottom Left Zone', def: 33, unit: '%', values: [15, 20, 25, 33, 40, 50] },
+  { key: 'swipeBottomRightZone', title: 'Bottom Right Zone', def: 33, unit: '%', values: [15, 20, 25, 33, 40, 50] },
 ];
 
 function renderSwipeSettings() {
@@ -9675,7 +9678,8 @@ function renderSwipeSettings() {
     values.forEach(v => {
       const option = document.createElement('option');
       option.value = String(v);
-      option.textContent = v === item.def ? `${v} pt (Default)` : `${v} pt`;
+      const shown = item.unit === '%' ? `${v}%` : `${v} pt`;
+      option.textContent = v === item.def ? `${shown} (Default)` : shown;
       if (v === current) option.selected = true;
       select.appendChild(option);
     });
