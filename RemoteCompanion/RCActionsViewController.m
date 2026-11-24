@@ -713,6 +713,7 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
         self.rcIconTile.frame = CGRectMake(tileX, rowHeight / 2.0 - RCActionCellIconTileSize / 2.0,
                                            RCActionCellIconTileSize, RCActionCellIconTileSize);
         CGFloat side = MIN(24.0, MAX(20.0, self.imageView.image.size.width));
+        self.imageView.contentMode = UIViewContentModeScaleAspectFit;
         CGRect imgFrame = self.imageView.frame;
         imgFrame.size.width = side;
         imgFrame.size.height = side;
@@ -4315,11 +4316,20 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 - (RCInlineRowItem *)inlineChoiceItemForCommand:(NSString *)command {
     NSDictionary *toggle = [[RCConfigManager sharedManager] toggleInfoForCommand:command];
     if (!toggle) return nil;
-    NSString *matchedPrefix = toggle[@"matchedPrefix"];
+    NSString *matchedPrefix = toggle[@"matchedPrefix"] ?: @"";
     NSArray *prefixes = toggle[@"prefixes"];
     NSString *canonicalPrefix = matchedPrefix.length ? matchedPrefix : (prefixes.firstObject ?: @"");
-    if (!canonicalPrefix.length || ![command hasPrefix:canonicalPrefix]) return nil;
-    NSString *rest = [[command substringFromIndex:canonicalPrefix.length] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    if (!canonicalPrefix.length) return nil;
+    NSString *rest = nil;
+    if (matchedPrefix.length) {
+        if (![command hasPrefix:matchedPrefix]) return nil;
+        rest = [[command substringFromIndex:matchedPrefix.length] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    } else {
+        // Exact matches like a bare "dance party" carry their current value separately; show the
+        // switch anyway, so an action added before its value was spelled out still gets the pill.
+        rest = toggle[@"currentSuffix"];
+    }
+    if (!rest.length) return nil;
     NSArray *suffixes = toggle[@"suffixes"];
     NSInteger index = NSNotFound;
     for (NSUInteger i = 0; i < suffixes.count; i++) {
