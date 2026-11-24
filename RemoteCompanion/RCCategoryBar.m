@@ -7,6 +7,11 @@
 // last scroll position, measured from the top of the content (0 = scrolled to the top)
 @property (nonatomic, assign) CGFloat revealed;
 @property (nonatomic, assign) CGFloat lastOffset;
+// The bar's space is added once the scroll view is on screen: an inset set in
+// viewDidLoad is ignored by the navigation bar, which leaves the large title
+// collapsed until the first scroll.
+@property (nonatomic, weak) UIScrollView *insetToApply;
+@property (nonatomic, assign) BOOL appliedInset;
 // The chips' titles and icons, to lay them out again when the number of lines changes
 @property (nonatomic, copy) NSArray *lastTitles;
 @property (nonatomic, copy) NSArray *lastIcons;
@@ -150,37 +155,54 @@
 }
 
 - (void)attachToScrollView:(UIScrollView *)tableView {
-    CGFloat height = [self height];
-    BOOL atTop = (tableView.contentOffset.y + tableView.adjustedContentInset.top) <= 0.5;
-    UIEdgeInsets inset = tableView.contentInset;
-    inset.top += height;
-    tableView.contentInset = inset;
-    // Growing the inset doesn't move the scroll position, which would leave the list
-    // "scrolled" 48pt into the new space, under the bar, until the first scroll
-    if (atTop) tableView.contentOffset = CGPointMake(tableView.contentOffset.x, -tableView.adjustedContentInset.top);
-    if (@available(iOS 13.0, *)) {
-        UIEdgeInsets indicators = tableView.verticalScrollIndicatorInsets;
-        indicators.top += height;
-        tableView.verticalScrollIndicatorInsets = indicators;
-    }
-    self.revealed = height;
+    self.insetToApply = tableView;
+    self.appliedInset = NO;
+    self.revealed = [self height];
     self.lastOffset = 0;
     [tableView addSubview:self];
     [self layoutInScrollView:tableView];
 }
 
 - (void)detachFromScrollView:(UIScrollView *)scrollView {
+    if (self.insetToApply == scrollView) self.insetToApply = nil;
     if (self.superview != scrollView) return;
-    CGFloat height = [self height];
-    UIEdgeInsets inset = scrollView.contentInset;
-    inset.top = MAX(0, inset.top - height);
-    scrollView.contentInset = inset;
-    if (@available(iOS 13.0, *)) {
-        UIEdgeInsets indicators = scrollView.verticalScrollIndicatorInsets;
-        indicators.top = MAX(0, indicators.top - height);
-        scrollView.verticalScrollIndicatorInsets = indicators;
+    if (self.appliedInset) {
+        CGFloat height = [self height];
+        UIEdgeInsets inset = scrollView.contentInset;
+        inset.top = MAX(0, inset.top - height);
+        scrollView.contentInset = inset;
+        if (@available(iOS 13.0, *)) {
+            UIEdgeInsets indicators = scrollView.verticalScrollIndicatorInsets;
+            indicators.top = MAX(0, indicators.top - height);
+            scrollView.verticalScrollIndicatorInsets = indicators;
+        }
+        self.appliedInset = NO;
     }
     [self removeFromSuperview];
+}
+
+// Adds the space the bar covers, now that the scroll view is in the window and
+// its safe area is known. Doing it here rather than as the bar is attached also
+// makes the navigation bar open the large title: an inset set before the scroll
+// view is on screen is ignored, so it started collapsed until the first scroll.
+- (void)applyInsetInScrollView:(UIScrollView *)scrollView {
+    if (self.insetToApply != scrollView || !scrollView.window) return;
+    self.insetToApply = nil;
+    self.appliedInset = YES;
+
+    CGFloat height = [self height];
+    BOOL atTop = (scrollView.contentOffset.y + scrollView.adjustedContentInset.top) <= 0.5;
+    UIEdgeInsets inset = scrollView.contentInset;
+    inset.top += height;
+    scrollView.contentInset = inset;
+    // Growing the inset doesn't move the scroll position, which would leave the list
+    // "scrolled" 48pt into the new space, under the bar, until the first scroll
+    if (atTop) scrollView.contentOffset = CGPointMake(scrollView.contentOffset.x, -scrollView.adjustedContentInset.top);
+    if (@available(iOS 13.0, *)) {
+        UIEdgeInsets indicators = scrollView.verticalScrollIndicatorInsets;
+        indicators.top += height;
+        scrollView.verticalScrollIndicatorInsets = indicators;
+    }
 }
 
 // Scroll position measured from the top of the content (0 = scrolled to the top)
@@ -207,6 +229,7 @@
 
 // Re-place the bar after a layout change, without treating the change as a scroll
 - (void)layoutInScrollView:(UIScrollView *)scrollView {
+    [self applyInsetInScrollView:scrollView];
     CGFloat offset = [self offsetInScrollView:scrollView];
     self.lastOffset = offset;
     if (offset <= 0) self.revealed = [self height];
