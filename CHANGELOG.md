@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [4.6.0] - 2026-11-29
 
 ### Added
 - **Airplane Mode triggers**: New Trigger > Device State adds Airplane Mode On and Airplane Mode Off, firing whenever Airplane Mode flips on or off from Control Center, Settings, Shortcuts, or `rc airplane`.

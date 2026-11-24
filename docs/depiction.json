@@ -80,6 +80,19 @@
       "views": [
         {
           "class": "DepictionHeaderView",
+          "title": "Version 4.6.0",
+          "useBoldText": true
+        },
+        {
+          "class": "DepictionSubheaderView",
+          "title": "Released November 29, 2026"
+        },
+        {
+          "class": "DepictionMarkdownView",
+          "markdown": "### Added\n* **Screen text**: Copy Text on Screen takes a dragged rectangle, Copy All Text on Screen takes every line, and Tap Text on Screen and Wait for Text find text where it appears. A Text on Screen condition works in If and Wait Until. Matching ignores case, and any text drawn in any app counts.\n* **Real touch gestures**: `gesture tap`, `hold`, `swipe`, `drag`, `swipe2`, `pinch` and `rotate` drive the touchscreen itself, plus `screen capture` and `screen settle`.\n* **MCP server for assistants**: `tools/rc-mcp` reads the screen, taps, swipes, types and runs RC commands over SSH, with a command index, one-call state, trigger and config control, sequence checks, deeplinks and debugging tools.\n* **Native Apple timers**: real Clock timers through MobileTimer.framework, synced with the Lock Screen, Control Center and Apple Watch, with pause, resume, stop, status and labels.\n* **Standard iOS notifications**: `notify` posts real notifications with a title, message, icon, buttons, Time Sensitive and Wait for Response, whether or not the app is running, and Notification Tap triggers.\n* **Control Center buttons**: up to four named buttons with icons, each running its own sequence. Needs CCSupport and iOS 17 or earlier.\n* **New triggers and actions**: Airplane Mode On and Off, Physical Orientation from the accelerometer, Set Orientation, and Action Sequence Edited with a debounce.\n* **Test Kit passcode Forever**: a passcode that never expires by time and survives a respring and a restart.\n\n### Changed\n* **Compact New Trigger menu**: tiles with the trigger icons, the category bar, and a check on types already added.\n* **Banner categories**: the Select Action category bar now sits in Settings > Banners too, with All and Enabled.\n* **Clear Notifications**: target any app, chosen apps, or add text filters inline or from a file.\n* **Tighter bar gesture zones**: 25pt from the edge instead of 50pt, with two-finger slides keeping their wider zone.\n* **New Trigger large title**: the picker opens with the same large title as the Triggers screen.\n\n### Fixed\n* Large title on the Triggers screen shows from launch and on the way back.\n* `openssh-client` and `sshpass` ship with the package, so SSH actions work right after install.\n* Notification rows save as just `notify \"Hi\"` without empty fields or a tap ID.\n* Wi-Fi off no longer fires the Wi-Fi Network disconnect trigger.\n* Cards redraw to the full width after rotating.\n* Notification permission is asked on first launch.\n* Long Clear Notifications lists are sent whole.\n* Backup screens carry a privacy warning.\n* Imported Keyboard Maestro actions show their macro names."
+        },
+        {
+          "class": "DepictionHeaderView",
           "title": "Version 4.5.0",
           "useBoldText": true
         },

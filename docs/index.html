@@ -79,7 +79,7 @@
                 <h1 class="hero-title">RemoteCompanion</h1>
                 <p class="hero-tagline">Scriptable system control, gesture automation, and desktop hub for modern jailbroken iOS.</p>
                 <div class="badge-group">
-                    <span class="compat-badge"><span class="badge-dot"></span> v4.5.0 Latest</span>
+                    <span class="compat-badge"><span class="badge-dot"></span> v4.6.0 Latest</span>
                     <span class="compat-badge">iOS 14 – 17 • Partial iOS 26</span>
                     <span class="compat-badge secondary">Rootless (Dopamine / Palera1n)</span>
                     <span class="compat-badge secondary">Rootful & RootHide</span>
@@ -152,7 +152,7 @@
                 </div>
                 <div class="meta-item">
                     <span class="meta-label">Latest Version</span>
-                    <span class="meta-value">4.5.0</span>
+                    <span class="meta-value">4.6.0</span>
                 </div>
                 <div class="meta-item">
                     <span class="meta-label">Architectures</span>
@@ -370,7 +370,7 @@
             <div class="changelog-header">
                 <div>
                     <div class="section-label">Release Notes</div>
-                    <h2 class="section-title">What's New in v4.4</h2>
+                    <h2 class="section-title">What's New in v4.6</h2>
                 </div>
                 <span class="version-badge">November 2026</span>
             </div>
@@ -378,62 +378,58 @@
             <div class="changelog-list">
                 <div class="changelog-item">
                     <span class="changelog-tag tag-new">New</span>
-                    <p class="changelog-text"><strong>New Triggers:</strong> Rotated to Landscape / Portrait, Find My Sound, Incoming Call / Call Started / Call Ended, Battery Level (1-100%), and Focus on / off for a chosen Focus or any Focus.</p>
+                    <p class="changelog-text"><strong>Screen text actions:</strong> Copy Text on Screen lets you drag a rectangle over any drawn words and copies the lines it touches, Copy All Text on Screen takes every line at once, and Tap Text on Screen and Wait for Text find a line where it appears. A Text on Screen condition works in If and Wait Until. Matching ignores case.</p>
                 </div>
                 <div class="changelog-item">
                     <span class="changelog-tag tag-new">New</span>
-                    <p class="changelog-text"><strong>Gesture Recorder:</strong> Settings → Gestures records taps, swipes and scrolls, plays back at 0.5x to 3x, with trim, re-record, replace, rename, export and import.</p>
+                    <p class="changelog-text"><strong>Real touch gestures:</strong> <code>gesture tap</code>, <code>hold</code>, <code>swipe</code>, <code>drag</code>, <code>swipe2</code>, <code>pinch</code> and <code>rotate</code> move the touchscreen itself, so apps that ignored the older simulated taps respond. New <code>screen capture</code> and <code>screen settle</code> commands take a JPEG and wait for the screen to stop changing.</p>
                 </div>
                 <div class="changelog-item">
                     <span class="changelog-tag tag-new">New</span>
-                    <p class="changelog-text"><strong>Loops and Waits:</strong> Repeat, Repeat While, Exit Repeat and Wait Until blocks, <code>{round}</code> inside a loop, and nesting with If blocks in either order.</p>
+                    <p class="changelog-text"><strong>MCP server for assistants:</strong> <code>tools/rc-mcp</code> reads the screen, taps, swipes, types and runs any RC command over SSH, with an offline command index, one-call state, full trigger and config control, sequence checks, deeplinks and debugging tools. Nothing is installed on the phone.</p>
                 </div>
                 <div class="changelog-item">
                     <span class="changelog-tag tag-new">New</span>
-                    <p class="changelog-text"><strong>Running &amp; History:</strong> See every trigger running now, stop one or all, follow a run step by step, and review past runs with the actions as they ran. Keep 0 to 50 runs per trigger, on iOS and in the Web UI.</p>
+                    <p class="changelog-text"><strong>Native Apple timers:</strong> the Timer action and <code>timer</code> command use MobileTimer.framework, so timers are real Clock timers that sync with the Lock Screen, Control Center and Apple Watch. Start a duration, then pause, resume, stop or read the status; labels work on iOS 17 and later.</p>
                 </div>
                 <div class="changelog-item">
                     <span class="changelog-tag tag-new">New</span>
-                    <p class="changelog-text"><strong>Faster Building:</strong> Compact tile layout with trigger icons, copy and paste for actions, search in the New Trigger screen, and a searchable Stop Trigger picker styled like the Triggers screen.</p>
+                    <p class="changelog-text"><strong>Standard iOS notifications:</strong> <code>notify</code> posts a real notification with a banner, a sound and a Notification Center entry, whether or not the app is running. The editor covers the title, message, a symbol or app icon, Time Sensitive, Remove After, up to four buttons and Wait for Response, and Notification Tap triggers run from a tap or a button.</p>
                 </div>
                 <div class="changelog-item">
                     <span class="changelog-tag tag-new">New</span>
-                    <p class="changelog-text"><strong>Variables:</strong> Set Variable action, <code>{name}</code> substitution in action text, a Variable condition, and a saved list in Settings → Advanced Settings → Variables.</p>
+                    <p class="changelog-text"><strong>Control Center buttons:</strong> up to four named buttons with SF Symbol icons, each running its own action sequence. They appear in Settings → Control Center as RemoteCompanion Button 1-4 and need CCSupport on iOS 17 or earlier.</p>
                 </div>
                 <div class="changelog-item">
                     <span class="changelog-tag tag-new">New</span>
-                    <p class="changelog-text"><strong>App Quick Action:</strong> Pick an app, then one of its registered shortcuts, read live from SpringBoard so the Home Screen menu never has to be opened first.</p>
+                    <p class="changelog-text"><strong>New triggers and actions:</strong> Airplane Mode On and Off, Physical Orientation (Portrait Up, Landscape Left, Landscape Right, Portrait Upside Down, read from the accelerometer), Set Orientation, and Action Sequence Edited with an optional debounce so a run of edits runs the sequence once.</p>
                 </div>
                 <div class="changelog-item">
                     <span class="changelog-tag tag-new">New</span>
-                    <p class="changelog-text"><strong>Excluded Apps:</strong> Settings → Advanced Settings → Options lists every trigger that has actions, grouped like the Triggers page, and sets the apps where each one stays quiet.</p>
+                    <p class="changelog-text"><strong>Test Kit passcode Forever:</strong> a passcode set to Forever never expires by time and survives a respring and a restart, until it is forgotten, replaced, or fails an unlock.</p>
                 </div>
                 <div class="changelog-item">
-                    <span class="changelog-tag tag-new">New</span>
-                    <p class="changelog-text"><strong>Toasts on the Lock Screen:</strong> Toasts show over the lock screen, wait for the next wake when the screen is off, and can wake the screen with the new Wake Screen switch.</p>
+                    <span class="changelog-tag tag-improved">Improved</span>
+                    <p class="changelog-text"><strong>Faster setup:</strong> a compact New Trigger menu with tiles and a category bar, banner categories, Clear Notifications for any app with pasted or inline text filters, the New Trigger large title, and tighter 25pt bar gesture zones.</p>
                 </div>
                 <div class="changelog-item">
-                    <span class="changelog-tag tag-improved">UI Refresh</span>
-                    <p class="changelog-text"><strong>Web UI Light Mode:</strong> The Web UI follows system appearance with a full light palette, and the Running sheet covers live runs and recent history.</p>
-                </div>
-                <div class="changelog-item">
-                    <span class="changelog-tag tag-fix">Security</span>
-                    <p class="changelog-text"><strong>API Token Gating:</strong> An optional token in Settings → Web UI → Access gates privileged <code>/api/command</code> calls such as <code>root</code>, <code>sudo</code> and <code>exec</code>.</p>
-                </div>
-                <div class="changelog-item">
-                    <span class="changelog-tag tag-new">New</span>
-                    <p class="changelog-text"><strong>Two-Finger Slides:</strong> Slide up from the bottom bar or down from the status bar with two fingers, each firing its own trigger, with distance-based firing, a widened landing zone and Control Center suppression.</p>
-                </div>
-                <div class="changelog-item">
-                    <span class="changelog-tag tag-improved">UI Refresh</span>
-                    <p class="changelog-text"><strong>Lock Scrolling During Gestures:</strong> An off-by-default toggle that keeps lists still while gesturing.</p>
+                    <span class="changelog-tag tag-fix">Fixed</span>
+                    <p class="changelog-text"><strong>Fixes:</strong> the large title on the Triggers screen, SSH tools ship with the package (<code>openssh-client</code> and <code>sshpass</code>), notification rows save cleanly, Wi-Fi off no longer fires its own disconnect trigger, cards redraw to full width after rotating, notification permission is asked on first launch, long Clear Notifications lists arrive whole, backups carry a privacy warning, and imported Keyboard Maestro actions show their macro names.</p>
                 </div>
             </div>
 
             <!-- Expandable Past Releases -->
             <details class="history-accordion">
-                <summary>View Previous Version History (v4.1.0 – v3.4.0)</summary>
+                <summary>View Previous Version History (v4.5.0 – v3.4.0)</summary>
                 <div class="history-content">
+                    <div class="changelog-item">
+                        <span class="changelog-tag tag-new">v4.5.0</span>
+                        <p class="changelog-text"><strong>Add-ons, full backup and Remote RC:</strong> JSON add-ons with validation and a Settings screen, one-file Export and Import for the whole configuration (<code>rc export</code> / <code>rc import</code>), <code>rc pull-backup</code>, a Triggers screen that starts empty with every trigger in the + menu, first-trigger onboarding, Remote RC actions on a second device, and duplicate actions including whole If and Repeat blocks.</p>
+                    </div>
+                    <div class="changelog-item">
+                        <span class="changelog-tag tag-new">v4.4.0</span>
+                        <p class="changelog-text"><strong>Triggers and building:</strong> Rotated to Landscape / Portrait, Find My Sound, Incoming Call / Call Started / Call Ended, Battery Level, Focus on/off, the Gesture Recorder, Loops and Waits, Running and Run History, compact layouts with trigger icons, a searchable Stop Trigger picker, App Quick Action, Excluded Apps, copy and paste for actions, Variables, two-finger slides, lock-screen toasts, Web UI light mode and API token gating.</p>
+                    </div>
                     <div class="changelog-item">
                         <span class="changelog-tag tag-new">v4.1.0</span>
                         <p class="changelog-text"><strong>Web UI Access Control, New Triggers & Retrigger Control:</strong> Any / Trusted / This iPhone Only access, CarPlay Connected/Disconnected, Ping iPhone from Apple Watch, Home Button (Hold) and Home + Power, Keep Default Action, When Triggered Again with Stop Trigger, Set Focus action, Button Triggers pause, Experimental NFC mode, Shortcuts without SpringCuts, and on-device Test Kit.</p>
