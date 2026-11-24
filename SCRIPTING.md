@@ -63,6 +63,7 @@ A sequence is a **JSON array** of actions. Each action is either:
 | `previous app` | Switch to previous app |
 | `kill current` | Force-close the currently focused app |
 | `open control center` | Open Control Center |
+| `open notification center` | Open Notification Center |
 | `screenshot` | Take a screenshot |
 | `camera photo 0.5x` | Open Camera in Photo mode (0.5x ultra-wide lens) |
 | `camera photo 2x` | Open Camera in Photo mode (2x telephoto zoom) |
@@ -78,6 +79,7 @@ A sequence is a **JSON array** of actions. Each action is either:
 | `haptic` | Trigger haptic feedback |
 | `siri` | Activate Siri |
 | `accessibility shortcut` | Run the Accessibility Shortcut |
+| `assistive touch [on|off|toggle|status]` | AssistiveTouch on-screen button |
 | `respring` | Respring (restart SpringBoard) |
 | `safemode` | Enter Safe Mode (restart SpringBoard with tweaks disabled) |
 | `ldrestart` | Soft reboot |
@@ -112,6 +114,9 @@ A sequence is a **JSON array** of actions. Each action is either:
 | Command | What it does |
 |---|---|
 | `flashlight toggle` | Toggle flashlight |
+| `flashlight <level>` | Set brightness: 0-100, `low`, `medium`, `high` or `max` |
+| `flashlight up [N]` / `down [N]` | Step brightness by N percent (default 25) |
+| `dance party [on|off]` | Run the torch with nearby music; bare toggles |
 | `rotate toggle` | Toggle rotation lock |
 | `orientation set <mode>` | Set screen orientation: `portrait`, `landscape left`, `landscape right`, `portrait upside down`, `auto` |
 | `vibration silent-toggle` | Toggle silent vibration |

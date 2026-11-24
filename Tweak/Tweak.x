@@ -2,7 +2,9 @@
 #import <Foundation/Foundation.h>
 #import "RCScreen.h"
 #import "RCDevAnnotate.h"
+#import "RCSpawn.h"
 #import <UIKit/UIKit.h>
+#import <CoreBluetooth/CoreBluetooth.h>
 #import <netinet/in.h>
 #import <sys/socket.h>
 #import <sys/un.h>
@@ -994,6 +996,53 @@ static BOOL get_dnd_state() {
         return (assertion != nil);
     }
     return NO;
+}
+
+// AssistiveTouch: the on-screen button under Settings > Accessibility > Touch. AXSettings holds
+// the preference Settings and Siri write, so its getter is the state; the Accessibility Shortcut's
+// own helper is what starts and stops the button.
+static Class rc_axsettings_class(void) {
+    static Class cls = Nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        dlopen("/System/Library/PrivateFrameworks/AccessibilityUtilities.framework/AccessibilityUtilities", RTLD_NOW);
+        cls = objc_getClass("AXSettings");
+    });
+    return cls;
+}
+
+static id rc_axsettings_shared(void) {
+    Class cls = rc_axsettings_class();
+    if (!cls || ![cls respondsToSelector:@selector(sharedInstance)]) return nil;
+    return ((id (*)(id, SEL))objc_msgSend)(cls, @selector(sharedInstance));
+}
+
+static BOOL rc_assistive_touch_is_on(void) {
+    id settings = rc_axsettings_shared();
+    if (settings && [settings respondsToSelector:@selector(assistiveTouchEnabled)]) {
+        return ((BOOL (*)(id, SEL))objc_msgSend)(settings, @selector(assistiveTouchEnabled));
+    }
+    return UIAccessibilityIsAssistiveTouchRunning();
+}
+
+// AXTripleClickHelpers is what the Accessibility Shortcut itself uses. It starts and stops the
+// AssistiveTouch scene, which writing the preference alone does not do (the daemon starts but the
+// button never appears). It only toggles, so the state is checked first.
+static BOOL rc_assistive_touch_set(BOOL on) {
+    if (rc_assistive_touch_is_on() == on) return YES;
+    Class helper = objc_getClass("AXTripleClickHelpers");
+    if (!helper) {
+        rc_axsettings_class();
+        helper = objc_getClass("AXTripleClickHelpers");
+    }
+    if (helper && [helper respondsToSelector:@selector(_toggleAssistiveTouch)]) {
+        ((void (*)(id, SEL))objc_msgSend)(helper, @selector(_toggleAssistiveTouch));
+        return YES;
+    }
+    id settings = rc_axsettings_shared();
+    if (!settings || ![settings respondsToSelector:@selector(setAssistiveTouchEnabled:)]) return NO;
+    ((void (*)(id, SEL, BOOL))objc_msgSend)(settings, @selector(setAssistiveTouchEnabled:), on);
+    return YES;
 }
 
 #pragma mark - Focus (iOS 15+)
@@ -2503,6 +2552,9 @@ static NSString *get_human_name_for_trigger(NSString *key, NSDictionary *trigger
             @"trigger_bottom_swipe_up_left": @"Bottom Swipe Up (Left)",
             @"trigger_bottom_swipe_up_center": @"Bottom Swipe Up (Center)",
             @"trigger_bottom_swipe_up_right": @"Bottom Swipe Up (Right)",
+            @"trigger_bottom_swipe_down_left": @"Bottom Swipe Down (Left)",
+            @"trigger_bottom_swipe_down_center": @"Bottom Swipe Down (Center)",
+            @"trigger_bottom_swipe_down_right": @"Bottom Swipe Down (Right)",
             @"trigger_statusbar_two_finger_swipe_down": @"2-Finger Top Slide Down",
             @"trigger_bottom_two_finger_swipe_up": @"2-Finger Bottom Slide Up",
             @"trigger_device_airplane_on": @"Airplane Mode On",
@@ -3019,6 +3071,443 @@ static void update_simulation_observers();
 
 static float get_flash_brightness() {
     return 1.0f;
+}
+
+static void rc_dispatch_sync_main_safe(dispatch_block_t block);
+
+// The flashlight is iOS's own flashlight controller, the one Siri, Control Center and the lock
+// screen button use. RemoteCompanion used to drive the torch through its own camera handle
+// instead, which couldn't see a light turned on with Siri or Control Center: a toggle then turned
+// it "on" and took the torch over (a quick off and on), and while RemoteCompanion held it Siri and
+// Control Center couldn't turn it off. The camera handle is left only to release a torch it holds
+// and for a system without the controller.
+static id rc_system_flashlight(void) {
+    Class c = objc_getClass("SBUIFlashlightController");
+    return [c respondsToSelector:@selector(sharedInstance)] ? [c performSelector:@selector(sharedInstance)] : nil;
+}
+
+static BOOL rc_flashlight_is_on(void) {
+    __block BOOL on = NO;
+    rc_dispatch_sync_main_safe(^{
+        id flashlight = rc_system_flashlight();
+        if ([flashlight respondsToSelector:@selector(level)]) on = ((unsigned long long (*)(id, SEL))objc_msgSend)(flashlight, @selector(level)) > 0;
+        if (!on) on = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo].torchMode == AVCaptureTorchModeOn;
+    });
+    return on;
+}
+
+// The controller's level getter is a stored detent that _setFlashlightLevel: never moves, and
+// AVFoundation can't see a torch the controller holds. Remember the level this process set, so
+// "status" and "up"/"down" can report and step from it. A torch turned on elsewhere has no known
+// level, and status says just ON rather than inventing one.
+static float g_rc_flashlight_level = 0;
+
+// level 0 turns it off; 0.01-1 is the brightness. NO when there's no flashlight to use.
+static BOOL rc_flashlight_set(float level) {
+    __block BOOL done = NO;
+    rc_dispatch_sync_main_safe(^{
+        AVCaptureDevice *device = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
+        // A torch this handle holds (from an older build, or the fallback below) is let go first,
+        // or iOS's controller can't use it
+        if (device.hasTorch && device.torchMode != AVCaptureTorchModeOff && [device lockForConfiguration:nil]) {
+            [device setTorchMode:AVCaptureTorchModeOff];
+            [device unlockForConfiguration];
+            if (level <= 0) done = YES;
+        }
+        id flashlight = rc_system_flashlight();
+        if ([flashlight respondsToSelector:@selector(setLevel:)]) {
+            if (level <= 0) {
+                ((void (*)(id, SEL, unsigned long long))objc_msgSend)(flashlight, @selector(setLevel:), 0ULL);
+            } else if ([flashlight respondsToSelector:@selector(_setFlashlightLevel:)]) {
+                ((void (*)(id, SEL, float))objc_msgSend)(flashlight, @selector(_setFlashlightLevel:), MIN(1.0f, level));
+            } else {
+                // Its four brightness steps
+                unsigned long long step = (unsigned long long)MAX(1L, MIN(4L, lroundf(level * 4.0f)));
+                ((void (*)(id, SEL, unsigned long long))objc_msgSend)(flashlight, @selector(setLevel:), step);
+            }
+            done = YES;
+            return;
+        }
+        if (level > 0 && device.hasTorch && [device lockForConfiguration:nil]) {
+            [device setTorchModeOnWithLevel:MIN(1.0f, level) error:nil];
+            [device unlockForConfiguration];
+            done = YES;
+        }
+    });
+    if (done) g_rc_flashlight_level = (level <= 0) ? 0 : MIN(1.0f, level);
+    return done;
+}
+
+// The level this process last set, 0 when it is off or was turned on elsewhere.
+static float rc_flashlight_known_level(void) {
+    return MAX(0.0f, MIN(1.0f, g_rc_flashlight_level));
+}
+
+// Named brightness levels. The four match the steps iOS's flashlight slider snaps to, so "low"
+// is the same amount a person gets by dragging it a quarter of the way up.
+static BOOL rc_flashlight_named_level(NSString *word, float *level) {
+    NSDictionary<NSString *, NSNumber *> *levels = @{
+        @"low": @0.25f, @"medium": @0.5f, @"med": @0.5f, @"high": @0.75f,
+        @"max": @1.0f, @"full": @1.0f, @"min": @0.01f, @"dim": @0.01f,
+    };
+    NSNumber *value = [levels objectForKey:word];
+    if (!value) return NO;
+    if (level) *level = value.floatValue;
+    return YES;
+}
+
+// A level is a percentage (50, 50%), a fraction (0.5) or one of the named levels.
+static BOOL rc_flashlight_parse_level(NSString *text, float *level) {
+    NSString *word = [text lowercaseString];
+    if (rc_flashlight_named_level(word, level)) return YES;
+    NSString *number = [word stringByReplacingOccurrencesOfString:@"%" withString:@""];
+    NSScanner *scanner = [NSScanner scannerWithString:number];
+    double parsed = 0;
+    if (![scanner scanDouble:&parsed] || !scanner.isAtEnd || parsed < 0) return NO;
+    float value = (float)parsed;
+    if (value > 1.0f) value /= 100.0f; // 50 means 50%, 0.5 already is one
+    if (value > 1.0f) value = 1.0f;
+    if (level) *level = value;
+    return YES;
+}
+
+static NSString *rc_flashlight_usage(void) {
+    return @"Usage: flashlight [on [low|medium|high|max|<0-100>]|off|toggle|status|low|medium|high|max|up|down [N]]\n";
+}
+
+static NSString *rc_flashlight_status_text(void) {
+    if (!rc_flashlight_is_on()) return @"Flashlight OFF\n";
+    float level = rc_flashlight_known_level();
+    if (level <= 0) return @"Flashlight ON\n";
+    return [NSString stringWithFormat:@"Flashlight ON (%.0f%%)\n", level * 100];
+}
+
+// Dance party: rc-party listens through the microphone and prints a torch level about 30 times a
+// second; this side turns that into brightness. The helper owns the microphone because a signed
+// tool can carry the TCC entitlement, where SpringBoard cannot record.
+static BOOL g_rcPartyOn = NO;
+static pid_t g_rcPartyPid = -1;
+static int g_rcPartyInFd = -1;
+static NSString *g_rcPartyStyle = @"pump";
+static int g_rcPartySensitivity = 5;
+static int g_rcPartyCap = 85;
+static int g_rcPartyTimeout = 15;
+static NSUInteger g_rcPartyGeneration = 0;
+static dispatch_source_t g_rcPartyHeatTimer = nil;
+
+static void rc_party_move_fd(int *fd) {
+    if (!fd || *fd < 0 || *fd > STDERR_FILENO) return;
+    int moved = fcntl(*fd, F_DUPFD_CLOEXEC, 3);
+    if (moved >= 0) {
+        close(*fd);
+        *fd = moved;
+    }
+}
+
+static void rc_party_stop(void) {
+    g_rcPartyOn = NO;
+    g_rcPartyGeneration++;
+    if (g_rcPartyHeatTimer) {
+        dispatch_source_cancel(g_rcPartyHeatTimer);
+        g_rcPartyHeatTimer = nil;
+    }
+    int fd = g_rcPartyInFd;
+    g_rcPartyInFd = -1;
+    pid_t pid = g_rcPartyPid;
+    g_rcPartyPid = -1;
+    if (fd >= 0) {
+        write(fd, "stop\n", 5);
+        close(fd);
+    }
+    if (pid > 0) kill(pid, SIGTERM);
+    rc_flashlight_set(0);
+}
+
+static void rc_party_handle_event(NSDictionary *event, NSUInteger generation) {
+    if (generation != g_rcPartyGeneration || !g_rcPartyOn) return;
+    NSString *type = [event[@"type"] description] ?: @"";
+    if ([type isEqualToString:@"level"]) {
+        float level = [event[@"v"] floatValue];
+        rc_flashlight_set(MAX(0.0f, MIN(1.0f, level)));
+        return;
+    }
+    if ([type isEqualToString:@"ended"] || [type isEqualToString:@"error"]) {
+        SRLog(@"Dance party ended (%@): %@", type, event[@"reason"] ?: event[@"message"] ?: @"");
+        rc_party_stop();
+    }
+}
+
+static NSString *rc_party_start(NSString *style) {
+    rc_party_stop();
+    NSString *tool = rc_tool_path(@"rc-party");
+    if (!tool) return @"Error: rc-party is not installed\n";
+
+    int inPipe[2] = { -1, -1 };
+    int outPipe[2] = { -1, -1 };
+    if (pipe(inPipe) != 0 || pipe(outPipe) != 0) {
+        if (inPipe[0] >= 0) { close(inPipe[0]); close(inPipe[1]); }
+        if (outPipe[0] >= 0) { close(outPipe[0]); close(outPipe[1]); }
+        return @"Error: Could not start the dance party\n";
+    }
+    int devNull = open("/dev/null", O_WRONLY);
+    rc_party_move_fd(&inPipe[0]);
+    rc_party_move_fd(&inPipe[1]);
+    rc_party_move_fd(&outPipe[0]);
+    rc_party_move_fd(&outPipe[1]);
+    if (devNull >= 0) rc_party_move_fd(&devNull);
+
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+    posix_spawn_file_actions_adddup2(&actions, inPipe[0], STDIN_FILENO);
+    posix_spawn_file_actions_adddup2(&actions, outPipe[1], STDOUT_FILENO);
+    if (devNull >= 0) {
+        posix_spawn_file_actions_adddup2(&actions, devNull, STDERR_FILENO);
+        if (devNull > STDERR_FILENO) posix_spawn_file_actions_addclose(&actions, devNull);
+    }
+    if (inPipe[0] > STDERR_FILENO) posix_spawn_file_actions_addclose(&actions, inPipe[0]);
+    if (inPipe[1] > STDERR_FILENO) posix_spawn_file_actions_addclose(&actions, inPipe[1]);
+    if (outPipe[0] > STDERR_FILENO) posix_spawn_file_actions_addclose(&actions, outPipe[0]);
+    if (outPipe[1] > STDERR_FILENO) posix_spawn_file_actions_addclose(&actions, outPipe[1]);
+
+    NSString *sensitivity = [NSString stringWithFormat:@"%d", g_rcPartySensitivity];
+    NSString *cap = [NSString stringWithFormat:@"%d", g_rcPartyCap];
+    NSString *timeout = [NSString stringWithFormat:@"%d", g_rcPartyTimeout];
+    char *args[] = {
+        (char *)tool.fileSystemRepresentation,
+        (char *)"--style", (char *)style.UTF8String,
+        (char *)"--sensitivity", (char *)sensitivity.UTF8String,
+        (char *)"--cap", (char *)cap.UTF8String,
+        (char *)"--timeout", (char *)timeout.UTF8String,
+        NULL
+    };
+    pid_t pid = -1;
+    int spawnError = posix_spawn(&pid, args[0], &actions, NULL, args, environ);
+    posix_spawn_file_actions_destroy(&actions);
+    if (devNull >= 0) close(devNull);
+    close(inPipe[0]);
+    close(outPipe[1]);
+    if (spawnError != 0 || pid <= 0) {
+        close(inPipe[1]);
+        close(outPipe[0]);
+        return @"Error: Could not start the dance party\n";
+    }
+#ifdef F_SETNOSIGPIPE
+    fcntl(inPipe[1], F_SETNOSIGPIPE, 1);
+#endif
+
+    g_rcPartyGeneration++;
+    NSUInteger generation = g_rcPartyGeneration;
+    g_rcPartyOn = YES;
+    g_rcPartyPid = pid;
+    g_rcPartyInFd = inPipe[1];
+    g_rcPartyStyle = [style copy];
+
+    int readFd = outPipe[0];
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSMutableData *buffer = [NSMutableData data];
+        char chunk[2048];
+        while (true) {
+            ssize_t n = read(readFd, chunk, sizeof(chunk));
+            if (n < 0 && errno == EINTR) continue;
+            if (n <= 0) break;
+            [buffer appendBytes:chunk length:(NSUInteger)n];
+            while (true) {
+                const uint8_t *bytes = buffer.bytes;
+                NSUInteger length = buffer.length, newline = NSNotFound;
+                for (NSUInteger i = 0; i < length; i++) {
+                    if (bytes[i] == '\n') { newline = i; break; }
+                }
+                if (newline == NSNotFound) break;
+                NSData *line = [buffer subdataWithRange:NSMakeRange(0, newline)];
+                [buffer replaceBytesInRange:NSMakeRange(0, newline + 1) withBytes:NULL length:0];
+                if (line.length == 0) continue;
+                id parsed = [NSJSONSerialization JSONObjectWithData:line options:0 error:nil];
+                if (![parsed isKindOfClass:[NSDictionary class]]) continue;
+                NSDictionary *event = parsed;
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    rc_party_handle_event(event, generation);
+                });
+            }
+        }
+        close(readFd);
+        int status = 0;
+        waitpid(pid, &status, 0);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (generation != g_rcPartyGeneration) return;
+            g_rcPartyOn = NO;
+            g_rcPartyPid = -1;
+            if (g_rcPartyInFd >= 0) { close(g_rcPartyInFd); g_rcPartyInFd = -1; }
+            if (g_rcPartyHeatTimer) { dispatch_source_cancel(g_rcPartyHeatTimer); g_rcPartyHeatTimer = nil; }
+            rc_flashlight_set(0);
+        });
+    });
+
+    dispatch_source_t heat = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
+    dispatch_source_set_timer(heat, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC), 5 * NSEC_PER_SEC, NSEC_PER_SEC);
+    dispatch_source_set_event_handler(heat, ^{
+        if (!g_rcPartyOn) return;
+        id flashlight = rc_system_flashlight();
+        BOOL overheated = [flashlight respondsToSelector:@selector(isOverheated)] &&
+            ((BOOL (*)(id, SEL))objc_msgSend)(flashlight, @selector(isOverheated));
+        if (overheated) {
+            SRLog(@"Dance party stopped: the flashlight is overheated");
+            rc_party_stop();
+        }
+    });
+    g_rcPartyHeatTimer = heat;
+    dispatch_resume(heat);
+
+    return [NSString stringWithFormat:@"Dance party ON (%@)\n", style];
+}
+
+static NSString *rc_party_status_text(void) {
+    if (!g_rcPartyOn) return @"Dance party OFF\n";
+    float level = rc_flashlight_known_level();
+    return [NSString stringWithFormat:@"Dance party ON (%@, %.0f%%)\n", g_rcPartyStyle, level * 100];
+}
+
+static NSString *rc_party_command(NSString *argument) {
+    NSString *word = [argument stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]].lowercaseString;
+    if (word.length == 0) {
+        if (g_rcPartyOn) {
+            rc_party_stop();
+            return @"Dance party OFF\n";
+        }
+        return rc_party_start(g_rcPartyStyle);
+    }
+    if ([word isEqualToString:@"stop"]) {
+        if (g_rcPartyOn) rc_party_stop();
+        return @"Dance party OFF\n";
+    }
+    if ([word isEqualToString:@"status"]) return rc_party_status_text();
+    if ([word isEqualToString:@"pump"] || [word isEqualToString:@"beat"]) {
+        return rc_party_start(word);
+    }
+    NSArray<NSString *> *parts = [word componentsSeparatedByString:@" "];
+    if (parts.count == 2) {
+        int value = parts[1].intValue;
+        if ([parts[0] isEqualToString:@"sensitivity"] && value >= 1 && value <= 10) {
+            g_rcPartySensitivity = value;
+            if (g_rcPartyOn) return rc_party_start(g_rcPartyStyle);
+            return [NSString stringWithFormat:@"Dance party sensitivity %d\n", value];
+        }
+        if ([parts[0] isEqualToString:@"cap"] && value >= 10 && value <= 100) {
+            g_rcPartyCap = value;
+            if (g_rcPartyOn) return rc_party_start(g_rcPartyStyle);
+            return [NSString stringWithFormat:@"Dance party cap %d%%\n", value];
+        }
+        if ([parts[0] isEqualToString:@"timeout"] && value >= 1 && value <= 60) {
+            g_rcPartyTimeout = value;
+            if (g_rcPartyOn) return rc_party_start(g_rcPartyStyle);
+            return [NSString stringWithFormat:@"Dance party timeout %d min\n", value];
+        }
+    }
+    return @"Usage: flashlight party [pump|beat|stop|status|sensitivity 1-10|cap 10-100|timeout 1-60]\n";
+}
+
+// The public face of the party: one command, pump style, on or off. The style and tuning words
+// on "flashlight party" stay for anyone who goes looking, but the help and README do not mention
+// them.
+static NSString *rc_dance_party_start(void) {
+    NSString *result = rc_party_start(@"pump");
+    return [result hasPrefix:@"Error:"] ? result : @"Dance party ON\n";
+}
+
+static NSString *rc_dance_party_command(NSString *argument) {
+    NSString *word = [argument stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]].lowercaseString;
+    if (word.length == 0) {
+        if (g_rcPartyOn) {
+            rc_party_stop();
+            return @"Dance party OFF\n";
+        }
+        return rc_dance_party_start();
+    }
+    if ([word isEqualToString:@"on"] || [word isEqualToString:@"start"]) {
+        return rc_dance_party_start();
+    }
+    if ([word isEqualToString:@"toggle"]) {
+        if (g_rcPartyOn) {
+            rc_party_stop();
+            return @"Dance party OFF\n";
+        }
+        return rc_dance_party_start();
+    }
+    if ([word isEqualToString:@"off"] || [word isEqualToString:@"stop"]) {
+        if (g_rcPartyOn) rc_party_stop();
+        return @"Dance party OFF\n";
+    }
+    if ([word isEqualToString:@"status"]) return g_rcPartyOn ? @"Dance party ON\n" : @"Dance party OFF\n";
+    return @"Usage: dance party [on|off|status]\n";
+}
+
+// flashlight, torch and flash all come here: on [level], off, toggle, status, a named level,
+// up/down [N] to step, or a bare level. Bare "flashlight" toggles.
+static NSString *rc_handle_flashlight_command(NSString *cmd) {
+    NSString *arg = @"";
+    NSRange space = [cmd rangeOfString:@" "];
+    if (space.location != NSNotFound) {
+        arg = [[cmd substringFromIndex:space.location + 1] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    }
+    NSString *verb = [arg lowercaseString];
+    NSString *value = @"";
+    NSRange valueSpace = [arg rangeOfString:@" "];
+    if (valueSpace.location != NSNotFound) {
+        verb = [[arg substringToIndex:valueSpace.location] lowercaseString];
+        value = [[arg substringFromIndex:valueSpace.location + 1] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    }
+
+    if ([verb isEqualToString:@"party"]) return rc_party_command(value);
+    // Any other flashlight command takes the torch back from the party.
+    if (g_rcPartyOn && ![verb isEqualToString:@"status"]) rc_party_stop();
+
+    if (verb.length == 0 || [verb isEqualToString:@"toggle"]) {
+        BOOL wasOn = rc_flashlight_is_on();
+        SRLog(@"Toggling flashlight (was %@)", wasOn ? @"on" : @"off");
+        if (!rc_flashlight_set(wasOn ? 0 : get_flash_brightness())) return @"Error: Flashlight not available\n";
+        return wasOn ? @"Flashlight OFF\n" : @"Flashlight ON\n";
+    }
+    if ([verb isEqualToString:@"off"]) {
+        if (!rc_flashlight_set(0)) return @"Error: Flashlight not available\n";
+        return @"Flashlight OFF\n";
+    }
+    if ([verb isEqualToString:@"status"]) return rc_flashlight_status_text();
+    if ([verb isEqualToString:@"on"]) {
+        float level = get_flash_brightness();
+        if (value.length > 0 && !rc_flashlight_parse_level(value, &level)) return rc_flashlight_usage();
+        if (level < 0.01f) level = 0.01f; // "on 0" is still an on
+        if (level > 1.0f) level = 1.0f;
+        SRLog(@"Flashlight ON at level: %f", level);
+        if (!rc_flashlight_set(level)) return @"Error: Flashlight not available\n";
+        return [NSString stringWithFormat:@"Flashlight ON (%.0f%%)\n", level * 100];
+    }
+    if ([verb isEqualToString:@"up"] || [verb isEqualToString:@"down"]) {
+        float amount = 0.25f;
+        if (value.length > 0 && !rc_flashlight_parse_level(value, &amount)) return rc_flashlight_usage();
+        BOOL on = rc_flashlight_is_on();
+        float current = on ? rc_flashlight_known_level() : 0;
+        if (on && current <= 0) current = 0.5f; // on from Control Center: start from the middle
+        float level = [verb isEqualToString:@"up"] ? current + amount : current - amount;
+        if (level <= 0) {
+            if (!rc_flashlight_set(0)) return @"Error: Flashlight not available\n";
+            return @"Flashlight OFF\n";
+        }
+        level = MAX(0.01f, MIN(1.0f, level));
+        if (!rc_flashlight_set(level)) return @"Error: Flashlight not available\n";
+        return [NSString stringWithFormat:@"Flashlight set to %.0f%%\n", level * 100];
+    }
+    if (value.length == 0) {
+        float level = 0;
+        if (rc_flashlight_parse_level(verb, &level)) {
+            if (level <= 0) {
+                if (!rc_flashlight_set(0)) return @"Error: Flashlight not available\n";
+                return @"Flashlight OFF\n";
+            }
+            level = MAX(0.01f, MIN(1.0f, level));
+            if (!rc_flashlight_set(level)) return @"Error: Flashlight not available\n";
+            return [NSString stringWithFormat:@"Flashlight set to %.0f%%\n", level * 100];
+        }
+    }
+    return rc_flashlight_usage();
 }
 
 // Forward declarations for gesture management functions
@@ -4313,6 +4802,25 @@ static BOOL rc_is_current_time_in_range(NSString *rangeString) {
 }
 
 static void rc_dispatch_sync_main_safe(dispatch_block_t block);
+static BOOL rc_device_locked(SBLockScreenManager *lsm);
+
+// Control Center showing, over the home screen, an app or the lock screen. Main thread.
+static BOOL rc_control_center_open(void) {
+    for (id controlCenter in @[rc_shared_instance("SBControlCenterController") ?: [NSNull null], rc_control_center_presenter() ?: [NSNull null]]) {
+        if ([controlCenter respondsToSelector:@selector(isVisible)] && ((BOOL (*)(id, SEL))objc_msgSend)(controlCenter, @selector(isVisible))) return YES;
+    }
+    return NO;
+}
+
+// Notification Center showing: the cover sheet pulled down over the unlocked phone. While the
+// phone is locked the cover sheet is the lock screen, so that counts as closed. Main thread.
+static BOOL rc_notification_center_open(void) {
+    SBLockScreenManager *lockScreen = [objc_getClass("SBLockScreenManager") sharedInstance];
+    if ([lockScreen respondsToSelector:@selector(isUILocked)] && rc_device_locked(lockScreen)) return NO;
+    Class coverSheetClass = objc_getClass("SBCoverSheetPresentationManager");
+    id coverSheet = [coverSheetClass respondsToSelector:@selector(sharedInstance)] ? [coverSheetClass performSelector:@selector(sharedInstance)] : nil;
+    return [coverSheet respondsToSelector:@selector(isVisible)] && ((BOOL (*)(id, SEL))objc_msgSend)(coverSheet, @selector(isVisible));
+}
 
 // "ABOVE 20" / "BELOW 80" against a 0-100 level
 static BOOL rc_threshold_matches(NSString *expected, float level) {
@@ -4354,8 +4862,7 @@ static BOOL rc_condition_direct_match(NSString *key, NSString *expected, BOOL *h
     } else if ([key isEqualToString:@"lpm"]) {
         actual = [[NSProcessInfo processInfo] isLowPowerModeEnabled] ? @"ON" : @"OFF";
     } else if ([key isEqualToString:@"flashlight"]) {
-        AVCaptureDevice *device = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
-        actual = (device.torchMode == AVCaptureTorchModeOn) ? @"ON" : @"OFF";
+        actual = rc_flashlight_is_on() ? @"ON" : @"OFF";
     } else if ([key isEqualToString:@"carplay"]) {
         actual = rc_carplay_connected() ? @"CONNECTED" : @"NOT_CONNECTED";
     } else if ([key isEqualToString:@"watch"]) {
@@ -4403,7 +4910,7 @@ static BOOL rc_condition_direct_match(NSString *key, NSString *expected, BOOL *h
             if ([device connected] && [rc_normalized_name([device name]) isEqualToString:rc_normalized_name(expected)]) return YES;
         }
         return NO;
-    } else if ([@[@"ringer", @"rotation_lock", @"appearance", @"screen", @"wifi_network"] containsObject:key]) {
+    } else if ([@[@"ringer", @"rotation_lock", @"appearance", @"screen", @"wifi_network", @"control_center", @"notification_center"] containsObject:key]) {
         // SpringBoard UI state - read on the main thread
         rc_dispatch_sync_main_safe(^{
             if ([key isEqualToString:@"ringer"]) {
@@ -4417,6 +4924,10 @@ static BOOL rc_condition_direct_match(NSString *key, NSString *expected, BOOL *h
                 actual = [[objc_getClass("SBBacklightController") sharedInstance] screenIsOn] ? @"ON" : @"OFF";
             } else if ([key isEqualToString:@"wifi_network"]) {
                 actual = [[objc_getClass("SBWiFiManager") sharedInstance] currentNetworkName];
+            } else if ([key isEqualToString:@"control_center"]) {
+                actual = rc_control_center_open() ? @"OPEN" : @"CLOSED";
+            } else if ([key isEqualToString:@"notification_center"]) {
+                actual = rc_notification_center_open() ? @"OPEN" : @"CLOSED";
             }
         });
         if ([key isEqualToString:@"wifi_network"]) {
@@ -4869,8 +5380,7 @@ static NSString *rc_banner_read_state(NSString *key, NSString *statusCmd, NSStri
         return [[NSProcessInfo processInfo] isLowPowerModeEnabled] ? @"On" : @"Off";
     }
     if ([key isEqualToString:@"flashlight"]) {
-        AVCaptureDevice *device = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
-        return (device.torchMode == AVCaptureTorchModeOn) ? @"On" : @"Off";
+        return rc_flashlight_is_on() ? @"On" : @"Off";
     }
     if ([key isEqualToString:@"appearance"]) {
         __block BOOL dark = NO;
@@ -4912,6 +5422,7 @@ static void rc_banner_show_toggle_state(NSString *cmd, NSString *title, NSString
             @{ @"key": @"airplane", @"prefixes": @[@"airplane "], @"status": @"airplane status" },
             @{ @"key": @"lpm", @"prefixes": @[@"low power mode ", @"low power ", @"lpm "] },
             @{ @"key": @"dnd", @"prefixes": @[@"dnd "], @"status": @"dnd status" },
+            @{ @"key": @"assistivetouch", @"prefixes": @[@"assistive touch ", @"assistive-touch ", @"assistivetouch "], @"status": @"assistive touch status" },
             @{ @"key": @"location", @"prefixes": @[@"location services ", @"locationservices ", @"location ", @"gps "], @"status": @"location status" },
             @{ @"key": @"rotate", @"prefixes": @[@"rotate "] },
             @{ @"key": @"appearance", @"prefixes": @[@"appearance "] },
@@ -11648,12 +12159,16 @@ static NSArray *RCCommandHelpSections(void) {
             @[@"button <name>", @"power, lock, home, volup, voldown, mute"],
             @[@"button triggers pause [min] | resume", @"Return buttons to stock behavior"],
             @[@"brightness <0-100>", @"Set screen brightness"],
-            @[@"flashlight [on|off|toggle|status]", @"Control the torch"],
+            @[@"flashlight [on|off|toggle|status|low|medium|high|max|up|down] [level]", @"Control the torch and its brightness"],
+            @[@"dance party [on|off|status]", @"Run the torch in time with the music"],
             @[@"rotate [lock|unlock|toggle|status]", @"Orientation lock"],
             @[@"orientation status", @"Print PORTRAIT or LANDSCAPE"],
+            @[@"control center status", @"Print OPEN or CLOSED"],
+            @[@"notification center status", @"Print OPEN or CLOSED"],
             @[@"orientation set <mode>", @"Rotate screen (portrait, landscape left/right, upside down, auto)"],
             @[@"appearance [dark|light|toggle]", @"Light or dark appearance"],
             @[@"dnd [on|off|toggle|status]", @"Do Not Disturb"],
+            @[@"assistive touch [on|off|toggle|status]", @"AssistiveTouch on-screen button"],
             @[@"low power mode [on|off|toggle|status]", @"Low Power Mode"],
             @[@"haptic", @"Play a haptic tap"],
             @[@"screenshot", @"Take a screenshot"],
@@ -11681,6 +12196,7 @@ static NSArray *RCCommandHelpSections(void) {
             @[@"switcher", @"Open the App Switcher"],
             @[@"previous app", @"Switch to the previous app"],
             @[@"control-center", @"Open Control Center"],
+            @[@"notification-center", @"Open Notification Center"],
             @[@"url <url>", @"Open a link"],
             @[@"nav <panel>", @"triggers, settings, ha, km, mqtt, add"],
             @[@"type \"Text\"", @"Type text"],
@@ -12498,6 +13014,8 @@ static NSArray<NSDictionary *> *rc_tweaks_specs(void) {
           @"config": @"disablePowerConnectedHaptics", @"name": @"Disable Power Connected Haptics"},
         @{@"key": @"unlocked-vibration", @"aliases": @[@"unlocked vibration", @"notification vibration", @"notif vibration"],
           @"config": @"disableUnlockedNotificationVibration", @"name": @"Disable Vibration When Unlocked"},
+        @{@"key": @"watch-notify", @"aliases": @[@"watch notify", @"send to watch", @"watch notifications", @"notifications to watch"],
+          @"config": @"sendNotificationsToWatchWhenUnlocked", @"name": @"Send to Watch When Unlocked"},
     ];
 }
 
@@ -12592,7 +13110,9 @@ static NSString *rc_handle_tweaks_command(NSString *cmd) {
 
     NSDictionary *spec = rc_tweaks_spec_for(nameArg);
     if (!spec) {
-        return [NSString stringWithFormat:@"Error: unknown tweak '%@'. Use: wake-on-power, power-haptics, unlocked-vibration\n", nameArg];
+        NSMutableArray *keys = [NSMutableArray array];
+        for (NSDictionary *spec in rc_tweaks_specs()) [keys addObject:spec[@"key"]];
+        return [NSString stringWithFormat:@"Error: unknown tweak '%@'. Use: %@\n", nameArg, [keys componentsJoinedByString:@", "]];
     }
 
     BOOL current = [config[spec[@"config"]] boolValue];
@@ -12606,6 +13126,48 @@ static NSString *rc_handle_tweaks_command(NSString *cmd) {
         save_trigger_config();
     }
     return [NSString stringWithFormat:@"%@: %@\n", spec[@"name"], wanted ? @"ON" : @"OFF"];
+}
+
+// Low-energy Bluetooth. BluetoothManager's pairedDevices is the classic list only, so
+// the Apple Watch and low-energy accessories (an AssistiveTouch mouse, say) never show
+// up there. CoreBluetooth sees what the system has connected and fills that gap. It
+// cannot drop one: cancelPeripheralConnection: only cancels a link this process opened,
+// and iOS keeps the system's own client connected.
+static CBCentralManager *g_rcLECentral = nil;
+
+static CBCentralManager *rc_le_central(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        // No delegate needed: only the state and the connected list are read.
+        g_rcLECentral = [[CBCentralManager alloc] initWithDelegate:nil queue:nil];
+    });
+    return g_rcLECentral;
+}
+
+static NSArray<CBPeripheral *> *rc_connected_le_peripherals(void) {
+    CBCentralManager *central = rc_le_central();
+    // The state arrives from bluetoothd a moment after the manager is made (about two
+    // seconds), and the connected list is empty until it reads powered on.
+    for (int i = 0; i < 50 && central.state != CBManagerStatePoweredOn; i++) {
+        usleep(50 * 1000);
+    }
+    if (central.state != CBManagerStatePoweredOn) return @[];
+
+    // HID is mice, keyboards and pointers; the rest are the generic services every
+    // accessory carries, so the list doesn't depend on one kind of device.
+    static NSArray<CBUUID *> *services;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        services = @[
+            [CBUUID UUIDWithString:@"1812"], // Human Interface Device
+            [CBUUID UUIDWithString:@"1800"], // Generic Access
+            [CBUUID UUIDWithString:@"1801"], // Generic Attribute
+            [CBUUID UUIDWithString:@"180A"], // Device Information
+            [CBUUID UUIDWithString:@"180F"], // Battery
+        ];
+    });
+    NSArray *connected = [central retrieveConnectedPeripheralsWithServices:services];
+    return connected ?: @[];
 }
 
 static NSString *handle_command(NSString *cmd) {
@@ -12950,61 +13512,17 @@ static NSString *handle_command(NSString *cmd) {
         if ([NSThread isMainThread]) state = RCNFCScannerCommand(what);
         else dispatch_sync(dispatch_get_main_queue(), ^{ state = RCNFCScannerCommand(what); });
         return [NSString stringWithFormat:@"NFC scanner %@\n", state];
-    } else if ([cleanCmd isEqualToString:@"flashlight"] || [cleanCmd isEqualToString:@"torch"] || [cleanCmd isEqualToString:@"flashlight toggle"]) {
-        SRLog(@"Toggling flashlight");
-        AVCaptureDevice *device = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
-        if ([device hasTorch]) {
-            [device lockForConfiguration:nil];
-            if (device.torchMode == AVCaptureTorchModeOn) {
-                [device setTorchMode:AVCaptureTorchModeOff];
-            } else {
-                float level = get_flash_brightness();
-                [device setTorchModeOnWithLevel:level error:nil];
-            }
-            [device unlockForConfiguration];
-        }
-        return @"Flashlight toggled\n";
-    } else if ([cleanCmd hasPrefix:@"flashlight on"] || [cleanCmd hasPrefix:@"flash on"]) {
-        float level = get_flash_brightness();
-        NSArray *parts = [cleanCmd componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-        if (parts.count >= 3) {
-            float customLevel = [parts[2] floatValue];
-            if (customLevel > 0) level = customLevel;
-            if (level > 1.0f) level /= 100.0f; // Handle percentage
-        }
-        
-        SRLog(@"Flashlight ON at level: %f", level);
-        AVCaptureDevice *device = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
-        if ([device hasTorch]) {
-            [device lockForConfiguration:nil];
-            if (level < 0.01f) level = 0.01f;
-            if (level > 1.0f) level = 1.0f;
-            [device setTorchModeOnWithLevel:level error:nil];
-            [device unlockForConfiguration];
-        }
-        return [NSString stringWithFormat:@"Flashlight ON (%.0f%%)\n", level * 100];
-    } else if ([cleanCmd hasPrefix:@"flashlight "] || [cleanCmd hasPrefix:@"flash "]) {
-        // Handle "flashlight 0.5" or "flashlight 50"
-        NSString *valStr = [cleanCmd substringFromIndex:([cleanCmd hasPrefix:@"flashlight "] ? 11 : 6)];
-        float level = [valStr floatValue];
-        if (level > 1.0f) level /= 100.0f;
-        
-        AVCaptureDevice *device = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
-        if ([device hasTorch]) {
-            [device lockForConfiguration:nil];
-            if (level <= 0) {
-                [device setTorchMode:AVCaptureTorchModeOff];
-                [device unlockForConfiguration];
-                return @"Flashlight OFF\n";
-            }
-            if (level < 0.01f) level = 0.01f;
-            if (level > 1.0f) level = 1.0f;
-            [device setTorchModeOnWithLevel:level error:nil];
-            [device unlockForConfiguration];
-            return [NSString stringWithFormat:@"Flashlight set to %.0f%%\n", level * 100];
-        }
-        return @"Error: Flashlight not available\n";
-    } else if ([cleanCmd isEqualToString:@"flashlight off"] || [cleanCmd isEqualToString:@"torch off"]) {
+    } else if ([cleanCmd isEqualToString:@"dance party"] || [cleanCmd hasPrefix:@"dance party "]) {
+        NSString *arg = [cleanCmd isEqualToString:@"dance party"] ? @"" : [cleanCmd substringFromIndex:12];
+        return rc_dance_party_command(arg);
+    } else if ([cleanCmd isEqualToString:@"flashlight"] || [cleanCmd isEqualToString:@"flashlight toggle"] ||
+               [cleanCmd isEqualToString:@"flashlight off"] || [cleanCmd isEqualToString:@"flashlight status"] ||
+               [cleanCmd isEqualToString:@"torch"] || [cleanCmd isEqualToString:@"torch on"] ||
+               [cleanCmd isEqualToString:@"torch off"] || [cleanCmd isEqualToString:@"torch status"] ||
+               [cleanCmd isEqualToString:@"flash on"] || [cleanCmd isEqualToString:@"flash off"] ||
+               [cleanCmd hasPrefix:@"flashlight "] || [cleanCmd hasPrefix:@"flash "] ||
+               [cleanCmd hasPrefix:@"torch "]) {
+        return rc_handle_flashlight_command(cleanCmd);
     } else if ([cleanCmd isEqualToString:@"notify clear"] || [cleanCmd hasPrefix:@"notify clear "] ||
                [cleanCmd isEqualToString:@"clear notification"] || [cleanCmd hasPrefix:@"clear notification "] ||
                [cleanCmd isEqualToString:@"clear notifications"] || [cleanCmd hasPrefix:@"clear notifications "] ||
@@ -13269,6 +13787,40 @@ static NSString *handle_command(NSString *cmd) {
             dispatch_sync(dispatch_get_main_queue(), ccBlock);
         }
         return opened ? @"Control Center opened\n" : @"Failed to open Control Center\n";
+    } else if ([cleanCmd isEqualToString:@"open notification center"] ||
+               [cleanCmd isEqualToString:@"notification center"] ||
+               [cleanCmd isEqualToString:@"open-notification-center"] ||
+               [cleanCmd isEqualToString:@"notification-center"]) {
+        // Notification Center is the cover sheet pulled down over the unlocked phone: show it, or
+        // put it away when it is already showing. While the phone is locked the cover sheet is the
+        // lock screen, and putting it away would start an unlock, so nothing happens then.
+        __block NSString *result = nil;
+        void (^ncBlock)(void) = ^{
+            SBLockScreenManager *lockScreen = [objc_getClass("SBLockScreenManager") sharedInstance];
+            if ([lockScreen respondsToSelector:@selector(isUILocked)] && rc_device_locked(lockScreen)) {
+                result = @"Notification Center not opened: the phone is locked\n";
+                return;
+            }
+            Class coverSheetClass = objc_getClass("SBCoverSheetPresentationManager");
+            id coverSheet = [coverSheetClass respondsToSelector:@selector(sharedInstance)] ? [coverSheetClass performSelector:@selector(sharedInstance)] : nil;
+            SEL setPresented = @selector(setCoverSheetPresented:animated:withCompletion:);
+            if (![coverSheet respondsToSelector:setPresented]) {
+                SRLog(@"Notification Center: cover sheet manager unavailable");
+                result = @"Failed to open Notification Center\n";
+                return;
+            }
+            BOOL visible = [coverSheet respondsToSelector:@selector(isVisible)] && ((BOOL (*)(id, SEL))objc_msgSend)(coverSheet, @selector(isVisible));
+            // Control Center sits above the cover sheet; put it away first so Notification Center shows
+            id controlCenter = visible ? nil : rc_control_center_presenter();
+            if ([controlCenter respondsToSelector:@selector(isVisible)] && [controlCenter isVisible] && [controlCenter respondsToSelector:@selector(dismissAnimated:)]) {
+                [controlCenter dismissAnimated:NO];
+            }
+            ((void (*)(id, SEL, BOOL, BOOL, id))objc_msgSend)(coverSheet, setPresented, !visible, YES, nil);
+            result = visible ? @"Notification Center closed\n" : @"Notification Center opened\n";
+        };
+        if ([NSThread isMainThread]) ncBlock();
+        else dispatch_sync(dispatch_get_main_queue(), ncBlock);
+        return result;
     } else if ([cleanCmd isEqualToString:@"previous app"] || [cleanCmd isEqualToString:@"last app"]) {
         if (g_previousAppBundleId) {
             SRLog(@"[RemoteCommand] Returning to previous app: %@", g_previousAppBundleId);
@@ -13905,6 +14457,27 @@ static NSString *handle_command(NSString *cmd) {
             toggle_dnd(!current);
             return [NSString stringWithFormat:@"DND %@\n", !current ? @"Enabled" : @"Disabled"];
         }
+    } else if ([cleanCmd isEqualToString:@"assistive touch"] || [cleanCmd isEqualToString:@"assistive-touch"] || [cleanCmd isEqualToString:@"assistivetouch"] ||
+               [cleanCmd hasPrefix:@"assistive touch "] || [cleanCmd hasPrefix:@"assistive-touch "] || [cleanCmd hasPrefix:@"assistivetouch "]) {
+        NSString *subCmd = @"toggle";
+        for (NSString *prefix in @[@"assistive touch ", @"assistive-touch ", @"assistivetouch "]) {
+            if ([cleanCmd hasPrefix:prefix]) {
+                subCmd = [[cleanCmd substringFromIndex:prefix.length] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+                break;
+            }
+        }
+        if ([subCmd isEqualToString:@"on"] || [subCmd isEqualToString:@"off"] || [subCmd isEqualToString:@"toggle"]) {
+            BOOL want = [subCmd isEqualToString:@"on"] ? YES : ([subCmd isEqualToString:@"off"] ? NO : !rc_assistive_touch_is_on());
+            __block BOOL set = NO;
+            void (^applyBlock)(void) = ^{ set = rc_assistive_touch_set(want); };
+            if ([NSThread isMainThread]) applyBlock();
+            else dispatch_sync(dispatch_get_main_queue(), applyBlock);
+            if (!set) return @"Error: AssistiveTouch not available\n";
+            return want ? @"AssistiveTouch ON\n" : @"AssistiveTouch OFF\n";
+        } else if ([subCmd isEqualToString:@"status"]) {
+            return rc_assistive_touch_is_on() ? @"AssistiveTouch ON\n" : @"AssistiveTouch OFF\n";
+        }
+        return @"Usage: assistive touch [on|off|toggle|status]\n";
     } else if ([cleanCmd hasPrefix:@"location "] || [cleanCmd hasPrefix:@"location-"] ||
                [cleanCmd hasPrefix:@"locationservices "] || [cleanCmd hasPrefix:@"locationservices-"] ||
                [cleanCmd hasPrefix:@"location services "] ||
@@ -13984,6 +14557,11 @@ static NSString *handle_command(NSString *cmd) {
             toggle_lpm(!current);
             return [NSString stringWithFormat:@"Low Power Mode %@\n", !current ? @"Enabled" : @"Disabled"];
         }
+    } else if ([cleanCmd isEqualToString:@"control center status"] || [cleanCmd isEqualToString:@"notification center status"]) {
+        BOOL controlCenter = [cleanCmd hasPrefix:@"control"];
+        __block BOOL open = NO;
+        rc_dispatch_sync_main_safe(^{ open = controlCenter ? rc_control_center_open() : rc_notification_center_open(); });
+        return open ? @"OPEN\n" : @"CLOSED\n";
     } else if ([cleanCmd isEqualToString:@"orientation status"]) {
         __block NSString *result = nil;
         void (^orientationBlock)(void) = ^{
@@ -14493,6 +15071,7 @@ static NSString *handle_command(NSString *cmd) {
         return @"Error: BluetoothManager not found\n";
     } else if ([cleanCmd isEqualToString:@"bluetooth list"] || [cleanCmd isEqualToString:@"bt list"]) {
         NSMutableString *output = [NSMutableString string];
+        NSMutableSet *listed = [NSMutableSet set];
         void *btHandle = dlopen("/System/Library/PrivateFrameworks/BluetoothManager.framework/BluetoothManager", RTLD_NOW);
         if (btHandle) {
             Class BluetoothManagerClass = objc_getClass("BluetoothManager");
@@ -14501,8 +15080,17 @@ static NSString *handle_command(NSString *cmd) {
                 for (BluetoothDevice *device in [btManager pairedDevices]) {
                     NSString *name = [device name] ?: @"Unknown Device";
                     [output appendFormat:@"%@\n", name];
+                    [listed addObject:name.lowercaseString];
                 }
             }
+        }
+        // Low-energy devices the classic list leaves out. A headset that pairs both ways
+        // can be in both lists, so skip names already printed.
+        for (CBPeripheral *peripheral in rc_connected_le_peripherals()) {
+            NSString *name = peripheral.name;
+            if (name.length == 0 || [listed containsObject:name.lowercaseString]) continue;
+            [output appendFormat:@"%@\n", name];
+            [listed addObject:name.lowercaseString];
         }
         return output.length > 0 ? output : @"No paired Bluetooth devices found\n";
     } else if ([cleanCmd hasPrefix:@"bt-connect "] || [cleanCmd hasPrefix:@"bt connect "] || [cleanCmd hasPrefix:@"bluetooth connect "]) {
@@ -14526,6 +15114,11 @@ static NSString *handle_command(NSString *cmd) {
                 }
             }
         }
+        for (CBPeripheral *peripheral in rc_connected_le_peripherals()) {
+            if ([[peripheral name] localizedCaseInsensitiveContainsString:deviceName]) {
+                return [NSString stringWithFormat:@"%@ is a low-energy device and is already connected\n", [peripheral name]];
+            }
+        }
         return @"Error: Device not found or BluetoothManager failed\n";
     } else if ([cleanCmd hasPrefix:@"bt-disconnect "] || [cleanCmd hasPrefix:@"bt disconnect "] || [cleanCmd hasPrefix:@"bluetooth disconnect "]) {
         NSString *deviceName;
@@ -14546,6 +15139,11 @@ static NSString *handle_command(NSString *cmd) {
                         return [NSString stringWithFormat:@"Disconnecting %@\n", [device name]];
                     }
                 }
+            }
+        }
+        for (CBPeripheral *peripheral in rc_connected_le_peripherals()) {
+            if ([[peripheral name] localizedCaseInsensitiveContainsString:deviceName]) {
+                return [NSString stringWithFormat:@"%@ is a low-energy device, which iOS doesn't let apps disconnect. Forget it in Settings > Bluetooth, or turn Bluetooth off and on with rc bt off and rc bt on.\n", [peripheral name]];
             }
         }
         return @"Error: Device not found or BluetoothManager failed\n";
@@ -14833,60 +15431,10 @@ static NSString *handle_command(NSString *cmd) {
         AudioServicesPlaySystemSound(1005);
         NSLog(@"[RemoteCommand] Ping (Alert Sound) played");
         return @"Ping played\n";
-    } else if ([cleanCmd isEqualToString:@"flash-on"] || [cleanCmd isEqualToString:@"flash on"]) {
-        // Flashlight on using AVCaptureDevice
-        AVCaptureDevice *device = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
-        if ([device hasTorch] && [device isTorchAvailable]) {
-            [device lockForConfiguration:nil];
-            [device setTorchMode:AVCaptureTorchModeOn];
-            [device unlockForConfiguration];
-            NSLog(@"[RemoteCommand] Flashlight on");
-        }
-        return @"Flashlight ON\n";
-    } else if ([cleanCmd isEqualToString:@"flash-off"] || [cleanCmd isEqualToString:@"flash off"]) {
-        // Flashlight off
-        AVCaptureDevice *device = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
-        if ([device hasTorch]) {
-            [device lockForConfiguration:nil];
-            [device setTorchMode:AVCaptureTorchModeOff];
-            [device unlockForConfiguration];
-            NSLog(@"[RemoteCommand] Flashlight off");
-        }
-    } else if ([cleanCmd isEqualToString:@"flashlight toggle"]) {
-        AVCaptureDevice *device = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
-        if ([device hasTorch] && [device isTorchAvailable]) {
-            [device lockForConfiguration:nil];
-            if ([device torchMode] == AVCaptureTorchModeOn) {
-                [device setTorchMode:AVCaptureTorchModeOff];
-                NSLog(@"[RemoteCommand] Flashlight toggled OFF");
-            } else {
-                float level = get_flash_brightness();
-                [device setTorchModeOnWithLevel:level error:nil];
-                NSLog(@"[RemoteCommand] Flashlight toggled ON at level %f", level);
-            }
-            [device unlockForConfiguration];
-        }
-    } else if ([cleanCmd isEqualToString:@"flashlight on"]) {
-        AVCaptureDevice *device = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
-        if ([device hasTorch] && [device isTorchAvailable]) {
-            [device lockForConfiguration:nil];
-            float level = get_flash_brightness();
-            [device setTorchModeOnWithLevel:level error:nil];
-            [device unlockForConfiguration];
-        }
-    } else if ([cleanCmd isEqualToString:@"flashlight off"]) {
-        AVCaptureDevice *device = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
-        if ([device hasTorch]) {
-            [device lockForConfiguration:nil];
-            [device setTorchMode:AVCaptureTorchModeOff];
-            [device unlockForConfiguration];
-        }
-    } else if ([cleanCmd isEqualToString:@"flashlight status"]) {
-        AVCaptureDevice *device = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
-        if ([device hasTorch]) {
-            return [NSString stringWithFormat:@"Flashlight %@\n", [device torchMode] == AVCaptureTorchModeOn ? @"ON" : @"OFF"];
-        }
-        return @"Error: Flashlight not found\n";
+    } else if ([cleanCmd isEqualToString:@"flash-on"] || [cleanCmd isEqualToString:@"flash-off"]) {
+        BOOL on = [cleanCmd isEqualToString:@"flash-on"];
+        if (!rc_flashlight_set(on ? get_flash_brightness() : 0)) return @"Error: Flashlight not available\n";
+        return on ? @"Flashlight ON\n" : @"Flashlight OFF\n";
     } else if ([cleanCmd isEqualToString:@"kill current"] || [cleanCmd isEqualToString:@"kill front"] ||
                [cleanCmd isEqualToString:@"kill foreground"] || [cleanCmd isEqualToString:@"kill current app"] ||
                [cleanCmd isEqualToString:@"kill front app"]) {
@@ -16333,6 +16881,7 @@ static void start_web_server() {
                                                       @"location status", @"carplay status", @"watch status", @"ringer status", @"vibration silent-status",
                                                       @"haptics status", @"is-playing", @"lock status", @"low power status", @"flashlight status",
                                                       @"dnd status", @"focus status", @"screenrecord status", @"timer status", @"proximity status",
+                                                      @"assistive touch status",
                                                       @"orientation status", @"appearance status", @"autolock status"];
                                 NSMutableDictionary *answers = [NSMutableDictionary dictionary];
                                 for (NSString *command in commands) {
@@ -17155,6 +17704,7 @@ static void start_web_server() {
                                     @{@"command": @"snapper [open|freeze|instant|close]", @"desc": @"Integrations: Control Snapper 2 / Snapper 3"},
                                     @{@"command": @"camera video [zoom] [flash]", @"desc": @"Camera: Open Camera in Video mode (e.g. 2x, 2x flash)"},
                                     @{@"command": @"open control center", @"desc": @"System: Open Control Center"},
+                                    @{@"command": @"open notification center", @"desc": @"System: Open Notification Center"},
                                     @{@"command": @"app switcher", @"desc": @"System: Open App Switcher"},
                                     @{@"command": @"accessibility shortcut", @"desc": @"System: Run the Accessibility Shortcut"},
                                     @{@"command": @"open <bundleId>", @"desc": @"System: Launch an application by bundle identifier"},
@@ -17185,6 +17735,7 @@ static void start_web_server() {
                                     @{@"command": @"location on/off/toggle/status", @"desc": @"Toggles: Location Services (GPS)"},
                                     @{@"command": @"airplane on/off", @"desc": @"Toggles: Airplane Mode power"},
                                     @{@"command": @"dnd on/off", @"desc": @"Toggles: Do Not Disturb Mode"},
+                                    @{@"command": @"assistive touch on/off/toggle", @"desc": @"Toggles: AssistiveTouch on-screen button"},
                                     @{@"command": @"focus on/toggle <name>, focus off", @"desc": @"Focus: turns a Focus on or off (iOS 15+)"},
                                     @{@"command": @"focus status/list", @"desc": @"Focus: the active Focus, or the Focus modes"},
                                     @{@"command": @"audiomix on/off", @"desc": @"Toggles: AudioMix simultaneous playback"},
@@ -18124,7 +18675,7 @@ static BOOL RC_DefaultHapticsForTrigger(NSString *triggerKey) {
     if ([triggerKey hasPrefix:@"trigger_home_"]) return YES;
     if ([triggerKey hasPrefix:@"trigger_statusbar_"]) return YES;
     if ([triggerKey hasPrefix:@"trigger_bottombar_"]) return YES;
-    if ([triggerKey hasPrefix:@"trigger_bottom_swipe_up_"]) return YES;
+    if ([triggerKey hasPrefix:@"trigger_bottom_swipe_"]) return YES;
     if ([triggerKey hasPrefix:@"trigger_edge_"]) return YES;
     return NO;
 }
@@ -23241,6 +23792,57 @@ static BOOL RC_ShouldKeepBottomBarSideSwipe(void) {
         }
     }
     %orig;
+}
+
+%end
+
+// BOTTOM SWIPE DOWN TRIGGERS
+// A swipe down on the bottom edge is iOS's Reachability gesture. The triggers reuse iOS's own
+// recognizer instead of reading touches, so they react exactly where Reachability does: when one
+// with actions is set up for the part of the edge the swipe started in, it runs instead of
+// Reachability (or as well, with Keep Default Action). Reachability must be on in Settings >
+// Accessibility > Touch for iOS to report the swipe.
+static inline NSString *RC_BottomSwipeDownTriggerForProgress(CGFloat progress) {
+    if (progress < 0.33) return @"trigger_bottom_swipe_down_left";
+    if (progress > 0.67) return @"trigger_bottom_swipe_down_right";
+    return @"trigger_bottom_swipe_down_center";
+}
+
+// The trigger that took the current Reachability swipe: iOS reports the swipe when it begins and
+// again when it ends, and both belong to that trigger
+static NSString *g_rcReachabilitySwipeKey = nil;
+
+%hook SBReachabilityManager
+
+- (void)_activateReachability:(id)sender {
+    UIGestureRecognizer *recognizer = [sender isKindOfClass:[UIGestureRecognizer class]] ? sender : nil;
+    if (!recognizer || recognizer != [self reachabilityGestureRecognizer] || !recognizer.view) {
+        %orig;
+        return;
+    }
+    UIGestureRecognizerState state = recognizer.state;
+    if (state == UIGestureRecognizerStateBegan || !g_rcReachabilitySwipeKey) {
+        g_rcReachabilitySwipeKey = nil;
+        SEL initialSel = NSSelectorFromString(@"initialTouchLocation"); // where the swipe started
+        CGPoint start = [recognizer respondsToSelector:initialSel]
+            ? ((CGPoint (*)(id, SEL))objc_msgSend)(recognizer, initialSel)
+            : [recognizer locationInView:recognizer.view];
+        CGFloat width = CGRectGetWidth(recognizer.view.bounds);
+        NSString *key = RC_BottomSwipeDownTriggerForProgress(width > 0 ? start.x / width : 0.5);
+        if (!RC_TriggerIsActionable(key)) {
+            %orig;
+            return;
+        }
+        if (state == UIGestureRecognizerStateBegan) g_rcReachabilitySwipeKey = key;
+        SRLogMin(@"[RCBottom] %@ (Reachability swipe at x=%.0f)", key, start.x);
+        RCTriggerHapticFor(key);
+        RCExecuteTrigger(key);
+        if (RC_TriggerKeepsDefault(key)) %orig;
+        return;
+    }
+    // The rest of a swipe a trigger took: iOS only sees it with Keep Default Action
+    if (RC_TriggerKeepsDefault(g_rcReachabilitySwipeKey)) %orig;
+    if (state != UIGestureRecognizerStateChanged) g_rcReachabilitySwipeKey = nil;
 }
 
 %end

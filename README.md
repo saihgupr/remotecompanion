@@ -113,17 +113,20 @@ Access the desktop-class automation hub at `http://[DEVICE_IP]:8080` from any co
 - `rc timer <duration|stop|pause|resume|status> [--label "Name"]` - Start (e.g. `20m`, `1h30m`, `45s`, `20:00`), pause, resume, stop, or inspect a real Apple Clock timer (mirrors to Lock Screen and Apple Watch).
 - `rc button [power|lock|home|volup|voldown|mute]` - Simulate physical button presses.
 - `rc brightness 0-100` - Set screen brightness.
-- `rc flashlight [on|off|toggle]` - Control the torch.
+- `rc flashlight [on|off|toggle|status] [level]` - Control the torch. A level is 0-100, a fraction like 0.5, or `low`, `medium`, `high`, `max`; `up [N]` and `down [N]` step it from the current level (25 by default). `torch` and `flash` take the same options.
+- `rc dance party [on|off|status]` - Run the torch in time with the music playing in the room. Bare `rc dance party` toggles it, `on` starts it and `off` stops it. It follows the bass through the microphone, so headphones or Bluetooth mean nothing to follow, and it stops after about 15 seconds of quiet or a 15 minute timeout.
 - `rc rotate [lock|unlock|toggle]` - Orientation lock control.
 - `rc orientation set <portrait|landscape left|landscape right|portrait upside down|auto>` - Turn the screen to that orientation; it holds while rotation lock is on, otherwise the phone takes over when moved.
 - `rc appearance [dark|light|toggle]` - Set light/dark appearance.
 - `rc dnd [on|off|toggle]` - Toggle Do Not Disturb.
+- `rc assistive touch [on|off|toggle|status]` - Turn the AssistiveTouch on-screen button on or off.
 - `rc low power mode [on|off|toggle]` - Toggle battery saver.
 - `rc airplane [on|off|toggle]` - Control Airplane Mode.
 - `rc haptic` / `rc screenshot` - Haptic feedback / Screenshot.
 - `rc screenrecord [toggle|start|stop|status]` - Native SpringBoard screen recording control.
 - `rc snapper [open|freeze|instant|close]` - Direct Snapper 2 / Snapper 3 overlay trigger.
 - `rc control-center` - Opens the system Control Center.
+- `rc notification-center` - Opens Notification Center, or closes it when it is open.
 - `rc switcher` - Opens/toggles the App Switcher.
 - `rc previous app` / `rc last app` - Returns to the previously active application.
 - `rc vibration [silent-toggle|ring-toggle]` - System "Vibrate on Silent/Ring" settings.
@@ -134,6 +137,7 @@ The switches in Settings > Advanced Settings > Tweaks, also on the Web UI's Twea
 - `rc tweaks wake-on-power [on|off|toggle]` - Keep the screen dark when a charger connects or disconnects while the display is off or dimmed.
 - `rc tweaks power-haptics [on|off|toggle]` - Stop the charging vibration and chime when power connects.
 - `rc tweaks unlocked-vibration [on|off|toggle]` - Stop notification vibration while the phone is unlocked; banners, sounds, and urgent alerts still work.
+- `rc tweaks watch-notify [on|off|toggle]` - Send notifications to the Apple Watch while the iPhone is unlocked.
 - `rc tweaks all on|off` - Set every switch at once.
 
 ### Apps, URLs & Shortcuts
@@ -148,7 +152,8 @@ The switches in Settings > Advanced Settings > Tweaks, also on the Web UI's Twea
 
 ### Connectivity
 - `rc wifi [on|off|toggle]` / `rc cellular [on|off|toggle]` / `rc bluetooth [on|off|toggle]` / `rc location [on|off|toggle]`
-- `rc bluetooth [connect|disconnect] <name>` - Manage paired devices.
+- `rc bluetooth [connect|disconnect] <name>` - Manage paired classic Bluetooth devices. Low-energy devices (the Apple Watch, an AssistiveTouch mouse or pointer) can't be disconnected from the CLI: forget one in Settings > Bluetooth, or use `rc bluetooth off` and `on`.
+- `rc bluetooth list` - List the names of paired Bluetooth devices, classic and low-energy.
 - `rc airplay list` - See speakers and their UIDs.
 - `rc airplay connect <name|UID>` - Stream audio to an AirPlay receiver.
 - `rc airplay disconnect` - Stop AirPlay streaming.
@@ -173,12 +178,14 @@ The switches in Settings > Advanced Settings > Tweaks, also on the Web UI's Twea
 - `rc logs` - Stream live debug logs from the device (tail `/tmp/remotecommand.log`).
 - `rc vibration [silent-status|ring-status]` - Check current system vibration state.
 - `rc orientation status` - Returns `PORTRAIT` or `LANDSCAPE`.
+- `rc control center status` - Returns `OPEN` or `CLOSED`.
+- `rc notification center status` - Returns `OPEN` or `CLOSED` (`CLOSED` on the lock screen).
 - `rc rotate status` - Returns orientation lock state.
 - `rc dnd status` - Returns Do Not Disturb state.
 - `rc lpm status` - Returns Low Power Mode state.
 - `rc airplane status` - Returns Airplane Mode state.
 - `rc wifi status` / `rc cellular status` / `rc bt status` / `rc location status` - Returns connectivity and GPS states.
-- `rc flashlight status` - Returns torch state.
+- `rc flashlight status` - Returns torch state and brightness, e.g. `Flashlight ON (75%)`.
 - `rc proximity` - Returns `near` or `far`. *(Note: iOS powers off the sensor when the screen is asleep. To test manually while the screen is awake, run `rc proximity on` to force it active, then `rc proximity off` to disable it.)*
 
 ### System & Diagnostics
@@ -221,7 +228,7 @@ Configure these in the `RemoteCompanion` app for custom action sequences. Tip: *
 - **Gestures**: 
   - **Status Bar**: Hold (Left/Center/Right), Double-Tap, Swipe Left/Right, or a two-finger slide down.
   - **Edge Gestures**: Vertical swipe on left/right edges.
-  - **Bottom Bar Gestures**: Swipe Left/Right, **3-Zone Swipe Up** (Left 33%, Center 34%, Right 33%), or a two-finger slide up.
+  - **Bottom Bar Gestures**: Swipe Left/Right, **3-Zone Swipe Up** (Left 33%, Center 34%, Right 33%), **3-Zone Swipe Down** in place of Reachability (needs Reachability on in Settings > Accessibility > Touch), or a two-finger slide up.
 - **Motion Gestures**:
   - **Shake**: Fire actions when the device is physically shaken.
 - **System Events**:

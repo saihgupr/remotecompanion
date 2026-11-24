@@ -7,7 +7,7 @@
 //   buttons: volUp, volDown, power, ringer      home: a Home button
 //   zone: top, bottom, left, right               dot: L, C, R (in the top zone)
 //   arrow: left, right, up, down (in the zone)   arrowAt: L, C, R (a swipe up from the bottom)
-//   arrowDownAt: L, C, R (a swipe down from the top)
+//   arrowDownAt: L, C, R (a swipe down from the top)   arrowDownBottomAt: L, C, R (a swipe down on the bottom edge)
 //   fingers: up, down (two fingertips in the zone, with a big arrow the way they slide)
 //   mark: @"2×" (text), @"sym:clock" (a symbol), @"arrows:up,down"
 //   symbol: a plain symbol instead of the phone (Touch ID), with a mark as a small badge
@@ -46,6 +46,9 @@ static NSDictionary<NSString *, NSDictionary *> *RCPhoneIconSpecs(void) {
             @"trigger_bottom_swipe_up_left":   @{ @"arrowAt": @"L" },
             @"trigger_bottom_swipe_up_center": @{ @"arrowAt": @"C" },
             @"trigger_bottom_swipe_up_right":  @{ @"arrowAt": @"R" },
+            @"trigger_bottom_swipe_down_left":   @{ @"arrowDownBottomAt": @"L" },
+            @"trigger_bottom_swipe_down_center": @{ @"arrowDownBottomAt": @"C" },
+            @"trigger_bottom_swipe_down_right":  @{ @"arrowDownBottomAt": @"R" },
             @"trigger_statusbar_two_finger_swipe_down": @{ @"zone": @"top", @"fingers": @"down" },
             @"trigger_bottom_two_finger_swipe_up":      @{ @"zone": @"bottom", @"fingers": @"up" },
             @"trigger_two_finger_tap":                  @{ @"twoFingers": @"tap" },
@@ -282,6 +285,12 @@ static UIImage *RCDrawPhoneIcon(NSDictionary *spec, CGFloat side) {
             CGFloat x = [arrowDownAt isEqualToString:@"L"] ? 11 : [arrowDownAt isEqualToString:@"C"] ? 16 : 21;
             RCDrawFitted(RCSymbol(@"arrow.down", 14 * k, UIImageSymbolWeightBlack), R(x, 6, 8, 16), kCGBlendModeNormal);
             [[UIBezierPath bezierPathWithRoundedRect:R(14, 3.2, 12, 1.8) cornerRadius:0.9 * k] fill]; // the status bar
+        }
+        NSString *arrowDownBottomAt = spec[@"arrowDownBottomAt"];
+        if (arrowDownBottomAt) {
+            CGFloat x = [arrowDownBottomAt isEqualToString:@"L"] ? 11 : [arrowDownBottomAt isEqualToString:@"C"] ? 16 : 21;
+            RCDrawFitted(RCSymbol(@"arrow.down", 14 * k, UIImageSymbolWeightBlack), R(x, 18, 8, 16), kCGBlendModeNormal);
+            [[UIBezierPath bezierPathWithRoundedRect:R(14, 35, 12, 1.8) cornerRadius:0.9 * k] fill];   // the home bar
         }
         NSString *fingers = spec[@"fingers"];
         if (fingers) {

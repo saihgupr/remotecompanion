@@ -3656,7 +3656,7 @@ const TRIGGER_SECTIONS = [
   { title: 'Power Button',           id: 'power',     keys: ['power_double_tap','power_triple_click','power_quadruple_click','power_volume_up','power_volume_down','power_long_press'] },
   { title: 'Status Bar',             id: 'statusbar', keys: ['trigger_statusbar_left_hold','trigger_statusbar_center_hold','trigger_statusbar_right_hold','trigger_statusbar_swipe_left','trigger_statusbar_swipe_right','trigger_statusbar_double_tap','trigger_statusbar_swipe_down_left','trigger_statusbar_swipe_down_center','trigger_statusbar_swipe_down_right'] },
   { title: 'Edge Gestures',          id: 'edge',      keys: ['trigger_edge_left_swipe_up','trigger_edge_left_swipe_down','trigger_edge_right_swipe_up','trigger_edge_right_swipe_down'] },
-  { title: 'Bottom Bar Gestures',    id: 'bottombar', keys: ['trigger_bottombar_swipe_left','trigger_bottombar_swipe_right','trigger_bottom_swipe_up_left','trigger_bottom_swipe_up_center','trigger_bottom_swipe_up_right'] },
+  { title: 'Bottom Bar Gestures',    id: 'bottombar', keys: ['trigger_bottombar_swipe_left','trigger_bottombar_swipe_right','trigger_bottom_swipe_up_left','trigger_bottom_swipe_up_center','trigger_bottom_swipe_up_right','trigger_bottom_swipe_down_left','trigger_bottom_swipe_down_center','trigger_bottom_swipe_down_right'] },
   { title: 'Multi-Finger Gestures',  id: 'multifinger', keys: ['trigger_two_finger_tap','trigger_two_finger_swipe_left','trigger_two_finger_swipe_right','trigger_two_finger_swipe_up','trigger_two_finger_swipe_down','trigger_two_finger_rotate_cw','trigger_two_finger_rotate_ccw','trigger_statusbar_two_finger_swipe_down','trigger_bottom_two_finger_swipe_up'] },
   { title: 'Home Button',            id: 'home',      keys: ['trigger_home_double_click','trigger_home_triple_click','trigger_home_quadruple_click','trigger_home_hold','trigger_home_power','touchid_tap','touchid_hold'] },
   { title: 'Ringer Switch',          id: 'ringer',    keys: ['trigger_ringer_mute','trigger_ringer_unmute','trigger_ringer_toggle'] },
@@ -3701,6 +3701,7 @@ const TRIGGER_NAMES = {
   trigger_watch_face:'Watch Face: Any',
   trigger_bottombar_swipe_left:'Bottom Bar Swipe Left', trigger_bottombar_swipe_right:'Bottom Bar Swipe Right',
   trigger_bottom_swipe_up_left:'Bottom Swipe Up (Left)', trigger_bottom_swipe_up_center:'Bottom Swipe Up (Center)', trigger_bottom_swipe_up_right:'Bottom Swipe Up (Right)',
+  trigger_bottom_swipe_down_left:'Bottom Swipe Down (Left)', trigger_bottom_swipe_down_center:'Bottom Swipe Down (Center)', trigger_bottom_swipe_down_right:'Bottom Swipe Down (Right)',
   trigger_statusbar_two_finger_swipe_down:'2-Finger Top Slide Down', trigger_bottom_two_finger_swipe_up:'2-Finger Bottom Slide Up',
   trigger_two_finger_tap:'2-Finger Tap',
   trigger_two_finger_swipe_left:'2-Finger Swipe Left', trigger_two_finger_swipe_right:'2-Finger Swipe Right',
@@ -3757,6 +3758,9 @@ const TRIGGER_ICONS = {
   trigger_bottom_swipe_up_left: { icon:'arrow_up_to_line',        cls:'icon-indigo' },
   trigger_bottom_swipe_up_center:{ icon:'arrow_up_to_line',       cls:'icon-indigo' },
   trigger_bottom_swipe_up_right: { icon:'arrow_up_to_line',       cls:'icon-indigo' },
+  trigger_bottom_swipe_down_left:   { icon:'arrow_down_to_line', cls:'icon-indigo' },
+  trigger_bottom_swipe_down_center: { icon:'arrow_down_to_line', cls:'icon-indigo' },
+  trigger_bottom_swipe_down_right:  { icon:'arrow_down_to_line', cls:'icon-indigo' },
   trigger_ringer_mute:   { icon:'bell_slash_fill', cls:'icon-red' },
   trigger_ringer_unmute: { icon:'bell_fill',       cls:'icon-green' },
   trigger_ringer_toggle: { icon:'bell_badge_fill', cls:'icon-orange' },
@@ -3823,6 +3827,9 @@ const PHONE_ICONS = (() => {
     trigger_bottom_swipe_up_left: { arrowAt: 'L' },
     trigger_bottom_swipe_up_center: { arrowAt: 'C' },
     trigger_bottom_swipe_up_right: { arrowAt: 'R' },
+    trigger_bottom_swipe_down_left: { arrowDownBottomAt: 'L' },
+    trigger_bottom_swipe_down_center: { arrowDownBottomAt: 'C' },
+    trigger_bottom_swipe_down_right: { arrowDownBottomAt: 'R' },
     trigger_statusbar_two_finger_swipe_down: { zone: 'top', fingers: 'down' },
     trigger_bottom_two_finger_swipe_up: { zone: 'bottom', fingers: 'up' },
     trigger_two_finger_tap: { twoFingers: 'tap' },
@@ -3882,6 +3889,10 @@ function phoneIconSVG(spec) {
     if (spec.arrowDownAt) {
       parts.push(svgArrow({ L: 15, C: 20, R: 25 }[spec.arrowDownAt], 14, 'down', 11, 2.8));
       rect(14, 3.2, 12, 1.8, 0.9);
+    }
+    if (spec.arrowDownBottomAt) {
+      parts.push(svgArrow({ L: 15, C: 20, R: 25 }[spec.arrowDownBottomAt], 26, 'down', 11, 2.8));
+      rect(14, 35, 12, 1.8, 0.9);
     }
     if (spec.fingers) {
       // Two fingertips in the zone, and the way they slide across the rest of the screen
@@ -4084,6 +4095,7 @@ const CMD_NAMES = {
   'volume up':'Volume Up','volume down':'Volume Down',
   'queuealbum':'Queue Current Album','queue album':'Queue Current Album','queueartist':'Queue Artist (Shuffle)','queue artist':'Queue Artist (Shuffle)','shuffleall':'Shuffle All Songs','shuffle all songs':'Shuffle All Songs','deletesong':'Delete Currently Playing Song','delete song':'Delete Currently Playing Song','delete current song':'Delete Currently Playing Song',
   'flashlight':'Flashlight Toggle','flashlight on':'Flashlight On','flashlight off':'Flashlight Off','flashlight toggle':'Flashlight Toggle',
+  'dance party':'Dance Party','dance party toggle':'Dance Party','dance party on':'Dance Party On','dance party off':'Dance Party Off',
   'button triggers pause 15':'Button Triggers Pause 15 Minutes','button triggers pause 60':'Button Triggers Pause 1 Hour','button triggers pause':'Button Triggers Pause Until Resumed','button triggers resume':'Button Triggers Resume',
   'appearance dark':'Appearance Dark','appearance light':'Appearance Light','appearance toggle':'Appearance Toggle',
   'rotate lock':'Rotate Lock','rotate unlock':'Rotate Unlock','rotate toggle':'Rotate Toggle',
@@ -4115,6 +4127,7 @@ const CMD_NAMES = {
   'kill current':'Kill Current App', 'kill front':'Kill Current App', 'kill foreground':'Kill Current App',
   'kill current app':'Kill Current App', 'kill front app':'Kill Current App',
   'open control center':'Control Center',
+  'open notification center':'Notification Center',
   'ldrestart':'Soft Reboot','userspace-reboot':'Userspace Reboot','uicache':'Refresh Icon Cache',
   'low power on':'Low Power On','low power off':'Low Power Off','low power toggle':'Low Power Toggle',
   'watch theater':'Watch Theater Mode Toggle','watch theater on':'Watch Theater Mode On','watch theater off':'Watch Theater Mode Off','watch theater toggle':'Watch Theater Mode Toggle',
@@ -4133,6 +4146,9 @@ const CMD_NAMES = {
   'trigger_bottom_swipe_up_left':'Bottom Swipe Up (Left)',
   'trigger_bottom_swipe_up_center':'Bottom Swipe Up (Center)',
   'trigger_bottom_swipe_up_right':'Bottom Swipe Up (Right)',
+  'trigger_bottom_swipe_down_left':'Bottom Swipe Down (Left)',
+  'trigger_bottom_swipe_down_center':'Bottom Swipe Down (Center)',
+  'trigger_bottom_swipe_down_right':'Bottom Swipe Down (Right)',
   'trigger_statusbar_swipe_down_left':'Top Swipe Down (Left)',
   'trigger_statusbar_swipe_down_center':'Top Swipe Down (Center)',
   'trigger_statusbar_swipe_down_right':'Top Swipe Down (Right)',
@@ -4437,6 +4453,9 @@ function nameForCmd(cmd) {
   }
   if (lowCmd.startsWith('sneakycam photo') || lowCmd === 'sneakycam takephoto') return 'SneakyCam Photo';
   if (lowCmd.startsWith('sneakycam video') || lowCmd === 'sneakycam record' || lowCmd === 'sneakycam startstopvideo') return 'SneakyCam Video';
+  if (lowCmd === 'dance party' || lowCmd === 'dance party toggle') return 'Dance Party';
+  if (lowCmd === 'dance party on') return 'Dance Party On';
+  if (lowCmd === 'dance party off') return 'Dance Party Off';
   if (lowCmd.startsWith('flashlight ')) return `Flashlight ${cmd.slice(11)}%`;
   if (lowCmd.startsWith('lua:'))          return `Lua: ${cmd.slice(4)}`;
   if (lowCmd.startsWith('delay '))        return `Delay ${cmd.slice(6)}s`;
@@ -4655,6 +4674,7 @@ function iconForCmd(cmd) {
     'volume up':'speaker_3_fill','volume down':'speaker_1_fill',
     'queuealbum':'music_note_list','queue album':'music_note_list','queueartist':'music_mic','queue artist':'music_mic','shuffleall':'shuffle','shuffle all songs':'shuffle','deletesong':'trash','delete song':'trash','delete current song':'trash',
     'flashlight':'bolt_fill','flashlight on':'bolt_fill','flashlight off':'bolt_slash_fill','flashlight toggle':'bolt_fill',
+    'dance party':'bolt_fill','dance party toggle':'bolt_fill','dance party on':'bolt_fill','dance party off':'bolt_slash_fill',
     'button triggers pause 15':'pause_circle','button triggers pause 60':'pause_circle','button triggers pause':'pause_circle','button triggers resume':'play_circle',
     'appearance dark':'moon_fill','appearance light':'sun_max_fill','appearance toggle':'circle_lefthalf_fill',
     'location on':'location_fill','location off':'location_slash','location toggle':'location_fill',
@@ -4667,6 +4687,7 @@ function iconForCmd(cmd) {
     'audiohandoff enabled on':'headphones','audiohandoff enabled off':'headphones','audiohandoff enabled toggle':'headphones','audiohandoff auto on':'headphones','audiohandoff auto off':'headphones','audiohandoff auto toggle':'headphones',
     'respring':'arrow_2_circlepath','safemode':'shield_slash_fill','safe-mode':'shield_slash_fill','siri':'mic_fill','accessibility shortcut':'person_crop_circle','home':'house_fill',
     'open control center':'gear',
+    'open notification center':'bell_fill',
     'low power on':'battery_25','low power off':'battery_100',
     'watch theater':'eye_slash_fill','watch theater on':'eye_slash_fill','watch theater off':'eye_slash_fill','watch theater toggle':'eye_slash_fill',
     'autolock toggle':'timer','autolock 30s':'timer','autolock 1m':'timer','autolock 2m':'timer','autolock 3m':'timer','autolock 4m':'timer','autolock 5m':'timer','autolock never':'timer',
@@ -4726,6 +4747,7 @@ function iconForCmd(cmd) {
   if (lowCmd.startsWith('exec ') || lowCmd.startsWith('root ')) return { icon:'chevron_right_square_fill', cls:'icon-dark' };
   if (lowCmd.startsWith('trigger_statusbar_swipe_down')) return { icon:'arrow_down_to_line', cls:'icon-indigo' };
   if (lowCmd.startsWith('trigger_bottom_swipe_up')) return { icon:'arrow_up_to_line', cls:'icon-indigo' };
+  if (lowCmd.startsWith('trigger_bottom_swipe_down')) return { icon:'arrow_down_to_line', cls:'icon-indigo' };
   if (lowCmd.startsWith('trigger_bottombar')) return { icon:'square_stack_3d_up_fill', cls:'icon-gray' };
   // Recorded gestures
   if (lowCmd.startsWith('gesture record-toggle')) return { icon:'record_circle_fill', cls:'icon-red' };
@@ -4778,6 +4800,7 @@ const ACTION_SECTIONS = [
     { name:'App Switcher',      cmd:'switcher',      icon:'square_stack_3d_up_fill' },
     { name:'Previous App',      cmd:'previous app',  icon:'arrow_uturn_backward' },
     { name:'Control Center',    cmd:'open control center',icon:'gear' },
+    { name:'Notification Center', cmd:'open notification center',icon:'bell_fill' },
     { name:'Activate Siri',     cmd:'siri',          icon:'mic_fill' },
     { name:'Play Gesture…',     cmd:'__PLAY_GESTURE__', icon:'hand_draw', needs_input:true },
     { name:'Record Gesture',    cmd:'gesture record-toggle', icon:'record_circle_fill' },
@@ -4788,6 +4811,7 @@ const ACTION_SECTIONS = [
     { name:'Set Brightness…',   cmd:'__SET_BRIGHTNESS__',icon:'sun_max_fill', needs_input:true },
     { name:'Flashlight',        cmd:'flashlight toggle', icon:'bolt_fill', is_toggle:true },
     { name:'Flashlight Intensity…', cmd:'__SET_FLASHLIGHT__', icon:'dial_fill', needs_input:true },
+    { name:'Dance Party',      cmd:'dance party toggle', icon:'bolt_fill', is_toggle:true, keywords:'flashlight torch party music light dance' },
     { name:'Rotation Lock',     cmd:'rotate toggle',     icon:'lock_rotation', is_toggle:true },
     { name:'Set Orientation…',  cmd:'__SET_ORIENTATION__',icon:'rotate_right', needs_input:true, keywords:'rotate rotation landscape portrait orientation upside down screen sideways' },
     { name:'Button Triggers',   cmd:'button triggers pause 15', icon:'pause_circle', is_toggle:true },
@@ -4867,6 +4891,8 @@ const CONDITION_DEFS = [
   { key:'autolock',   title:'Auto-Lock',    icon:'timer', section:'Device', values:[{value:'30S',title:'30 Seconds'},{value:'1M',title:'1 Minute'},{value:'2M',title:'2 Minutes'},{value:'3M',title:'3 Minutes'},{value:'4M',title:'4 Minutes'},{value:'5M',title:'5 Minutes'},{value:'NEVER',title:'Never'}] },
   { key:'orientation',title:'Orientation',  icon:'rotate_right', section:'Device', values:[{value:'PORTRAIT',title:'Portrait'},{value:'LANDSCAPE',title:'Landscape'}] },
   { key:'rotation_lock', title:'Rotation Lock', icon:'lock_rotation', section:'Device', values:[{value:'LOCKED',title:'Locked'},{value:'UNLOCKED',title:'Unlocked'}] },
+  { key:'control_center', title:'Control Center', icon:'gear', section:'Device', values:[{value:'OPEN',title:'Open'},{value:'CLOSED',title:'Closed'}] },
+  { key:'notification_center', title:'Notification Center', icon:'bell_fill', section:'Device', values:[{value:'OPEN',title:'Open'},{value:'CLOSED',title:'Closed'}] },
   { key:'appearance', title:'Appearance', icon:'circle_lefthalf_fill', section:'Device', values:[{value:'DARK',title:'Dark'},{value:'LIGHT',title:'Light'}] },
   { key:'flashlight', title:'Flashlight', icon:'flashlight_on_fill', section:'Device', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
   { key:'screenrecord', title:'Screen Recording', icon:'record_circle_fill', section:'Device', values:[{value:'ACTIVE',title:'Recording'},{value:'INACTIVE',title:'Not Recording'}] },
@@ -5820,13 +5846,14 @@ function onEditTriggerSettings() {
 
 // Triggers that take over what iOS normally does can keep it as well, as in the app: the ping
 // sounds, and with a Home button the Accessibility Shortcut, App Switcher, Siri and screenshot,
-// otherwise Siri, the Accessibility Shortcut, a screenshot and Wallet
+// otherwise Siri, the Accessibility Shortcut, a screenshot, Wallet and Reachability
 function keepDefaultKeys() {
   const pings = ['trigger_device_findmy_sound', 'trigger_watch_ping', 'trigger_watch_ping_hold'];
   const home = typeof serverCapabilities === 'undefined' || serverCapabilities.home_button !== false;
   return pings.concat(home
     ? ['trigger_home_triple_click', 'trigger_home_double_click', 'trigger_home_hold', 'trigger_home_power']
-    : ['power_long_press', 'power_triple_click', 'power_volume_up', 'power_double_tap']);
+    : ['power_long_press', 'power_triple_click', 'power_volume_up', 'power_double_tap',
+       'trigger_bottom_swipe_down_left', 'trigger_bottom_swipe_down_center', 'trigger_bottom_swipe_down_right']);
 }
 function canKeepDefault(key) { return keepDefaultKeys().includes(key); }
 function keepsDefault(key) {
@@ -6138,6 +6165,7 @@ function parseToggleCmd(cmd) {
     { key:'bluetooth', name:'Bluetooth', icon:'bolt_horizontal_fill', prefixes:['bluetooth ','bt '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'] },
     { key:'location', name:'Location Services', icon:'location_fill', prefixes:['location ','locationservices ','location services ','gps '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'] },
     { key:'flashlight', name:'Flashlight', icon:'bolt_fill', prefixes:['flashlight ','flash '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'] },
+    { key:'dance_party', name:'Dance Party', icon:'bolt_fill', prefixes:['dance party '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'], exactMatches: { 'dance party':'toggle' } },
     { key:'buttontriggers', name:'Button Triggers', icon:'pause_circle', prefixes:['button triggers '], suffixes:['pause 15','pause 60','pause','resume'], displaySuffixes:['Pause 15 Minutes','Pause 1 Hour','Pause Until Resumed','Resume'] },
     { key:'appearance', name:'Appearance', icon:'circle_lefthalf_fill', prefixes:['appearance '], suffixes:['dark','light','toggle'], displaySuffixes:['Dark','Light','Toggle'] },
     { key:'audiomix', name:'AudioMix', icon:'equalizer', prefixes:['audiomix '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'], exactMatches: { 'audiomix':'toggle' } },
@@ -9209,6 +9237,7 @@ const VALUE_COMMANDS = [
     ['Haptics', 'haptics status', 'hand_draw'], ['Media Playing', 'is-playing', 'play_fill']]],
   ['Device', [['Lock State', 'lock status', 'lock_fill'], ['Low Power Mode', 'low power status', 'battery_25'],
     ['Flashlight', 'flashlight status', 'lightbulb_fill'], ['Do Not Disturb', 'dnd status', 'moon_fill'],
+    ['AssistiveTouch', 'assistive touch status', 'hand_raised_fill'],
     ['Focus', 'focus status', 'moon_circle_fill'], ['Screen Recording', 'screenrecord status', 'record_circle_fill'],
     ['Timer', 'timer status', 'timer'], ['Proximity', 'proximity status', 'hand_raised_fill']]],
   ['Display', [['Orientation', 'orientation status', 'rotate_right_fill'], ['Appearance', 'appearance status', 'circle_lefthalf_fill'],
@@ -9524,7 +9553,7 @@ function defaultHapticsForTrigger(key) {
   if (key.startsWith('trigger_home_')) return true;
   if (key.startsWith('trigger_statusbar_')) return true;
   if (key.startsWith('trigger_bottombar_')) return true;
-  if (key.startsWith('trigger_bottom_swipe_up_')) return true;
+  if (key.startsWith('trigger_bottom_swipe_')) return true;
   if (key.startsWith('trigger_edge_')) return true;
   return false;
 }
@@ -11535,7 +11564,7 @@ const BUILT_IN_TRIGGER_GROUPS = [
   { title: 'Power Button', keys: ['power_double_tap','power_triple_click','power_quadruple_click','power_volume_up','power_volume_down','power_long_press'] },
   { title: 'Status Bar', keys: ['trigger_statusbar_left_hold','trigger_statusbar_center_hold','trigger_statusbar_right_hold','trigger_statusbar_swipe_left','trigger_statusbar_swipe_right','trigger_statusbar_double_tap','trigger_statusbar_swipe_down_left','trigger_statusbar_swipe_down_center','trigger_statusbar_swipe_down_right'] },
   { title: 'Edge Gestures', keys: ['trigger_edge_left_swipe_up','trigger_edge_left_swipe_down','trigger_edge_right_swipe_up','trigger_edge_right_swipe_down'] },
-  { title: 'Bottom Bar Gestures', keys: ['trigger_bottombar_swipe_left','trigger_bottombar_swipe_right','trigger_bottom_swipe_up_left','trigger_bottom_swipe_up_center','trigger_bottom_swipe_up_right'] },
+  { title: 'Bottom Bar Gestures', keys: ['trigger_bottombar_swipe_left','trigger_bottombar_swipe_right','trigger_bottom_swipe_up_left','trigger_bottom_swipe_up_center','trigger_bottom_swipe_up_right','trigger_bottom_swipe_down_left','trigger_bottom_swipe_down_center','trigger_bottom_swipe_down_right'] },
   { title: 'Multi-Finger Gestures', keys: ['trigger_two_finger_tap','trigger_two_finger_swipe_left','trigger_two_finger_swipe_right','trigger_two_finger_swipe_up','trigger_two_finger_swipe_down','trigger_two_finger_rotate_cw','trigger_two_finger_rotate_ccw','trigger_statusbar_two_finger_swipe_down','trigger_bottom_two_finger_swipe_up'] },
   { title: 'Home Button', keys: ['trigger_home_double_click','trigger_home_triple_click','trigger_home_quadruple_click','trigger_home_hold','trigger_home_power','touchid_tap','touchid_hold'] },
   { title: 'Ringer Switch', keys: ['trigger_ringer_mute','trigger_ringer_unmute','trigger_ringer_toggle'] },
@@ -11565,6 +11594,8 @@ function showBuiltInTriggerSheet() {
     if (group.title === 'Apple Watch' && !watchAvailable()) return;
     rows.push({ header: group.title });
     group.keys.forEach(key => {
+      // Bottom Swipe Down takes over Reachability's swipe, which phones with a Home button don't have
+      if (key.startsWith('trigger_bottom_swipe_down_') && typeof serverCapabilities !== 'undefined' && serverCapabilities.home_button === true) return;
       rows.push({ label: `${defaultNameForKey(key)}${triggerIsAdded(key) ? ' ✓' : ''}`, action: () => addBuiltInTrigger(key) });
     });
   });

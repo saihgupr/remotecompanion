@@ -39,7 +39,7 @@ RemoteCommand_FILES += ../RemoteCompanion/RCClearNotificationsCommand.m
 RemoteCommand_FILES += ../RemoteCompanion/RCTimerCommand.m
 RemoteCommand_FILES += ../RemoteCompanion/RCDevAnnotateAction.m
 RemoteCommand_CFLAGS = -fobjc-arc -Ilua -I../RemoteCompanion -DLUA_USE_IOS -Wno-unused-function -Wno-unused-variable
-RemoteCommand_FRAMEWORKS = UIKit CoreNFC IOKit QuartzCore CoreLocation Security CoreMotion
+RemoteCommand_FRAMEWORKS = UIKit CoreNFC IOKit QuartzCore CoreLocation Security CoreMotion CoreBluetooth
 RemoteCommand_PRIVATE_FRAMEWORKS = AppSupport MediaRemote MobileCoreServices FrontBoardServices BackBoardServices MediaPlayer DoNotDisturb BiometricKit AccessibilityUtilities
 RemoteCommand_LDFLAGS += -F/opt/theos/sdks/iPhoneOS16.5.sdk/System/Library/PrivateFrameworks
 
@@ -78,5 +78,6 @@ SUBPROJECTS += rc-client
 SUBPROJECTS += rc-notify
 SUBPROJECTS += rc-ocr
 SUBPROJECTS += rc-dictate
+SUBPROJECTS += rc-party
 SUBPROJECTS += rc-ccmodule
 include $(THEOS_MAKE_PATH)/aggregate.mk

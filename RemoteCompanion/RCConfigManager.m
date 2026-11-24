@@ -505,6 +505,7 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
             // Bottom Bar Gestures
             @"trigger_bottombar_swipe_left", @"trigger_bottombar_swipe_right",
             @"trigger_bottom_swipe_up_left", @"trigger_bottom_swipe_up_center", @"trigger_bottom_swipe_up_right",
+            @"trigger_bottom_swipe_down_left", @"trigger_bottom_swipe_down_center", @"trigger_bottom_swipe_down_right",
             // Home Button
             @"trigger_home_double_click", @"trigger_home_triple_click", @"trigger_home_quadruple_click",
             @"trigger_home_hold", @"trigger_home_power", @"touchid_tap", @"touchid_hold",
@@ -1418,7 +1419,10 @@ static NSString *RCActionCommand(id item) {
         @"trigger_bottombar_swipe_right": @"Bottom Bar Swipe Right",
         @"trigger_bottom_swipe_up_left": @"Bottom Swipe Up (Left)",
         @"trigger_bottom_swipe_up_center": @"Bottom Swipe Up (Center)",
-        @"trigger_bottom_swipe_up_right": @"Bottom Swipe Up (Right)"
+        @"trigger_bottom_swipe_up_right": @"Bottom Swipe Up (Right)",
+        @"trigger_bottom_swipe_down_left": @"Bottom Swipe Down (Left)",
+        @"trigger_bottom_swipe_down_center": @"Bottom Swipe Down (Center)",
+        @"trigger_bottom_swipe_down_right": @"Bottom Swipe Down (Right)"
     };
     
     if ([triggerKey hasPrefix:@"trigger_watch_face_"]) {
@@ -1515,7 +1519,7 @@ static NSString *RCActionCommand(id item) {
     if ([triggerKey hasPrefix:@"trigger_home_"]) return YES;
     if ([triggerKey hasPrefix:@"trigger_statusbar_"]) return YES;
     if ([triggerKey hasPrefix:@"trigger_bottombar_"]) return YES;
-    if ([triggerKey hasPrefix:@"trigger_bottom_swipe_up_"]) return YES;
+    if ([triggerKey hasPrefix:@"trigger_bottom_swipe_"]) return YES;
     if ([triggerKey hasPrefix:@"trigger_edge_"]) return YES;
     return NO;
 }
@@ -1963,6 +1967,10 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         @"flashlight on": @"Flashlight On",
         @"flashlight off": @"Flashlight Off",
         @"flashlight toggle": @"Flashlight Toggle",
+        @"dance party": @"Dance Party",
+        @"dance party toggle": @"Dance Party Toggle",
+        @"dance party on": @"Dance Party On",
+        @"dance party off": @"Dance Party Off",
         @"appearance dark": @"Appearance Dark",
         @"appearance light": @"Appearance Light",
         @"appearance toggle": @"Appearance Toggle",
@@ -2096,6 +2104,8 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         @"home": @"Home Button",
         @"open control center": @"Open Control Center",
         @"control center": @"Open Control Center",
+        @"open notification center": @"Open Notification Center",
+        @"notification center": @"Open Notification Center",
         @"ldrestart": @"Soft Reboot (ldrestart)",
         @"userspace-reboot": @"Userspace Reboot",
         @"uicache": @"Refresh Icon Cache",
@@ -2653,6 +2663,8 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         if ([cmd containsString:@"auto"]) return ([UIImage systemImageNamed:@"gyroscope"] ? @"gyroscope" : @"rotate.right");
         return ([UIImage systemImageNamed:@"rectangle.portrait.rotate"] ? @"rectangle.portrait.rotate" : @"rotate.right");
     }
+    if ([cmd isEqualToString:@"dance party off"]) return @"flashlight.off.fill";
+    if ([cmd hasPrefix:@"dance party"]) return @"flashlight.on.fill";
     if ([cmd hasPrefix:@"flashlight "] || [cmd hasPrefix:@"flash "]) return @"flashlight.on.fill";
     if ([cmd hasPrefix:@"Lua "] || [cmd hasPrefix:@"lua_eval "] || [cmd hasPrefix:@"lua-eval "] || [cmd hasPrefix:@"lua "]) return @"scroll.fill";
     if ([cmd hasPrefix:@"spotify "]) return @"music.note";
@@ -2798,6 +2810,8 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         @"accessibility shortcut": ([UIImage systemImageNamed:@"accessibility"] ? @"accessibility" : @"figure.stand"), // "accessibility" is iOS 15+
         @"open control center": @"switch.2",
         @"control center": @"switch.2",
+        @"open notification center": @"bell.badge",
+        @"notification center": @"bell.badge",
         @"ldrestart": @"arrow.clockwise",
         @"userspace-reboot": @"arrow.clockwise.circle",
         @"uicache": @"square.grid.2x2",
@@ -2845,6 +2859,8 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         if ([cmd hasPrefix:@"delay "]) return @"hourglass";
         if ([cmd hasPrefix:@"stop trigger "]) return @"stop.circle";
         if ([cmd hasPrefix:@"exec "]) return @"chevron.right.square";
+        if ([cmd hasPrefix:@"dance party off"]) return @"flashlight.off.fill";
+        if ([cmd hasPrefix:@"dance party"]) return @"flashlight.on.fill";
         if ([cmd hasPrefix:@"flashlight "] || [cmd hasPrefix:@"flash "]) return @"flashlight.on.fill";
         if ([cmd hasPrefix:@"low power "]) return @"battery.100.bolt";
         if ([cmd hasPrefix:@"autolock "] || [cmd hasPrefix:@"auto-lock "] || [cmd hasPrefix:@"display sleep "] || [cmd hasPrefix:@"display timeout "] || [cmd hasPrefix:@"display time off "]) return @"timer";
@@ -2858,6 +2874,14 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
 
 // iPhones with Face ID are the ones without a Home button. biometryType is set by
 // canEvaluatePolicy: whatever it returns, so this holds without Face ID set up too.
+// The Bottom Bar Gestures that can be added. Bottom Swipe Down takes over Reachability's swipe
+// down on the bottom edge, which phones with a Home button don't have.
++ (NSArray<NSString *> *)bottomBarTriggerKeys {
+    NSMutableArray *keys = [@[@"trigger_bottombar_swipe_left", @"trigger_bottombar_swipe_right", @"trigger_bottom_swipe_up_left", @"trigger_bottom_swipe_up_center", @"trigger_bottom_swipe_up_right"] mutableCopy];
+    if (![self hasHomeButton]) [keys addObjectsFromArray:@[@"trigger_bottom_swipe_down_left", @"trigger_bottom_swipe_down_center", @"trigger_bottom_swipe_down_right"]];
+    return keys;
+}
+
 + (BOOL)hasHomeButton {
     static BOOL hasHomeButton;
     static dispatch_once_t once;
@@ -3127,6 +3151,15 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
             @"prefixes": @[@"flashlight ", @"flash "],
             @"suffixes": @[@"on", @"off", @"toggle"],
             @"displaySuffixes": @[@"On", @"Off", @"Toggle"]
+        },
+        @{
+            @"key": @"dance_party",
+            @"name": @"Dance Party",
+            @"icon": @"flashlight.on.fill",
+            @"prefixes": @[@"dance party "],
+            @"suffixes": @[@"on", @"off", @"toggle"],
+            @"displaySuffixes": @[@"On", @"Off", @"Toggle"],
+            @"exactMatches": @{ @"dance party": @"toggle" }
         },
         @{
             @"key": @"nfcscanner",

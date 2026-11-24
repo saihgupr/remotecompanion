@@ -713,6 +713,7 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
         self.rcIconTile.frame = CGRectMake(tileX, rowHeight / 2.0 - RCActionCellIconTileSize / 2.0,
                                            RCActionCellIconTileSize, RCActionCellIconTileSize);
         CGFloat side = MIN(24.0, MAX(20.0, self.imageView.image.size.width));
+        self.imageView.contentMode = UIViewContentModeScaleAspectFit;
         CGRect imgFrame = self.imageView.frame;
         imgFrame.size.width = side;
         imgFrame.size.height = side;
@@ -1447,6 +1448,11 @@ static NSArray *RCActionSnapshot(NSArray *actions) {
             baseText = @"Flashlight ";
             paramText = [NSString stringWithFormat:@"%@%%", val];
         }
+    } else if ([lower isEqualToString:@"dance party"] || [lower isEqualToString:@"dance party toggle"]) {
+        baseText = @"Dance Party";
+    } else if ([lower isEqualToString:@"dance party on"] || [lower isEqualToString:@"dance party off"]) {
+        baseText = @"Dance Party ";
+        paramText = [lower hasSuffix:@"on"] ? @"On" : @"Off";
     } else if ([lower hasPrefix:@"stop trigger "]) {
         baseText = @"Stop: ";
         paramText = [[RCConfigManager sharedManager] displayNameForTrigger:[cmd substringFromIndex:13]];
@@ -1689,10 +1695,10 @@ static NSArray *RCActionSnapshot(NSArray *actions) {
     NSMutableArray *menuActions = [NSMutableArray arrayWithObject:whenFiredAction];
     // Triggers that take over what iOS normally does can keep it as well: the ping sound, and with a
     // Home button the Accessibility Shortcut, App Switcher, Siri and screenshot, otherwise Siri, the
-    // Accessibility Shortcut, a screenshot and Wallet
+    // Accessibility Shortcut, a screenshot, Wallet and Reachability
     NSArray *keepsDefault = [RCConfigManager hasHomeButton]
         ? @[@"trigger_device_findmy_sound", @"trigger_watch_ping", @"trigger_watch_ping_hold", @"trigger_home_triple_click", @"trigger_home_double_click", @"trigger_home_hold", @"trigger_home_power"]
-        : @[@"trigger_device_findmy_sound", @"trigger_watch_ping", @"trigger_watch_ping_hold", @"power_long_press", @"power_triple_click", @"power_volume_up", @"power_double_tap"];
+        : @[@"trigger_device_findmy_sound", @"trigger_watch_ping", @"trigger_watch_ping_hold", @"power_long_press", @"power_triple_click", @"power_volume_up", @"power_double_tap", @"trigger_bottom_swipe_down_left", @"trigger_bottom_swipe_down_center", @"trigger_bottom_swipe_down_right"];
     if ([keepsDefault containsObject:_triggerKey]) {
         id stored = [[RCConfigManager sharedManager] triggerDataForKey:_triggerKey][@"keepDefault"];
         BOOL keep = stored ? [stored boolValue] : [_triggerKey isEqualToString:@"trigger_device_findmy_sound"];
@@ -3530,6 +3536,26 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             ]
         },
         @{
+            @"key": @"control_center",
+            @"title": @"Control Center",
+            @"icon": @"switch.2",
+            @"section": @"Device",
+            @"values": @[
+                @{ @"value": @"OPEN", @"title": @"Open" },
+                @{ @"value": @"CLOSED", @"title": @"Closed" }
+            ]
+        },
+        @{
+            @"key": @"notification_center",
+            @"title": @"Notification Center",
+            @"icon": @"bell.badge",
+            @"section": @"Device",
+            @"values": @[
+                @{ @"value": @"OPEN", @"title": @"Open" },
+                @{ @"value": @"CLOSED", @"title": @"Closed" }
+            ]
+        },
+        @{
             @"key": @"appearance",
             @"title": @"Appearance",
             @"icon": @"circle.lefthalf.fill",
@@ -4290,11 +4316,20 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 - (RCInlineRowItem *)inlineChoiceItemForCommand:(NSString *)command {
     NSDictionary *toggle = [[RCConfigManager sharedManager] toggleInfoForCommand:command];
     if (!toggle) return nil;
-    NSString *matchedPrefix = toggle[@"matchedPrefix"];
+    NSString *matchedPrefix = toggle[@"matchedPrefix"] ?: @"";
     NSArray *prefixes = toggle[@"prefixes"];
     NSString *canonicalPrefix = matchedPrefix.length ? matchedPrefix : (prefixes.firstObject ?: @"");
-    if (!canonicalPrefix.length || ![command hasPrefix:canonicalPrefix]) return nil;
-    NSString *rest = [[command substringFromIndex:canonicalPrefix.length] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    if (!canonicalPrefix.length) return nil;
+    NSString *rest = nil;
+    if (matchedPrefix.length) {
+        if (![command hasPrefix:matchedPrefix]) return nil;
+        rest = [[command substringFromIndex:matchedPrefix.length] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    } else {
+        // Exact matches like a bare "dance party" carry their current value separately; show the
+        // switch anyway, so an action added before its value was spelled out still gets the pill.
+        rest = toggle[@"currentSuffix"];
+    }
+    if (!rest.length) return nil;
     NSArray *suffixes = toggle[@"suffixes"];
     NSInteger index = NSNotFound;
     for (NSUInteger i = 0; i < suffixes.count; i++) {
