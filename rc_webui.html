@@ -10953,6 +10953,35 @@ function selectHAEntity(item) {
 
   if (domain === 'scene' || domain === 'script' || domain === 'automation') {
     let cmd = `ha call ${domain}.turn_on ${entityId}`;
+    if (domain === 'script') cmd = `ha call script.${entityId.split('.')[1]} ${entityId}`;
+    apply(cmd, '');
+  } else {
+    // While editing, tick whichever action the old command already used
+    const actions = triggerData(currentKey).actions || [];
+    const oldAct = editIdx !== null ? actions[editIdx] : null;
+    const oldCmd = (typeof oldAct === 'object' && oldAct !== null) ? (oldAct.command || '') : oldAct;
+    const old = editIdx !== null ? parseHACommand(oldCmd) : null;
+    const tick = (svc, verb) => old && (old.service === svc || old.service.split('.').pop() === verb) ? ' ✓' : '';
+    showSheet(`Control ${friendlyName}`, [
+      { label: `Toggle (${friendlyName})${tick(`${domain}.toggle`, 'toggle')}`, action: () => apply(`ha toggle ${entityId}`, 'Toggle') },
+      { label: `Turn On (${friendlyName})${tick(`${domain}.turn_on`, 'turn_on')}`, action: () => apply(`ha turn_on ${entityId}`, 'Turn On') },
+      { label: `Turn Off (${friendlyName})${tick(`${domain}.turn_off`, 'turn_off')}`, action: () => apply(`ha turn_off ${entityId}`, 'Turn Off') }
+    ]);
+  }
+}
+
+function updateHAAction(idx, cmd, message) {
+  const actions = triggerData(currentKey).actions || [];
+  if (idx === null || idx < 0 || idx >= actions.length) {
+    addActionToCurrent(cmd);
+  } else {
+    storeCommandAt(actions, idx, cmd);
+    saveConfig();
+    renderActionList();
+  }
+  if (message) showToast(message);
+}
+
 function parseHACommand(cmd) {
   if (!cmd || typeof cmd !== 'string') return null;
   let raw = cmd.trim();
@@ -11011,6 +11040,17 @@ function editHAAction(idx) {
       buttons.push({ label: `Trigger Automation${mark('automation.trigger')}`, action: () => updateHAAction(idx, `ha call automation.trigger ${parsed.entityId}`, '✓ Home Assistant Action Updated') });
     } else {
       standard = [`${domain}.toggle`, `${domain}.turn_on`, `${domain}.turn_off`].includes(parsed.service);
+      buttons.push({ label: `Toggle${mark(`${domain}.toggle`)}`, action: () => updateHAAction(idx, `ha toggle ${parsed.entityId}`, '✓ Home Assistant Action Updated') });
+      buttons.push({ label: `Turn On${mark(`${domain}.turn_on`)}`, action: () => updateHAAction(idx, `ha turn_on ${parsed.entityId}`, '✓ Home Assistant Action Updated') });
+      buttons.push({ label: `Turn Off${mark(`${domain}.turn_off`)}`, action: () => updateHAAction(idx, `ha turn_off ${parsed.entityId}`, '✓ Home Assistant Action Updated') });
+    }
+  }
+
+  if (!parsed || !standard) {
+    buttons.push({ label: 'Edit Command…', action: () => promptTerminalModal(cmd, idx, true) });
+  }
+  buttons.push({ label: 'Change Entity…', action: () => { g_haEditIdx = idx; promptHAActionPicker(); } });
+
   showSheet(parsed ? friendlyHAEntityName(parsed.entityId) : formatHACommandName(cmd), buttons);
 }
 
