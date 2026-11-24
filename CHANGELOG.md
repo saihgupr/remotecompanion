@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - **New Trigger large title**: the New Trigger picker uses the same large title as the Triggers screen it opens from, instead of a small one at the top.
+- **Settings spacing**: the first section header sits closer under the large title, matching the Triggers screen, while the gaps between the rest of the sections stay the same.
 
 ### Fixed
 - **Large title on the Triggers screen**: the main screen opened, and came back from a trigger, with the small title even though the list was at the top. The category bar added its space before the table was on screen, so the navigation bar started collapsed and only opened after a scroll. The space is added after the first layout now, so the large title shows from launch and on the way back.
