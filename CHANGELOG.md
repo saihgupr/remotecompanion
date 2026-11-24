@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 - **`previous` as an alias for `prev`**: `rc previous` skips to the previous track, the same as `rc prev`, in scripts and the CLI.
 
 ### Fixed
+- **Large title on the Triggers screen**: the main screen opened, and came back from a trigger, with the small title even though the list was at the top. The category bar added its space before the table was on screen, so the navigation bar started collapsed and only opened after a scroll. The space is added after the first layout now, so the large title shows from launch and on the way back.
 - **`rc bluetooth list` shows low-energy devices**: the Apple Watch and low-energy accessories such as an AssistiveTouch mouse or pointer were missing, because the command read BluetoothManager's paired list, which holds classic pairings only. The list now adds the devices CoreBluetooth reports as connected. `bt disconnect` on one of those says plainly that iOS doesn't allow apps to disconnect it, and points at Forget This Device in Settings > Bluetooth or `rc bt off` and `rc bt on`.
 
 ## [4.7.0] - 2026-11-19
