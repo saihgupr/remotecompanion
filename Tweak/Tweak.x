@@ -31,6 +31,7 @@
 #import <mach/mach_host.h>
 #import "native_curl.h"
 #import "RCTestKit.h"
+#import "RCSwipeZones.h"
 #import "RCToastPill.h"
 #import "RCNotifyCommand.h"
 #import "RCClearNotificationsCommand.h"
@@ -2137,7 +2138,8 @@ static void RC_SetButtonPauseUntil(uint64_t until) {
 }
 
 static BOOL RC_TriggersPaused(void) {
-    return RC_TriggersPausedByTweak() || RC_ButtonPauseUntil() != 0;
+    // RCSwipeZonesIsDragging: a handle of Adjust on Screen is being dragged
+    return RC_TriggersPausedByTweak() || RC_ButtonPauseUntil() != 0 || RCSwipeZonesIsDragging();
 }
 
 // The triggers a pause stops: the hardware buttons, Touch ID, the ringer switch and screen gestures
@@ -4558,6 +4560,23 @@ static void save_trigger_config() {
         SRLogMin(@"[WebUI] Failed to serialize config: %@", error);
     }
     }
+
+// For Adjust on Screen (RCSwipeZones.h)
+NSDictionary *RCSwipeZonesConfig(void) {
+    @synchronized (rc_trigger_config_lock()) { return g_triggerConfig; }
+}
+
+void RCSwipeZonesApply(NSDictionary<NSString *, NSNumber *> *values, NSDictionary<NSString *, NSNumber *> *defaults, BOOL save) {
+    NSMutableDictionary *config;
+    @synchronized (rc_trigger_config_lock()) { config = [g_triggerConfig mutableCopy]; }
+    if (!config) return;
+    [values enumerateKeysAndObjectsUsingBlock:^(NSString *key, NSNumber *value, BOOL *stop) {
+        if (fabs(value.doubleValue - defaults[key].doubleValue) < 0.5) [config removeObjectForKey:key];
+        else config[key] = @(round(value.doubleValue));
+    }];
+    rc_set_trigger_config(config);
+    if (save) save_trigger_config();
+}
 
     static void register_config_observer() {
     CFNotificationCenterAddObserver(
@@ -21692,10 +21711,27 @@ static NSTimeInterval g_lastStatusBarDoubleTapTime = 0;
 static NSString *g_statusBarZone = nil;
 static NSUInteger g_statusBarTapGeneration = 0; // a second tap cancels the first tap's pending single tap
 
+// Which third of a strip a touch is in (0 left, 1 center, 2 right), from how far along the strip it
+// is (0 to 1) and the left and right zones' share of the strip, in percent: config keys from Swipe
+// Triggers, 33 when unset. The center always keeps at least a tenth of the strip.
+static CGFloat RC_ZoneShare(NSString *key) {
+    id value = g_triggerConfig[key];
+    double percent = [value isKindOfClass:[NSNumber class]] ? [value doubleValue] : 0;
+    return (percent >= 5 && percent <= 60) ? percent / 100.0 : 0.33;
+}
+
+static NSInteger RC_ZoneForProgress(CGFloat progress, NSString *leftKey, NSString *rightKey) {
+    CGFloat left = RC_ZoneShare(leftKey), right = RC_ZoneShare(rightKey);
+    if (left + right > 0.9) { CGFloat scale = 0.9 / (left + right); left *= scale; right *= scale; }
+    if (progress < left) return 0;
+    if (progress > 1.0 - right) return 2;
+    return 1;
+}
+
+#define RC_STATUS_BAR_ZONE(progress) RC_ZoneForProgress((progress), @"swipeStatusBarLeftZone", @"swipeStatusBarRightZone")
+
 static NSString *rc_status_bar_zone_for_progress(CGFloat progress) {
-    if (progress < 0.33) return @"left";
-    if (progress > 0.66) return @"right";
-    return @"center";
+    return @[@"left", @"center", @"right"][RC_STATUS_BAR_ZONE(progress)];
 }
 
 static BOOL rc_status_bar_trigger_enabled(NSString *key) {
@@ -22037,15 +22073,9 @@ static CGFloat RC_SwipeSetting(NSString *key, CGFloat normal) {
 #define RC_TOP_DOWN_DISTANCE() RC_SwipeSetting(@"swipeTopDownDistance", 45)
 #define RC_BOTTOM_BAR_DISTANCE() RC_SwipeSetting(@"swipeBottomBarDistance", 60)
 #define RC_BOTTOM_UP_DISTANCE() RC_SwipeSetting(@"swipeBottomUpDistance", 45)
-// The bottom strip (bottom bar swipes and the bottom swipe-up zones), and how much of the bottom
-// edge the left and right swipe-up zones take, in percent (the center has the rest)
+// The bottom strip (bottom bar swipes and the bottom swipe-up zones); RC_ZoneForProgress splits it
 #define RC_BOTTOM_ZONE_HEIGHT() RC_SwipeSetting(@"swipeBottomZoneHeight", 25)
 
-static CGFloat RC_BottomZoneShare(NSString *key) {
-    id value = g_triggerConfig[key];
-    double percent = [value isKindOfClass:[NSNumber class]] ? [value doubleValue] : 0;
-    return (percent >= 5 && percent <= 60) ? percent / 100.0 : 0.33;
-}
 
 static inline BOOL RC_InBottomRegion(CGPoint loc, UIInterfaceOrientation orientation, CGFloat S, CGFloat L) {
     (void)S; (void)L;
@@ -22219,23 +22249,16 @@ static inline CGFloat RC_ProgressAlongEdge(CGPoint loc, UIInterfaceOrientation o
 }
 
 static inline NSString *RC_StatusHoldTriggerForProgress(CGFloat progress) {
-    if (progress < 0.33) return @"trigger_statusbar_left_hold";
-    if (progress > 0.66) return @"trigger_statusbar_right_hold";
-    return @"trigger_statusbar_center_hold";
+    return @[@"trigger_statusbar_left_hold", @"trigger_statusbar_center_hold", @"trigger_statusbar_right_hold"][RC_STATUS_BAR_ZONE(progress)];
 }
 
 static inline NSString *RC_BottomSwipeTriggerForProgress(CGFloat progress) {
-    CGFloat left = RC_BottomZoneShare(@"swipeBottomLeftZone"), right = RC_BottomZoneShare(@"swipeBottomRightZone");
-    if (left + right > 0.9) { CGFloat scale = 0.9 / (left + right); left *= scale; right *= scale; } // a center is always left
-    if (progress < left) return @"trigger_bottom_swipe_up_left";
-    if (progress > 1.0 - right) return @"trigger_bottom_swipe_up_right";
-    return @"trigger_bottom_swipe_up_center";
+    return @[@"trigger_bottom_swipe_up_left", @"trigger_bottom_swipe_up_center", @"trigger_bottom_swipe_up_right"]
+        [RC_ZoneForProgress(progress, @"swipeBottomLeftZone", @"swipeBottomRightZone")];
 }
 
 static inline NSString *RC_TopSwipeDownTriggerForProgress(CGFloat progress) {
-    if (progress < 0.33) return @"trigger_statusbar_swipe_down_left";
-    if (progress > 0.67) return @"trigger_statusbar_swipe_down_right";
-    return @"trigger_statusbar_swipe_down_center";
+    return @[@"trigger_statusbar_swipe_down_left", @"trigger_statusbar_swipe_down_center", @"trigger_statusbar_swipe_down_right"][RC_STATUS_BAR_ZONE(progress)];
 }
 
 // Physical (window-space) delta -> logical delta as the user sees it.
@@ -23785,7 +23808,41 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
 
 static NSUInteger g_rcCCPullEdge = 0;
 
+// Swipe Triggers > Adjust on Screen (RCSwipeZones.m) draws its handles at the screen's edges, so
+// while it's open SpringBoard's edge gestures (the Home swipe, Control Center, Notification
+// Center) are held back
+static BOOL RC_ZoneEditorOpen(void) {
+    return RCSwipeZonesIsExpanded();
+}
+
+// While Adjust on Screen is open, a swipe up from the bottom is held back once; another within 3
+// seconds is let through, so two swipes still go Home. A phone with a Home button holds every one
+// back (there the swipe opens Control Center, and the button goes Home). A touch is judged when it lands (the
+// recognizers asking about it then come within moments of each other); a later question about a
+// moving touch, or a recognizer about to begin, gets that same answer.
+static BOOL g_zoneEditorLastAnswer = NO;
+
+static BOOL RC_ZoneEditorLetsTouchThrough(CGPoint loc, BOOL judged) {
+    static NSTimeInterval lastBlockedAt = 0, lastTouchAt = 0;
+    if (judged) return g_zoneEditorLastAnswer;
+    BOOL (^answer)(BOOL) = ^BOOL(BOOL yes) { g_zoneEditorLastAnswer = yes; return yes; };
+    NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
+    if (now - lastTouchAt < 0.25) return g_zoneEditorLastAnswer; // the same touch, asked by another recognizer
+    lastTouchAt = now;
+    CGFloat height = MAX([UIScreen mainScreen].bounds.size.width, [UIScreen mainScreen].bounds.size.height);
+    if (loc.y < height - 40) return answer(NO); // not the Home swipe
+    if (rc_has_home_button()) return answer(NO); // the Home button goes Home: the swipe up (Control Center) stays held back
+    if (now - lastBlockedAt < 3) {
+        lastBlockedAt = 0;
+        SRLogMin(@"[RCZones] Second swipe up: going Home");
+        return answer(YES);
+    }
+    lastBlockedAt = now;
+    return answer(NO);
+}
+
 static BOOL rc_should_suppress_edge_recognizer(UIGestureRecognizer *recognizer, CGPoint loc, UIInterfaceOrientation orientation, BOOL isMove) {
+    if (RC_ZoneEditorOpen() && !RC_ZoneEditorLetsTouchThrough(loc, isMove)) return YES;
     UIRectEdge edges = 0;
     BOOL hasEdges = [recognizer respondsToSelector:@selector(edges)];
     if (hasEdges) edges = [(UIScreenEdgePanGestureRecognizer *)recognizer edges];
@@ -24277,6 +24334,10 @@ static NSString *g_rcReachabilitySwipeKey = nil;
     if (recognizer == leftEdgeRecognizer || recognizer == rightEdgeRecognizer ||
         recognizer == bottomUpRecognizer || recognizer == topDownRecognizer) {
         return %orig;
+    }
+    if (RC_ZoneEditorOpen() && !RC_ZoneEditorLetsTouchThrough(CGPointZero, YES)) {
+        SRLog(@"[RCZones] SBSystemGestureManager gestureRecognizerShouldBegin: NO while Adjust on Screen is open: %@", recognizer);
+        return NO;
     }
     if (rc_is_two_finger_top_active() && rc_recognizer_is_top_edge(recognizer)) {
         SRLog(@"[RCMultiFinger] SBSystemGestureManager gestureRecognizerShouldBegin: NO for top-edge recognizer %@", recognizer);
