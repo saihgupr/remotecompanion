@@ -52,7 +52,9 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
+    // The same large title as the Triggers screen it was pushed from
+    self.navigationController.navigationBar.prefersLargeTitles = YES;
+    self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeAlways;
     RCConfigManager *cm = [RCConfigManager sharedManager];
     CGFloat mainBG = [cm tweakValueForKey:@"mainBackground" defaultVal:0.09];
     UIColor *bg = [cm tweakColorForKey:@"actionPickerBackground" defaultVal:mainBG];
