@@ -307,6 +307,7 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
             @{ @"name": @"Appearance", @"command": @"appearance toggle", @"icon": @"circle.lefthalf.fill" },
             @{ @"name": @"Set Brightness", @"command": @"__SET_BRIGHTNESS__", @"icon": @"sun.max.fill" },
             @{ @"name": @"Flashlight", @"command": @"flashlight toggle", @"icon": @"flashlight.on.fill" },
+            @{ @"name": @"Dance Party", @"command": @"dance party toggle", @"icon": @"flashlight.on.fill", @"keywords": @"flashlight torch party music light dance" },
             @{ @"name": @"Rotation Lock", @"command": @"rotate toggle", @"icon": @"lock.rotation" },
             @{ @"name": @"Set Orientation...", @"command": @"__SET_ORIENTATION__", @"icon": @"rotate.right", @"keywords": @"rotate rotation landscape portrait orientation screen sideways" },
             @{ @"name": @"Lock Device", @"command": @"lock", @"icon": @"lock.fill" },

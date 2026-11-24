@@ -2,6 +2,7 @@
 #import <Foundation/Foundation.h>
 #import "RCScreen.h"
 #import "RCDevAnnotate.h"
+#import "RCSpawn.h"
 #import <UIKit/UIKit.h>
 #import <CoreBluetooth/CoreBluetooth.h>
 #import <netinet/in.h>
@@ -3095,6 +3096,12 @@ static BOOL rc_flashlight_is_on(void) {
     return on;
 }
 
+// The controller's level getter is a stored detent that _setFlashlightLevel: never moves, and
+// AVFoundation can't see a torch the controller holds. Remember the level this process set, so
+// "status" and "up"/"down" can report and step from it. A torch turned on elsewhere has no known
+// level, and status says just ON rather than inventing one.
+static float g_rc_flashlight_level = 0;
+
 // level 0 turns it off; 0.01-1 is the brightness. NO when there's no flashlight to use.
 static BOOL rc_flashlight_set(float level) {
     __block BOOL done = NO;
@@ -3127,7 +3134,380 @@ static BOOL rc_flashlight_set(float level) {
             done = YES;
         }
     });
+    if (done) g_rc_flashlight_level = (level <= 0) ? 0 : MIN(1.0f, level);
     return done;
+}
+
+// The level this process last set, 0 when it is off or was turned on elsewhere.
+static float rc_flashlight_known_level(void) {
+    return MAX(0.0f, MIN(1.0f, g_rc_flashlight_level));
+}
+
+// Named brightness levels. The four match the steps iOS's flashlight slider snaps to, so "low"
+// is the same amount a person gets by dragging it a quarter of the way up.
+static BOOL rc_flashlight_named_level(NSString *word, float *level) {
+    NSDictionary<NSString *, NSNumber *> *levels = @{
+        @"low": @0.25f, @"medium": @0.5f, @"med": @0.5f, @"high": @0.75f,
+        @"max": @1.0f, @"full": @1.0f, @"min": @0.01f, @"dim": @0.01f,
+    };
+    NSNumber *value = [levels objectForKey:word];
+    if (!value) return NO;
+    if (level) *level = value.floatValue;
+    return YES;
+}
+
+// A level is a percentage (50, 50%), a fraction (0.5) or one of the named levels.
+static BOOL rc_flashlight_parse_level(NSString *text, float *level) {
+    NSString *word = [text lowercaseString];
+    if (rc_flashlight_named_level(word, level)) return YES;
+    NSString *number = [word stringByReplacingOccurrencesOfString:@"%" withString:@""];
+    NSScanner *scanner = [NSScanner scannerWithString:number];
+    double parsed = 0;
+    if (![scanner scanDouble:&parsed] || !scanner.isAtEnd || parsed < 0) return NO;
+    float value = (float)parsed;
+    if (value > 1.0f) value /= 100.0f; // 50 means 50%, 0.5 already is one
+    if (value > 1.0f) value = 1.0f;
+    if (level) *level = value;
+    return YES;
+}
+
+static NSString *rc_flashlight_usage(void) {
+    return @"Usage: flashlight [on [low|medium|high|max|<0-100>]|off|toggle|status|low|medium|high|max|up|down [N]]\n";
+}
+
+static NSString *rc_flashlight_status_text(void) {
+    if (!rc_flashlight_is_on()) return @"Flashlight OFF\n";
+    float level = rc_flashlight_known_level();
+    if (level <= 0) return @"Flashlight ON\n";
+    return [NSString stringWithFormat:@"Flashlight ON (%.0f%%)\n", level * 100];
+}
+
+// Dance party: rc-party listens through the microphone and prints a torch level about 30 times a
+// second; this side turns that into brightness. The helper owns the microphone because a signed
+// tool can carry the TCC entitlement, where SpringBoard cannot record.
+static BOOL g_rcPartyOn = NO;
+static pid_t g_rcPartyPid = -1;
+static int g_rcPartyInFd = -1;
+static NSString *g_rcPartyStyle = @"pump";
+static int g_rcPartySensitivity = 5;
+static int g_rcPartyCap = 85;
+static int g_rcPartyTimeout = 15;
+static NSUInteger g_rcPartyGeneration = 0;
+static dispatch_source_t g_rcPartyHeatTimer = nil;
+
+static void rc_party_move_fd(int *fd) {
+    if (!fd || *fd < 0 || *fd > STDERR_FILENO) return;
+    int moved = fcntl(*fd, F_DUPFD_CLOEXEC, 3);
+    if (moved >= 0) {
+        close(*fd);
+        *fd = moved;
+    }
+}
+
+static void rc_party_stop(void) {
+    g_rcPartyOn = NO;
+    g_rcPartyGeneration++;
+    if (g_rcPartyHeatTimer) {
+        dispatch_source_cancel(g_rcPartyHeatTimer);
+        g_rcPartyHeatTimer = nil;
+    }
+    int fd = g_rcPartyInFd;
+    g_rcPartyInFd = -1;
+    pid_t pid = g_rcPartyPid;
+    g_rcPartyPid = -1;
+    if (fd >= 0) {
+        write(fd, "stop\n", 5);
+        close(fd);
+    }
+    if (pid > 0) kill(pid, SIGTERM);
+    rc_flashlight_set(0);
+}
+
+static void rc_party_handle_event(NSDictionary *event, NSUInteger generation) {
+    if (generation != g_rcPartyGeneration || !g_rcPartyOn) return;
+    NSString *type = [event[@"type"] description] ?: @"";
+    if ([type isEqualToString:@"level"]) {
+        float level = [event[@"v"] floatValue];
+        rc_flashlight_set(MAX(0.0f, MIN(1.0f, level)));
+        return;
+    }
+    if ([type isEqualToString:@"ended"] || [type isEqualToString:@"error"]) {
+        SRLog(@"Dance party ended (%@): %@", type, event[@"reason"] ?: event[@"message"] ?: @"");
+        rc_party_stop();
+    }
+}
+
+static NSString *rc_party_start(NSString *style) {
+    rc_party_stop();
+    NSString *tool = rc_tool_path(@"rc-party");
+    if (!tool) return @"Error: rc-party is not installed\n";
+
+    int inPipe[2] = { -1, -1 };
+    int outPipe[2] = { -1, -1 };
+    if (pipe(inPipe) != 0 || pipe(outPipe) != 0) {
+        if (inPipe[0] >= 0) { close(inPipe[0]); close(inPipe[1]); }
+        if (outPipe[0] >= 0) { close(outPipe[0]); close(outPipe[1]); }
+        return @"Error: Could not start the dance party\n";
+    }
+    int devNull = open("/dev/null", O_WRONLY);
+    rc_party_move_fd(&inPipe[0]);
+    rc_party_move_fd(&inPipe[1]);
+    rc_party_move_fd(&outPipe[0]);
+    rc_party_move_fd(&outPipe[1]);
+    if (devNull >= 0) rc_party_move_fd(&devNull);
+
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+    posix_spawn_file_actions_adddup2(&actions, inPipe[0], STDIN_FILENO);
+    posix_spawn_file_actions_adddup2(&actions, outPipe[1], STDOUT_FILENO);
+    if (devNull >= 0) {
+        posix_spawn_file_actions_adddup2(&actions, devNull, STDERR_FILENO);
+        if (devNull > STDERR_FILENO) posix_spawn_file_actions_addclose(&actions, devNull);
+    }
+    if (inPipe[0] > STDERR_FILENO) posix_spawn_file_actions_addclose(&actions, inPipe[0]);
+    if (inPipe[1] > STDERR_FILENO) posix_spawn_file_actions_addclose(&actions, inPipe[1]);
+    if (outPipe[0] > STDERR_FILENO) posix_spawn_file_actions_addclose(&actions, outPipe[0]);
+    if (outPipe[1] > STDERR_FILENO) posix_spawn_file_actions_addclose(&actions, outPipe[1]);
+
+    NSString *sensitivity = [NSString stringWithFormat:@"%d", g_rcPartySensitivity];
+    NSString *cap = [NSString stringWithFormat:@"%d", g_rcPartyCap];
+    NSString *timeout = [NSString stringWithFormat:@"%d", g_rcPartyTimeout];
+    char *args[] = {
+        (char *)tool.fileSystemRepresentation,
+        (char *)"--style", (char *)style.UTF8String,
+        (char *)"--sensitivity", (char *)sensitivity.UTF8String,
+        (char *)"--cap", (char *)cap.UTF8String,
+        (char *)"--timeout", (char *)timeout.UTF8String,
+        NULL
+    };
+    pid_t pid = -1;
+    int spawnError = posix_spawn(&pid, args[0], &actions, NULL, args, environ);
+    posix_spawn_file_actions_destroy(&actions);
+    if (devNull >= 0) close(devNull);
+    close(inPipe[0]);
+    close(outPipe[1]);
+    if (spawnError != 0 || pid <= 0) {
+        close(inPipe[1]);
+        close(outPipe[0]);
+        return @"Error: Could not start the dance party\n";
+    }
+#ifdef F_SETNOSIGPIPE
+    fcntl(inPipe[1], F_SETNOSIGPIPE, 1);
+#endif
+
+    g_rcPartyGeneration++;
+    NSUInteger generation = g_rcPartyGeneration;
+    g_rcPartyOn = YES;
+    g_rcPartyPid = pid;
+    g_rcPartyInFd = inPipe[1];
+    g_rcPartyStyle = [style copy];
+
+    int readFd = outPipe[0];
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSMutableData *buffer = [NSMutableData data];
+        char chunk[2048];
+        while (true) {
+            ssize_t n = read(readFd, chunk, sizeof(chunk));
+            if (n < 0 && errno == EINTR) continue;
+            if (n <= 0) break;
+            [buffer appendBytes:chunk length:(NSUInteger)n];
+            while (true) {
+                const uint8_t *bytes = buffer.bytes;
+                NSUInteger length = buffer.length, newline = NSNotFound;
+                for (NSUInteger i = 0; i < length; i++) {
+                    if (bytes[i] == '\n') { newline = i; break; }
+                }
+                if (newline == NSNotFound) break;
+                NSData *line = [buffer subdataWithRange:NSMakeRange(0, newline)];
+                [buffer replaceBytesInRange:NSMakeRange(0, newline + 1) withBytes:NULL length:0];
+                if (line.length == 0) continue;
+                id parsed = [NSJSONSerialization JSONObjectWithData:line options:0 error:nil];
+                if (![parsed isKindOfClass:[NSDictionary class]]) continue;
+                NSDictionary *event = parsed;
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    rc_party_handle_event(event, generation);
+                });
+            }
+        }
+        close(readFd);
+        int status = 0;
+        waitpid(pid, &status, 0);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (generation != g_rcPartyGeneration) return;
+            g_rcPartyOn = NO;
+            g_rcPartyPid = -1;
+            if (g_rcPartyInFd >= 0) { close(g_rcPartyInFd); g_rcPartyInFd = -1; }
+            if (g_rcPartyHeatTimer) { dispatch_source_cancel(g_rcPartyHeatTimer); g_rcPartyHeatTimer = nil; }
+            rc_flashlight_set(0);
+        });
+    });
+
+    dispatch_source_t heat = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
+    dispatch_source_set_timer(heat, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC), 5 * NSEC_PER_SEC, NSEC_PER_SEC);
+    dispatch_source_set_event_handler(heat, ^{
+        if (!g_rcPartyOn) return;
+        id flashlight = rc_system_flashlight();
+        BOOL overheated = [flashlight respondsToSelector:@selector(isOverheated)] &&
+            ((BOOL (*)(id, SEL))objc_msgSend)(flashlight, @selector(isOverheated));
+        if (overheated) {
+            SRLog(@"Dance party stopped: the flashlight is overheated");
+            rc_party_stop();
+        }
+    });
+    g_rcPartyHeatTimer = heat;
+    dispatch_resume(heat);
+
+    return [NSString stringWithFormat:@"Dance party ON (%@)\n", style];
+}
+
+static NSString *rc_party_status_text(void) {
+    if (!g_rcPartyOn) return @"Dance party OFF\n";
+    float level = rc_flashlight_known_level();
+    return [NSString stringWithFormat:@"Dance party ON (%@, %.0f%%)\n", g_rcPartyStyle, level * 100];
+}
+
+static NSString *rc_party_command(NSString *argument) {
+    NSString *word = [argument stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]].lowercaseString;
+    if (word.length == 0) {
+        if (g_rcPartyOn) {
+            rc_party_stop();
+            return @"Dance party OFF\n";
+        }
+        return rc_party_start(g_rcPartyStyle);
+    }
+    if ([word isEqualToString:@"stop"]) {
+        if (g_rcPartyOn) rc_party_stop();
+        return @"Dance party OFF\n";
+    }
+    if ([word isEqualToString:@"status"]) return rc_party_status_text();
+    if ([word isEqualToString:@"pump"] || [word isEqualToString:@"beat"]) {
+        return rc_party_start(word);
+    }
+    NSArray<NSString *> *parts = [word componentsSeparatedByString:@" "];
+    if (parts.count == 2) {
+        int value = parts[1].intValue;
+        if ([parts[0] isEqualToString:@"sensitivity"] && value >= 1 && value <= 10) {
+            g_rcPartySensitivity = value;
+            if (g_rcPartyOn) return rc_party_start(g_rcPartyStyle);
+            return [NSString stringWithFormat:@"Dance party sensitivity %d\n", value];
+        }
+        if ([parts[0] isEqualToString:@"cap"] && value >= 10 && value <= 100) {
+            g_rcPartyCap = value;
+            if (g_rcPartyOn) return rc_party_start(g_rcPartyStyle);
+            return [NSString stringWithFormat:@"Dance party cap %d%%\n", value];
+        }
+        if ([parts[0] isEqualToString:@"timeout"] && value >= 1 && value <= 60) {
+            g_rcPartyTimeout = value;
+            if (g_rcPartyOn) return rc_party_start(g_rcPartyStyle);
+            return [NSString stringWithFormat:@"Dance party timeout %d min\n", value];
+        }
+    }
+    return @"Usage: flashlight party [pump|beat|stop|status|sensitivity 1-10|cap 10-100|timeout 1-60]\n";
+}
+
+// The public face of the party: one command, pump style, on or off. The style and tuning words
+// on "flashlight party" stay for anyone who goes looking, but the help and README do not mention
+// them.
+static NSString *rc_dance_party_start(void) {
+    NSString *result = rc_party_start(@"pump");
+    return [result hasPrefix:@"Error:"] ? result : @"Dance party ON\n";
+}
+
+static NSString *rc_dance_party_command(NSString *argument) {
+    NSString *word = [argument stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]].lowercaseString;
+    if (word.length == 0) {
+        if (g_rcPartyOn) {
+            rc_party_stop();
+            return @"Dance party OFF\n";
+        }
+        return rc_dance_party_start();
+    }
+    if ([word isEqualToString:@"on"] || [word isEqualToString:@"start"]) {
+        return rc_dance_party_start();
+    }
+    if ([word isEqualToString:@"toggle"]) {
+        if (g_rcPartyOn) {
+            rc_party_stop();
+            return @"Dance party OFF\n";
+        }
+        return rc_dance_party_start();
+    }
+    if ([word isEqualToString:@"off"] || [word isEqualToString:@"stop"]) {
+        if (g_rcPartyOn) rc_party_stop();
+        return @"Dance party OFF\n";
+    }
+    if ([word isEqualToString:@"status"]) return g_rcPartyOn ? @"Dance party ON\n" : @"Dance party OFF\n";
+    return @"Usage: dance party [on|off|status]\n";
+}
+
+// flashlight, torch and flash all come here: on [level], off, toggle, status, a named level,
+// up/down [N] to step, or a bare level. Bare "flashlight" toggles.
+static NSString *rc_handle_flashlight_command(NSString *cmd) {
+    NSString *arg = @"";
+    NSRange space = [cmd rangeOfString:@" "];
+    if (space.location != NSNotFound) {
+        arg = [[cmd substringFromIndex:space.location + 1] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    }
+    NSString *verb = [arg lowercaseString];
+    NSString *value = @"";
+    NSRange valueSpace = [arg rangeOfString:@" "];
+    if (valueSpace.location != NSNotFound) {
+        verb = [[arg substringToIndex:valueSpace.location] lowercaseString];
+        value = [[arg substringFromIndex:valueSpace.location + 1] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    }
+
+    if ([verb isEqualToString:@"party"]) return rc_party_command(value);
+    // Any other flashlight command takes the torch back from the party.
+    if (g_rcPartyOn && ![verb isEqualToString:@"status"]) rc_party_stop();
+
+    if (verb.length == 0 || [verb isEqualToString:@"toggle"]) {
+        BOOL wasOn = rc_flashlight_is_on();
+        SRLog(@"Toggling flashlight (was %@)", wasOn ? @"on" : @"off");
+        if (!rc_flashlight_set(wasOn ? 0 : get_flash_brightness())) return @"Error: Flashlight not available\n";
+        return wasOn ? @"Flashlight OFF\n" : @"Flashlight ON\n";
+    }
+    if ([verb isEqualToString:@"off"]) {
+        if (!rc_flashlight_set(0)) return @"Error: Flashlight not available\n";
+        return @"Flashlight OFF\n";
+    }
+    if ([verb isEqualToString:@"status"]) return rc_flashlight_status_text();
+    if ([verb isEqualToString:@"on"]) {
+        float level = get_flash_brightness();
+        if (value.length > 0 && !rc_flashlight_parse_level(value, &level)) return rc_flashlight_usage();
+        if (level < 0.01f) level = 0.01f; // "on 0" is still an on
+        if (level > 1.0f) level = 1.0f;
+        SRLog(@"Flashlight ON at level: %f", level);
+        if (!rc_flashlight_set(level)) return @"Error: Flashlight not available\n";
+        return [NSString stringWithFormat:@"Flashlight ON (%.0f%%)\n", level * 100];
+    }
+    if ([verb isEqualToString:@"up"] || [verb isEqualToString:@"down"]) {
+        float amount = 0.25f;
+        if (value.length > 0 && !rc_flashlight_parse_level(value, &amount)) return rc_flashlight_usage();
+        BOOL on = rc_flashlight_is_on();
+        float current = on ? rc_flashlight_known_level() : 0;
+        if (on && current <= 0) current = 0.5f; // on from Control Center: start from the middle
+        float level = [verb isEqualToString:@"up"] ? current + amount : current - amount;
+        if (level <= 0) {
+            if (!rc_flashlight_set(0)) return @"Error: Flashlight not available\n";
+            return @"Flashlight OFF\n";
+        }
+        level = MAX(0.01f, MIN(1.0f, level));
+        if (!rc_flashlight_set(level)) return @"Error: Flashlight not available\n";
+        return [NSString stringWithFormat:@"Flashlight set to %.0f%%\n", level * 100];
+    }
+    if (value.length == 0) {
+        float level = 0;
+        if (rc_flashlight_parse_level(verb, &level)) {
+            if (level <= 0) {
+                if (!rc_flashlight_set(0)) return @"Error: Flashlight not available\n";
+                return @"Flashlight OFF\n";
+            }
+            level = MAX(0.01f, MIN(1.0f, level));
+            if (!rc_flashlight_set(level)) return @"Error: Flashlight not available\n";
+            return [NSString stringWithFormat:@"Flashlight set to %.0f%%\n", level * 100];
+        }
+    }
+    return rc_flashlight_usage();
 }
 
 // Forward declarations for gesture management functions
@@ -11779,7 +12159,8 @@ static NSArray *RCCommandHelpSections(void) {
             @[@"button <name>", @"power, lock, home, volup, voldown, mute"],
             @[@"button triggers pause [min] | resume", @"Return buttons to stock behavior"],
             @[@"brightness <0-100>", @"Set screen brightness"],
-            @[@"flashlight [on|off|toggle|status]", @"Control the torch"],
+            @[@"flashlight [on|off|toggle|status|low|medium|high|max|up|down] [level]", @"Control the torch and its brightness"],
+            @[@"dance party [on|off|status]", @"Run the torch in time with the music"],
             @[@"rotate [lock|unlock|toggle|status]", @"Orientation lock"],
             @[@"orientation status", @"Print PORTRAIT or LANDSCAPE"],
             @[@"control center status", @"Print OPEN or CLOSED"],
@@ -13131,46 +13512,17 @@ static NSString *handle_command(NSString *cmd) {
         if ([NSThread isMainThread]) state = RCNFCScannerCommand(what);
         else dispatch_sync(dispatch_get_main_queue(), ^{ state = RCNFCScannerCommand(what); });
         return [NSString stringWithFormat:@"NFC scanner %@\n", state];
-    } else if ([cleanCmd isEqualToString:@"flashlight"] || [cleanCmd isEqualToString:@"torch"] || [cleanCmd isEqualToString:@"flashlight toggle"]) {
-        BOOL wasOn = rc_flashlight_is_on();
-        SRLog(@"Toggling flashlight (was %@)", wasOn ? @"on" : @"off");
-        if (!rc_flashlight_set(wasOn ? 0 : get_flash_brightness())) return @"Error: Flashlight not available\n";
-        return wasOn ? @"Flashlight OFF\n" : @"Flashlight ON\n";
-    } else if ([cleanCmd isEqualToString:@"flashlight status"] || [cleanCmd isEqualToString:@"torch status"]) {
-        return rc_flashlight_is_on() ? @"Flashlight ON\n" : @"Flashlight OFF\n";
-    } else if ([cleanCmd isEqualToString:@"flashlight off"] || [cleanCmd isEqualToString:@"torch off"] || [cleanCmd isEqualToString:@"flash off"]) {
-        if (!rc_flashlight_set(0)) return @"Error: Flashlight not available\n";
-        return @"Flashlight OFF\n";
-    } else if ([cleanCmd hasPrefix:@"flashlight on"] || [cleanCmd hasPrefix:@"flash on"] || [cleanCmd isEqualToString:@"torch on"]) {
-        float level = get_flash_brightness();
-        NSArray *parts = [cleanCmd componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-        if (parts.count >= 3) {
-            float customLevel = [parts[2] floatValue];
-            if (customLevel > 0) level = customLevel;
-            if (level > 1.0f) level /= 100.0f; // Handle percentage
-        }
-        if (level < 0.01f) level = 0.01f;
-        if (level > 1.0f) level = 1.0f;
-        SRLog(@"Flashlight ON at level: %f", level);
-        if (!rc_flashlight_set(level)) return @"Error: Flashlight not available\n";
-        return [NSString stringWithFormat:@"Flashlight ON (%.0f%%)\n", level * 100];
-    } else if ([cleanCmd hasPrefix:@"flashlight "] || [cleanCmd hasPrefix:@"flash "]) {
-        // "flashlight 0.5" or "flashlight 50": only a number, so a word ("flashlight status" once)
-        // isn't read as 0 and turns the light off
-        NSString *valStr = [[cleanCmd substringFromIndex:([cleanCmd hasPrefix:@"flashlight "] ? 11 : 6)] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-        double parsed = 0;
-        NSScanner *scanner = [NSScanner scannerWithString:[valStr stringByReplacingOccurrencesOfString:@"%" withString:@""]];
-        if (![scanner scanDouble:&parsed] || !scanner.isAtEnd) return @"Usage: flashlight [on|off|toggle|status|<level 0-100>]\n";
-        float level = (float)parsed;
-        if (level > 1.0f) level /= 100.0f;
-        if (level <= 0) {
-            if (!rc_flashlight_set(0)) return @"Error: Flashlight not available\n";
-            return @"Flashlight OFF\n";
-        }
-        if (level < 0.01f) level = 0.01f;
-        if (level > 1.0f) level = 1.0f;
-        if (!rc_flashlight_set(level)) return @"Error: Flashlight not available\n";
-        return [NSString stringWithFormat:@"Flashlight set to %.0f%%\n", level * 100];
+    } else if ([cleanCmd isEqualToString:@"dance party"] || [cleanCmd hasPrefix:@"dance party "]) {
+        NSString *arg = [cleanCmd isEqualToString:@"dance party"] ? @"" : [cleanCmd substringFromIndex:12];
+        return rc_dance_party_command(arg);
+    } else if ([cleanCmd isEqualToString:@"flashlight"] || [cleanCmd isEqualToString:@"flashlight toggle"] ||
+               [cleanCmd isEqualToString:@"flashlight off"] || [cleanCmd isEqualToString:@"flashlight status"] ||
+               [cleanCmd isEqualToString:@"torch"] || [cleanCmd isEqualToString:@"torch on"] ||
+               [cleanCmd isEqualToString:@"torch off"] || [cleanCmd isEqualToString:@"torch status"] ||
+               [cleanCmd isEqualToString:@"flash on"] || [cleanCmd isEqualToString:@"flash off"] ||
+               [cleanCmd hasPrefix:@"flashlight "] || [cleanCmd hasPrefix:@"flash "] ||
+               [cleanCmd hasPrefix:@"torch "]) {
+        return rc_handle_flashlight_command(cleanCmd);
     } else if ([cleanCmd isEqualToString:@"notify clear"] || [cleanCmd hasPrefix:@"notify clear "] ||
                [cleanCmd isEqualToString:@"clear notification"] || [cleanCmd hasPrefix:@"clear notification "] ||
                [cleanCmd isEqualToString:@"clear notifications"] || [cleanCmd hasPrefix:@"clear notifications "] ||

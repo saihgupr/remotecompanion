@@ -128,7 +128,10 @@
   {"command": "blacklist remove <bundleId>", "args": "bundle id", "description": "Stop excluding an app", "category": "Connectivity", "example": "blacklist remove com.example.app", "status": "blacklist list"},
   {"command": "blacklist reset", "args": "", "description": "Clear the excluded apps", "category": "Connectivity", "example": "blacklist reset", "status": "blacklist list"},
 
-  {"command": "flashlight toggle", "args": "toggle|on|off|status", "description": "Toggle the flashlight", "category": "Device Controls", "example": "flashlight toggle", "status": "flashlight status"},
+  {"command": "flashlight toggle", "args": "toggle|on|off|status|low|medium|high|max|up|down", "description": "Toggle the flashlight", "category": "Device Controls", "example": "flashlight toggle", "status": "flashlight status"},
+  {"command": "flashlight <level>", "args": "0-100, low, medium, high, max", "description": "Set the flashlight brightness", "category": "Device Controls", "example": "flashlight low", "status": "flashlight status"},
+  {"command": "dance party", "args": "on|off|status", "description": "Run the flashlight in time with the music", "category": "Device Controls", "example": "dance party on", "status": "dance party status"},
+  {"command": "flashlight up", "args": "up|down [N]", "description": "Step the flashlight brightness by N percent", "category": "Device Controls", "example": "flashlight up 10", "status": "flashlight status"},
   {"command": "flashlight on", "args": "", "description": "Turn the flashlight on", "category": "Device Controls", "example": "flashlight on", "status": "flashlight status"},
   {"command": "flashlight off", "args": "", "description": "Turn the flashlight off", "category": "Device Controls", "example": "flashlight off", "status": "flashlight status"},
   {"command": "flashlight status", "args": "", "description": "Whether the flashlight is on", "category": "Device Controls", "example": "flashlight status", "status": ""},

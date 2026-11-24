@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **Dance Party**: `rc dance party [on|off]` runs the torch with the music playing in the room, following the bass. Bare `rc dance party` toggles it. It stops after about 15 seconds of quiet or a 15 minute timeout, and headphones or Bluetooth mean the microphone hears nothing to follow. It is also under Device Controls in the action picker as a toggle, like Flashlight.
+- **Flashlight brightness options**: `rc flashlight low|medium|high|max` sets one of the four levels iOS's own slider uses, `rc flashlight up|down [N]` steps from the current level (25 by default), and `rc flashlight status` now prints the level, e.g. `Flashlight ON (75%)`. `on` takes the same names or a percentage, and `torch` and `flash` accept everything `flashlight` does.
+
 ### Fixed
 - **`rc bluetooth list` shows low-energy devices**: the Apple Watch and low-energy accessories such as an AssistiveTouch mouse or pointer were missing, because the command read BluetoothManager's paired list, which holds classic pairings only. The list now adds the devices CoreBluetooth reports as connected. `bt disconnect` on one of those says plainly that iOS doesn't allow apps to disconnect it, and points at Forget This Device in Settings > Bluetooth or `rc bt off` and `rc bt on`.
 
