@@ -1363,39 +1363,19 @@ static UIImage *RCGrabberImage(void) {
 
 @implementation RCActionsViewController
 
-static id g_actionClipboard = nil;
-
 // The clipboard holds one action, or a whole block as its rows in order. Everything that pastes
-// goes through the array, so a copied If / Repeat block arrives complete. The shared pasteboard is
-// read too: a multi-select copy, or a JSON action put there by a script or the Web UI, can land here.
+// goes through the array, so a copied If / Repeat block arrives complete. It lives in the app's
+// own store, not the pasteboard, so menus and buttons built while loading never read clipboard
+// content (reading it would make iOS show its "pasted from" banner). The pasteboard is read only
+// inside an actual paste.
 static NSArray *RCActionClipboardItems(void) {
-    if ([g_actionClipboard isKindOfClass:[NSArray class]]) return g_actionClipboard;
-    if (g_actionClipboard) return @[g_actionClipboard];
-    NSArray *pasted = [RCActionsViewController rc_actionsOnPasteboard];
-    if (pasted.count > 0) return pasted;
-    if (@available(iOS 16.0, *)) {
-        // A plain string on the pasteboard would need the user's paste permission; the app's own
-        // type above is the copy that matters
-    } else {
-        NSString *text = [UIPasteboard generalPasteboard].string;
-        if (text.length) {
-            id parsed = [NSJSONSerialization JSONObjectWithData:[text dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
-            if ([parsed isKindOfClass:[NSArray class]] && [parsed count] > 0) return parsed;
-        }
-    }
-    return nil;
+    return [RCActionsViewController rc_storedActionClipboard];
 }
 
+// An empty list clears the store. Anything else is kept there and also written to the system
+// pasteboard, so a copy still pastes outside the app.
 static void RCActionClipboardSetItems(NSArray *items) {
-    if (items.count == 0) {
-        g_actionClipboard = nil;
-        return;
-    }
-    g_actionClipboard = items.count == 1
-        ? [items.firstObject copy]
-        : [[NSArray alloc] initWithArray:items copyItems:YES];
-    // The shared pasteboard keeps the copy across launches and lets the ••• menu offer Paste
-    [RCActionsViewController rc_putActionsOnPasteboard:items];
+    [RCActionsViewController rc_storeActionClipboard:items];
 }
 
 static NSString *RCActionClipboardCountText(NSUInteger count) {
@@ -2273,6 +2253,7 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
                           [_triggerKey hasPrefix:@"bt_"] ||
                           [_triggerKey hasPrefix:@"output_"] ||
                           [_triggerKey hasPrefix:@"trigger_device_battery_"] ||
+                          [_triggerKey hasPrefix:@"trigger_watch_battery_"] ||
                           [_triggerKey hasPrefix:@"app_launch_"] ||
                           [_triggerKey hasPrefix:@"app_exit_"] ||
                           [_triggerKey hasPrefix:@"app_hold_"] ||
@@ -2549,7 +2530,7 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
 
 - (void)editTriggerSettings {
     UIViewController *vc = nil;
-    if ([_triggerKey hasPrefix:@"trigger_device_battery_"]) {
+    if ([_triggerKey hasPrefix:@"trigger_device_battery_"] || [_triggerKey hasPrefix:@"trigger_watch_battery_"]) {
         [self.navigationController pushViewController:[[RCBatteryTriggerViewController alloc] initWithTriggerKey:_triggerKey] animated:YES];
         return;
     }
@@ -3603,6 +3584,23 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             @"input": @"threshold"
         },
         @{
+            @"key": @"watch_charging",
+            @"title": @"Apple Watch Charging",
+            @"icon": @"applewatch",
+            @"section": @"Power",
+            @"values": @[
+                @{ @"value": @"CHARGING", @"title": @"Charging" },
+                @{ @"value": @"NOT_CHARGING", @"title": @"Not Charging" }
+            ]
+        },
+        @{
+            @"key": @"watch_battery",
+            @"title": @"Apple Watch Battery Level",
+            @"icon": @"applewatch",
+            @"section": @"Power",
+            @"input": @"threshold"
+        },
+        @{
             @"key": @"volume",
             @"title": @"Volume Level",
             @"icon": @"speaker.wave.2.fill",
@@ -3654,11 +3652,12 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             @"input": @"variable"
         }
     ] arrayByAddingObjectsFromArray:[self addOnConditionDefinitions]];
-    // The Watch condition only makes sense where the Apple Watch app is installed
+    // The Watch conditions only make sense where the Apple Watch app is installed
     if (![RCConfigManager watchFeaturesAvailable]) {
         NSMutableArray<NSDictionary *> *kept = [NSMutableArray array];
         for (NSDictionary *definition in definitions) {
-            if ([definition[@"key"] isEqualToString:@"watch"]) continue;
+            NSString *condKey = definition[@"key"];
+            if ([condKey isEqualToString:@"watch"] || [condKey hasPrefix:@"watch_"]) continue;
             [kept addObject:definition];
         }
         definitions = kept;
@@ -4685,8 +4684,9 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             }]];
         }
 
-        // Paste Above/Below options
-        if (RCActionClipboardItems().count > 0) {
+        // Paste Above/Below options. The check reads only the app's own store and safe pasteboard
+        // type checks, never clipboard content.
+        if ([RCActionsViewController rc_hasPasteableActions]) {
             [alert addAction:[UIAlertAction actionWithTitle:@"Paste Above" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
                 [self insertClipboardActionsAtIndex:indexPath.row];
             }]];
@@ -4835,12 +4835,11 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             }]];
         }
     } else {
-        // Long press on empty space
-        if (g_actionClipboard) {
+        // Long press on empty space. Offered on the same content-free check; the paste itself
+        // reads the store, then the pasteboard if the store is empty.
+        if ([RCActionsViewController rc_hasPasteableActions]) {
             [alert addAction:[UIAlertAction actionWithTitle:@"Paste" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-                [self.actions addObject:[RCNotifyCommand copyOfActionWithNewIDs:g_actionClipboard]];
-                [self saveActions];
-                [self.tableView reloadData];
+                [self insertClipboardActionsAtIndex:self.actions.count];
             }]];
         } else {
             return; // Nothing to do on empty space if clipboard is empty
@@ -4919,7 +4918,10 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 
 // Puts the clipboard at an index, each action with IDs of its own. Returns how many were pasted.
 - (NSInteger)insertClipboardActionsAtIndex:(NSInteger)index {
+    // The person tapped Paste, so reading the pasteboard here is fine: the store first, then a
+    // copy made elsewhere (another app, a script, the Web UI)
     NSArray *items = RCActionClipboardItems();
+    if (items.count == 0) items = [RCActionsViewController rc_actionsOnPasteboard];
     if (items.count == 0) return 0;
     NSInteger at = MAX(0, MIN(index, (NSInteger)self.actions.count));
     for (id item in items) {
@@ -4931,7 +4933,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     return items.count;
 }
 
-// The bar's paste button: left of Play, on an empty sequence, while the clipboard has something
+// The bar's paste button: left of Play, on an empty sequence, while there are copied actions
 - (UIBarButtonItem *)pasteButton {
     if (!_pasteButton) {
         // A touch smaller than the bar's own glyphs, so it reads as a secondary action beside Play
@@ -4947,7 +4949,9 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 
 - (void)updatePasteButton {
     if (!self.isViewLoaded || self.debugRunID || self.rc_isSelectingActions) return;
-    BOOL show = self.actions.count == 0 && RCActionClipboardItems().count > 0;
+    // A content-free check (app store plus pasteboard type), so showing the button never reads
+    // the clipboard and never triggers the system's "pasted from" banner
+    BOOL show = self.actions.count == 0 && [RCActionsViewController rc_hasPasteableActions];
     NSMutableArray *items = [self.navigationItem.rightBarButtonItems mutableCopy] ?: [NSMutableArray array];
     UIBarButtonItem *paste = self.pasteButton;
     if (show) {
@@ -6851,17 +6855,23 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 
     NSMutableArray<UIContextualAction *> *actions = [NSMutableArray arrayWithObject:copy];
 
-    NSArray *clipboard = RCActionClipboardItems();
-    if (clipboard.count > 0) {
+    // Whether Paste is offered comes from the app's own store and a pasteboard type check, never
+    // from clipboard content the swipe config would otherwise read while building
+    BOOL canPaste = [RCActionsViewController rc_hasPasteableActions];
+    if (canPaste) {
         UIContextualAction *paste = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal
                                                                            title:@"Paste"
                                                                          handler:^(UIContextualAction * _Nonnull action, __kindof UIView * _Nonnull sourceView, void (^ _Nonnull completionHandler)(BOOL)) {
             __strong typeof(weakSelf) strongSelf = weakSelf;
             if (!strongSelf) { completionHandler(NO); return; }
-            [strongSelf insertClipboardActionsAtIndex:NSMaxRange(block)];
-            [strongSelf showHUDToast:[NSString stringWithFormat:@"Pasted %@", RCActionClipboardCountText(clipboard.count)]
-                          subtitle:nil
-                              icon:@"doc.on.clipboard"];
+            // The count comes from what was actually pasted, so a copy that only lived on the
+            // pasteboard reports its real number
+            NSInteger count = [strongSelf insertClipboardActionsAtIndex:NSMaxRange(block)];
+            if (count > 0) {
+                [strongSelf showHUDToast:[NSString stringWithFormat:@"Pasted %@", RCActionClipboardCountText(count)]
+                              subtitle:nil
+                                  icon:@"doc.on.clipboard"];
+            }
             completionHandler(YES);
         }];
         paste.image = [UIImage systemImageNamed:@"doc.on.clipboard"];

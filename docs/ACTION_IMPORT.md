@@ -56,6 +56,7 @@ Here is the complete list of valid commands you can write, along with parameters
 | `pause` | Pause active playback | `pause` |
 | `next` | Skip to the next track | `next` |
 | `prev` | Skip to the previous track | `prev` |
+| `previous` | Same as `prev` | `previous` |
 | `toggle` | Toggle playback between play/pause | `toggle` |
 | `vol up` | Raise system volume by 1 step | `vol up` |
 | `vol down` | Lower system volume by 1 step | `vol down` |

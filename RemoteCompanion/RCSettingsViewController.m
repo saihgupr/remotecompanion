@@ -63,7 +63,10 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     
     // Improved Section Spacing
     if (@available(iOS 15.0, *)) {
-        self.tableView.sectionHeaderTopPadding = 10;
+        // The spacing is built into the header heights below, the same way the
+        // Triggers screen does it; the default top padding left too much air
+        // under the large title.
+        self.tableView.sectionHeaderTopPadding = 0;
     }
     
     [self.view addSubview:self.tableView];
@@ -220,8 +223,14 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     else if (section == RCSettingsSectionDiagnostics) title = @"Diagnostics";
     else title = @"Backup";
     
-    UIView *headerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, tableView.bounds.size.width, 40)];
-    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(20, 15, tableView.bounds.size.width - 40, 20)];
+    // The first header sits close under the large title; the other sections keep
+    // the 10pt of air the old sectionHeaderTopPadding supplied, so the gaps
+    // between groups don't change. 6pt above the label is the inset the chip bar
+    // uses on the Triggers screen, so measure to the label box, not the letters.
+    BOOL first = (section == RCSettingsSectionGeneral);
+    CGFloat headerHeight = first ? 31.0 : 50.0;
+    UIView *headerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, tableView.bounds.size.width, headerHeight)];
+    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(20, first ? 6 : 15, tableView.bounds.size.width - 40, 20)];
     label.text = [title uppercaseString];
     label.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
     label.textColor = [UIColor secondaryLabelColor];
@@ -230,7 +239,7 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section {
-    return 40.0f;
+    return section == RCSettingsSectionGeneral ? 31.0 : 50.0;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {

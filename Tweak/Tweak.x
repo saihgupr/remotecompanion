@@ -314,6 +314,7 @@ extern Boolean MRMediaRemoteSendCommandToApp(MRMediaRemoteCommand command, NSDic
 @property (nonatomic, assign) BOOL isLeftEdge;
 @property (nonatomic, assign) BOOL isRightEdge;
 @property (nonatomic, assign) BOOL hasTriggered;
+@property (nonatomic, assign) CGPoint startPoint;
 @end
 
 // Bottom-up system recognizer (issue #81 follow-up). Unlike the sendEvent
@@ -2547,6 +2548,10 @@ static NSString *get_human_name_for_trigger(NSString *key, NSDictionary *trigger
             @"trigger_ringer_toggle": @"Ringer Toggled",
             @"trigger_watch_ping": @"Ping iPhone",
             @"trigger_watch_ping_hold": @"Ping iPhone (Hold)",
+            @"trigger_watch_connect": @"Watch Connected",
+            @"trigger_watch_disconnect": @"Watch Disconnected",
+            @"trigger_watch_charging_start": @"Watch Started Charging",
+            @"trigger_watch_charging_stop": @"Watch Stopped Charging",
             @"trigger_bottombar_swipe_left": @"Bottom Bar Swipe Left",
             @"trigger_bottombar_swipe_right": @"Bottom Bar Swipe Right",
             @"trigger_bottom_swipe_up_left": @"Bottom Swipe Up (Left)",
@@ -2557,6 +2562,8 @@ static NSString *get_human_name_for_trigger(NSString *key, NSDictionary *trigger
             @"trigger_bottom_swipe_down_right": @"Bottom Swipe Down (Right)",
             @"trigger_statusbar_two_finger_swipe_down": @"2-Finger Top Slide Down",
             @"trigger_bottom_two_finger_swipe_up": @"2-Finger Bottom Slide Up",
+            @"trigger_device_airplane_on": @"Airplane Mode On",
+            @"trigger_device_airplane_off": @"Airplane Mode Off",
             @"trigger_two_finger_tap": @"2-Finger Tap",
             @"trigger_two_finger_swipe_left": @"2-Finger Swipe Left",
             @"trigger_two_finger_swipe_right": @"2-Finger Swipe Right",
@@ -2564,8 +2571,6 @@ static NSString *get_human_name_for_trigger(NSString *key, NSDictionary *trigger
             @"trigger_two_finger_swipe_down": @"2-Finger Swipe Down",
             @"trigger_two_finger_rotate_cw": @"2-Finger Rotate Clockwise",
             @"trigger_two_finger_rotate_ccw": @"2-Finger Rotate Counter-Clockwise",
-            @"trigger_device_airplane_on": @"Airplane Mode On",
-            @"trigger_device_airplane_off": @"Airplane Mode Off",
             @"trigger_sequence_edited": @"Action Sequence Edited"
         };
     });
@@ -2594,6 +2599,8 @@ static NSString *get_human_name_for_trigger(NSString *key, NSDictionary *trigger
     if ([key hasPrefix:@"notifbtn_"]) return @"Notification Button";
     if ([key hasPrefix:@"trigger_device_battery_below_"]) return [NSString stringWithFormat:@"Battery Drops to %@%%", [key substringFromIndex:29]];
     if ([key hasPrefix:@"trigger_device_battery_above_"]) return [NSString stringWithFormat:@"Battery Rises to %@%%", [key substringFromIndex:29]];
+    if ([key hasPrefix:@"trigger_watch_battery_below_"] && key.length > 28) return [NSString stringWithFormat:@"Watch Battery Drops to %@%%", [key substringFromIndex:28]];
+    if ([key hasPrefix:@"trigger_watch_battery_above_"] && key.length > 28) return [NSString stringWithFormat:@"Watch Battery Rises to %@%%", [key substringFromIndex:28]];
     if ([key hasPrefix:@"trigger_cc_button_"]) return [NSString stringWithFormat:@"Control Center Button %@", [key substringFromIndex:18]];
     
     return key;
@@ -2704,6 +2711,7 @@ static void rc_note_cc_buttons_change(NSDictionary *config) {
 }
 static void rc_watch_face_refresh_observer(NSDictionary *config);
 static void rc_watch_sync_observing(NSDictionary *config);
+static void rc_watch_battery_refresh_observer(NSDictionary *config);
 
 static void load_trigger_config() {
     @autoreleasepool {
@@ -2751,6 +2759,7 @@ static void load_trigger_config() {
                 dispatch_async(dispatch_get_main_queue(), ^{ RC_RefreshAXTriplePress(); });
                 rc_watch_face_refresh_observer(newConfig);
                 rc_watch_sync_observing(newConfig);
+                rc_watch_battery_refresh_observer(newConfig);
             } else {
                 SRLogMin(@"Failed to parse config at %@", path);
             }
@@ -4855,6 +4864,8 @@ static NSString *rc_normalized_name(NSString *name) {
 
 static BOOL rc_carplay_connected(void);
 static BOOL rc_watch_connected(void);
+static BOOL rc_watch_charging(void);
+static int rc_watch_battery_percent(void);
 
 // If conditions answered by reading the state directly rather than through a status
 // command. Sets *handled for the keys it knows. expected is already uppercased.
@@ -4877,6 +4888,11 @@ static BOOL rc_condition_direct_match(NSString *key, NSString *expected, BOOL *h
         actual = rc_carplay_connected() ? @"CONNECTED" : @"NOT_CONNECTED";
     } else if ([key isEqualToString:@"watch"]) {
         actual = rc_watch_connected() ? @"CONNECTED" : @"NOT_CONNECTED";
+    } else if ([key isEqualToString:@"watch_charging"]) {
+        actual = rc_watch_charging() ? @"CHARGING" : @"NOT_CHARGING";
+    } else if ([key isEqualToString:@"watch_battery"]) {
+        int level = rc_watch_battery_percent();
+        return level >= 0 && rc_threshold_matches(expected, (float)level);
     } else if ([key isEqualToString:@"charging"]) {
         UIDevice *device = [UIDevice currentDevice];
         device.batteryMonitoringEnabled = YES;
@@ -7917,6 +7933,229 @@ static BOOL rc_watch_connection_trigger_configured(NSDictionary *config) {
 static void rc_watch_sync_observing(NSDictionary *config) {
     if (!rc_watch_features_available() || !rc_watch_connection_trigger_configured(config)) return;
     rc_watch_start_observing();
+}
+
+@protocol RCBCBatteryDevice <NSObject>
+@optional
+- (NSString *)name;
+- (NSInteger)percentCharge;
+- (NSInteger)powerSourceState;
+- (unsigned long long)accessoryCategory;
+- (BOOL)isInternal;
+- (BOOL)isConnected;
+- (BOOL)isCharging;
+- (BOOL)isWirelesslyCharging;
+@end
+
+@protocol RCBCBatteryDeviceController <NSObject>
+@optional
++ (instancetype)sharedInstance;
+- (NSArray *)connectedDevices;
+- (void)addBatteryDeviceObserver:(id)observer queue:(dispatch_queue_t)queue;
+- (void)removeBatteryDeviceObserver:(id)observer;
+@end
+
+@interface RCWatchBatteryObserver : NSObject
+@end
+
+static id g_watchBatteryController = nil;
+static RCWatchBatteryObserver *g_watchBatteryObserver = nil;
+static BOOL g_watchBatteryObserving = NO;
+static BOOL g_watchChargingKnown = NO;
+static BOOL g_watchChargingLast = NO;
+static uint64_t g_watchChargingDebounceGen = 0;
+static int g_watchBatteryLastPercent = -1;
+
+// Must be called on the main queue
+static id rc_watch_battery_controller(void) {
+    if (!rc_watch_features_available()) return nil;
+    if (g_watchBatteryController) return g_watchBatteryController;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        dlopen("/System/Library/PrivateFrameworks/BatteryCenter.framework/BatteryCenter", RTLD_NOW);
+    });
+    Class ctrlCls = objc_getClass("BCBatteryDeviceController");
+    if (!ctrlCls) return nil;
+    id ctrl = [ctrlCls respondsToSelector:@selector(sharedInstance)]
+        ? ((id (*)(id, SEL))objc_msgSend)(ctrlCls, @selector(sharedInstance))
+        : nil;
+    if (!ctrl) ctrl = [[ctrlCls alloc] init];
+    g_watchBatteryController = ctrl;
+    return g_watchBatteryController;
+}
+
+static BOOL rc_bc_device_is_watch(id dev) {
+    if (!dev) return NO;
+    if ([dev respondsToSelector:@selector(isInternal)] && [(id<RCBCBatteryDevice>)dev isInternal]) return NO;
+    if ([dev respondsToSelector:@selector(accessoryCategory)]) {
+        unsigned long long cat = [(id<RCBCBatteryDevice>)dev accessoryCategory];
+        if (cat == 3) return YES;
+        if (cat != 0) return NO;
+    }
+    NSString *desc = [dev description];
+    return [desc isKindOfClass:[NSString class]] && [desc containsString:@"accessoryCategory = Watch"];
+}
+
+static id rc_watch_battery_device_in_list(NSArray *devices) {
+    if (![devices isKindOfClass:[NSArray class]]) return nil;
+    for (id dev in devices) {
+        if (!rc_bc_device_is_watch(dev)) continue;
+        if ([dev respondsToSelector:@selector(isConnected)] && ![(id<RCBCBatteryDevice>)dev isConnected]) continue;
+        return dev;
+    }
+    return nil;
+}
+
+static BOOL rc_bc_device_is_charging(id dev) {
+    if (!dev) return NO;
+    if ([dev respondsToSelector:@selector(isCharging)] && [(id<RCBCBatteryDevice>)dev isCharging]) return YES;
+    if ([dev respondsToSelector:@selector(isWirelesslyCharging)] && [(id<RCBCBatteryDevice>)dev isWirelesslyCharging]) return YES;
+    if ([dev respondsToSelector:@selector(powerSourceState)] && [(id<RCBCBatteryDevice>)dev powerSourceState] == 2) return YES;
+    return NO;
+}
+
+static int rc_bc_device_percent(id dev) {
+    if (!dev || ![dev respondsToSelector:@selector(percentCharge)]) return -1;
+    NSInteger pct = [(id<RCBCBatteryDevice>)dev percentCharge];
+    return (pct >= 0 && pct <= 100) ? (int)pct : -1;
+}
+
+static void rc_watch_battery_snapshot(BOOL *connectedOut, BOOL *chargingOut, int *percentOut) {
+    if (connectedOut) *connectedOut = NO;
+    if (chargingOut) *chargingOut = NO;
+    if (percentOut) *percentOut = -1;
+    if (!rc_watch_features_available()) return;
+    __block BOOL connected = NO;
+    __block BOOL charging = NO;
+    __block int pct = -1;
+    rc_dispatch_sync_main_safe(^{
+        id ctrl = rc_watch_battery_controller();
+        NSArray *devs = [ctrl respondsToSelector:@selector(connectedDevices)] ? [(id<RCBCBatteryDeviceController>)ctrl connectedDevices] : nil;
+        id dev = rc_watch_battery_device_in_list(devs);
+        if (dev) {
+            connected = YES;
+            charging = rc_bc_device_is_charging(dev);
+            pct = rc_bc_device_percent(dev);
+        }
+    });
+    if (connectedOut) *connectedOut = connected;
+    if (chargingOut) *chargingOut = charging;
+    if (percentOut) *percentOut = pct;
+}
+
+static BOOL rc_watch_charging(void) {
+    BOOL charging = NO;
+    rc_watch_battery_snapshot(NULL, &charging, NULL);
+    return charging;
+}
+
+static int rc_watch_battery_percent(void) {
+    int pct = -1;
+    rc_watch_battery_snapshot(NULL, NULL, &pct);
+    return pct;
+}
+
+static void rc_watch_battery_handle_devices(NSArray *devices, BOOL seedOnly, NSString *source) {
+    id watchDev = rc_watch_battery_device_in_list(devices);
+    if (!watchDev) {
+        g_watchChargingDebounceGen++;
+        return;
+    }
+    BOOL nowCharging = rc_bc_device_is_charging(watchDev);
+    int nowPct = rc_bc_device_percent(watchDev);
+
+    if (seedOnly || !g_watchChargingKnown) {
+        g_watchChargingKnown = YES;
+        g_watchChargingLast = nowCharging;
+        SRLog(@"⌚ [RCWatchBattery] Seeded Watch charging (%@): charging=%d battery=%d%%", source, nowCharging, nowPct);
+    } else if (nowCharging != g_watchChargingLast) {
+        uint64_t gen = ++g_watchChargingDebounceGen;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (gen != g_watchChargingDebounceGen || !g_watchBatteryObserving) return;
+            id curCtrl = rc_watch_battery_controller();
+            NSArray *curDevs = [curCtrl respondsToSelector:@selector(connectedDevices)] ? [(id<RCBCBatteryDeviceController>)curCtrl connectedDevices] : nil;
+            id curDev = rc_watch_battery_device_in_list(curDevs);
+            if (!curDev) return;
+            BOOL settled = rc_bc_device_is_charging(curDev);
+            if (settled == g_watchChargingLast) return;
+            g_watchChargingLast = settled;
+            SRLogMin(@"⌚ [RCWatchBattery] Transition detected (%@): WATCH %@", source, settled ? @"STARTED CHARGING" : @"STOPPED CHARGING");
+            RCExecuteTrigger(settled ? @"trigger_watch_charging_start" : @"trigger_watch_charging_stop");
+        });
+    } else {
+        g_watchChargingDebounceGen++;
+    }
+
+    if (nowPct >= 0 && nowPct != g_watchBatteryLastPercent) {
+        int beforePct = g_watchBatteryLastPercent;
+        g_watchBatteryLastPercent = nowPct;
+        if (!seedOnly && beforePct >= 0) {
+            NSDictionary *triggers = nil;
+            @synchronized (rc_trigger_config_lock()) {
+                NSDictionary *raw = [g_triggerConfig isKindOfClass:[NSDictionary class]] ? g_triggerConfig[@"triggers"] : nil;
+                if ([raw isKindOfClass:[NSDictionary class]]) triggers = [raw copy];
+            }
+            for (NSString *key in triggers) {
+                BOOL below = [key hasPrefix:@"trigger_watch_battery_below_"];
+                if (!below && ![key hasPrefix:@"trigger_watch_battery_above_"]) continue;
+                if (key.length <= 28) continue;
+                int level = [[key substringFromIndex:28] intValue];
+                if (level < 1 || level > 100) continue;
+                BOOL crossed = below ? (beforePct > level && nowPct <= level) : (beforePct < level && nowPct >= level);
+                if (!crossed) continue;
+                SRLogMin(@"⌚ [RCWatchBattery] Watch battery %d%% -> %d%%: %@.", beforePct, nowPct, key);
+                RCExecuteTrigger(key);
+            }
+        }
+    }
+}
+
+@implementation RCWatchBatteryObserver
+- (void)connectedDevicesDidChange:(NSArray *)devices {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (g_watchBatteryObserving) rc_watch_battery_handle_devices(devices, NO, @"connectedDevicesDidChange");
+    });
+}
+@end
+
+static BOOL rc_watch_battery_has_configured_trigger(NSDictionary *config) {
+    NSDictionary *triggers = [config isKindOfClass:[NSDictionary class]] ? config[@"triggers"] : nil;
+    if (![triggers isKindOfClass:[NSDictionary class]]) return NO;
+    if (triggers[@"trigger_watch_charging_start"] != nil || triggers[@"trigger_watch_charging_stop"] != nil) return YES;
+    for (NSString *key in triggers) {
+        if ([key hasPrefix:@"trigger_watch_battery_below_"] || [key hasPrefix:@"trigger_watch_battery_above_"]) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+static void rc_watch_battery_refresh_observer(NSDictionary *config) {
+    BOOL shouldObserve = rc_watch_features_available() && rc_watch_battery_has_configured_trigger(config);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (shouldObserve == g_watchBatteryObserving) return;
+        if (shouldObserve) {
+            id ctrl = rc_watch_battery_controller();
+            if (!ctrl) return;
+            if (!g_watchBatteryObserver) g_watchBatteryObserver = [RCWatchBatteryObserver new];
+            g_watchBatteryObserving = YES;
+            NSArray *devs = [ctrl respondsToSelector:@selector(connectedDevices)] ? [(id<RCBCBatteryDeviceController>)ctrl connectedDevices] : nil;
+            rc_watch_battery_handle_devices(devs, YES, @"arm");
+            if ([ctrl respondsToSelector:@selector(addBatteryDeviceObserver:queue:)]) {
+                [(id<RCBCBatteryDeviceController>)ctrl addBatteryDeviceObserver:g_watchBatteryObserver queue:dispatch_get_main_queue()];
+            }
+            SRLogMin(@"⌚ [RCWatchBattery] Armed Watch battery/charging observer");
+        } else {
+            g_watchBatteryObserving = NO;
+            g_watchChargingDebounceGen++;
+            if (g_watchBatteryController && g_watchBatteryObserver && [g_watchBatteryController respondsToSelector:@selector(removeBatteryDeviceObserver:)]) {
+                [(id<RCBCBatteryDeviceController>)g_watchBatteryController removeBatteryDeviceObserver:g_watchBatteryObserver];
+            }
+            g_watchChargingKnown = NO;
+            g_watchBatteryLastPercent = -1;
+            SRLogMin(@"⌚ [RCWatchBattery] Disarmed Watch battery/charging observer (no triggers configured)");
+        }
+    });
 }
 
 // Orientation triggers: the screen turning to landscape or back to portrait. SpringBoard says when
@@ -12140,7 +12379,7 @@ static NSArray *RCCommandHelpSections(void) {
     return @[
         @{@"title": @"Media", @"rows": @[
             @[@"play | pause | playpause", @"Play, pause, or toggle playback"],
-            @[@"next | prev", @"Next or previous track"],
+            @[@"next | prev | previous", @"Next or previous track"],
             @[@"volume <0-100>", @"Set the volume"],
             @[@"volume up|down [N]", @"Step the volume up or down"],
             @[@"mute [on|off|toggle|status]", @"Media mute"],
@@ -12231,6 +12470,8 @@ static NSArray *RCCommandHelpSections(void) {
             @[@"bluetooth connect|disconnect <name>", @"Manage paired devices"],
             @[@"carplay status", @"CarPlay connection state"],
             @[@"watch status", @"Apple Watch connection state"],
+            @[@"watch charging", @"Apple Watch charging state"],
+            @[@"watch battery", @"Apple Watch battery level and charging state"],
             @[@"battery status", @"Battery level and charging state"],
         ]},
         @{@"title": @"Automation", @"rows": @[
@@ -13508,7 +13749,7 @@ static NSString *handle_command(NSString *cmd) {
     } else if ([cleanCmd isEqualToString:@"next"]) {
         MRMediaRemoteSendCommand(kMRNextTrack, nil);
         return @"Next track\n";
-    } else if ([cleanCmd isEqualToString:@"prev"]) {
+    } else if ([cleanCmd isEqualToString:@"prev"] || [cleanCmd isEqualToString:@"previous"]) {
         MRMediaRemoteSendCommand(kMRPreviousTrack, nil);
         return @"Previous track\n";
     } else if ([cleanCmd isEqualToString:@"button triggers"] || [cleanCmd hasPrefix:@"button triggers "]) {
@@ -15389,6 +15630,19 @@ static NSString *handle_command(NSString *cmd) {
         return rc_carplay_connected() ? @"CarPlay: CONNECTED\n" : @"CarPlay: NOT_CONNECTED\n";
     } else if ([cleanCmd isEqualToString:@"watch"] || [cleanCmd isEqualToString:@"watch status"]) {
         return rc_watch_connected() ? @"Watch: CONNECTED\n" : @"Watch: NOT_CONNECTED\n";
+    } else if ([cleanCmd isEqualToString:@"watch charging"] || [cleanCmd isEqualToString:@"watch charging status"]) {
+        BOOL connected = NO, charging = NO;
+        int pct = -1;
+        rc_watch_battery_snapshot(&connected, &charging, &pct);
+        if (!connected) return @"Watch Charging: NOT_CONNECTED\n";
+        return charging ? @"Watch Charging: CHARGING\n" : @"Watch Charging: NOT_CHARGING\n";
+    } else if ([cleanCmd isEqualToString:@"watch battery"] || [cleanCmd isEqualToString:@"watch battery status"]) {
+        BOOL connected = NO, charging = NO;
+        int pct = -1;
+        rc_watch_battery_snapshot(&connected, &charging, &pct);
+        if (!connected || pct < 0) return @"Watch Battery: unknown\n";
+        NSString *suffix = charging ? (pct >= 100 ? @" (Full)" : @" (Charging)") : @"";
+        return [NSString stringWithFormat:@"Watch Battery: %d%%%@\n", pct, suffix];
     } else if ([cleanCmd isEqualToString:@"ringer"] || [cleanCmd hasPrefix:@"ringer "]) {
         NSString *sub = cleanCmd.length > 7 ? [cleanCmd substringFromIndex:7] : @"status";
         // Ringtone & alerts volume, separate from the media volume (set-vol)
@@ -16888,7 +17142,7 @@ static void start_web_server() {
                                 // The answers of the status commands Set Variable's command list offers, for
                                 // the Web UI to show next to them. Only these: they report, they change nothing.
                                 NSArray *commands = @[@"battery", @"volume", @"wifi status", @"bt status", @"cell status", @"airplane status",
-                                                      @"location status", @"carplay status", @"watch status", @"ringer status", @"vibration silent-status",
+                                                      @"location status", @"carplay status", @"watch status", @"watch charging", @"watch battery", @"ringer status", @"vibration silent-status",
                                                       @"haptics status", @"is-playing", @"lock status", @"low power status", @"flashlight status",
                                                       @"dnd status", @"focus status", @"screenrecord status", @"timer status", @"proximity status",
                                                       @"assistive touch status",
@@ -21548,7 +21802,16 @@ static void RC_FreezeGestureScrolling(void) {
         if (!g_rcFrozenGestureRecognizers) g_rcFrozenGestureRecognizers = [NSHashTable weakObjectsHashTable];
         if (!g_rcFrozenInteractionWindows) g_rcFrozenInteractionWindows = [NSHashTable weakObjectsHashTable];
         @try {
-            NSArray *windows = [UIApplication sharedApplication].windows;
+            // Every window except iOS's system gesture window: the Home swipe, Control Center and
+            // other tweaks' screen-edge gestures recognize there, and turning it off cancelled them
+            // mid-swipe (a swipe up to close an app that drifted sideways took several tries, #189)
+            NSMutableArray *windows = [[UIApplication sharedApplication].windows mutableCopy];
+            id gestureManager = [%c(SBSystemGestureManager) mainDisplayManager];
+            SEL windowSel = NSSelectorFromString(@"windowForSystemGestures");
+            id systemGestureWindow = [gestureManager respondsToSelector:windowSel] ? ((id (*)(id, SEL))objc_msgSend)(gestureManager, windowSel) : nil;
+            for (UIWindow *w in [windows copy]) {
+                if (w == systemGestureWindow || [NSStringFromClass([w class]) containsString:@"SystemGesture"]) [windows removeObject:w];
+            }
             for (UIWindow *w in windows) {
                 NSMutableArray *found = [NSMutableArray array];
                 RC_CollectScrollViewsInView(w, found);
@@ -21917,6 +22180,25 @@ static inline void RC_UserDeltaForOrientation(CGFloat dx_phys, CGFloat dy_phys, 
 // Logical left/right edges follow the interface as the user sees it. In
 // landscape these are the short side edges: UI-left/UI-right = device
 // bottom/device top (or vice versa). y spans L here, x spans S.
+// Swipe Triggers (Advanced Settings): how far each kind of swipe trigger needs a swipe to go before
+// it runs, and how close to the side a side-edge swipe has to start, in points. A setting that
+// isn't there (or isn't a number in range) is the distance the triggers always used. Longer
+// distances and a narrower strip leave more room for the Home swipe and other tweaks' gestures
+// (#189). A trigger that also fires on lift does so a little sooner, at the same proportion as
+// before (40 of 50 for the status bar, 35 of 45 for the top and bottom).
+static CGFloat RC_SwipeSetting(NSString *key, CGFloat normal) {
+    id value = g_triggerConfig[key];
+    double number = [value isKindOfClass:[NSNumber class]] ? [value doubleValue] : 0;
+    return (number >= 5 && number <= 400) ? number : normal;
+}
+
+#define RC_EDGE_STRIP() RC_SwipeSetting(@"swipeEdgeStrip", 25)
+#define RC_EDGE_DISTANCE() RC_SwipeSetting(@"swipeEdgeDistance", 30)
+#define RC_STATUS_BAR_DISTANCE() RC_SwipeSetting(@"swipeStatusBarDistance", 50)
+#define RC_TOP_DOWN_DISTANCE() RC_SwipeSetting(@"swipeTopDownDistance", 45)
+#define RC_BOTTOM_BAR_DISTANCE() RC_SwipeSetting(@"swipeBottomBarDistance", 60)
+#define RC_BOTTOM_UP_DISTANCE() RC_SwipeSetting(@"swipeBottomUpDistance", 45)
+
 static inline void RC_EdgeZonesForLoc(CGPoint loc, UIInterfaceOrientation orientation, CGFloat S, CGFloat L, CGFloat edgeThreshold, CGFloat margin, BOOL *outNearLeft, BOOL *outNearRight, BOOL *outWithinBounds) {
     BOOL nearLeft = NO, nearRight = NO, within = NO;
     if (orientation == UIInterfaceOrientationPortrait) {
@@ -22492,7 +22774,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                         g_statusBarSwipeHapticFired = YES;
                     }
                     
-                    if (!g_statusBarSwipeTriggered && !g_topSwipeDownTriggered && isHoz && abs_udx > 50) {
+                    if (!g_statusBarSwipeTriggered && !g_topSwipeDownTriggered && isHoz && abs_udx > RC_STATUS_BAR_DISTANCE()) {
                         NSString *trigger = (user_dx > 0) ? @"trigger_statusbar_swipe_right" : @"trigger_statusbar_swipe_left";
                         RCExecuteTrigger(trigger);
                         g_statusBarSwipeTriggered = YES;
@@ -22504,7 +22786,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                             RC_FreezeGestureScrolling();
                         }
                     }
-                    if (!g_statusBarSwipeTriggered && !g_topSwipeDownTriggered && isVertDown && abs_udy > 45) {
+                    if (!g_statusBarSwipeTriggered && !g_topSwipeDownTriggered && isVertDown && abs_udy > RC_TOP_DOWN_DISTANCE()) {
                         rc_fire_top_swipe_down_if_enabled(@"during move");
                     }
                 }
@@ -22532,13 +22814,13 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                 // Bottom Bar Swipe Up (3-Zone) during Move
                 // Early freeze: once upward intent is clear and the zoned
                 // trigger is actionable, hold the list still for the rest
-                // of the touch (firing itself happens at 45pt below).
+                // of the touch (firing itself happens at the Bottom Swipe Up distance below, 45pt by default).
                 if (g_bottomBarTouchActive && !g_bottomBarSwipeUpTriggered && isVertUp && abs_udy > 10) {
                     if (g_pendingBottomBarSwipeUpTrigger && RC_TriggerIsActionable(g_pendingBottomBarSwipeUpTrigger)) {
                         RC_FreezeGestureScrolling();
                     }
                 }
-                if (g_bottomBarTouchActive && !g_bottomBarSwipeUpTriggered && isVertUp && abs_udy > 45) {
+                if (g_bottomBarTouchActive && !g_bottomBarSwipeUpTriggered && isVertUp && abs_udy > RC_BOTTOM_UP_DISTANCE()) {
                     if (g_pendingBottomBarSwipeUpTrigger) {
                         load_trigger_config();
                         BOOL enabled = RC_MasterEnabled() && 
@@ -22563,15 +22845,15 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                     g_pendingStatusBarTrigger = nil;
 
                     if (g_statusBarTouchActive && !g_statusBarHoldTriggered && !g_statusBarSwipeTriggered && !g_topSwipeDownTriggered) {
-                        if (isVertDown && abs_udy > 35) {
+                        if (isVertDown && abs_udy > RC_TOP_DOWN_DISTANCE() * 35.0 / 45.0) {
                             rc_fire_top_swipe_down_if_enabled(@"on ended");
                         }
-                        if (!g_topSwipeDownTriggered && isHoz && abs_udx > 40) {
+                        if (!g_topSwipeDownTriggered && isHoz && abs_udx > RC_STATUS_BAR_DISTANCE() * 0.8) {
                             NSString *trigger = (user_dx > 0) ? @"trigger_statusbar_swipe_right" : @"trigger_statusbar_swipe_left";
                             RCExecuteTrigger(trigger);
                         }
                     }
-                    if (g_bottomBarTouchActive && !g_bottomBarSwipeUpTriggered && isVertUp && abs_udy > 35) {
+                    if (g_bottomBarTouchActive && !g_bottomBarSwipeUpTriggered && isVertUp && abs_udy > RC_BOTTOM_UP_DISTANCE() * 35.0 / 45.0) {
                         if (g_pendingBottomBarSwipeUpTrigger) {
                             load_trigger_config();
                             BOOL enabled = RC_MasterEnabled() && 
@@ -22587,7 +22869,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                         }
                     }
                     if (g_bottomBarTouchActive && !g_bottomBarSwipeUpTriggered) {
-                        if (isHoz && abs_udx > 60) {
+                        if (isHoz && abs_udx > RC_BOTTOM_BAR_DISTANCE()) {
                             NSString *trigger = (user_dx > 0) ? @"trigger_bottombar_swipe_right" : @"trigger_bottombar_swipe_left";
                             RCExecuteTrigger(trigger);
                         }
@@ -22659,18 +22941,23 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
     // Logical left/right edges follow the interface (orientation central).
     // In landscape the logical left/right zones are strips along y (the short
     // axis) bounded on x (the long axis); see RC_EdgeZonesForLoc.
-    CGFloat edgeThreshold = 25.0;
+    CGFloat edgeThreshold = RC_EDGE_STRIP();
     CGFloat margin = 100.0;
 
     BOOL nearLogicalLeft = NO, nearLogicalRight = NO, withinBounds = NO;
     RC_EdgeZonesForLoc(loc, orientation, S, L, edgeThreshold, margin, &nearLogicalLeft, &nearLogicalRight, &withinBounds);
 
     if (!withinBounds) {
+        SRLog(@"Edge Gesture: X=%.1f Y=%.1f is above or below the edge zones", loc.x, loc.y);
         self.state = UIGestureRecognizerStateFailed;
         return;
     }
 
+    // Only one recognizer of the pair logs, so a touch on one side isn't reported by the other
     if (self.isLeftEdge && !nearLogicalLeft) {
+        BOOL nearMissLeft = NO, nearMissRight = NO, nearMissBounds = NO;
+        RC_EdgeZonesForLoc(loc, orientation, S, L, 60.0, margin, &nearMissLeft, &nearMissRight, &nearMissBounds);
+        if (!nearLogicalRight && (nearMissLeft || nearMissRight)) SRLog(@"Edge Gesture: X=%.1f Y=%.1f is outside the %.0f pt edge strip", loc.x, loc.y, edgeThreshold);
         self.state = UIGestureRecognizerStateFailed;
         return;
     }
@@ -22682,11 +22969,26 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
 
     [super touchesBegan:touches withEvent:event];
     self.hasTriggered = NO;
+    self.startPoint = loc;
     RC_SnapshotGestureOffsets();
     SRLogMin(@"Edge Gesture touchesBegan: X=%.2f Y=%.2f orient=%ld", loc.x, loc.y, (long)orientation);
 }
 
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    // The edge triggers are swipes up and down along the edge. A swipe in from the edge is
+    // someone else's (a launcher tweak, an app's back swipe): step aside as soon as it's clear,
+    // so their recognizers get it instead of this one holding it (#189).
+    UITouch *touch = [touches anyObject];
+    if (touch && !self.hasTriggered) {
+        CGPoint loc = [touch locationInView:nil];
+        CGFloat dx = 0, dy = 0;
+        RC_UserDeltaForOrientation(loc.x - self.startPoint.x, loc.y - self.startPoint.y, get_current_interface_orientation(), &dx, &dy);
+        if (MAX(fabs(dx), fabs(dy)) > 10 && fabs(dx) > fabs(dy)) {
+            SRLog(@"Edge Gesture: sideways (dx %.1f dy %.1f), stepping aside", dx, dy);
+            self.state = (self.state == UIGestureRecognizerStatePossible) ? UIGestureRecognizerStateFailed : UIGestureRecognizerStateCancelled;
+            return;
+        }
+    }
     [super touchesMoved:touches withEvent:event];
     // State tracking and haptics now handled in handleEdgeGesture:
 }
@@ -22910,8 +23212,9 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
 
         // Early freeze: once vertical intent is clear and the matching
         // trigger is actionable, hold the list still for the rest of the
-        // touch (firing itself happens at the 30pt threshold below).
-        if (!gesture.hasTriggered && verticalSwipeDistance > 10 && horizontalDrift < 100) {
+        // touch (firing itself happens at the Side Edge distance below, 30pt by default).
+        BOOL mostlyVertical = verticalSwipeDistance > horizontalDrift * 1.5;
+        if (!gesture.hasTriggered && verticalSwipeDistance > RC_EDGE_DISTANCE() / 3.0 && mostlyVertical) {
             NSString *earlyKey = nil;
             if (gesture.isLeftEdge) {
                 earlyKey = (dy_u < 0) ? @"trigger_edge_left_swipe_up" : @"trigger_edge_left_swipe_down";
@@ -22921,8 +23224,8 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
             if (earlyKey && RC_TriggerIsActionable(earlyKey)) RC_FreezeGestureScrolling();
         }
 
-        // Threshold: 30pt for instant trigger
-        if (verticalSwipeDistance > 30 && horizontalDrift < 100) {
+        // Threshold: the Side Edge distance (30pt by default; see RC_SwipeSetting)
+        if (verticalSwipeDistance > RC_EDGE_DISTANCE() && mostlyVertical) {
             SRLogMin(@"Instant Edge Trigger! V=%.2f H=%.2f orient=%ld", verticalSwipeDistance, horizontalDrift, (long)orientation);
 
             gesture.hasTriggered = YES;

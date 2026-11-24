@@ -288,6 +288,7 @@
   {"command": "root <command>", "args": "shell command", "description": "Run a shell command as root", "category": "Files & Shell", "example": "root ls /var/jb", "status": ""},
   {"command": "sudo <command>", "args": "shell command", "description": "Alias of root", "category": "Files & Shell", "example": "sudo ls /var/jb", "status": ""},
   {"command": "ssh-run <host> <command>", "args": "host command", "description": "Run a command over SSH on another machine", "category": "Files & Shell", "example": "ssh-run mac.local uptime", "status": ""},
+  {"command": "dev-annotate <json>", "args": "json", "description": "Capture the screen, annotate it and send it to an editor (Developer Mode)", "category": "Integrations", "example": "dev-annotate {\"autoSend\":true,\"editor\":\"opencode\",\"hostId\":\"<uuid>\"}", "status": ""},
   {"command": "terminal <command>", "args": "shell command", "description": "The app's Terminal Command action (same as exec)", "category": "Files & Shell", "example": "terminal ls -la", "status": ""},
   {"command": "Lua <code>", "args": "lua code", "description": "Run Lua in a sequence (rc.execute, rc.sleep)", "category": "Files & Shell", "example": "Lua rc.execute('play')", "status": ""},
   {"command": "lua_eval <code>", "args": "lua code", "description": "Run Lua and return its value", "category": "Files & Shell", "example": "lua_eval rc.battery()", "status": ""},
