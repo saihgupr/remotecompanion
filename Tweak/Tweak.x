@@ -3082,8 +3082,18 @@ static void rc_dispatch_sync_main_safe(dispatch_block_t block);
 // Control Center couldn't turn it off. The camera handle is left only to release a torch it holds
 // and for a system without the controller.
 static id rc_system_flashlight(void) {
+    // iPads and camera-less devices have no torch. Asking SBUIFlashlightController for its
+    // shared instance there throws, and SpringBoard has no one to catch it, so check first.
+    AVCaptureDevice *device = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
+    if (!device.hasTorch) return nil;
     Class c = objc_getClass("SBUIFlashlightController");
-    return [c respondsToSelector:@selector(sharedInstance)] ? [c performSelector:@selector(sharedInstance)] : nil;
+    if (![c respondsToSelector:@selector(sharedInstance)]) return nil;
+    @try {
+        return [c performSelector:@selector(sharedInstance)];
+    } @catch (NSException *exception) {
+        SRLog(@"Flashlight controller unavailable: %@", exception.reason);
+        return nil;
+    }
 }
 
 static BOOL rc_flashlight_is_on(void) {
