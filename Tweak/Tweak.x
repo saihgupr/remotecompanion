@@ -2531,6 +2531,18 @@ static NSString *get_human_name_for_trigger(NSString *key, NSDictionary *trigger
             @"trigger_statusbar_swipe_left": @"Status Bar Swipe Left",
             @"trigger_statusbar_swipe_right": @"Status Bar Swipe Right",
             @"trigger_statusbar_double_tap": @"Status Bar Double Tap",
+            @"trigger_statusbar_left_tap": @"Status Bar Tap (Left)",
+            @"trigger_statusbar_center_tap": @"Status Bar Tap (Center)",
+            @"trigger_statusbar_right_tap": @"Status Bar Tap (Right)",
+            @"trigger_statusbar_left_double_tap": @"Status Bar Double Tap (Left)",
+            @"trigger_statusbar_center_double_tap": @"Status Bar Double Tap (Center)",
+            @"trigger_statusbar_right_double_tap": @"Status Bar Double Tap (Right)",
+            @"trigger_statusbar_left_swipe_left": @"Status Bar Swipe Left (Left)",
+            @"trigger_statusbar_left_swipe_right": @"Status Bar Swipe Right (Left)",
+            @"trigger_statusbar_center_swipe_left": @"Status Bar Swipe Left (Center)",
+            @"trigger_statusbar_center_swipe_right": @"Status Bar Swipe Right (Center)",
+            @"trigger_statusbar_right_swipe_left": @"Status Bar Swipe Left (Right)",
+            @"trigger_statusbar_right_swipe_right": @"Status Bar Swipe Right (Right)",
             @"trigger_statusbar_swipe_down_left": @"Top Swipe Down (Left)",
             @"trigger_statusbar_swipe_down_center": @"Top Swipe Down (Center)",
             @"trigger_statusbar_swipe_down_right": @"Top Swipe Down (Right)",
@@ -21675,6 +21687,31 @@ static CGFloat g_bottomBarUserDY = 0;
 static BOOL g_statusBarSwipeHapticFired = NO;
 static BOOL g_statusBarSwipeTriggered = NO;
 static NSTimeInterval g_lastStatusBarDoubleTapTime = 0;
+// The status bar zone the current touch started in ("left", "center", "right"): per-zone taps,
+// double taps and swipes run that zone's trigger when it's set up, else the whole-bar one
+static NSString *g_statusBarZone = nil;
+static NSUInteger g_statusBarTapGeneration = 0; // a second tap cancels the first tap's pending single tap
+
+static NSString *rc_status_bar_zone_for_progress(CGFloat progress) {
+    if (progress < 0.33) return @"left";
+    if (progress > 0.66) return @"right";
+    return @"center";
+}
+
+static BOOL rc_status_bar_trigger_enabled(NSString *key) {
+    return key && RC_MasterEnabled() && [g_triggerConfig[@"triggers"][key][@"enabled"] boolValue] && !RC_IsTriggerExcludedForForegroundApp(key);
+}
+
+// The zone's own trigger for a gesture ("tap", "double_tap", "swipe_left", "swipe_right") if it's
+// on, otherwise the whole-bar trigger (nil for a tap, which has none)
+static NSString *rc_status_bar_trigger(NSString *gesture) {
+    if (g_statusBarZone) {
+        NSString *zoneKey = [NSString stringWithFormat:@"trigger_statusbar_%@_%@", g_statusBarZone, gesture];
+        if (rc_status_bar_trigger_enabled(zoneKey)) return zoneKey;
+    }
+    if ([gesture isEqualToString:@"tap"]) return nil;
+    return [@"trigger_statusbar_" stringByAppendingString:gesture];
+}
 
 // Top Swipe Down (3-Zone) State, mirroring the bottom swipe up zones
 static NSString *g_pendingTopSwipeDownTrigger = nil;
@@ -21739,6 +21776,10 @@ static BOOL RC_GestureScrollSuppressionWanted(void) {
         @"trigger_statusbar_right_hold", @"trigger_statusbar_double_tap",
         @"trigger_statusbar_swipe_down_left", @"trigger_statusbar_swipe_down_center",
         @"trigger_statusbar_swipe_down_right",
+        @"trigger_statusbar_left_swipe_left", @"trigger_statusbar_left_swipe_right",
+        @"trigger_statusbar_center_swipe_left", @"trigger_statusbar_center_swipe_right",
+        @"trigger_statusbar_right_swipe_left", @"trigger_statusbar_right_swipe_right",
+        @"trigger_statusbar_left_double_tap", @"trigger_statusbar_center_double_tap", @"trigger_statusbar_right_double_tap",
         @"trigger_bottombar_swipe_left", @"trigger_bottombar_swipe_right",
         @"trigger_bottom_swipe_up_left", @"trigger_bottom_swipe_up_center",
         @"trigger_bottom_swipe_up_right",
@@ -22552,8 +22593,10 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                 g_statusBarHoldTriggered = NO;
                 g_topSwipeDownTriggered = NO;
                 g_pendingTopSwipeDownTrigger = nil;
+                g_statusBarZone = rc_status_bar_zone_for_progress(RC_ProgressAlongEdge(loc, touchOrientation, S, L));
                 
                 if (touch.tapCount == 2) {
+                    g_statusBarTapGeneration++; // the first tap's single tap doesn't run
                     if (g_statusBarHoldTimer) {
                         [g_statusBarHoldTimer invalidate];
                         g_statusBarHoldTimer = nil;
@@ -22562,18 +22605,17 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                     g_pendingTopSwipeDownTrigger = nil;
                     
                     load_trigger_config();
-                    BOOL enabled = RC_MasterEnabled() && 
-                                   [g_triggerConfig[@"triggers"][@"trigger_statusbar_double_tap"][@"enabled"] boolValue] &&
-                                   !RC_IsTriggerExcludedForForegroundApp(@"trigger_statusbar_double_tap");
+                    NSString *doubleTapKey = rc_status_bar_trigger(@"double_tap");
+                    BOOL enabled = rc_status_bar_trigger_enabled(doubleTapKey);
                     
                     if (enabled) {
                         NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
                         if (now - g_lastStatusBarDoubleTapTime > 0.4) {
                             g_lastStatusBarDoubleTapTime = now;
                             g_statusBarHoldTriggered = YES;
-                            RCTriggerHapticFor(@"trigger_statusbar_double_tap");
-                            RCExecuteTrigger(@"trigger_statusbar_double_tap");
-                            SRLog(@"[RCStatus] Status Bar Double Tap FIRED!");
+                            RCTriggerHapticFor(doubleTapKey);
+                            RCExecuteTrigger(doubleTapKey);
+                            SRLog(@"[RCStatus] %@ FIRED!", doubleTapKey);
                         } else {
                             g_statusBarHoldTriggered = YES;
                             SRLog(@"[RCStatus] Status Bar Double Tap ignored (cooldown: %.3fs)", now - g_lastStatusBarDoubleTapTime);
@@ -22766,7 +22808,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                     }
                     
                     if (isHoz && abs_udx > 15 && !g_statusBarSwipeHapticFired && !g_topSwipeDownTriggered) {
-                        NSString *trigger = (user_dx > 0) ? @"trigger_statusbar_swipe_right" : @"trigger_statusbar_swipe_left";
+                        NSString *trigger = rc_status_bar_trigger(user_dx > 0 ? @"swipe_right" : @"swipe_left");
                         load_trigger_config();
                         if (RC_MasterEnabled() && [g_triggerConfig[@"triggers"][trigger][@"enabled"] boolValue] &&
                             !RC_IsTriggerExcludedForForegroundApp(trigger)) {
@@ -22777,7 +22819,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                     }
                     
                     if (!g_statusBarSwipeTriggered && !g_topSwipeDownTriggered && isHoz && abs_udx > RC_STATUS_BAR_DISTANCE()) {
-                        NSString *trigger = (user_dx > 0) ? @"trigger_statusbar_swipe_right" : @"trigger_statusbar_swipe_left";
+                        NSString *trigger = rc_status_bar_trigger(user_dx > 0 ? @"swipe_right" : @"swipe_left");
                         RCExecuteTrigger(trigger);
                         g_statusBarSwipeTriggered = YES;
                     }
@@ -22851,8 +22893,24 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                             rc_fire_top_swipe_down_if_enabled(@"on ended");
                         }
                         if (!g_topSwipeDownTriggered && isHoz && abs_udx > RC_STATUS_BAR_DISTANCE() * 0.8) {
-                            NSString *trigger = (user_dx > 0) ? @"trigger_statusbar_swipe_right" : @"trigger_statusbar_swipe_left";
+                            NSString *trigger = rc_status_bar_trigger(user_dx > 0 ? @"swipe_right" : @"swipe_left");
                             RCExecuteTrigger(trigger);
+                        }
+                        // A tap: lifted where it landed, before a hold. When a double tap is set up it
+                        // waits to see whether a second tap follows, which then runs instead.
+                        NSString *tapKey = rc_status_bar_trigger(@"tap");
+                        if (!g_topSwipeDownTriggered && abs_udx < 10 && abs_udy < 10 && rc_status_bar_trigger_enabled(tapKey)) {
+                            NSString *zoneDouble = [NSString stringWithFormat:@"trigger_statusbar_%@_double_tap", g_statusBarZone];
+                            BOOL waits = rc_status_bar_trigger_enabled(zoneDouble) || rc_status_bar_trigger_enabled(@"trigger_statusbar_double_tap");
+                            NSUInteger generation = ++g_statusBarTapGeneration;
+                            void (^fire)(void) = ^{
+                                if (generation != g_statusBarTapGeneration) return;
+                                RCTriggerHapticFor(tapKey);
+                                RCExecuteTrigger(tapKey);
+                                SRLog(@"[RCStatus] %@ FIRED!", tapKey);
+                            };
+                            if (waits) dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), fire);
+                            else fire();
                         }
                     }
                     if (g_bottomBarTouchActive && !g_bottomBarSwipeUpTriggered && isVertUp && abs_udy > RC_BOTTOM_UP_DISTANCE() * 35.0 / 45.0) {
