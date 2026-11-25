@@ -4895,6 +4895,40 @@ static NSString *rc_normalized_name(NSString *name) {
     return n;
 }
 
+// ---------------------------------------------------------------------------
+// Dynamic Island: SpringBoard's own controller gives the island's frame, and the Live Activities
+// in it are its scene elements (each with a layout mode: compact, minimal or expanded). All of it
+// is SpringBoard UI state, so only ever read on the main thread. Phones without the island have
+// no controller, and these say so (CGRectNull, no elements).
+// ---------------------------------------------------------------------------
+static id rc_island_controller(void) {
+    id sb = [UIApplication sharedApplication];
+    SEL sel = NSSelectorFromString(@"systemApertureControllerForMainDisplay");
+    return [sb respondsToSelector:sel] ? ((id (*)(id, SEL))objc_msgSend)(sb, sel) : nil;
+}
+
+static CGRect rc_island_frame(void) {
+    id controller = rc_island_controller();
+    SEL sel = NSSelectorFromString(@"defaultIslandFrameInCoordinateSpace:");
+    if (![controller respondsToSelector:sel]) return CGRectNull;
+    CGRect frame = ((CGRect (*)(id, SEL, id))objc_msgSend)(controller, sel, [UIScreen mainScreen].coordinateSpace);
+    return (CGRectIsEmpty(frame) || CGRectIsInfinite(frame)) ? CGRectNull : frame;
+}
+
+static NSArray *rc_island_elements(void) {
+    Class cls = objc_getClass("SBSystemApertureSceneElement");
+    SEL sel = NSSelectorFromString(@"activeElements");
+    id elements = [cls respondsToSelector:sel] ? ((id (*)(id, SEL))objc_msgSend)(cls, sel) : nil;
+    if ([elements isKindOfClass:[NSArray class]]) return elements;
+    if ([elements respondsToSelector:@selector(allObjects)]) return [elements allObjects];
+    return @[];
+}
+
+static long rc_island_element_layout_mode(id element) {
+    SEL sel = NSSelectorFromString(@"layoutMode");
+    return [element respondsToSelector:sel] ? ((long (*)(id, SEL))objc_msgSend)(element, sel) : 0;
+}
+
 static BOOL rc_carplay_connected(void);
 static BOOL rc_watch_connected(void);
 static BOOL rc_watch_charging(void);
@@ -14119,6 +14153,23 @@ static NSString *handle_command(NSString *cmd) {
         } else {
             return @"No previous app available.";
         }
+    } else if ([cleanCmd isEqualToString:@"island"] || [cleanCmd isEqualToString:@"island status"]) {
+        // What's in the Dynamic Island: its frame and the Live Activities, each with its layout mode
+        __block NSMutableString *result = [NSMutableString string];
+        rc_dispatch_sync_main_safe(^{
+            CGRect frame = rc_island_frame();
+            if (CGRectIsNull(frame)) { [result appendString:@"No Dynamic Island\n"]; return; }
+            [result appendFormat:@"Island %.0f,%.0f %.0fx%.0f\n", frame.origin.x, frame.origin.y, frame.size.width, frame.size.height];
+            NSArray *elements = rc_island_elements();
+            [result appendFormat:@"Live Activities: %lu\n", (unsigned long)elements.count];
+            for (id element in elements) {
+                NSString *identifier = [element respondsToSelector:NSSelectorFromString(@"elementIdentifier")] ? [element valueForKey:@"elementIdentifier"] : nil;
+                SEL expandingSel = NSSelectorFromString(@"isExpanding");
+                BOOL expanding = [element respondsToSelector:expandingSel] && ((BOOL (*)(id, SEL))objc_msgSend)(element, expandingSel);
+                [result appendFormat:@"  %@ layoutMode=%ld expanding=%d\n", identifier ?: NSStringFromClass([element class]), rc_island_element_layout_mode(element), expanding];
+            }
+        });
+        return result;
     } else if ([cleanCmd isEqualToString:@"switcher"] || [cleanCmd isEqualToString:@"app switcher"]) {
         __block BOOL success = NO;
         SRLog(@"Attempting to toggle App Switcher...");
