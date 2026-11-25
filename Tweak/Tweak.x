@@ -21951,6 +21951,19 @@ static UIInterfaceOrientation get_current_interface_orientation() {
 static UIInterfaceOrientation g_rcLatchedTouchOrientation = UIInterfaceOrientationPortrait;
 static BOOL g_rcLatchedTouchOrientationValid = NO;
 
+// A touch's location in those device-fixed portrait coordinates. SpringBoard's own windows stay
+// portrait, but a notification banner over a landscape app is in a window that turns with the
+// app, so its touches arrive in landscape coordinates: read as portrait, a swipe up on the
+// banner looked like a swipe along the status bar (#209). A landscape-shaped window's point is
+// converted to the screen's fixed (portrait) space; everything else is used as it comes.
+static inline CGPoint RC_TouchPoint(UITouch *touch) {
+    CGPoint point = [touch locationInView:nil];
+    UIWindow *window = touch.window;
+    if (!window || window.bounds.size.width <= window.bounds.size.height) return point;
+    UIScreen *screen = window.screen ?: [UIScreen mainScreen];
+    return [window convertPoint:point toCoordinateSpace:screen.fixedCoordinateSpace];
+}
+
 static inline void RC_ScreenSL(CGFloat *outS, CGFloat *outL) {
     CGSize screenSize = [[UIScreen mainScreen] bounds].size;
     CGFloat s = MIN(screenSize.width, screenSize.height);
@@ -22436,7 +22449,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
         // SpringBoard sees one touch at the top while the touchscreen sees a second finger the app got
         if (allTouches.count == 1 && !g_twoFingerTopActive && !g_twoFingerTopTriggered &&
             RC_TriggerIsActionable(@"trigger_statusbar_two_finger_swipe_down")) {
-            CGPoint loc = [touch locationInView:nil];
+            CGPoint loc = RC_TouchPoint(touch);
             BOOL startedTop = (touch.phase == UITouchPhaseBegan && RC_InTopRegionMulti(loc, orientation, S, L)) ||
                               (touch.phase == UITouchPhaseMoved && g_statusBarTouchActive && !g_statusBarSwipeTriggered && !g_statusBarHoldTriggered);
             CGPoint other = CGPointZero;
@@ -22467,8 +22480,8 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
         // Check for multi-finger (2-finger) activation
         if (allTouches.count >= 2) {
             NSArray<UITouch *> *touchArr = [allTouches allObjects];
-            CGPoint p0 = [touchArr[0] locationInView:nil];
-            CGPoint p1 = [touchArr[1] locationInView:nil];
+            CGPoint p0 = RC_TouchPoint(touchArr[0]);
+            CGPoint p1 = RC_TouchPoint(touchArr[1]);
             BOOL p0Top = RC_InTopRegionMulti(p0, orientation, S, L);
             BOOL p1Top = RC_InTopRegionMulti(p1, orientation, S, L);
             BOOL p0Bottom = RC_InBottomRegionMulti(p0, orientation, S, L);
@@ -22522,7 +22535,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
             g_rcLatchedTouchOrientation = touchOrientation;
             g_rcLatchedTouchOrientationValid = YES;
 
-            CGPoint loc = [touch locationInView:nil];
+            CGPoint loc = RC_TouchPoint(touch);
             CGSize screenSize = [[UIScreen mainScreen] bounds].size;
 
             // S/L from the central helper (same values every call site uses).
@@ -22646,7 +22659,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
             }
         }
         else if (touch.phase == UITouchPhaseMoved || touch.phase == UITouchPhaseEnded) {
-            CGPoint loc = [touch locationInView:nil];
+            CGPoint loc = RC_TouchPoint(touch);
             // Use the orientation latched at Began so a rotation mid-swipe can't
             // cross-wire top/bottom. Fall back to live only if somehow unlatched.
             UIInterfaceOrientation orientation = g_rcLatchedTouchOrientationValid ? g_rcLatchedTouchOrientation : get_current_interface_orientation();
@@ -22661,8 +22674,8 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                 CGPoint curPt = CGPointZero;
                 if (allTouches.count >= 2) {
                     NSArray<UITouch *> *touchArr = [allTouches allObjects];
-                    CGPoint p0 = [touchArr[0] locationInView:nil];
-                    CGPoint p1 = [touchArr[1] locationInView:nil];
+                    CGPoint p0 = RC_TouchPoint(touchArr[0]);
+                    CGPoint p1 = RC_TouchPoint(touchArr[1]);
                     curPt = CGPointMake((p0.x + p1.x) / 2.0, (p0.y + p1.y) / 2.0);
                 } else {
                     curPt = loc;
@@ -22935,7 +22948,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
     }
 
     UITouch *touch = [touches anyObject];
-    CGPoint loc = [touch locationInView:nil];
+    CGPoint loc = RC_TouchPoint(touch);
     CGFloat S = 0, L = 0;
     RC_ScreenSL(&S, &L);
     UIInterfaceOrientation orientation = get_current_interface_orientation();
@@ -22982,7 +22995,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
     // so their recognizers get it instead of this one holding it (#189).
     UITouch *touch = [touches anyObject];
     if (touch && !self.hasTriggered) {
-        CGPoint loc = [touch locationInView:nil];
+        CGPoint loc = RC_TouchPoint(touch);
         CGFloat dx = 0, dy = 0;
         RC_UserDeltaForOrientation(loc.x - self.startPoint.x, loc.y - self.startPoint.y, get_current_interface_orientation(), &dx, &dy);
         if (MAX(fabs(dx), fabs(dy)) > 10 && fabs(dx) > fabs(dy)) {
@@ -23023,7 +23036,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
         return;
     }
     UITouch *touch = [touches anyObject];
-    CGPoint loc = [touch locationInView:nil];
+    CGPoint loc = RC_TouchPoint(touch);
     UIInterfaceOrientation orientation = get_current_interface_orientation();
     BOOL inBottom = NO;
     NSString *key = get_bottom_swipe_trigger_for_touch(loc, orientation, &inBottom);
@@ -23048,7 +23061,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
         return;
     }
     UITouch *touch = [touches anyObject];
-    CGPoint loc = [touch locationInView:nil];
+    CGPoint loc = RC_TouchPoint(touch);
     UIInterfaceOrientation orientation = get_current_interface_orientation();
     CGFloat dx = 0, dy = 0;
     RC_UserDeltaForOrientation(loc.x - self.startPoint.x, loc.y - self.startPoint.y,
@@ -23111,7 +23124,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
         return;
     }
     UITouch *touch = [touches anyObject];
-    CGPoint loc = [touch locationInView:nil];
+    CGPoint loc = RC_TouchPoint(touch);
     UIInterfaceOrientation orientation = get_current_interface_orientation();
     BOOL inTop = NO;
     NSString *key = get_top_swipe_down_trigger_for_touch(loc, orientation, &inTop);
@@ -23135,7 +23148,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
         return;
     }
     UITouch *touch = [touches anyObject];
-    CGPoint loc = [touch locationInView:nil];
+    CGPoint loc = RC_TouchPoint(touch);
     UIInterfaceOrientation orientation = get_current_interface_orientation();
     CGFloat dx = 0, dy = 0;
     RC_UserDeltaForOrientation(loc.x - self.startPoint.x, loc.y - self.startPoint.y,
@@ -23735,7 +23748,7 @@ static inline BOOL rc_is_top_gesture_suppressing_cc(void) {
 
 - (BOOL)_shouldReceiveTouch:(UITouch *)touch withEvent:(UIEvent *)event {
     if (touch && [touch isKindOfClass:[UITouch class]]) {
-        CGPoint loc = [touch locationInView:nil];
+        CGPoint loc = RC_TouchPoint(touch);
         UIInterfaceOrientation orientation = get_current_interface_orientation();
         if (rc_should_suppress_edge_recognizer(self, loc, orientation, NO)) {
             SRLog(@"[RCEdge] UIScreenEdgePanGestureRecognizer _shouldReceiveTouch: NO at (%.1f, %.1f)", loc.x, loc.y);
@@ -23748,7 +23761,7 @@ static inline BOOL rc_is_top_gesture_suppressing_cc(void) {
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     UITouch *touch = [touches anyObject];
     if (touch && [touch isKindOfClass:[UITouch class]]) {
-        CGPoint loc = [touch locationInView:nil];
+        CGPoint loc = RC_TouchPoint(touch);
         UIInterfaceOrientation orientation = get_current_interface_orientation();
         if (rc_should_suppress_edge_recognizer(self, loc, orientation, NO)) {
             SRLog(@"[RCEdge] UIScreenEdgePanGestureRecognizer touchesBegan: setting state to Failed at (%.1f, %.1f)", loc.x, loc.y);
@@ -23762,7 +23775,7 @@ static inline BOOL rc_is_top_gesture_suppressing_cc(void) {
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     UITouch *touch = [touches anyObject];
     if (touch && [touch isKindOfClass:[UITouch class]]) {
-        CGPoint loc = [touch locationInView:nil];
+        CGPoint loc = RC_TouchPoint(touch);
         UIInterfaceOrientation orientation = get_current_interface_orientation();
         if (rc_should_suppress_edge_recognizer(self, loc, orientation, YES)) {
             self.state = UIGestureRecognizerStateFailed;
@@ -23778,7 +23791,7 @@ static inline BOOL rc_is_top_gesture_suppressing_cc(void) {
 
 - (BOOL)_shouldReceiveTouch:(UITouch *)touch withEvent:(UIEvent *)event {
     if (touch && [touch isKindOfClass:[UITouch class]]) {
-        CGPoint loc = [touch locationInView:nil];
+        CGPoint loc = RC_TouchPoint(touch);
         UIInterfaceOrientation orientation = get_current_interface_orientation();
         if (rc_should_suppress_edge_recognizer(self, loc, orientation, NO)) {
             SRLog(@"[RCEdge] _UIScreenEdgePanGestureRecognizer _shouldReceiveTouch: NO at (%.1f, %.1f)", loc.x, loc.y);
@@ -23791,7 +23804,7 @@ static inline BOOL rc_is_top_gesture_suppressing_cc(void) {
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     UITouch *touch = [touches anyObject];
     if (touch && [touch isKindOfClass:[UITouch class]]) {
-        CGPoint loc = [touch locationInView:nil];
+        CGPoint loc = RC_TouchPoint(touch);
         UIInterfaceOrientation orientation = get_current_interface_orientation();
         if (rc_should_suppress_edge_recognizer(self, loc, orientation, NO)) {
             SRLog(@"[RCEdge] _UIScreenEdgePanGestureRecognizer touchesBegan: setting state to Failed at (%.1f, %.1f)", loc.x, loc.y);
@@ -23805,7 +23818,7 @@ static inline BOOL rc_is_top_gesture_suppressing_cc(void) {
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     UITouch *touch = [touches anyObject];
     if (touch && [touch isKindOfClass:[UITouch class]]) {
-        CGPoint loc = [touch locationInView:nil];
+        CGPoint loc = RC_TouchPoint(touch);
         UIInterfaceOrientation orientation = get_current_interface_orientation();
         if (rc_should_suppress_edge_recognizer(self, loc, orientation, YES)) {
             self.state = UIGestureRecognizerStateFailed;
@@ -23821,7 +23834,7 @@ static inline BOOL rc_is_top_gesture_suppressing_cc(void) {
 
 - (BOOL)_shouldReceiveTouch:(UITouch *)touch withEvent:(UIEvent *)event {
     if (touch && [touch isKindOfClass:[UITouch class]]) {
-        CGPoint loc = [touch locationInView:nil];
+        CGPoint loc = RC_TouchPoint(touch);
         UIInterfaceOrientation orientation = get_current_interface_orientation();
         if (rc_should_suppress_edge_recognizer(self, loc, orientation, NO)) {
             SRLog(@"[RCEdge] SBScreenEdgePanGestureRecognizer _shouldReceiveTouch: NO at (%.1f, %.1f)", loc.x, loc.y);
@@ -23834,7 +23847,7 @@ static inline BOOL rc_is_top_gesture_suppressing_cc(void) {
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     UITouch *touch = [touches anyObject];
     if (touch && [touch isKindOfClass:[UITouch class]]) {
-        CGPoint loc = [touch locationInView:nil];
+        CGPoint loc = RC_TouchPoint(touch);
         UIInterfaceOrientation orientation = get_current_interface_orientation();
         if (rc_should_suppress_edge_recognizer(self, loc, orientation, NO)) {
             SRLog(@"[RCEdge] SBScreenEdgePanGestureRecognizer touchesBegan: setting state to Failed at (%.1f, %.1f)", loc.x, loc.y);
@@ -23848,7 +23861,7 @@ static inline BOOL rc_is_top_gesture_suppressing_cc(void) {
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     UITouch *touch = [touches anyObject];
     if (touch && [touch isKindOfClass:[UITouch class]]) {
-        CGPoint loc = [touch locationInView:nil];
+        CGPoint loc = RC_TouchPoint(touch);
         UIInterfaceOrientation orientation = get_current_interface_orientation();
         if (rc_should_suppress_edge_recognizer(self, loc, orientation, YES)) {
             self.state = UIGestureRecognizerStateFailed;
@@ -23864,7 +23877,7 @@ static inline BOOL rc_is_top_gesture_suppressing_cc(void) {
 
 - (BOOL)_shouldReceiveTouch:(UITouch *)touch {
     if (touch && [touch isKindOfClass:[UITouch class]]) {
-        CGPoint loc = [touch locationInView:nil];
+        CGPoint loc = RC_TouchPoint(touch);
         UIInterfaceOrientation orientation = get_current_interface_orientation();
         NSUInteger edge = 0;
         if ([self respondsToSelector:@selector(edge)]) {
@@ -23907,7 +23920,7 @@ static inline BOOL rc_is_top_gesture_suppressing_cc(void) {
     NSUInteger edge = [tongue respondsToSelector:@selector(edge)] ? [tongue edge] : 0;
     g_rcCCPullEdge = edge;
     if (touch && [touch isKindOfClass:[UITouch class]]) {
-        CGPoint loc = [touch locationInView:nil];
+        CGPoint loc = RC_TouchPoint(touch);
         UIInterfaceOrientation orientation = get_current_interface_orientation();
         if ((edge == UIRectEdgeBottom || edge == 0) && should_suppress_bottom_edge_gesture(loc, orientation)) {
             SRLog(@"[RCBottom] SBControlCenterController grabberTongue:shouldReceiveTouch: NO at (%.1f, %.1f)", loc.x, loc.y);
@@ -24053,7 +24066,7 @@ static BOOL RC_ShouldKeepBottomBarSideSwipe(void) {
 
 - (BOOL)_shouldReceiveTouch:(UITouch *)touch withEvent:(UIEvent *)event {
     if (touch && [touch isKindOfClass:[UITouch class]]) {
-        CGPoint loc = [touch locationInView:nil];
+        CGPoint loc = RC_TouchPoint(touch);
         UIInterfaceOrientation orientation = get_current_interface_orientation();
         if (rc_should_suppress_edge_recognizer(self, loc, orientation, NO)) {
             SRLog(@"[RCTop] SBCoverSheetScreenEdgePanGestureRecognizer _shouldReceiveTouch: NO at (%.1f, %.1f)", loc.x, loc.y);
@@ -24066,7 +24079,7 @@ static BOOL RC_ShouldKeepBottomBarSideSwipe(void) {
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     UITouch *touch = [touches anyObject];
     if (touch && [touch isKindOfClass:[UITouch class]]) {
-        CGPoint loc = [touch locationInView:nil];
+        CGPoint loc = RC_TouchPoint(touch);
         UIInterfaceOrientation orientation = get_current_interface_orientation();
         if (rc_should_suppress_edge_recognizer(self, loc, orientation, NO)) {
             SRLog(@"[RCTop] SBCoverSheetScreenEdgePanGestureRecognizer touchesBegan: Failed at (%.1f, %.1f)", loc.x, loc.y);
@@ -24080,7 +24093,7 @@ static BOOL RC_ShouldKeepBottomBarSideSwipe(void) {
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     UITouch *touch = [touches anyObject];
     if (touch && [touch isKindOfClass:[UITouch class]]) {
-        CGPoint loc = [touch locationInView:nil];
+        CGPoint loc = RC_TouchPoint(touch);
         UIInterfaceOrientation orientation = get_current_interface_orientation();
         if (rc_should_suppress_edge_recognizer(self, loc, orientation, YES)) {
             self.state = UIGestureRecognizerStateFailed;
@@ -24188,7 +24201,7 @@ static NSString *g_rcReachabilitySwipeKey = nil;
         return NO;
     }
     if (touch && [touch isKindOfClass:[UITouch class]] && [recognizer respondsToSelector:@selector(edges)]) {
-        CGPoint loc = [touch locationInView:nil];
+        CGPoint loc = RC_TouchPoint(touch);
         UIInterfaceOrientation orientation = get_current_interface_orientation();
         if (rc_should_suppress_edge_recognizer(recognizer, loc, orientation, NO)) {
             SRLog(@"[RCEdge] SBSystemGestureManager shouldReceiveTouch: NO for recognizer %@", recognizer);
