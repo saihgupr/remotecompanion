@@ -1500,7 +1500,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     // Using dark gray tint for a "premium" but subtle look
     UIImage *custom = [RCAddOnCatalog isAddOnTriggerKey:triggerKey] ? [RCAddOnCatalog imageForTriggerKey:triggerKey] : nil;   // an add-on's image icon
     // The trigger's own picture: its app's icon, the phone drawing, or its symbol with a letter
-    cell.imageView.image = custom ?: [self appIconForTrigger:triggerKey side:29] ?: RCTriggerIconImage(triggerKey, 22) ?: [self symbolIconForTrigger:triggerKey size:22];
+    cell.imageView.image = custom ?: [self appIconForTrigger:triggerKey side:29] ?: RCTriggerIconImageWithLetter(triggerKey, [[RCConfigManager sharedManager] letterTagForTrigger:triggerKey], 22) ?: [self symbolIconForTrigger:triggerKey size:22];
     cell.imageView.tintColor = custom ? nil : [UIColor systemGrayColor];
 
     cell.accessoryView = nil;
@@ -1659,6 +1659,9 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
 // of the user's name for it, else of its network, device or topic. None for an unnamed NFC tag or
 // schedule (their default names don't say anything a letter could).
 + (NSString *)letterForTrigger:(NSString *)triggerKey {
+    // A letter tag of the user's own (the trigger's More menu), on any trigger
+    NSString *tag = [[RCConfigManager sharedManager] letterTagForTrigger:triggerKey];
+    if (tag) return tag;
     BOOL created = NO;
     for (NSString *prefix in @[@"nfc_", @"wifi_", @"bt_", @"output_", @"notif_", @"notify_", @"sched_", @"mqtt_", @"notiftap_", @"notifbtn_"]) {
         if ([triggerKey hasPrefix:prefix]) { created = YES; break; }
@@ -1703,7 +1706,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
             if (app) return app;
         }
     }
-    return RCTriggerIconImage(triggerKey, size) ?: RCTriggerLetterImage([RCTriggersViewController drawnIconNameForTrigger:triggerKey], [RCTriggersViewController letterForTrigger:triggerKey], size);
+    return RCTriggerIconImageWithLetter(triggerKey, [[RCConfigManager sharedManager] letterTagForTrigger:triggerKey], size) ?: RCTriggerLetterImage([RCTriggersViewController drawnIconNameForTrigger:triggerKey], [RCTriggersViewController letterForTrigger:triggerKey], size);
 }
 
 // A trigger's plain symbol, with its letter when it's a created one
@@ -1779,7 +1782,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     UIImage *custom = [self customIconForTrigger:key];
     if (custom) return custom;
     UIImage *addOnImage = [RCAddOnCatalog isAddOnTriggerKey:key] ? [RCAddOnCatalog imageForTriggerKey:key] : nil;
-    return addOnImage ?: [self appIconForTrigger:key side:30] ?: RCTriggerIconImage(key, 26) ?: [self symbolIconForTrigger:key size:26];
+    return addOnImage ?: [self appIconForTrigger:key side:30] ?: RCTriggerIconImageWithLetter(key, [[RCConfigManager sharedManager] letterTagForTrigger:key], 26) ?: [self symbolIconForTrigger:key size:26];
 }
 
 - (NSInteger)gridActionCountForTrigger:(NSString *)key {

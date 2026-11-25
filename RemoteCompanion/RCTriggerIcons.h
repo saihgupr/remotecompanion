@@ -12,6 +12,9 @@ UIImage *RCTriggerSymbolImage(NSString *symbolName, CGFloat pointSize);
 // The same, with a letter in a small badge at the bottom right: a created trigger's first letter,
 // so NFC tags, networks and devices of one kind are told apart. No letter: the plain symbol.
 UIImage *RCTriggerLetterImage(NSString *symbolName, NSString *letter, CGFloat pointSize);
+// A drawn trigger icon (RCTriggerIconImage's) with a letter tag at its bottom right, as created
+// triggers have; whatever badge it had there gives way to the letter
+UIImage *RCTriggerIconImageWithLetter(NSString *triggerKey, NSString *letter, CGFloat pointSize);
 
 // A name the two functions above take in place of a symbol's: the Bluetooth logo, drawn (there's
 // no symbol for it)
