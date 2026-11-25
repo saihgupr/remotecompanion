@@ -1,7 +1,8 @@
 #import <UIKit/UIKit.h>
 
 // A Play Gesture action's own page: which gesture it plays (or Latest Recording) and at what
-// speed, kept with Save. Recording and the recording tab's options live in Settings > Gestures.
+// speed, kept with Save. Record New Gesture records one from here and picks it; managing them and the
+// recording tab's options live in Settings > Gestures.
 @interface RCPlayGestureViewController : UITableViewController
 
 // The action being edited (nil for a new one)
