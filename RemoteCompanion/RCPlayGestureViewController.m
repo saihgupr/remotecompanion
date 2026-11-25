@@ -122,7 +122,7 @@ typedef NS_ENUM(NSInteger, RCPlayGestureSection) {
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    if (section == RCPlayGestureSectionGesture) return @"Record New Gesture steps aside so you can do it on the screen, then tap Stop; it's picked here once saved. Manage gestures in Settings > Gestures.";
+    if (section == RCPlayGestureSectionGesture) return @"Record New Gesture steps aside so you can do it on the screen, then tap Stop; it's picked here once saved. Swipe a gesture left, or touch and hold it, to delete it. Manage gestures in Settings > Gestures.";
     return @"Faster or slower playback can change flicks and long presses.";
 }
 
@@ -207,6 +207,73 @@ typedef NS_ENUM(NSInteger, RCPlayGestureSection) {
     self.chosen = [self gestureRows][indexPath.row][@"name"];
     [self updateSaveButton];
     [tableView reloadSections:[NSIndexSet indexSetWithIndex:RCPlayGestureSectionGesture] withRowAnimation:UITableViewRowAnimationNone];
+}
+
+#pragma mark - Deleting
+
+// A gesture in the library (not Record New Gesture, Latest Recording, a missing one or a status row)
+- (NSString *)savedGestureAt:(NSIndexPath *)indexPath {
+    if (indexPath.section != RCPlayGestureSectionGesture) return nil;
+    NSArray *rows = [self gestureRows];
+    if (indexPath.row >= (NSInteger)rows.count) return nil;
+    NSDictionary *g = rows[indexPath.row];
+    if ([g[@"record"] boolValue] || [g[@"latest"] boolValue] || [g[@"missing"] boolValue] || [g[@"status"] boolValue]) return nil;
+    return g[@"name"];
+}
+
+// Swipe left on a gesture, as in Settings > Gestures
+- (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
+    NSString *name = [self savedGestureAt:indexPath];
+    if (!name) return nil;
+    __weak typeof(self) weakSelf = self;
+    UIContextualAction *delete = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleDestructive title:@"Delete"
+        handler:^(UIContextualAction *action, UIView *view, void (^done)(BOOL)) {
+        [weakSelf confirmDelete:name];
+        done(YES);
+    }];
+    delete.image = [UIImage systemImageNamed:@"trash"];
+    return [UISwipeActionsConfiguration configurationWithActions:@[delete]];
+}
+
+// Or touch and hold it
+- (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoint)point {
+    NSString *name = [self savedGestureAt:indexPath];
+    if (!name) return nil;
+    __weak typeof(self) weakSelf = self;
+    return [UIContextMenuConfiguration configurationWithIdentifier:nil previewProvider:nil actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggested) {
+        UIAction *delete = [UIAction actionWithTitle:@"Delete" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(UIAction *a) {
+            [weakSelf confirmDelete:name];
+        }];
+        delete.attributes = UIMenuElementAttributesDestructive;
+        return [UIMenu menuWithTitle:name children:@[delete]];
+    }];
+}
+
+- (void)confirmDelete:(NSString *)name {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Delete Gesture?"
+        message:[NSString stringWithFormat:@"“%@” is deleted from the library. Actions that play it stop working.", name] preferredStyle:UIAlertControllerStyleAlert];
+    __weak typeof(self) weakSelf = self;
+    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Delete" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
+        NSString *command = [NSString stringWithFormat:@"gesture delete \"%@\"", name];
+        [[RCServerClient sharedClient] executeCommand:command completion:^(NSString *output, NSError *error) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                if (!strongSelf) return;
+                if (error || [output hasPrefix:@"Error"]) {
+                    [strongSelf showMessage:@"Couldn't Delete" detail:error.localizedDescription ?: [output stringByReplacingOccurrencesOfString:@"Error: " withString:@""]];
+                    return;
+                }
+                // The gesture this action was going to play is gone: pick another
+                if (strongSelf.chosen.length && [strongSelf.chosen caseInsensitiveCompare:name] == NSOrderedSame) {
+                    strongSelf.chosen = nil;
+                    [strongSelf updateSaveButton];
+                }
+                [strongSelf reload];
+            });
+        }];
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 
 #pragma mark - Recording
