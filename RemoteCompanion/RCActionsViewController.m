@@ -3129,7 +3129,7 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
     BOOL isNew = index == NSNotFound || index < 0 || index >= (NSInteger)self.actions.count;
     NSDictionary *menu = isNew ? @{ @"type": @"menu", @"timeout": @10 } : self.actions[index];
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:isNew ? @"Choose from Menu" : @"Edit Menu"
-        message:@"The menu shows in the middle of the screen, over any app and on the lock screen. Time Limit: seconds before it closes (0 waits until a pick)."
+        message:@"The menu shows in the middle of the screen, over any app and on the lock screen. Time Limit: seconds before it closes (0 waits until a pick). Tap End Menu, or an option, to add more options."
         preferredStyle:UIAlertControllerStyleAlert];
     [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
         field.placeholder = @"Title (optional)";
@@ -3162,6 +3162,19 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
     }];
     [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     [alert addAction:save];
+    if (!isNew) {
+        // Another option, after what was typed above is kept
+        [alert addAction:[UIAlertAction actionWithTitle:@"Add Option" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
+            __strong typeof(weakSelf) self = weakSelf;
+            if (!self) return;
+            NSMutableDictionary *updated = [menu mutableCopy];
+            NSString *title = [alert.textFields[0].text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            if (title.length) updated[@"title"] = title; else [updated removeObjectForKey:@"title"];
+            updated[@"timeout"] = @(MAX(0, MIN(3600, [alert.textFields[1].text integerValue])));
+            self.actions[index] = updated;
+            [self addOptionToMenuAtIndex:index];
+        }]];
+    }
     alert.preferredAction = save;
     [self presentViewController:alert animated:YES completion:nil];
 }
@@ -3201,6 +3214,22 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
         [sheet addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"Pick \u201C%@\u201D%@", name, ticked ? @" \u2713" : @""] style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) { choose(@(i)); }]];
     }];
     [sheet addAction:[UIAlertAction actionWithTitle:@"Keep As Is" style:UIAlertActionStyleCancel handler:nil]];
+    [self configurePopoverSourceForAlert:sheet];
+    [self presentViewController:sheet animated:YES completion:nil];
+}
+
+// Tapping an option: its name, its icon, or deleting it
+- (void)presentMenuOptionActionsForIndex:(NSInteger)index {
+    NSString *name = [self.actions[index][@"name"] description] ?: @"Option";
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:name message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Rename" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) { [self presentMenuOptionNameForIndex:index]; }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Icon" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) { [self presentMenuOptionIconForIndex:index]; }]];
+    NSInteger menu = [self blockStartForBranchRow:index];
+    if (menu != NSNotFound) {
+        [sheet addAction:[UIAlertAction actionWithTitle:@"Add Another Option" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) { [self addOptionToMenuAtIndex:menu]; }]];
+    }
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Delete Option" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *a) { [self deleteMenuOptionAtIndex:index]; }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     [self configurePopoverSourceForAlert:sheet];
     [self presentViewController:sheet animated:YES completion:nil];
 }
@@ -3463,22 +3492,45 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
     return NSMakeRange(index, 1);
 }
 
+// A row's nesting. A menu's Option rows sit one level inside it, and each option's actions one
+// further, so the options read as a list under the menu (an If's Else rows stay level with it).
 - (NSInteger)indentationLevelForRow:(NSInteger)row {
-    NSInteger depth = 0;
+    NSMutableArray<NSString *> *open = [NSMutableArray array]; // "block" or "option", innermost last
     for (NSInteger idx = 0; idx < row; idx++) {
         id item = self.actions[idx];
-        if ([self isBlockStartItem:item]) {
-            depth++;
+        if ([self isMenuOptionActionItem:item]) {
+            if ([open.lastObject isEqualToString:@"option"]) [open removeLastObject];
+            [open addObject:@"option"];
+        } else if ([self isBlockStartItem:item]) {
+            [open addObject:@"block"];
         } else if ([self isBlockEndItem:item]) {
-            depth = MAX(depth - 1, 0);
+            if ([self isEndMenuActionItem:item] && [open.lastObject isEqualToString:@"option"]) [open removeLastObject];
+            if (open.count) [open removeLastObject];
         }
     }
-    
+    NSInteger depth = open.count;
     id current = self.actions[row];
+    if ([self isMenuOptionActionItem:current]) {
+        return [open.lastObject isEqualToString:@"option"] ? depth - 1 : depth;
+    }
+    if ([self isEndMenuActionItem:current]) {
+        NSInteger d = [open.lastObject isEqualToString:@"option"] ? depth - 1 : depth;
+        return MAX(d - 1, 0);
+    }
     if ([self isBlockEndItem:current] || [self isBranchActionItem:current]) {
         return MAX(depth - 1, 0);
     }
     return depth;
+}
+
+// An option's icon: its own, or its number in a circle (1 for the menu's first option)
+- (NSString *)iconForMenuOptionAtRow:(NSInteger)row {
+    NSString *icon = [self.actions[row][@"icon"] description];
+    if (icon.length && [UIImage systemImageNamed:icon]) return icon;
+    NSInteger menu = [self blockStartForBranchRow:row];
+    NSUInteger position = menu == NSNotFound ? NSNotFound : [[self optionRowsForMenuAtIndex:menu] indexOfObject:@(row)];
+    NSString *numbered = position != NSNotFound && position < 50 ? [NSString stringWithFormat:@"%lu.circle.fill", (unsigned long)position + 1] : nil;
+    return numbered && [UIImage systemImageNamed:numbered] ? numbered : @"circle.fill";
 }
 
 // The vibration conditions as this iOS version's Settings shows them: iOS 17's one Haptics
@@ -5350,7 +5402,10 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             } else if ([self isMenuActionItem:actionData]) {
                 [self presentMenuSettingsForIndex:indexPath.row];
             } else if ([self isMenuOptionActionItem:actionData]) {
-                [self presentMenuOptionNameForIndex:indexPath.row];
+                [self presentMenuOptionActionsForIndex:indexPath.row];
+            } else if ([self isEndMenuActionItem:actionData]) {
+                NSInteger menu = [self matchingIfIndexForEndAtIndex:indexPath.row];
+                if (menu != NSNotFound) [self addOptionToMenuAtIndex:menu];
             }
             return;
         }
@@ -6466,7 +6521,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         cell.textLabel.textColor = isControl ? [UIColor secondaryLabelColor] : [UIColor labelColor];
         cell.detailTextLabel.text = nil;
         
-        NSString *stepIcon = [self iconForCommand:actionItem];
+        NSString *stepIcon = [self isMenuOptionActionItem:actionItem] ? [self iconForMenuOptionAtRow:indexPath.row] : [self iconForCommand:actionItem];
         if ([stepIcon isEqualToString:@"x.squareroot"]) {
             cell.imageView.image = RCVariableMenuIconActionSized(22);
         } else {

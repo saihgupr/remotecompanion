@@ -5981,14 +5981,18 @@ function renderActionList() {
   }
 
   let indent = 0;
+  const optionOpen = []; // per open block: whether one of its (menu) options is open
   actions.forEach((action, idx) => {
     const isCtrl = typeof action === 'object';
     const type   = isCtrl ? (action.type||'').toLowerCase() : null;
     const isEnd  = type === 'end_if' || type === 'end' || type === 'end_repeat' || type === 'end_menu';
-    const isElse = type === 'else' || type === 'menu_option'; // a branch of its block
+    const isElse = type === 'else';
     const isElseIf = type === 'else_if';
     const isIf   = type === 'if';
-    const rowIndent = (isEnd || isElse || isElseIf) ? Math.max(0, indent - 1) : indent;
+    // A menu's options sit one level inside it, and their actions one further
+    let rowIndent = (isEnd || isElse || isElseIf) ? Math.max(0, indent - 1) : indent;
+    if (type === 'menu_option') rowIndent = optionOpen[optionOpen.length - 1] ? indent - 1 : indent;
+    if (type === 'end_menu') rowIndent = Math.max(0, (optionOpen[optionOpen.length - 1] ? indent - 1 : indent) - 1);
     const { icon, cls } = iconForCmd(action);
 
     // Build indent guide elements if rowIndent > 0
@@ -6150,8 +6154,15 @@ function renderActionList() {
     card.appendChild(row);
 
     // Update indent level for subsequent rows
-    if (isIf || type === 'repeat' || type === 'repeat_while' || type === 'menu') indent++;
-    else if (isEnd) indent = Math.max(0, indent - 1);
+    if (type === 'menu_option') {
+      if (optionOpen[optionOpen.length - 1]) indent--;
+      optionOpen[optionOpen.length - 1] = true;
+      indent++;
+    } else if (isIf || type === 'repeat' || type === 'repeat_while' || type === 'menu') { indent++; optionOpen.push(false); }
+    else if (isEnd) {
+      if (optionOpen.pop()) indent--;
+      indent = Math.max(0, indent - 1);
+    }
   });
 
   // Re-init drag reorder

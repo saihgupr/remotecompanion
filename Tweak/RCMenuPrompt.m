@@ -124,7 +124,10 @@ static UIWindowScene *RCMenuWindowScene(void) {
         [line.heightAnchor constraintEqualToConstant:0.5].active = YES;
         [rows addArrangedSubview:line];
         NSString *name = [option[@"name"] description].length ? [option[@"name"] description] : [NSString stringWithFormat:@"Option %lu", (unsigned long)i + 1];
-        [rows addArrangedSubview:[self rowWithTitle:name icon:[option[@"icon"] description] tag:(NSInteger)i cancel:NO]];
+        // Its own icon, or its number in a circle
+        NSString *icon = [option[@"icon"] description];
+        if (!icon.length || ![UIImage systemImageNamed:icon]) icon = i < 50 ? [NSString stringWithFormat:@"%lu.circle.fill", (unsigned long)i + 1] : @"circle.fill";
+        [rows addArrangedSubview:[self rowWithTitle:name icon:icon tag:(NSInteger)i cancel:NO]];
     }];
     [stack addArrangedSubview:scroll];
     UIView *line = [[UIView alloc] init];
