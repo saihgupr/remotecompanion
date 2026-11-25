@@ -2124,6 +2124,8 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         @"accessibility shortcut": @"Accessibility Shortcut",
         @"home": @"Home Button",
         @"open control center": @"Open Control Center",
+        @"spotlight": @"Spotlight",
+        @"reachability": @"Reachability",
         @"control center": @"Open Control Center",
         @"open notification center": @"Open Notification Center",
         @"notification center": @"Open Notification Center",
@@ -2830,6 +2832,8 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         @"siri": @"mic.circle.fill",
         @"accessibility shortcut": ([UIImage systemImageNamed:@"accessibility"] ? @"accessibility" : @"figure.stand"), // "accessibility" is iOS 15+
         @"open control center": @"switch.2",
+        @"spotlight": @"magnifyingglass",
+        @"reachability": @"arrow.down.to.line",
         @"control center": @"switch.2",
         @"open notification center": @"bell.badge",
         @"notification center": @"bell.badge",

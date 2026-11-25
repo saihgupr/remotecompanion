@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Added
 - **Dance Party**: `rc dance party [on|off]` runs the torch with the music playing in the room, following the bass. Bare `rc dance party` toggles it. It stops after about 15 seconds of quiet or a 15 minute timeout, and headphones or Bluetooth mean the microphone hears nothing to follow. It is also under Device Controls in the action picker as a toggle, like Flashlight.
 - **Flashlight brightness options**: `rc flashlight low|medium|high|max` sets one of the four levels iOS's own slider uses, `rc flashlight up|down [N]` steps from the current level (25 by default), and `rc flashlight status` now prints the level, e.g. `Flashlight ON (75%)`. `on` takes the same names or a percentage, and `torch` and `flash` accept everything `flashlight` does.
+- **Spotlight and Reachability actions**: `rc spotlight` opens Spotlight over the home screen or an app, as Command-Space on a keyboard does (`toggle`, `open` and `close` say which), and `rc reachability` slides the screen down within reach (`on`, `off`, `status`). Reachability needs Settings > Accessibility > Touch > Reachability turned on, and says so if it isn't. Both are under Apps & Navigation in the action picker.
 - **`previous` as an alias for `prev`**: `rc previous` skips to the previous track, the same as `rc prev`, in scripts and the CLI.
 
 ### Changed

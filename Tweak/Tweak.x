@@ -338,6 +338,9 @@ extern Boolean MRMediaRemoteSendCommandToApp(MRMediaRemoteCommand command, NSDic
 + (id)sharedInstance;
 - (UIGestureRecognizer *)reachabilityGestureRecognizer;
 - (void)toggleReachability;
+- (void)deactivateReachability;
+- (BOOL)reachabilityEnabled;
+- (BOOL)reachabilityModeActive;
 @end
 
 
@@ -12445,6 +12448,8 @@ static NSArray *RCCommandHelpSections(void) {
             @[@"kill current", @"Force close the front app"],
             @[@"home", @"Press Home"],
             @[@"switcher", @"Open the App Switcher"],
+            @[@"spotlight [toggle|open|close]", @"Open or close Spotlight"],
+            @[@"reachability [toggle|on|off|status]", @"Slide the screen down within reach"],
             @[@"previous app", @"Switch to the previous app"],
             @[@"control-center", @"Open Control Center"],
             @[@"notification-center", @"Open Notification Center"],
@@ -14088,6 +14093,55 @@ static NSString *handle_command(NSString *cmd) {
         } else {
             return @"No previous app available.";
         }
+    } else if ([cleanCmd isEqualToString:@"spotlight"] || [cleanCmd hasPrefix:@"spotlight "]) {
+        // Spotlight, as a keyboard's Command-Space opens it: over the home screen or an app.
+        // "spotlight" opens it (or closes it if it's open on the home screen); toggle, open and close
+        // say which. SpringBoard's own call, on its main thread.
+        NSString *mode = [[cleanCmd substringFromIndex:9] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]].lowercaseString;
+        if (!mode.length) mode = @"toggle";
+        if (![@[@"toggle", @"open", @"close"] containsObject:mode]) return @"Usage: spotlight [toggle|open|close]\n";
+        __block NSString *result = nil;
+        RCOnMainThreadSync(^{
+            id sb = [UIApplication sharedApplication];
+            SEL toggle = NSSelectorFromString(@"_toggleSearch");
+            if (![sb respondsToSelector:toggle]) { result = @"Error: Spotlight can't be opened on this iOS version\n"; return; }
+            // Whether it's showing: the home screen's Spotlight (over an app it can't be read, so open
+            // and toggle open it there)
+            id icons = [objc_getClass("SBIconController") respondsToSelector:@selector(sharedInstance)] ? [objc_getClass("SBIconController") performSelector:@selector(sharedInstance)] : nil;
+            SEL visibleSel = NSSelectorFromString(@"isAnySearchVisibleOrTransitioning");
+            BOOL visible = [icons respondsToSelector:visibleSel] && ((BOOL (*)(id, SEL))objc_msgSend)(icons, visibleSel);
+            if (([mode isEqualToString:@"open"] && visible) || ([mode isEqualToString:@"close"] && !visible)) {
+                result = visible ? @"Spotlight is already open\n" : @"Spotlight isn't open\n";
+                return;
+            }
+            ((void (*)(id, SEL))objc_msgSend)(sb, toggle);
+            result = visible ? @"Spotlight closed\n" : @"Spotlight opened\n";
+        });
+        return result;
+    } else if ([cleanCmd isEqualToString:@"reachability"] || [cleanCmd hasPrefix:@"reachability "]) {
+        // Reachability: the screen's top half slides down within reach, as a swipe down on the bottom
+        // edge does. Needs Settings > Accessibility > Touch > Reachability. SpringBoard's own calls,
+        // on its main thread (its checks assert they're there).
+        NSString *mode = [[cleanCmd substringFromIndex:12] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]].lowercaseString;
+        if (!mode.length) mode = @"toggle";
+        if (![@[@"toggle", @"on", @"off", @"status"] containsObject:mode]) return @"Usage: reachability [toggle|on|off|status]\n";
+        __block NSString *result = nil;
+        RCOnMainThreadSync(^{
+            SBReachabilityManager *manager = [objc_getClass("SBReachabilityManager") respondsToSelector:@selector(sharedInstance)] ? [objc_getClass("SBReachabilityManager") sharedInstance] : nil;
+            if (!manager || ![manager respondsToSelector:@selector(toggleReachability)]) { result = @"Error: Reachability isn't available\n"; return; }
+            BOOL active = [manager respondsToSelector:@selector(reachabilityModeActive)] && [manager reachabilityModeActive];
+            if ([mode isEqualToString:@"status"]) { result = active ? @"Reachability ON\n" : @"Reachability OFF\n"; return; }
+            if ([manager respondsToSelector:@selector(reachabilityEnabled)] && ![manager reachabilityEnabled]) {
+                result = @"Error: Reachability is off in Settings > Accessibility > Touch\n";
+                return;
+            }
+            if ([mode isEqualToString:@"on"] && active) { result = @"Reachability is already on\n"; return; }
+            if ([mode isEqualToString:@"off"] && !active) { result = @"Reachability is already off\n"; return; }
+            if (active && [manager respondsToSelector:@selector(deactivateReachability)]) [manager deactivateReachability];
+            else [manager toggleReachability];
+            result = active ? @"Reachability off\n" : @"Reachability on\n";
+        });
+        return result;
     } else if ([cleanCmd isEqualToString:@"switcher"] || [cleanCmd isEqualToString:@"app switcher"]) {
         __block BOOL success = NO;
         SRLog(@"Attempting to toggle App Switcher...");
@@ -17970,6 +18024,8 @@ static void start_web_server() {
                                     @{@"command": @"snapper [open|freeze|instant|close]", @"desc": @"Integrations: Control Snapper 2 / Snapper 3"},
                                     @{@"command": @"camera video [zoom] [flash]", @"desc": @"Camera: Open Camera in Video mode (e.g. 2x, 2x flash)"},
                                     @{@"command": @"open control center", @"desc": @"System: Open Control Center"},
+                                    @{@"command": @"spotlight", @"desc": @"System: Open Spotlight (spotlight toggle|open|close)"},
+                                    @{@"command": @"reachability", @"desc": @"System: Toggle Reachability (reachability on|off|status)"},
                                     @{@"command": @"open notification center", @"desc": @"System: Open Notification Center"},
                                     @{@"command": @"app switcher", @"desc": @"System: Open App Switcher"},
                                     @{@"command": @"accessibility shortcut", @"desc": @"System: Run the Accessibility Shortcut"},

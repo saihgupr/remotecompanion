@@ -292,6 +292,8 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
             @{ @"name": @"App Switcher", @"command": @"switcher", @"icon": @"square.stack.3d.up.fill" },
             @{ @"name": @"Previous App", @"command": @"previous app", @"icon": @"arrow.uturn.backward" },
             @{ @"name": @"Control Center", @"command": @"open control center", @"icon": @"switch.2" },
+            @{ @"name": @"Spotlight", @"command": @"spotlight", @"icon": @"magnifyingglass" },
+            @{ @"name": @"Reachability", @"command": @"reachability", @"icon": @"arrow.down.to.line" },
             @{ @"name": @"Notification Center", @"command": @"open notification center", @"icon": @"bell.badge" },
             @{ @"name": @"Activate Siri", @"command": @"siri", @"icon": @"mic.circle.fill" },
             @{ @"name": @"Play Gesture...", @"command": @"__PLAY_GESTURE__", @"icon": @"hand.draw.fill" },
