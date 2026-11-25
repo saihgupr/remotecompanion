@@ -73,6 +73,7 @@ static NSString *const kRCAOBuiltinPrefixes[] = {
     @"open camera ",
     @"paste ",
     @"play playlist ",
+    @"player ",
     @"playlist ",
     @"proximity ",
     @"quickactions ",
