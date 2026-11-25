@@ -28,6 +28,7 @@
 #import "RCTriggerIcons.h"
 #import "RCServerClient.h"
 #import "RCDevicePickerViewController.h"
+#import "RCHolidayMode.h"
 
 #define kSimulateNotificationPrefix "com.pizzaman.rc.simulate."
 
@@ -259,6 +260,9 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
 @property (nonatomic, strong) UIRefreshControl *gridRefresh;
 @property (nonatomic, assign) BOOL pausedByAction; // Resume shows at the top left
 @property (nonatomic, strong) UIBarButtonItem *resumeItem;
+// The red present at the left of the header: turns the holiday snow on and off. Only in the
+// list while Holiday Mode is on.
+@property (nonatomic, strong) UIBarButtonItem *holidayItem;
 @property (nonatomic, assign) UITableViewStyle tableStyle;
 @property (nonatomic, strong) NSArray<NSArray<NSString *> *> *sections;
 @property (nonatomic, strong) NSArray<NSString *> *sectionTitles;
@@ -513,15 +517,30 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     [self applyLayout];
 }
 
-// The top left: Edit in Compact, and Resume while button triggers are paused by the action
+// The top left: the holiday present, Edit in Compact, and Resume while button triggers are
+// paused by the action
 - (void)updateLeftItems {
     NSMutableArray *items = [NSMutableArray array];
+    // The present first, so it keeps its place as Edit and Resume come and go
+    if ([RCHolidayMode isEnabled]) [items addObject:self.holidayItem];
     if ([self compactLayout] && self.grid) [items addObject:self.editButtonItem];
     if (self.pausedByAction) {
         if (!self.resumeItem) self.resumeItem = [[UIBarButtonItem alloc] initWithTitle:@"Resume" style:UIBarButtonItemStylePlain target:self action:@selector(resumeButtonTriggers)];
         [items addObject:self.resumeItem];
     }
     self.navigationItem.leftBarButtonItems = items;
+}
+
+// One present for the life of this screen, so it keeps its glow and its place
+- (UIBarButtonItem *)holidayItem {
+    if (!_holidayItem) {
+        _holidayItem = [RCHolidayMode presentBarButtonItemWithTarget:self action:@selector(toggleHolidaySnow)];
+    }
+    return _holidayItem;
+}
+
+- (void)toggleHolidaySnow {
+    [RCHolidayMode toggleSnow];
 }
 
 // The grid's columns and margins follow a rotation (and the Dynamic Island in landscape)
@@ -649,6 +668,10 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
 }
 - (void)handleConfigChanged:(NSNotification *)note {
     dispatch_async(dispatch_get_main_queue(), ^{
+        // Holiday Mode may have been turned off in Settings or the Web UI: take the present
+        // away and stop the snow right away, even while another screen is on top
+        [RCHolidayMode refresh];
+        [self updateLeftItems];
         // Only reload if we're the visible VC; if we're buried in the stack
         // during an animated transition, skip — viewWillAppear will reload on return.
         if (self.isViewLoaded && self.view.window && self.navigationController.topViewController == self) {

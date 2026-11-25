@@ -165,7 +165,7 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
     if (section == RCAdvancedSettingsSectionLayout) return (NSInteger)RCLayoutScreens().count;
     if (section == RCAdvancedSettingsSectionSecurity) return 1;
     if (section == RCAdvancedSettingsSectionDeveloper) return 1;
-    return 5; // Excluded Apps, Wrap Long Names, Logging, Lock Scrolling During Gestures, Only Unlock Out of Pocket
+    return 6; // Excluded Apps, Wrap Long Names, Logging, Lock Scrolling During Gestures, Only Unlock Out of Pocket, Holiday Mode
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -262,6 +262,13 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
             proximityUnlockSwitch.on = cm.onlyUnlockOutOfPocket;
             [proximityUnlockSwitch addTarget:self action:@selector(onlyUnlockOutOfPocketChanged:) forControlEvents:UIControlEventValueChanged];
             cell.accessoryView = proximityUnlockSwitch;
+            cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        } else if (indexPath.row == 5) {
+            cell.textLabel.text = @"Holiday Mode";
+            UISwitch *holidaySwitch = [[UISwitch alloc] init];
+            holidaySwitch.on = cm.holidayModeEnabled;
+            [holidaySwitch addTarget:self action:@selector(holidayModeToggleChanged:) forControlEvents:UIControlEventValueChanged];
+            cell.accessoryView = holidaySwitch;
             cell.selectionStyle = UITableViewCellSelectionStyleNone;
         }
     } else if (indexPath.section == RCAdvancedSettingsSectionButtons) {
@@ -412,6 +419,12 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
 
 - (void)onlyUnlockOutOfPocketChanged:(UISwitch *)sender {
     [RCConfigManager sharedManager].onlyUnlockOutOfPocket = sender.on;
+}
+
+// Saving the config posts RCConfigChangedNotification, which takes the present away and stops
+// the snow right away when this is switched off
+- (void)holidayModeToggleChanged:(UISwitch *)sender {
+    [RCConfigManager sharedManager].holidayModeEnabled = sender.on;
 }
 
 - (void)directRootToggleChanged:(UISwitch *)sender {

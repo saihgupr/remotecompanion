@@ -30,6 +30,7 @@ RemoteCompanion_FILES += RCCategoryBar.m RCActionTile.m RCTriggersGrid.m RCTrigg
 RemoteCompanion_FILES += RCSectionIndexBar.m
 RemoteCompanion_FILES += RCToastPill.m
 RemoteCompanion_FILES += RCSectionCardView.m
+RemoteCompanion_FILES += RCHolidayMode.m RCSnowfallView.m
 RemoteCompanion_FILES += RCActionsViewController+Selection.m
 RemoteCompanion_FILES += RCFocusPickerViewController.m
 RemoteCompanion_FILES += RCWebUIAccessViewController.m

@@ -173,6 +173,86 @@
       margin: 0;
     }
 
+    /* ── Holiday Mode ───────────────────────────────────────────────────────
+       A red present sits left of the large title and toggles a slow snowfall.
+       The title keeps its id/class; only its box padding moves to the row so
+       the top and bottom edges stay exactly where they were before. */
+    .main-title-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 16px 0;
+    }
+    .main-title-row .large-title {
+      padding: 12px 0;
+      flex: 1 1 auto;
+      min-width: 0;
+      font-size: clamp(26px, 8.7vw, 34px);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .holiday-gift {
+      position: relative;
+      flex: 0 0 auto;
+      width: 34px; height: 34px;
+      display: inline-flex; align-items: center; justify-content: center;
+      padding: 0; margin: 0;
+      border: 0; background: none;
+      border-radius: 10px;
+      cursor: pointer;
+      -webkit-user-select: none; user-select: none;
+      transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.25s ease;
+    }
+    .holiday-gift::before {
+      content: '';
+      position: absolute; inset: -4px;
+      border-radius: 12px;
+      background: radial-gradient(circle, rgba(255,69,58,0.28), rgba(255,69,58,0) 68%);
+      opacity: 0;
+      transform: scale(0.65);
+      transition: opacity 0.4s ease, transform 0.4s ease;
+      pointer-events: none;
+    }
+    .holiday-gift svg {
+      display: block;
+      width: 32px; height: 32px;
+      position: relative; z-index: 1;
+    }
+    .holiday-gift:active { transform: scale(0.86) rotate(-5deg); }
+    .holiday-gift.snowing::before { opacity: 1; transform: scale(1); }
+    .holiday-gift.snowing svg { filter: drop-shadow(0 0 7px rgba(255,89,74,0.45)); }
+    @media (hover: hover) {
+      .holiday-gift:hover { transform: translateY(-1px) scale(1.04); }
+      .holiday-gift:hover::before { opacity: 0.7; transform: scale(0.92); }
+    }
+    @media (max-width: 360px) {
+      .main-title-row { gap: 9px; padding-left: 14px; padding-right: 14px; }
+      .holiday-gift { width: 32px; height: 32px; }
+      .holiday-gift svg { width: 30px; height: 30px; }
+    }
+
+    /* Snow overlay: above navbars (100) and panels (500), below dialogs
+       (900), sheets (950), toasts (1000) and menus. Never takes taps. */
+    #holiday-snow {
+      position: fixed;
+      inset: 0;
+      z-index: 650;
+      width: 100%; height: 100%;
+      display: none;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 1.4s ease;
+    }
+    #holiday-snow.rc-snow-on { opacity: 1; }
+
+    @media (prefers-reduced-motion: reduce) {
+      .holiday-gift,
+      .holiday-gift::before { transition-duration: 0.01ms; }
+      .holiday-gift:active,
+      .holiday-gift:hover { transform: none; }
+    }
+
     /* ── Section headers ── */
     .section-header .section-icon { display: inline-flex; vertical-align: -2px; margin-right: 7px; }
     .section-header .section-icon i { font-size: 13px; }
@@ -2093,7 +2173,40 @@
 <!-- ══ MAIN PAGE ══════════════════════════════════════════════════════════ -->
 <div class="page-content">
   <div id="conn-banner">⚠ Unable to connect to device</div>
-  <h1 class="large-title" id="main-large-title">RemoteCompanion</h1>
+  <div class="main-title-row">
+    <button type="button" class="holiday-gift" id="holiday-snow-toggle"
+            aria-label="Toggle holiday snowfall" aria-pressed="false"
+            title="Toggle holiday snowfall" onclick="toggleHolidaySnow()">
+      <svg viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+        <defs>
+          <linearGradient id="rcGiftBody" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#ff5a4e"/>
+            <stop offset="0.55" stop-color="#e8202f"/>
+            <stop offset="1" stop-color="#b50f22"/>
+          </linearGradient>
+          <linearGradient id="rcGiftLid" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#ff7a6e"/>
+            <stop offset="1" stop-color="#e01f30"/>
+          </linearGradient>
+          <linearGradient id="rcGiftRibbon" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#ffe7ae"/>
+            <stop offset="1" stop-color="#e9b45f"/>
+          </linearGradient>
+        </defs>
+        <ellipse cx="16" cy="29.3" rx="10" ry="1.7" fill="rgba(0,0,0,0.18)"/>
+        <path d="M16 8.7C13.2 5.3 8.6 5.1 8.6 7.8c0 2.3 3.6 2.9 7.4 2.9z" fill="url(#rcGiftRibbon)"/>
+        <path d="M16 8.7c2.8-3.4 7.4-3.6 7.4-.9 0 2.3-3.6 2.9-7.4 2.9z" fill="url(#rcGiftRibbon)"/>
+        <rect x="4.4" y="12.2" width="23.2" height="15.4" rx="2.6" fill="url(#rcGiftBody)"/>
+        <rect x="2.8" y="8.6" width="26.4" height="6.2" rx="2" fill="url(#rcGiftLid)"/>
+        <rect x="13.7" y="12.2" width="4.6" height="15.4" fill="url(#rcGiftRibbon)"/>
+        <rect x="13.7" y="8.6" width="4.6" height="6.2" fill="url(#rcGiftRibbon)"/>
+        <rect x="13.1" y="6.9" width="5.8" height="4.1" rx="1.8" fill="#f4c66c"/>
+        <rect x="6.2" y="13.9" width="2.2" height="11.8" rx="1.1" fill="rgba(255,255,255,0.18)"/>
+        <rect x="3.9" y="9.7" width="23" height="1.3" rx="0.65" fill="rgba(255,255,255,0.28)"/>
+      </svg>
+    </button>
+    <h1 class="large-title" id="main-large-title">RemoteCompanion</h1>
+  </div>
   <div class="category-bar-wrap"><div class="category-bar" id="category-bar"></div></div>
   <div id="triggers-root"></div>
   <div class="page-footer">
@@ -2619,6 +2732,12 @@
         <span class="settings-label">Only Unlock Out of Pocket</span>
         <div class="settings-btn">
           <input type="checkbox" class="ios-toggle" id="setting-only-unlock-out-of-pocket" onchange="config.onlyUnlockOutOfPocket=this.checked;saveConfig()">
+        </div>
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">Holiday Mode</span>
+        <div class="settings-btn">
+          <input type="checkbox" class="ios-toggle" id="setting-holiday-mode" aria-label="Holiday Mode" checked onchange="onHolidayModeChange(this.checked)">
         </div>
       </div>
     </div>
@@ -3611,6 +3730,9 @@
 
 <!-- ══ TOAST ══════════════════════════════════════════════════════════════ -->
 <div class="toast" id="toast"></div>
+
+<!-- ══ HOLIDAY SNOW (decorative, never takes taps) ═════════════════════════ -->
+<canvas id="holiday-snow" aria-hidden="true"></canvas>
 
 <script>
 'use strict';
@@ -5202,6 +5324,7 @@ async function loadData() {
     config = await res.json();
     if (!config.triggers) config.triggers = {};
     if (!config.favoriteTriggers) config.favoriteTriggers = [];
+    applyHolidayMode();
     document.getElementById('conn-banner').classList.remove('visible');
     hasLoadedData = true;
     await loadCapabilities();
@@ -10145,6 +10268,8 @@ function openAdvancedPanel() {
   if (freezeEl) freezeEl.checked = (config.freezeListsDuringGestures == null) ? true : !!config.freezeListsDuringGestures;
   const onlyUnlockEl = document.getElementById('setting-only-unlock-out-of-pocket');
   if (onlyUnlockEl) onlyUnlockEl.checked = !!config.onlyUnlockOutOfPocket;
+  const holidayEl = document.getElementById('setting-holiday-mode');
+  if (holidayEl) holidayEl.checked = isHolidayModeEnabled();
   const devModeEl = document.getElementById('setting-developer-mode');
   if (devModeEl) devModeEl.checked = !!config.developerMode;
   const wrapEl = document.getElementById('setting-wrap-names');
@@ -10266,6 +10391,441 @@ function onWrapLongNamesChange(enabled) {
   try { localStorage.setItem('rc_wrap_long_names', enabled ? '1' : '0'); } catch(e) {}
   applyWrapLongNames();
 }
+
+// ── Holiday Mode ────────────────────────────────────────────────────────────
+// Shared with the app through config.holidayModeEnabled. Missing means on, so
+// existing configs get the present without a migration. Snow always starts off.
+function isHolidayModeEnabled() {
+  return config.holidayModeEnabled !== false;
+}
+
+function applyHolidayMode() {
+  const enabled = isHolidayModeEnabled();
+  const btn = document.getElementById('holiday-snow-toggle');
+  if (btn) btn.style.display = enabled ? 'inline-flex' : 'none';
+  if (!enabled) {
+    stopHolidaySnow(true);
+    if (btn) {
+      btn.classList.remove('snowing');
+      btn.setAttribute('aria-pressed', 'false');
+    }
+  }
+}
+
+function onHolidayModeChange(enabled) {
+  config.holidayModeEnabled = enabled;
+  saveConfig();
+  applyHolidayMode();
+}
+
+function toggleHolidaySnow() {
+  if (!isHolidayModeEnabled()) return;
+  if (holidaySnow.on) stopHolidaySnow(false);
+  else startHolidaySnow();
+}
+
+// Three depth bands. Speeds are deliberately slow: 12-45 px per second.
+const HOLIDAY_SNOW_BANDS = [
+  { sprite: 'dust',  rMin: 1.2, rMax: 2.8,  vyMin: 26, vyMax: 45, swayMin: 4,  swayMax: 12, alphaMin: 0.55, alphaMax: 0.95, driftMin: -3, driftMax: 3, swaySpeedMin: 0.25, swaySpeedMax: 0.65 },
+  { sprite: 'soft',  rMin: 3.2, rMax: 7.0,  vyMin: 16, vyMax: 31, swayMin: 9,  swayMax: 22, alphaMin: 0.34, alphaMax: 0.72, driftMin: -4, driftMax: 4, swaySpeedMin: 0.18, swaySpeedMax: 0.45 },
+  { sprite: 'bokeh', rMin: 10,  rMax: 24,   vyMin: 12, vyMax: 22, swayMin: 14, swayMax: 30, alphaMin: 0.14, alphaMax: 0.30, driftMin: -2, driftMax: 2, swaySpeedMin: 0.12, swaySpeedMax: 0.30 }
+];
+const HOLIDAY_SNOW_COLORS = {
+  dark: [255, 255, 255],
+  light: [116, 146, 186] // soft cool blue-gray, visible on the light background
+};
+const holidaySnow = {
+  canvas: null,
+  ctx: null,
+  on: false,
+  raf: 0,
+  w: 0,
+  h: 0,
+  dpr: 1,
+  flakes: [],
+  sprites: null,
+  theme: '',
+  elapsed: 0,
+  lastTs: 0,
+  resizeTimer: 0,
+  hideTimer: 0,
+  reduced: false
+};
+let holidayMotionQuery = null;
+let holidayThemeQuery = null;
+try { holidayMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)'); } catch (e) {}
+try { holidayThemeQuery = window.matchMedia('(prefers-color-scheme: light)'); } catch (e) {}
+
+function holidaySnowTheme() {
+  try {
+    return (holidayThemeQuery && holidayThemeQuery.matches) ? 'light' : 'dark';
+  } catch (e) { return 'dark'; }
+}
+
+function holidaySnowCount() {
+  const base = Math.max(44, Math.min(190, Math.round((holidaySnow.w * holidaySnow.h) / 3600)));
+  // Reduced motion gets a quieter still: fewer flakes and no movement
+  return holidaySnow.reduced ? Math.max(20, Math.round(base * 0.45)) : base;
+}
+
+function holidayRandomBand() {
+  const roll = Math.random();
+  return roll < 0.56 ? 0 : (roll < 0.88 ? 1 : 2);
+}
+
+function makeHolidaySprite(size, stops, rgb, scale) {
+  const c = document.createElement('canvas');
+  c.width = Math.round(size * scale);
+  c.height = Math.round(size * scale);
+  const g = c.getContext('2d');
+  if (!g) return c;
+  g.scale(scale, scale);
+  const half = size / 2;
+  const grad = g.createRadialGradient(half, half, 0, half, half, half);
+  for (let i = 0; i < stops.length; i++) {
+    grad.addColorStop(stops[i][0], `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${stops[i][1]})`);
+  }
+  g.fillStyle = grad;
+  g.fillRect(0, 0, size, size);
+  return c;
+}
+
+function makeHolidayCrystalSprite(size, rgb, scale) {
+  const c = document.createElement('canvas');
+  c.width = Math.round(size * scale);
+  c.height = Math.round(size * scale);
+  const g = c.getContext('2d');
+  if (!g) return c;
+  g.scale(scale, scale);
+  const half = size / 2;
+  const arm = half - 2;
+  // Faint halo so the crystal still reads at tiny sizes
+  const glow = g.createRadialGradient(half, half, 0, half, half, half);
+  glow.addColorStop(0, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.9)`);
+  glow.addColorStop(0.22, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.5)`);
+  glow.addColorStop(0.55, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.12)`);
+  glow.addColorStop(1, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0)`);
+  g.fillStyle = glow;
+  g.fillRect(0, 0, size, size);
+  g.strokeStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.92)`;
+  g.lineWidth = Math.max(0.9, size / 26);
+  g.lineCap = 'round';
+  g.translate(half, half);
+  for (let i = 0; i < 6; i++) {
+    g.save();
+    g.rotate((Math.PI / 3) * i);
+    g.beginPath();
+    g.moveTo(0, 0);
+    g.lineTo(0, -arm);
+    g.moveTo(0, -arm * 0.48);
+    g.lineTo(-arm * 0.17, -arm * 0.63);
+    g.moveTo(0, -arm * 0.48);
+    g.lineTo(arm * 0.17, -arm * 0.63);
+    g.moveTo(0, -arm * 0.78);
+    g.lineTo(-arm * 0.12, -arm * 0.9);
+    g.moveTo(0, -arm * 0.78);
+    g.lineTo(arm * 0.12, -arm * 0.9);
+    g.stroke();
+    g.restore();
+  }
+  return c;
+}
+
+function buildHolidaySprites(theme, dpr) {
+  const rgb = HOLIDAY_SNOW_COLORS[theme] || HOLIDAY_SNOW_COLORS.dark;
+  const scale = Math.min(3, Math.max(2, Math.ceil(dpr || 1)));
+  return {
+    dust: makeHolidaySprite(18, [[0, 1], [0.35, 0.95], [0.58, 0.4], [1, 0]], rgb, scale),
+    crystal: makeHolidayCrystalSprite(28, rgb, scale),
+    soft: makeHolidaySprite(44, [[0, 0.9], [0.28, 0.72], [0.58, 0.28], [0.82, 0.07], [1, 0]], rgb, scale),
+    bokeh: makeHolidaySprite(72, [[0, 0.40], [0.28, 0.32], [0.55, 0.18], [0.79, 0.055], [1, 0]], rgb, scale)
+  };
+}
+
+function createHolidayFlake(band, scatter) {
+  const b = HOLIDAY_SNOW_BANDS[band];
+  const rand = (min, max) => min + Math.random() * (max - min);
+  return {
+    band: band,
+    sprite: (band === 0 && Math.random() < 0.5) ? 'crystal' : b.sprite,
+    r: rand(b.rMin, b.rMax),
+    x: Math.random() * Math.max(1, holidaySnow.w),
+    y: scatter ? Math.random() * Math.max(1, holidaySnow.h) : -24 - Math.random() * 90,
+    vy: rand(b.vyMin, b.vyMax),
+    sway: rand(b.swayMin, b.swayMax),
+    swaySpeed: rand(b.swaySpeedMin, b.swaySpeedMax),
+    phase: Math.random() * Math.PI * 2,
+    drift: rand(b.driftMin, b.driftMax),
+    alpha: rand(b.alphaMin, b.alphaMax),
+    fade: scatter ? -Math.random() * 1.2 : 0,
+    rot: Math.random() * Math.PI * 2,
+    rotSpeed: (Math.random() - 0.5) * 0.9,
+    flutterSpeed: 0.6 + Math.random() * 0.9,
+    flutterPhase: Math.random() * Math.PI * 2,
+    twinkleSpeed: 1.1 + Math.random() * 1.7,
+    twinklePhase: Math.random() * Math.PI * 2
+  };
+}
+
+function buildHolidayFlakes(scatter) {
+  const total = holidaySnowCount();
+  const flakes = [];
+  for (let i = 0; i < total; i++) {
+    flakes.push(createHolidayFlake(holidayRandomBand(), scatter));
+  }
+  holidaySnow.flakes = flakes;
+}
+
+function sizeHolidayCanvas(scatter) {
+  const c = holidaySnow.canvas;
+  if (!c) return;
+  const oldW = holidaySnow.w || 1;
+  const oldH = holidaySnow.h || 1;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = Math.max(1, window.innerWidth);
+  const h = Math.max(1, window.innerHeight);
+  holidaySnow.w = w;
+  holidaySnow.h = h;
+  holidaySnow.dpr = dpr;
+  c.width = Math.round(w * dpr);
+  c.height = Math.round(h * dpr);
+  const ctx = c.getContext('2d');
+  if (!ctx) return;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  holidaySnow.ctx = ctx;
+  const theme = holidaySnowTheme();
+  if (theme !== holidaySnow.theme || !holidaySnow.sprites) {
+    holidaySnow.theme = theme;
+    holidaySnow.sprites = buildHolidaySprites(theme, dpr);
+  }
+  if (!scatter && holidaySnow.flakes.length) {
+    // Keep the same flakes on resize; just move them with the viewport
+    const sx = w / oldW;
+    const sy = h / oldH;
+    for (let i = 0; i < holidaySnow.flakes.length; i++) {
+      const p = holidaySnow.flakes[i];
+      p.x *= sx;
+      p.y *= sy;
+    }
+    const total = holidaySnowCount();
+    while (holidaySnow.flakes.length < total) {
+      holidaySnow.flakes.push(createHolidayFlake(holidayRandomBand(), false));
+    }
+    if (holidaySnow.flakes.length > total) holidaySnow.flakes.length = total;
+  } else {
+    buildHolidayFlakes(!!scatter);
+  }
+}
+
+function startHolidaySnow() {
+  if (!isHolidayModeEnabled()) return;
+  const c = document.getElementById('holiday-snow');
+  if (!c) return;
+  holidaySnow.canvas = c;
+  if (holidaySnow.hideTimer) {
+    clearTimeout(holidaySnow.hideTimer);
+    holidaySnow.hideTimer = 0;
+  }
+  holidaySnow.on = true;
+  holidaySnow.reduced = !!(holidayMotionQuery && holidayMotionQuery.matches);
+  holidaySnow.elapsed = 0;
+  holidaySnow.lastTs = 0;
+  const btn = document.getElementById('holiday-snow-toggle');
+  if (btn) {
+    btn.classList.add('snowing');
+    btn.setAttribute('aria-pressed', 'true');
+  }
+  const wasHidden = !c.classList.contains('rc-snow-on');
+  c.style.display = 'block';
+  if (wasHidden) void c.offsetWidth; // let the opacity fade start from zero
+  c.classList.add('rc-snow-on');
+  sizeHolidayCanvas(true);
+  if (!holidaySnow.ctx) {
+    stopHolidaySnow(true);
+    return;
+  }
+  if (holidaySnow.reduced) {
+    drawHolidaySnowStill();
+  } else {
+    startHolidaySnowLoop();
+  }
+}
+
+function startHolidaySnowLoop() {
+  if (holidaySnow.raf || holidaySnow.reduced || document.hidden) return;
+  holidaySnow.lastTs = 0;
+  const step = (ts) => {
+    holidaySnow.raf = 0;
+    if (!holidaySnow.on || holidaySnow.reduced || document.hidden) return;
+    if (!holidaySnow.lastTs) holidaySnow.lastTs = ts;
+    let dt = (ts - holidaySnow.lastTs) / 1000;
+    holidaySnow.lastTs = ts;
+    if (!(dt > 0)) dt = 0.016;
+    if (dt > 0.05) dt = 0.05;
+    holidaySnow.elapsed += dt;
+    drawHolidaySnowFrame(dt);
+    holidaySnow.raf = requestAnimationFrame(step);
+  };
+  holidaySnow.raf = requestAnimationFrame(step);
+}
+
+function stopHolidaySnow(immediate) {
+  holidaySnow.on = false;
+  if (holidaySnow.raf) {
+    cancelAnimationFrame(holidaySnow.raf);
+    holidaySnow.raf = 0;
+  }
+  const c = holidaySnow.canvas || document.getElementById('holiday-snow');
+  const btn = document.getElementById('holiday-snow-toggle');
+  if (btn) {
+    btn.classList.remove('snowing');
+    btn.setAttribute('aria-pressed', 'false');
+  }
+  if (!c) return;
+  c.classList.remove('rc-snow-on');
+  if (holidaySnow.hideTimer) {
+    clearTimeout(holidaySnow.hideTimer);
+    holidaySnow.hideTimer = 0;
+  }
+  const finish = () => {
+    holidaySnow.hideTimer = 0;
+    if (holidaySnow.on) return;
+    if (holidaySnow.ctx) holidaySnow.ctx.clearRect(0, 0, holidaySnow.w, holidaySnow.h);
+    holidaySnow.flakes = [];
+    c.style.display = 'none';
+  };
+  if (immediate) finish();
+  else holidaySnow.hideTimer = setTimeout(finish, 1450);
+}
+
+function drawHolidayFlake(p, x, y, alpha, t) {
+  const sprite = holidaySnow.sprites && holidaySnow.sprites[p.sprite];
+  const ctx = holidaySnow.ctx;
+  if (!sprite || !ctx) return;
+  let dw = p.r * 2;
+  const dh = p.r * 2;
+  if (p.band === 1) {
+    // Slight squash-and-stretch reads as flutter on the soft flakes
+    dw *= 0.74 + 0.26 * Math.abs(Math.sin(t * p.flutterSpeed + p.flutterPhase));
+  }
+  ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+  if (p.sprite === 'crystal') {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(p.rot + t * p.rotSpeed);
+    ctx.drawImage(sprite, -dw / 2, -dh / 2, dw, dh);
+    ctx.restore();
+  } else {
+    ctx.drawImage(sprite, x - dw / 2, y - dh / 2, dw, dh);
+  }
+}
+
+function drawHolidaySnowFrame(dt) {
+  const ctx = holidaySnow.ctx;
+  if (!ctx) return;
+  const w = holidaySnow.w;
+  const h = holidaySnow.h;
+  const t = holidaySnow.elapsed;
+  ctx.clearRect(0, 0, w, h);
+  ctx.globalAlpha = 1;
+  for (let i = 0; i < holidaySnow.flakes.length; i++) {
+    const p = holidaySnow.flakes[i];
+    if (p.fade < 1) p.fade = Math.min(1, p.fade + dt / 1.15);
+    p.y += p.vy * dt;
+    p.x += p.drift * dt;
+    if (p.x < -70) p.x = w + 70;
+    else if (p.x > w + 70) p.x = -70;
+    if (p.y - p.r * 2 > h + 20) {
+      p.y = -30 - Math.random() * 80;
+      p.x = Math.random() * w;
+      p.fade = 0;
+    }
+    if (p.fade <= 0) continue;
+    const x = p.x + Math.sin(p.phase + t * p.swaySpeed) * p.sway;
+    let alpha = p.alpha * Math.min(1, p.fade);
+    if (p.band === 0) alpha *= 0.78 + 0.22 * Math.sin(t * p.twinkleSpeed + p.twinklePhase);
+    else if (p.band === 2) alpha *= 0.88 + 0.12 * Math.sin(t * p.twinkleSpeed * 0.5 + p.twinklePhase);
+    drawHolidayFlake(p, x, p.y, alpha, t);
+  }
+  ctx.globalAlpha = 1;
+}
+
+// Static frame for prefers-reduced-motion: atmosphere without movement
+function drawHolidaySnowStill() {
+  const ctx = holidaySnow.ctx;
+  if (!ctx) return;
+  ctx.clearRect(0, 0, holidaySnow.w, holidaySnow.h);
+  for (let i = 0; i < holidaySnow.flakes.length; i++) {
+    const p = holidaySnow.flakes[i];
+    const x = p.x + Math.sin(p.phase) * p.sway;
+    const y = p.y + Math.cos(p.phase * 1.3) * p.sway * 0.16;
+    drawHolidayFlake(p, x, y, p.alpha, 0);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function onHolidayMotionPreferenceChange() {
+  if (!holidaySnow.on) return;
+  holidaySnow.reduced = !!(holidayMotionQuery && holidayMotionQuery.matches);
+  if (holidaySnow.reduced) {
+    if (holidaySnow.raf) {
+      cancelAnimationFrame(holidaySnow.raf);
+      holidaySnow.raf = 0;
+    }
+    const total = holidaySnowCount();
+    if (holidaySnow.flakes.length > total) holidaySnow.flakes.length = total;
+    drawHolidaySnowStill();
+  } else {
+    const total = holidaySnowCount();
+    while (holidaySnow.flakes.length < total) {
+      holidaySnow.flakes.push(createHolidayFlake(holidayRandomBand(), true));
+    }
+    holidaySnow.lastTs = 0;
+    startHolidaySnowLoop();
+  }
+}
+
+function onHolidayThemePreferenceChange() {
+  if (!holidaySnow.on) return;
+  const theme = holidaySnowTheme();
+  if (theme === holidaySnow.theme && holidaySnow.sprites) return;
+  holidaySnow.theme = theme;
+  holidaySnow.sprites = buildHolidaySprites(theme, holidaySnow.dpr);
+  if (holidaySnow.reduced) drawHolidaySnowStill();
+}
+
+if (holidayMotionQuery) {
+  if (holidayMotionQuery.addEventListener) holidayMotionQuery.addEventListener('change', onHolidayMotionPreferenceChange);
+  else if (holidayMotionQuery.addListener) holidayMotionQuery.addListener(onHolidayMotionPreferenceChange);
+}
+if (holidayThemeQuery) {
+  if (holidayThemeQuery.addEventListener) holidayThemeQuery.addEventListener('change', onHolidayThemePreferenceChange);
+  else if (holidayThemeQuery.addListener) holidayThemeQuery.addListener(onHolidayThemePreferenceChange);
+}
+
+window.addEventListener('resize', () => {
+  if (!holidaySnow.on) return;
+  if (holidaySnow.resizeTimer) clearTimeout(holidaySnow.resizeTimer);
+  holidaySnow.resizeTimer = setTimeout(() => {
+    holidaySnow.resizeTimer = 0;
+    if (!holidaySnow.on) return;
+    sizeHolidayCanvas(false);
+    if (holidaySnow.reduced) drawHolidaySnowStill();
+  }, 180);
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (!holidaySnow.on) return;
+  if (document.hidden) {
+    if (holidaySnow.raf) {
+      cancelAnimationFrame(holidaySnow.raf);
+      holidaySnow.raf = 0;
+    }
+  } else if (!holidaySnow.reduced) {
+    holidaySnow.lastTs = 0;
+    startHolidaySnowLoop();
+  }
+});
 
 function openIntegrationsPanel() {
   updateAudioStreamAvailability();
@@ -12229,6 +12789,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   } catch(e) {}
   applyWrapLongNames();
+  applyHolidayMode();
   loadData();
 });
 </script>

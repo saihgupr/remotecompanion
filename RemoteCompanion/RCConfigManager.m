@@ -407,6 +407,12 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
             [self saveConfig];
         }
 
+        // Auto-add holidayModeEnabled (default to YES: the present shows until it is turned off)
+        if (_config[@"holidayModeEnabled"] == nil) {
+            _config[@"holidayModeEnabled"] = @YES;
+            [self saveConfig];
+        }
+
         // Auto-add developerMode (default to NO: developer actions hidden until enabled)
         if (_config[@"developerMode"] == nil) {
             _config[@"developerMode"] = @NO;
@@ -447,6 +453,7 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
             @"freezeListsDuringGestures": @YES,
             @"allowDirectRootHelper": @NO,
             @"onlyUnlockOutOfPocket": @NO,
+            @"holidayModeEnabled": @YES,
             @"developerMode": @NO,
             @"disableWakeOnPower": @NO,
             @"disablePowerConnectedHaptics": @NO,
@@ -640,6 +647,19 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
 
 - (void)setFreezeListsDuringGestures:(BOOL)freezeListsDuringGestures {
     _config[@"freezeListsDuringGestures"] = @(freezeListsDuringGestures);
+    [self saveConfig];
+}
+
+// Missing means on: the present is there for anyone who has not turned Holiday Mode off
+- (BOOL)holidayModeEnabled {
+    if (!_config[@"holidayModeEnabled"]) {
+        return YES;
+    }
+    return [_config[@"holidayModeEnabled"] boolValue];
+}
+
+- (void)setHolidayModeEnabled:(BOOL)holidayModeEnabled {
+    _config[@"holidayModeEnabled"] = @(holidayModeEnabled);
     [self saveConfig];
 }
 
