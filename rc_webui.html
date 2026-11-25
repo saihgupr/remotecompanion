@@ -7949,7 +7949,8 @@ function openMenuEditor(idx) {
     const block = menuBlock(actions, idx);
     const options = block.options.map(o => ({ name: o.option.name || '', icon: o.option.icon || '', row: o.option, actions: o.actions }));
     menuEd = { idx, menu, end: block.end, pre: block.pre, options,
-      timeout: Math.max(0, parseInt(menu.timeout, 10) || 0),
+      // No timeout saved is the 10 seconds a menu always has (as the phone and the app read it)
+      timeout: menu.timeout === undefined || menu.timeout === null ? 10 : Math.max(0, parseInt(menu.timeout, 10) || 0),
       timeoutOption: Number.isInteger(menu.timeoutOption) ? options[menu.timeoutOption] || null : null };
   }
   document.getElementById('menu-ed-title').value = (menuEd.menu.title || '');

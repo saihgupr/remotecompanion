@@ -6409,7 +6409,11 @@ static void rc_execute_action_sequence_body(NSArray *actions, NSString *triggerK
             break;
         }
 
-        if (rc_is_action_item_disabled(actionItem)) {
+        // A disabled menu option still ends the option above it (its handler below skips on to End
+        // Menu); only its own actions are left out of the menu
+        BOOL isMenuOption = [actionItem isKindOfClass:[NSDictionary class]] &&
+                            [[[((NSDictionary *)actionItem)[@"type"] description] lowercaseString] isEqualToString:@"menu_option"];
+        if (rc_is_action_item_disabled(actionItem) && !isMenuOption) {
             SRLog(@"[%@] Skipping disabled action: %@", triggerKey, actionItem);
             continue;
         }
@@ -6518,13 +6522,18 @@ static void rc_execute_action_sequence_body(NSArray *actions, NSString *triggerK
             // Menus nest: only this one's own options count.
             NSMutableArray<NSNumber *> *optionAt = [NSMutableArray array];
             NSMutableArray<NSDictionary *> *options = [NSMutableArray array];
+            // timeoutOption counts every option, disabled ones too (as the app and the Web UI list them)
+            NSMutableArray<NSNumber *> *shownAt = [NSMutableArray array]; // per option: its place in options, or -1
             NSInteger depth = 0, end = NSNotFound;
             for (NSInteger j = idx + 1; j < (NSInteger)actions.count; j++) {
                 NSString *inner = [actions[j] isKindOfClass:[NSDictionary class]] ? [[((NSDictionary *)actions[j])[@"type"] description] lowercaseString] : nil;
                 if ([inner isEqualToString:@"menu"]) depth++;
                 else if ([inner isEqualToString:@"end_menu"]) { if (depth == 0) { end = j; break; } depth--; }
-                else if (depth == 0 && [inner isEqualToString:@"menu_option"] && !rc_is_action_item_disabled(actions[j])) {
+                else if (depth == 0 && [inner isEqualToString:@"menu_option"] && rc_is_action_item_disabled(actions[j])) {
+                    [shownAt addObject:@(-1)];
+                } else if (depth == 0 && [inner isEqualToString:@"menu_option"]) {
                     NSDictionary *option = actions[j];
+                    [shownAt addObject:@(options.count)];
                     [optionAt addObject:@(j)];
                     [options addObject:@{ @"name": rc_fill_placeholders([option[@"name"] description] ?: @""), @"icon": [option[@"icon"] description] ?: @"" }];
                 }
@@ -6544,7 +6553,8 @@ static void rc_execute_action_sequence_body(NSArray *actions, NSString *triggerK
             if (picked == RCMenuPromptTimedOut) {
                 id choice = dictAction[@"timeoutOption"];
                 NSInteger index = [choice respondsToSelector:@selector(integerValue)] ? [choice integerValue] : -1;
-                picked = (choice && index >= 0 && index < (NSInteger)options.count) ? index : RCMenuPromptCancelled;
+                NSInteger shown = (choice && index >= 0 && index < (NSInteger)shownAt.count) ? [shownAt[index] integerValue] : -1;
+                picked = shown >= 0 ? shown : RCMenuPromptCancelled; // a disabled pick is Cancel
                 SRLogMin(@"[%@] Choose from Menu timed out -> %@", triggerKey, picked >= 0 ? options[picked][@"name"] : @"Cancel");
             }
             if (picked < 0 || picked >= (NSInteger)options.count) {
