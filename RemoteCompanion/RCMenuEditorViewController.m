@@ -1,5 +1,6 @@
 #import "RCMenuEditorViewController.h"
 #import "RCConfigManager.h"
+#import "RCSymbolPickerViewController.h"
 
 typedef NS_ENUM(NSInteger, RCMenuEditorSection) {
     RCMenuEditorSectionTitle,
@@ -154,29 +155,20 @@ static NSString *RCItemType(id item) {
     [self presentViewController:alert animated:YES completion:nil];
 }
 
+// The same symbol picker banners use: a searchable grid by category, and None for the option's
+// number in a circle
 - (void)chooseIconForOptionAt:(NSUInteger)i from:(UIView *)source {
     NSMutableDictionary *option = self.options[i][@"option"];
-    NSArray<NSArray<NSString *> *> *icons = @[@[@"Number", @""], @[@"Light", @"lightbulb.fill"], @[@"Home", @"house.fill"], @[@"Music", @"music.note"],
-                                              @[@"Phone", @"phone.fill"], @[@"Message", @"message.fill"], @[@"Car", @"car.fill"], @[@"Moon", @"moon.fill"],
-                                              @[@"Power", @"power"], @[@"Star", @"star.fill"], @[@"Bolt", @"bolt.fill"], @[@"Lock", @"lock.fill"],
-                                              @[@"Camera", @"camera.fill"], @[@"Heart", @"heart.fill"], @[@"Timer", @"timer"], @[@"Speaker", @"speaker.wave.2.fill"]];
-    NSString *current = [option[@"icon"] description] ?: @"";
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Icon" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
-    for (NSArray<NSString *> *icon in icons) {
-        NSString *symbol = icon[1].length ? icon[1] : [self iconForOptionAt:i];
-        if (icon[1].length && ![UIImage systemImageNamed:icon[1]]) continue;
-        UIAlertAction *choice = [UIAlertAction actionWithTitle:[icon[0] stringByAppendingString:[icon[1] isEqualToString:current] ? @" ✓" : @""] style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
-            if (icon[1].length) option[@"icon"] = icon[1]; else [option removeObjectForKey:@"icon"];
-            [self.tableView reloadData];
-        }];
-        UIImage *image = [UIImage systemImageNamed:icon[1].length ? symbol : [NSString stringWithFormat:@"%lu.circle.fill", (unsigned long)i + 1]];
-        if (image) [choice setValue:image forKey:@"image"];
-        [sheet addAction:choice];
-    }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    sheet.popoverPresentationController.sourceView = source;
-    sheet.popoverPresentationController.sourceRect = source.bounds;
-    [self presentViewController:sheet animated:YES completion:nil];
+    NSString *current = [option[@"icon"] description];
+    RCSymbolPickerViewController *picker = [[RCSymbolPickerViewController alloc] initWithSelectedSymbol:current.length ? current : nil allowsNone:YES];
+    picker.favoriteSymbols = @[@"lightbulb.fill", @"house.fill", @"music.note", @"phone.fill", @"message.fill", @"car.fill", @"moon.fill",
+                               @"power", @"star.fill", @"bolt.fill", @"lock.fill", @"camera.fill", @"heart.fill", @"timer", @"speaker.wave.2.fill"];
+    __weak typeof(self) weakSelf = self;
+    picker.onPick = ^(NSString *name) {
+        if (name.length) option[@"icon"] = name; else [option removeObjectForKey:@"icon"];
+        [weakSelf.tableView reloadData];
+    };
+    [self.navigationController pushViewController:picker animated:YES];
 }
 
 - (void)deleteOptionAt:(NSUInteger)i {
@@ -299,7 +291,9 @@ static NSString *RCItemType(id item) {
     NSDictionary *option = cancelRow ? nil : self.options[indexPath.row - 1];
     cell.textLabel.text = cancelRow ? @"Cancel the Trigger" : [NSString stringWithFormat:@"Pick “%@”", [option[@"option"][@"name"] description] ?: @"Option"];
     BOOL ticked = cancelRow ? self.timeoutOption == nil : self.timeoutOption == option;
+    // The table is in editing mode for the options' drag handles, which shows editingAccessoryType
     cell.accessoryType = ticked ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+    cell.editingAccessoryType = cell.accessoryType;
     cell.imageView.image = [UIImage systemImageNamed:cancelRow ? @"xmark.circle" : [self iconForOptionAt:indexPath.row - 1]];
     cell.imageView.tintColor = cancelRow ? [UIColor secondaryLabelColor] : [UIColor systemBlueColor];
     return cell;
