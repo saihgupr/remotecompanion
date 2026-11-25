@@ -878,6 +878,11 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
 @property (nonatomic, assign) NSInteger inlineEditorIndex;
 @property (nonatomic, copy) NSString *inlineEditorCommand;
 @property (nonatomic, assign) CGFloat inlineEditorRowHeight;
+// Each row's height as last shown, by row: with Wrap Long Names the rows size themselves, and the
+// table places the ones it hasn't measured at an estimate. When a row opens or folds, every row is
+// placed again from those estimates, so off by even a little, the whole list jumped away and slid
+// back. Measured heights keep it in place.
+@property (nonatomic, strong) NSMutableDictionary<NSNumber *, NSNumber *> *rowHeightCache;
 // A choice or a text row's editor, open in place the same way: its value (kept here so scrolling
 // away and back doesn't lose what was typed) and whether a fold is already storing it
 @property (nonatomic, strong) RCInlineRowItem *inlineRowItem;
@@ -4177,16 +4182,20 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     [cell rc_showInlinePanel:panel rowContentHeight:self.inlineEditorRowHeight];
     [self applySectionCardStyleToCell:cell atIndexPath:path];
     cell.inlinePanelContainer.alpha = 0.0;
-    void (^changes)(void) = ^{
-        [self.tableView beginUpdates];
-        [self.tableView endUpdates];
+    [UIView performWithoutAnimation:^{ [cell layoutIfNeeded]; }];
+    void (^fade)(void) = ^{
         cell.inlinePanelContainer.alpha = 1.0;
         [self updateInlineEditorDimming];
     };
     if (UIAccessibilityIsReduceMotionEnabled()) {
-        changes();
+        [UIView performWithoutAnimation:^{ [self.tableView performBatchUpdates:nil completion:nil]; }];
+        fade();
     } else {
-        [UIView animateWithDuration:0.28 delay:0 options:UIViewAnimationOptionCurveEaseInOut animations:changes completion:nil];
+        // The table moves the rows below with its own animation (only the row's height changes, so
+        // they slide, rather than being placed again inside an animation of ours); the panel fades in
+        // alongside
+        [self.tableView performBatchUpdates:nil completion:nil];
+        [UIView animateWithDuration:0.28 delay:0 options:UIViewAnimationOptionCurveEaseInOut animations:fade completion:nil];
     }
     [self.tableView scrollToRowAtIndexPath:path atScrollPosition:UITableViewScrollPositionNone animated:YES];
 }
@@ -4240,13 +4249,12 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     // come forward, and only then does the row take what the editor kept
     NSIndexPath *path = [NSIndexPath indexPathForRow:index inSection:0];
     UIView *container = openCell.inlinePanelContainer;
-    void (^changes)(void) = ^{
-        [self.tableView beginUpdates];
-        [self.tableView endUpdates];
+    // As it opened: the table slides the rows below back up, and the panel fades alongside
+    [self.tableView performBatchUpdates:nil completion:nil];
+    [UIView animateWithDuration:0.26 delay:0 options:UIViewAnimationOptionCurveEaseInOut animations:^{
         container.alpha = 0.0;
         [self updateInlineEditorDimming];
-    };
-    [UIView animateWithDuration:0.26 delay:0 options:UIViewAnimationOptionCurveEaseInOut animations:changes completion:^(BOOL finished) {
+    } completion:^(BOOL finished) {
         [openCell rc_showInlinePanel:nil rowContentHeight:70.0];
         [openCell rc_setValueChipAccented:NO];
         [self applySectionCardStyleToCell:openCell atIndexPath:path];
@@ -6459,7 +6467,17 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     return cell;
 }
 
+// A row's height as it was last shown, or the usual estimate for one not shown yet
+- (CGFloat)tableView:(UITableView *)tableView estimatedHeightForRowAtIndexPath:(NSIndexPath *)indexPath {
+    NSNumber *height = indexPath.section == 0 ? self.rowHeightCache[@(indexPath.row)] : nil;
+    return height ? height.doubleValue : tableView.estimatedRowHeight;
+}
+
 - (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (indexPath.section == 0 && cell.bounds.size.height > 0) {
+        if (!self.rowHeightCache) self.rowHeightCache = [NSMutableDictionary dictionary];
+        self.rowHeightCache[@(indexPath.row)] = @(cell.bounds.size.height);
+    }
     [self applySectionCardStyleToCell:cell atIndexPath:indexPath];
     if ([self runShown]) cell.accessoryView.hidden = YES; // no drag handles while it runs
     else cell.accessoryView.hidden = NO;
