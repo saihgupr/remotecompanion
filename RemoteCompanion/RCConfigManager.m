@@ -2622,7 +2622,7 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
             return @"list.bullet.rectangle";
         } else if ([type isEqualToString:@"menu_option"]) {
             NSString *icon = [dict[@"icon"] description];
-            return icon.length && [UIImage systemImageNamed:icon] ? icon : @"smallcircle.filled.circle";
+            return icon.length && [UIImage systemImageNamed:icon] ? icon : @"smallcircle.fill.circle";
         } else if ([type isEqualToString:@"exit_repeat"]) {
             return @"arrow.right.to.line";
         } else if ([type isEqualToString:@"set_variable"]) {
