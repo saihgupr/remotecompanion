@@ -19054,6 +19054,7 @@ static BOOL RC_DefaultHapticsForTrigger(NSString *triggerKey) {
     if ([triggerKey hasPrefix:@"trigger_bottombar_"]) return YES;
     if ([triggerKey hasPrefix:@"trigger_bottom_swipe_"]) return YES;
     if ([triggerKey hasPrefix:@"trigger_edge_"]) return YES;
+    if ([triggerKey hasPrefix:@"trigger_island_"]) return YES;
     return NO;
 }
 
