@@ -17,6 +17,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - **Editing a Timer or Clear Notifications action in the Web UI**: tapping one already on a trigger did nothing, because the editor read the action through a helper that was missing. It opens with the action's settings now.
+- **Blank icons in the Web UI**: about twenty icons named symbols the Web UI's icon set doesn't have, so they showed empty: If and If Condition, Previous App, AirPlay and audio output, AudioMix, Screen Recording and Record Gesture, Snapper Freeze, Tap and Hold, Wake on Wrist Raise, REST API Call, the Video Camera action, the Flashlight, Screen and Volume conditions, and others. Each uses the nearest icon the set has.
 - **Control Center button trigger icon in the Web UI**: these triggers showed a blank icon, because the Web UI's icon font has no switch symbol. They show sliders now.
 - **Web UI settings pages open again**: Buttons, Swipe Triggers, NFC, Layout, Web UI, Backup, Security and Diagnostics did nothing when tapped. Opening them still called the Tweaks row's count, which was removed along with the count.
 - **Large title on the Triggers screen**: the main screen opened, and came back from a trigger, with the small title even though the list was at the top. The category bar added its space before the table was on screen, so the navigation bar started collapsed and only opened after a scroll. The space is added after the first layout now, so the large title shows from launch and on the way back.
