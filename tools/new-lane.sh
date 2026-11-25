@@ -12,8 +12,8 @@ Usage:
   tools/new-lane.sh <slug> [base-ref]
 
 Examples:
-  tools/new-lane.sh trigger-onboarding alpha-4.7
-  tools/new-lane.sh picker-polish origin/alpha-4.7
+  tools/new-lane.sh trigger-onboarding alpha-4.8
+  tools/new-lane.sh picker-polish origin/alpha-4.8
 
 Creates:
   branch: feature/<slug>
@@ -25,7 +25,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
 SLUG="${1:-}"
-BASE="${2:-alpha-4.7}"
+BASE="${2:-alpha-4.8}"
 
 if [ -z "$SLUG" ]; then
     usage

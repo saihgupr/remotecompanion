@@ -47,7 +47,7 @@ fi
 git worktree remove "$LANE"
 
 if [ "$DELETE_BRANCH" = true ]; then
-    # The lane lands on its base branch (alpha-4.7 by default), not on whatever this
+    # The lane lands on its base branch (alpha-4.8 by default), not on whatever this
     # checkout has open, so -d's check against HEAD is the wrong one. The tip being
     # contained in any other branch, local or remote-tracking, is proof the work has
     # landed; a lane that was never merged or pushed keeps its branch.
