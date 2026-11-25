@@ -2529,6 +2529,8 @@ static NSString *get_human_name_for_trigger(NSString *key, NSDictionary *trigger
             @"power_volume_down": @"Power + Volume Down",
             @"trigger_statusbar_left_hold": @"Status Bar Left Hold",
             @"trigger_statusbar_center_hold": @"Status Bar Center Hold",
+            @"trigger_island_tap": @"Dynamic Island Tap",
+            @"trigger_island_hold": @"Dynamic Island Hold",
             @"trigger_statusbar_right_hold": @"Status Bar Right Hold",
             @"trigger_statusbar_swipe_left": @"Status Bar Swipe Left",
             @"trigger_statusbar_swipe_right": @"Status Bar Swipe Right",
@@ -4924,6 +4926,16 @@ static NSArray *rc_island_elements(void) {
     return @[];
 }
 
+// Whether this phone has the island at all (asked once, on the main thread)
+static BOOL rc_has_dynamic_island(void) {
+    static BOOL has;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        rc_dispatch_sync_main_safe(^{ has = !CGRectIsNull(rc_island_frame()); });
+    });
+    return has;
+}
+
 static long rc_island_element_layout_mode(id element) {
     SEL sel = NSSelectorFromString(@"layoutMode");
     return [element respondsToSelector:sel] ? ((long (*)(id, SEL))objc_msgSend)(element, sel) : 0;
@@ -4947,6 +4959,20 @@ static BOOL rc_condition_direct_match(NSString *key, NSString *expected, BOOL *h
         if (!value) return NO;
         if (isNumber) return rc_threshold_matches(expected, value.floatValue);
         return [value caseInsensitiveCompare:expected] == NSOrderedSame;
+    } else if ([key isEqualToString:@"island"]) {
+        // The Dynamic Island: a Live Activity in it (ACTIVE / NONE), or one opened up (EXPANDED / NOT_EXPANDED)
+        __block NSUInteger count = 0;
+        __block BOOL expanded = NO;
+        rc_dispatch_sync_main_safe(^{
+            NSArray *elements = rc_island_elements();
+            count = elements.count;
+            for (id element in elements) if (rc_island_element_layout_mode(element) >= 3) expanded = YES;
+        });
+        if ([expected isEqualToString:@"ACTIVE"]) return count > 0;
+        if ([expected isEqualToString:@"NONE"]) return count == 0;
+        if ([expected isEqualToString:@"EXPANDED"]) return expanded;
+        if ([expected isEqualToString:@"NOT_EXPANDED"]) return !expanded;
+        return NO;
     } else if ([key isEqualToString:@"lpm"]) {
         actual = [[NSProcessInfo processInfo] isLowPowerModeEnabled] ? @"ON" : @"OFF";
     } else if ([key isEqualToString:@"flashlight"]) {
@@ -12510,6 +12536,7 @@ static NSArray *RCCommandHelpSections(void) {
             @[@"kill current", @"Force close the front app"],
             @[@"home", @"Press Home"],
             @[@"switcher", @"Open the App Switcher"],
+            @[@"island", @"Show what's in the Dynamic Island"],
             @[@"previous app", @"Switch to the previous app"],
             @[@"control-center", @"Open Control Center"],
             @[@"notification-center", @"Open Notification Center"],
@@ -17499,6 +17526,7 @@ static void start_web_server() {
                                         @"audiostream": @(is_audiostream_installed()),
                                         @"audiostream_running": @(is_audiostreamerd_running()),
                                         @"home_button": @(rc_has_home_button()),
+                                        @"dynamic_island": @(rc_has_dynamic_island()),
                                         @"watch": @(rc_watch_features_available()),
                                         @"multi_timer": @([[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:(NSOperatingSystemVersion){17, 0, 0}]),
                                         @"ios17": @([[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:(NSOperatingSystemVersion){17, 0, 0}]),
@@ -18052,6 +18080,7 @@ static void start_web_server() {
                                     @{@"command": @"snapper [open|freeze|instant|close]", @"desc": @"Integrations: Control Snapper 2 / Snapper 3"},
                                     @{@"command": @"camera video [zoom] [flash]", @"desc": @"Camera: Open Camera in Video mode (e.g. 2x, 2x flash)"},
                                     @{@"command": @"open control center", @"desc": @"System: Open Control Center"},
+                                    @{@"command": @"island", @"desc": @"System: Show what's in the Dynamic Island"},
                                     @{@"command": @"open notification center", @"desc": @"System: Open Notification Center"},
                                     @{@"command": @"app switcher", @"desc": @"System: Open App Switcher"},
                                     @{@"command": @"accessibility shortcut", @"desc": @"System: Run the Accessibility Shortcut"},
@@ -22549,6 +22578,111 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
     return (trigger && [trigger[@"enabled"] boolValue]);
 }
 
+// ============ DYNAMIC ISLAND TAP + HOLD ============
+// A touch that starts on the island (in portrait, with the island not expanded) runs Dynamic Island
+// Tap when it's let go quickly, or Dynamic Island Hold after half a second, and the status bar's
+// zones don't see it. SpringBoard gets each touch twice: through the system gesture window, and on
+// the island's own window. Unless the triggers set keep the default action, the island's copy is
+// held back, so iOS doesn't open or expand the Live Activity as well.
+typedef NS_ENUM(NSInteger, RCIslandTouch) { RCIslandTouchNotOurs, RCIslandTouchOurs, RCIslandTouchHeldBack };
+static BOOL g_islandTouchActive = NO;
+static BOOL g_islandHoldFired = NO;
+static BOOL g_islandMovedAway = NO;
+static BOOL g_islandHoldBack = NO;
+static NSTimeInterval g_islandTouchBeganTime = 0;
+static CGPoint g_islandTouchStart;
+static NSTimer *g_islandHoldTimer = nil;
+static NSHashTable<UITouch *> *g_islandHeldBackTouches = nil;
+
+static BOOL rc_island_expanded(void) {
+    for (id element in rc_island_elements()) {
+        if (rc_island_element_layout_mode(element) >= 3) return YES;
+    }
+    return NO;
+}
+
+static void rc_island_end_touch(void) {
+    g_islandTouchActive = NO;
+    [g_islandHoldTimer invalidate];
+    g_islandHoldTimer = nil;
+}
+
+static RCIslandTouch rc_island_handle_touch(UITouch *touch, UIInterfaceOrientation orientation) {
+    BOOL onIslandWindow = [touch.window isKindOfClass:objc_getClass("SBSystemApertureWindow")];
+    if (!g_islandHeldBackTouches) g_islandHeldBackTouches = [NSHashTable weakObjectsHashTable];
+    BOOL heldBack = onIslandWindow && [g_islandHeldBackTouches containsObject:touch];
+    CGPoint loc = [touch locationInView:nil];
+
+    if (touch.phase == UITouchPhaseBegan) {
+        // The second copy of a touch already being followed
+        BOOL sameTouch = g_islandTouchActive && fabs(touch.timestamp - g_islandTouchBeganTime) < 0.05 &&
+                         hypot(loc.x - g_islandTouchStart.x, loc.y - g_islandTouchStart.y) < 3;
+        if (!sameTouch) {
+            rc_island_end_touch();
+            if (orientation != UIInterfaceOrientationPortrait || loc.y > 90) return RCIslandTouchNotOurs;
+            load_trigger_config();
+            BOOL tapOn = rc_status_bar_trigger_enabled(@"trigger_island_tap");
+            BOOL holdOn = rc_status_bar_trigger_enabled(@"trigger_island_hold");
+            if (!tapOn && !holdOn) return RCIslandTouchNotOurs;
+            CGRect island = rc_island_frame();
+            if (CGRectIsNull(island)) return RCIslandTouchNotOurs;
+            // A little room around it, and up to the top edge
+            CGRect hit = CGRectMake(CGRectGetMinX(island) - 10, 0, CGRectGetWidth(island) + 20, CGRectGetMaxY(island) + 8);
+            if (!CGRectContainsPoint(hit, loc) || rc_island_expanded()) return RCIslandTouchNotOurs;
+
+            g_islandTouchActive = YES;
+            g_islandHoldFired = NO;
+            g_islandMovedAway = NO;
+            g_islandTouchBeganTime = touch.timestamp;
+            g_islandTouchStart = loc;
+            g_islandHoldBack = (tapOn && ![g_triggerConfig[@"triggers"][@"trigger_island_tap"][@"keepDefault"] boolValue]) ||
+                               (holdOn && ![g_triggerConfig[@"triggers"][@"trigger_island_hold"][@"keepDefault"] boolValue]);
+            SRLog(@"[RCIsland] Touch began at (%.0f, %.0f), tap=%d hold=%d holdBack=%d", loc.x, loc.y, tapOn, holdOn, g_islandHoldBack);
+            if (holdOn) {
+                g_islandHoldTimer = [NSTimer scheduledTimerWithTimeInterval:0.5 repeats:NO block:^(NSTimer *timer) {
+                    g_islandHoldTimer = nil;
+                    if (!g_islandTouchActive || g_islandMovedAway) return;
+                    g_islandHoldFired = YES;
+                    RCTriggerHapticFor(@"trigger_island_hold");
+                    RCExecuteTrigger(@"trigger_island_hold");
+                    SRLog(@"trigger_island_hold FIRED!");
+                }];
+            }
+        }
+        if (!g_islandTouchActive) return RCIslandTouchNotOurs;
+        if (onIslandWindow && g_islandHoldBack) {
+            [g_islandHeldBackTouches addObject:touch];
+            return RCIslandTouchHeldBack;
+        }
+        return RCIslandTouchOurs;
+    }
+
+    if (touch.phase == UITouchPhaseEnded || touch.phase == UITouchPhaseCancelled) {
+        if (heldBack) [g_islandHeldBackTouches removeObject:touch];
+        if (g_islandTouchActive) {
+            if (touch.phase == UITouchPhaseEnded && !g_islandHoldFired && !g_islandMovedAway &&
+                rc_status_bar_trigger_enabled(@"trigger_island_tap")) {
+                RCTriggerHapticFor(@"trigger_island_tap");
+                RCExecuteTrigger(@"trigger_island_tap");
+                SRLog(@"trigger_island_tap FIRED!");
+            }
+            rc_island_end_touch();
+            return heldBack ? RCIslandTouchHeldBack : RCIslandTouchOurs;
+        }
+        return heldBack ? RCIslandTouchHeldBack : RCIslandTouchNotOurs;
+    }
+
+    // Moved or still: a touch that slides off isn't a tap or a hold
+    if (g_islandTouchActive && !g_islandMovedAway &&
+        hypot(loc.x - g_islandTouchStart.x, loc.y - g_islandTouchStart.y) > 15) {
+        g_islandMovedAway = YES;
+        [g_islandHoldTimer invalidate];
+        g_islandHoldTimer = nil;
+    }
+    if (heldBack) return RCIslandTouchHeldBack;
+    return g_islandTouchActive ? RCIslandTouchOurs : RCIslandTouchNotOurs;
+}
+
 %hook UIApplication
 
 - (void)sendEvent:(UIEvent *)event {
@@ -22559,6 +22693,14 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
         if (!touch) {
             %orig;
             return;
+        }
+
+        // The Dynamic Island comes before the status bar's zones
+        if (allTouches.count == 1) {
+            UIInterfaceOrientation islandOrientation = g_rcLatchedTouchOrientationValid && touch.phase != UITouchPhaseBegan ? g_rcLatchedTouchOrientation : get_current_interface_orientation();
+            RCIslandTouch island = rc_island_handle_touch(touch, islandOrientation);
+            if (island == RCIslandTouchHeldBack) return;
+            if (island == RCIslandTouchOurs) { %orig; return; }
         }
 
         UIInterfaceOrientation orientation = g_rcLatchedTouchOrientationValid ? g_rcLatchedTouchOrientation : get_current_interface_orientation();

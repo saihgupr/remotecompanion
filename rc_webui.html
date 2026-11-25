@@ -3659,6 +3659,7 @@ const TRIGGER_SECTIONS = [
   { title: 'Volume Buttons',         id: 'volume',    keys: ['volume_up_hold','volume_down_hold','volume_both_press','volume_up_then_down','volume_down_then_up'] },
   { title: 'Power Button',           id: 'power',     keys: ['power_double_tap','power_triple_click','power_quadruple_click','power_volume_up','power_volume_down','power_long_press'] },
   { title: 'Status Bar',             id: 'statusbar', keys: ['trigger_statusbar_left_hold','trigger_statusbar_center_hold','trigger_statusbar_right_hold','trigger_statusbar_swipe_left','trigger_statusbar_swipe_right','trigger_statusbar_double_tap','trigger_statusbar_left_tap','trigger_statusbar_center_tap','trigger_statusbar_right_tap','trigger_statusbar_left_double_tap','trigger_statusbar_center_double_tap','trigger_statusbar_right_double_tap','trigger_statusbar_left_swipe_left','trigger_statusbar_left_swipe_right','trigger_statusbar_center_swipe_left','trigger_statusbar_center_swipe_right','trigger_statusbar_right_swipe_left','trigger_statusbar_right_swipe_right','trigger_statusbar_swipe_down_left','trigger_statusbar_swipe_down_center','trigger_statusbar_swipe_down_right'] },
+  { title: 'Dynamic Island',         id: 'island',    keys: ['trigger_island_tap','trigger_island_hold'] },
   { title: 'Edge Gestures',          id: 'edge',      keys: ['trigger_edge_left_swipe_up','trigger_edge_left_swipe_down','trigger_edge_right_swipe_up','trigger_edge_right_swipe_down'] },
   { title: 'Bottom Bar Gestures',    id: 'bottombar', keys: ['trigger_bottombar_swipe_left','trigger_bottombar_swipe_right','trigger_bottom_swipe_up_left','trigger_bottom_swipe_up_center','trigger_bottom_swipe_up_right','trigger_bottom_swipe_down_left','trigger_bottom_swipe_down_center','trigger_bottom_swipe_down_right'] },
   { title: 'Multi-Finger Gestures',  id: 'multifinger', keys: ['trigger_two_finger_tap','trigger_two_finger_swipe_left','trigger_two_finger_swipe_right','trigger_two_finger_swipe_up','trigger_two_finger_swipe_down','trigger_two_finger_rotate_cw','trigger_two_finger_rotate_ccw','trigger_statusbar_two_finger_swipe_down','trigger_bottom_two_finger_swipe_up'] },
@@ -3690,6 +3691,7 @@ const TRIGGER_NAMES = {
   power_triple_click:'Power Triple Click', power_quadruple_click:'Power Quadruple Click',
   power_volume_up:'Power + Volume Up', power_volume_down:'Power + Volume Down',
   trigger_statusbar_left_hold:'Status Bar Left Hold', trigger_statusbar_center_hold:'Status Bar Center Hold',
+  trigger_island_tap:'Dynamic Island Tap', trigger_island_hold:'Dynamic Island Hold',
   trigger_statusbar_right_hold:'Status Bar Right Hold', trigger_statusbar_swipe_left:'Status Bar Swipe Left',
   trigger_statusbar_swipe_right:'Status Bar Swipe Right', trigger_statusbar_double_tap:'Status Bar Double Tap', trigger_statusbar_left_tap:'Status Bar Tap (Left)', trigger_statusbar_center_tap:'Status Bar Tap (Center)', trigger_statusbar_right_tap:'Status Bar Tap (Right)', trigger_statusbar_left_double_tap:'Status Bar Double Tap (Left)', trigger_statusbar_center_double_tap:'Status Bar Double Tap (Center)', trigger_statusbar_right_double_tap:'Status Bar Double Tap (Right)', trigger_statusbar_left_swipe_left:'Status Bar Swipe Left (Left)', trigger_statusbar_left_swipe_right:'Status Bar Swipe Right (Left)', trigger_statusbar_center_swipe_left:'Status Bar Swipe Left (Center)', trigger_statusbar_center_swipe_right:'Status Bar Swipe Right (Center)', trigger_statusbar_right_swipe_left:'Status Bar Swipe Left (Right)', trigger_statusbar_right_swipe_right:'Status Bar Swipe Right (Right)',
   trigger_statusbar_swipe_down_left:'Top Swipe Down (Left)', trigger_statusbar_swipe_down_center:'Top Swipe Down (Center)', trigger_statusbar_swipe_down_right:'Top Swipe Down (Right)',
@@ -3740,6 +3742,8 @@ const TRIGGER_ICONS = {
   power_volume_down:  { icon:'minus_circle_fill',        cls:'icon-indigo' },
   trigger_statusbar_left_hold:   { icon:'hand_draw',     cls:'icon-gray' },
   trigger_statusbar_center_hold: { icon:'hand_draw',     cls:'icon-gray' },
+  trigger_island_tap:            { icon:'capsule_fill',  cls:'icon-gray' },
+  trigger_island_hold:           { icon:'capsule_fill',  cls:'icon-gray' },
   trigger_statusbar_right_hold:  { icon:'hand_draw',     cls:'icon-gray' },
   trigger_statusbar_swipe_left:  { icon:'arrow_left_to_line', cls:'icon-gray' },
   trigger_statusbar_swipe_right: { icon:'arrow_right_to_line',cls:'icon-gray' },
@@ -3830,6 +3834,8 @@ const PHONE_ICONS = (() => {
     power_long_press: { buttons: ['power'], mark: hold },
     trigger_statusbar_left_hold: { zone: 'top', dot: 'L' },
     trigger_statusbar_center_hold: { zone: 'top', dot: 'C' },
+    trigger_island_tap: { island: true, mark: '1×' },
+    trigger_island_hold: { island: true, mark: hold },
     trigger_statusbar_right_hold: { zone: 'top', dot: 'R' },
     trigger_statusbar_swipe_left: { zone: 'top', arrow: 'left' },
     trigger_statusbar_swipe_right: { zone: 'top', arrow: 'right' },
@@ -3905,6 +3911,7 @@ function phoneIconSVG(spec) {
     const buttons = { ringer: [5, 5, 3.4, 5], volUp: [5, 12, 3.4, 7], volDown: [5, 21, 3.4, 7], power: [31.6, 11, 3.4, 10] };
     (spec.buttons || []).forEach(b => { const r = buttons[b]; if (r) rect(r[0], r[1], r[2], r[3], 1.4); });
     if (spec.home) parts.push('<circle cx="20" cy="33.5" r="4" fill="none" stroke="currentColor" stroke-width="2.2"/>');
+    if (spec.island) rect(14.5, 4, 11, 4.4, 2.2); // the Dynamic Island's pill
     const zones = { top: [11, 3, 18, 8], bottom: [11, 29, 18, 8], left: [11, 3, 7, 34], right: [22, 3, 7, 34] };
     const zone = zones[spec.zone];
     if (zone) rect(zone[0], zone[1], zone[2], zone[3], 3, 'fill="currentColor" fill-opacity="0.42"');
@@ -4951,6 +4958,7 @@ const CONDITION_DEFS = [
   { key:'orientation',title:'Orientation',  icon:'rotate_right', section:'Device', values:[{value:'PORTRAIT',title:'Portrait'},{value:'LANDSCAPE',title:'Landscape'}] },
   { key:'rotation_lock', title:'Rotation Lock', icon:'lock_rotation', section:'Device', values:[{value:'LOCKED',title:'Locked'},{value:'UNLOCKED',title:'Unlocked'}] },
   { key:'control_center', title:'Control Center', icon:'gear', section:'Device', values:[{value:'OPEN',title:'Open'},{value:'CLOSED',title:'Closed'}] },
+  { key:'island', title:'Dynamic Island', icon:'capsule_fill', section:'Device', values:[{value:'ACTIVE',title:'Live Activity Running'},{value:'NONE',title:'No Live Activity'},{value:'EXPANDED',title:'Expanded'},{value:'NOT_EXPANDED',title:'Not Expanded'}] },
   { key:'notification_center', title:'Notification Center', icon:'bell_fill', section:'Device', values:[{value:'OPEN',title:'Open'},{value:'CLOSED',title:'Closed'}] },
   { key:'appearance', title:'Appearance', icon:'circle_lefthalf_fill', section:'Device', values:[{value:'DARK',title:'Dark'},{value:'LIGHT',title:'Light'}] },
   { key:'flashlight', title:'Flashlight', icon:'flashlight_on_fill', section:'Device', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
@@ -4986,6 +4994,8 @@ const CONDITION_DEFS = [
 let serverCapabilities = { snapper: false, sneakycam: false, audiostream: false, audiohandoff: false };
 // The Apple Watch entries only exist when the phone has a Watch app. Before the
 // capabilities arrive the dictionary is empty, so the entries stay, as with home_button.
+// The Dynamic Island's triggers and condition, only on phones that have one
+function islandAvailable() { return typeof serverCapabilities !== 'undefined' && serverCapabilities.dynamic_island === true; }
 function watchAvailable() { return !(typeof serverCapabilities !== 'undefined' && serverCapabilities.watch === false); }
 // ── Add-ons (ADDONS.md) ──────────────────────────────────────────────────────
 let addOnCatalog = [];
@@ -5391,6 +5401,7 @@ function computeVisibleSections() {
     }
     if (sec.id !== 'favorites') keys = keys.filter(k => !favs.includes(k));
     if (sec.id === 'home' && typeof serverCapabilities !== 'undefined' && serverCapabilities.home_button === false) return;
+    if (sec.id === 'island' && !islandAvailable()) return;
     if (keys.length === 0) return;
     out.push({ sec, keys });
   });
@@ -5914,7 +5925,8 @@ function keepDefaultKeys() {
   return pings.concat(home
     ? ['trigger_home_triple_click', 'trigger_home_double_click', 'trigger_home_hold', 'trigger_home_power']
     : ['power_long_press', 'power_triple_click', 'power_volume_up', 'power_double_tap',
-       'trigger_bottom_swipe_down_left', 'trigger_bottom_swipe_down_center', 'trigger_bottom_swipe_down_right']);
+       'trigger_bottom_swipe_down_left', 'trigger_bottom_swipe_down_center', 'trigger_bottom_swipe_down_right',
+       'trigger_island_tap', 'trigger_island_hold']);
 }
 function canKeepDefault(key) { return keepDefaultKeys().includes(key); }
 function keepsDefault(key) {
@@ -8542,7 +8554,7 @@ function saveTimeCondDialog() {
 // ── Condition picker (mirrors iOS RCConditionPickerViewController: grouped, ──
 // searchable sections; tapping a condition expands its options inline beneath it)
 const COND_SECTION_ORDER = ['Time', 'Device', 'Power', 'Sound', 'Connectivity', 'Variables', 'Other', 'Add-ons'];
-function allCondDefs() { return CONDITION_DEFS.filter(d => (d.key !== 'watch' && !d.key.startsWith('watch_')) || watchAvailable()).concat(addOnConditionDefs); }
+function allCondDefs() { return CONDITION_DEFS.filter(d => ((d.key !== 'watch' && !d.key.startsWith('watch_')) || watchAvailable()) && (d.key !== 'island' || islandAvailable())).concat(addOnConditionDefs); }
 const COND_DAY_CODES = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
 const COND_DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 let condPickerEditIdx = null;
@@ -11701,6 +11713,7 @@ const BUILT_IN_TRIGGER_GROUPS = [
   { title: 'Volume Buttons', keys: ['volume_up_hold','volume_down_hold','volume_both_press','volume_up_then_down','volume_down_then_up'] },
   { title: 'Power Button', keys: ['power_double_tap','power_triple_click','power_quadruple_click','power_volume_up','power_volume_down','power_long_press'] },
   { title: 'Status Bar', keys: ['trigger_statusbar_left_hold','trigger_statusbar_center_hold','trigger_statusbar_right_hold','trigger_statusbar_swipe_left','trigger_statusbar_swipe_right','trigger_statusbar_double_tap','trigger_statusbar_left_tap','trigger_statusbar_center_tap','trigger_statusbar_right_tap','trigger_statusbar_left_double_tap','trigger_statusbar_center_double_tap','trigger_statusbar_right_double_tap','trigger_statusbar_left_swipe_left','trigger_statusbar_left_swipe_right','trigger_statusbar_center_swipe_left','trigger_statusbar_center_swipe_right','trigger_statusbar_right_swipe_left','trigger_statusbar_right_swipe_right','trigger_statusbar_swipe_down_left','trigger_statusbar_swipe_down_center','trigger_statusbar_swipe_down_right'] },
+  { title: 'Dynamic Island', keys: ['trigger_island_tap','trigger_island_hold'] },
   { title: 'Edge Gestures', keys: ['trigger_edge_left_swipe_up','trigger_edge_left_swipe_down','trigger_edge_right_swipe_up','trigger_edge_right_swipe_down'] },
   { title: 'Bottom Bar Gestures', keys: ['trigger_bottombar_swipe_left','trigger_bottombar_swipe_right','trigger_bottom_swipe_up_left','trigger_bottom_swipe_up_center','trigger_bottom_swipe_up_right','trigger_bottom_swipe_down_left','trigger_bottom_swipe_down_center','trigger_bottom_swipe_down_right'] },
   { title: 'Multi-Finger Gestures', keys: ['trigger_two_finger_tap','trigger_two_finger_swipe_left','trigger_two_finger_swipe_right','trigger_two_finger_swipe_up','trigger_two_finger_swipe_down','trigger_two_finger_rotate_cw','trigger_two_finger_rotate_ccw','trigger_statusbar_two_finger_swipe_down','trigger_bottom_two_finger_swipe_up'] },
@@ -11729,6 +11742,7 @@ function showBuiltInTriggerSheet() {
   const rows = [];
   BUILT_IN_TRIGGER_GROUPS.forEach(group => {
     if (group.title === 'Home Button' && typeof serverCapabilities !== 'undefined' && serverCapabilities.home_button === false) return;
+    if (group.title === 'Dynamic Island' && !islandAvailable()) return;
     if (group.title === 'Apple Watch' && !watchAvailable()) return;
     rows.push({ header: group.title });
     group.keys.forEach(key => {

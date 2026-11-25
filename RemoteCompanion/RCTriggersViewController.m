@@ -745,6 +745,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     addSection(@[@"volume_up_hold", @"volume_down_hold", @"volume_both_press", @"volume_up_then_down", @"volume_down_then_up"], @"Volume Buttons", YES);
     addSection(@[@"power_double_tap", @"power_triple_click", @"power_quadruple_click", @"power_volume_up", @"power_volume_down", @"power_long_press"], @"Power Button", YES);
     addSection(@[@"trigger_statusbar_left_hold", @"trigger_statusbar_center_hold", @"trigger_statusbar_right_hold", @"trigger_statusbar_swipe_left", @"trigger_statusbar_swipe_right", @"trigger_statusbar_double_tap", @"trigger_statusbar_left_tap", @"trigger_statusbar_center_tap", @"trigger_statusbar_right_tap", @"trigger_statusbar_left_double_tap", @"trigger_statusbar_center_double_tap", @"trigger_statusbar_right_double_tap", @"trigger_statusbar_left_swipe_left", @"trigger_statusbar_left_swipe_right", @"trigger_statusbar_center_swipe_left", @"trigger_statusbar_center_swipe_right", @"trigger_statusbar_right_swipe_left", @"trigger_statusbar_right_swipe_right", @"trigger_statusbar_swipe_down_left", @"trigger_statusbar_swipe_down_center", @"trigger_statusbar_swipe_down_right"], @"Status Bar", YES);
+    if ([RCConfigManager hasDynamicIsland]) addSection([RCConfigManager dynamicIslandTriggerKeys], @"Dynamic Island", YES);
     addSection(@[@"trigger_edge_left_swipe_up", @"trigger_edge_left_swipe_down", @"trigger_edge_right_swipe_up", @"trigger_edge_right_swipe_down"], @"Edge Gestures", YES);
     addSection(@[@"trigger_bottombar_swipe_left", @"trigger_bottombar_swipe_right", @"trigger_bottom_swipe_up_left", @"trigger_bottom_swipe_up_center", @"trigger_bottom_swipe_up_right", @"trigger_bottom_swipe_down_left", @"trigger_bottom_swipe_down_center", @"trigger_bottom_swipe_down_right"], @"Bottom Bar Gestures", YES);
     // Multi-Finger Gestures Section (Only show if added)
@@ -1182,6 +1183,9 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     }
     for (NSString *key in @[@"trigger_statusbar_left_hold", @"trigger_statusbar_center_hold", @"trigger_statusbar_right_hold", @"trigger_statusbar_swipe_left", @"trigger_statusbar_swipe_right", @"trigger_statusbar_double_tap", @"trigger_statusbar_left_tap", @"trigger_statusbar_center_tap", @"trigger_statusbar_right_tap", @"trigger_statusbar_left_double_tap", @"trigger_statusbar_center_double_tap", @"trigger_statusbar_right_double_tap", @"trigger_statusbar_left_swipe_left", @"trigger_statusbar_left_swipe_right", @"trigger_statusbar_center_swipe_left", @"trigger_statusbar_center_swipe_right", @"trigger_statusbar_right_swipe_left", @"trigger_statusbar_right_swipe_right", @"trigger_statusbar_swipe_down_left", @"trigger_statusbar_swipe_down_center", @"trigger_statusbar_swipe_down_right"]) {
         addBuiltIn(key, @"Status Bar");
+    }
+    if ([RCConfigManager hasDynamicIsland]) {
+        for (NSString *key in [RCConfigManager dynamicIslandTriggerKeys]) addBuiltIn(key, @"Dynamic Island");
     }
     for (NSString *key in @[@"trigger_edge_left_swipe_up", @"trigger_edge_left_swipe_down", @"trigger_edge_right_swipe_up", @"trigger_edge_right_swipe_down"]) {
         addBuiltIn(key, @"Edge Gestures");

@@ -192,6 +192,9 @@
 // Vibration settings, the way this iOS version's Settings shows them: one Haptics menu from
 // iOS 17 (over the same two on/off values), the two switches by their names before that
 + (BOOL)hasHomeButton;
+// The Dynamic Island's triggers, and whether this phone has one
++ (NSArray<NSString *> *)dynamicIslandTriggerKeys;
++ (BOOL)hasDynamicIsland;
 + (NSArray<NSString *> *)bottomBarTriggerKeys;
 // Whether the Apple Watch app is installed, so Watch features make sense on this device
 + (BOOL)watchFeaturesAvailable;

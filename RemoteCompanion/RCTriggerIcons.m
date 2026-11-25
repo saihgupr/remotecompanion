@@ -6,6 +6,7 @@
 // hold, + for two buttons together, arrows for one button then the other).
 //   buttons: volUp, volDown, power, ringer      home: a Home button
 //   zone: top, bottom, left, right               dot: L, C, R (in the top zone)
+//   island: the Dynamic Island's pill at the top of the screen
 //   arrow: left, right, up, down (in the zone)   arrowAt: L, C, R (a swipe up from the bottom)
 //   arrowDownAt: L, C, R (a swipe down from the top)   arrowDownBottomAt: L, C, R (a swipe down on the bottom edge)
 //   fingers: up, down (two fingertips in the zone, with a big arrow the way they slide)
@@ -30,6 +31,8 @@ static NSDictionary<NSString *, NSDictionary *> *RCPhoneIconSpecs(void) {
             @"power_long_press":        @{ @"buttons": @[@"power"], @"mark": hold },
             @"trigger_statusbar_left_hold":   @{ @"zone": @"top", @"dot": @"L" },
             @"trigger_statusbar_center_hold": @{ @"zone": @"top", @"dot": @"C" },
+            @"trigger_island_tap":  @{ @"island": @YES, @"mark": @"1×" },
+            @"trigger_island_hold": @{ @"island": @YES, @"mark": hold },
             @"trigger_statusbar_right_hold":  @{ @"zone": @"top", @"dot": @"R" },
             @"trigger_statusbar_swipe_left":  @{ @"zone": @"top", @"arrow": @"left" },
             @"trigger_statusbar_swipe_right": @{ @"zone": @"top", @"arrow": @"right" },
@@ -264,6 +267,9 @@ static UIImage *RCDrawPhoneIcon(NSDictionary *spec, CGFloat side) {
             [[UIBezierPath bezierPathWithRoundedRect:R(16, 3.2, 8, 1.8) cornerRadius:0.9 * k] fill];
             [[UIBezierPath bezierPathWithRoundedRect:R(14, 34.6, 12, 1.8) cornerRadius:0.9 * k] fill];
         }
+
+        // The Dynamic Island: a pill at the top of the screen
+        if ([spec[@"island"] boolValue]) [[UIBezierPath bezierPathWithRoundedRect:R(14.5, 4, 11, 4.4) cornerRadius:2.2 * k] fill];
 
         // The part of the screen that's touched
         NSString *zone = spec[@"zone"];
