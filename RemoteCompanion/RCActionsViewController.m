@@ -1,4 +1,5 @@
 #import "RCActionsViewController.h"
+#import "RCMenuEditorViewController.h"
 #import "RCScreenActions.h"
 #import "RCAddOnCatalog.h"
 #import "RCAppDelegate.h"
@@ -3123,60 +3124,36 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
 
 #pragma mark - Choose from Menu
 
-// A menu's title, how long it waits and what a timeout picks. index NSNotFound: a new menu, added
-// with two options to fill in.
+// Choose from Menu's page (RCMenuEditorViewController): index is the menu's row, or NSNotFound
+// for a new one, added at the end of the list
 - (void)presentMenuSettingsForIndex:(NSInteger)index {
     BOOL isNew = index == NSNotFound || index < 0 || index >= (NSInteger)self.actions.count;
-    NSDictionary *menu = isNew ? @{ @"type": @"menu", @"timeout": @10 } : self.actions[index];
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:isNew ? @"Choose from Menu" : @"Edit Menu"
-        message:@"The menu shows in the middle of the screen, over any app and on the lock screen. Time Limit: seconds before it closes (0 waits until a pick). Tap End Menu, or an option, to add more options."
-        preferredStyle:UIAlertControllerStyleAlert];
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
-        field.placeholder = @"Title (optional)";
-        field.text = [menu[@"title"] description];
-        field.autocapitalizationType = UITextAutocapitalizationTypeWords;
-    }];
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
-        field.placeholder = @"Time Limit (s)";
-        field.keyboardType = UIKeyboardTypeNumberPad;
-        field.text = menu[@"timeout"] ? [NSString stringWithFormat:@"%.0f", [menu[@"timeout"] doubleValue]] : @"10";
-    }];
+    NSRange range = NSMakeRange(self.actions.count, 0);
+    if (!isNew) {
+        NSInteger end = [self matchingEndIndexForIfAtIndex:index];
+        if (end == NSNotFound) return;
+        range = NSMakeRange(index, end - index + 1);
+    }
+    RCMenuEditorViewController *editor = [[RCMenuEditorViewController alloc] initWithBlock:isNew ? nil : [self.actions subarrayWithRange:range]];
     __weak typeof(self) weakSelf = self;
-    UIAlertAction *save = [UIAlertAction actionWithTitle:isNew ? @"Add" : @"Save" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
+    editor.onSave = ^(NSArray *block) {
         __strong typeof(weakSelf) self = weakSelf;
-        if (!self) return;
-        NSMutableDictionary *updated = [menu mutableCopy];
-        NSString *title = [alert.textFields[0].text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        if (title.length) updated[@"title"] = title; else [updated removeObjectForKey:@"title"];
-        updated[@"timeout"] = @(MAX(0, MIN(3600, [alert.textFields[1].text integerValue])));
-        if (isNew) {
-            NSInteger at = self.actions.count;
-            [self.actions insertObjects:@[updated, @{ @"type": @"menu_option", @"name": @"Option 1" }, @{ @"type": @"menu_option", @"name": @"Option 2" }, @{ @"type": @"end_menu" }]
-                              atIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(at, 4)]];
-        } else {
-            self.actions[index] = updated;
-        }
+        if (!self || NSMaxRange(range) > self.actions.count) return;
+        [self.actions replaceObjectsInRange:range withObjectsFromArray:block];
         [self saveActions];
         [self.tableView reloadData];
-        if (!isNew) [self presentMenuTimeoutChoiceForIndex:index];
-    }];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:save];
-    if (!isNew) {
-        // Another option, after what was typed above is kept
-        [alert addAction:[UIAlertAction actionWithTitle:@"Add Option" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
-            __strong typeof(weakSelf) self = weakSelf;
-            if (!self) return;
-            NSMutableDictionary *updated = [menu mutableCopy];
-            NSString *title = [alert.textFields[0].text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-            if (title.length) updated[@"title"] = title; else [updated removeObjectForKey:@"title"];
-            updated[@"timeout"] = @(MAX(0, MIN(3600, [alert.textFields[1].text integerValue])));
-            self.actions[index] = updated;
-            [self addOptionToMenuAtIndex:index];
-        }]];
-    }
-    alert.preferredAction = save;
-    [self presentViewController:alert animated:YES completion:nil];
+    };
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:editor];
+    [self presentViewController:nav animated:YES completion:nil];
+}
+
+// The menu a row of one belongs to (the menu row itself, an option or End Menu), or NSNotFound
+- (NSInteger)menuIndexForRow:(NSInteger)row {
+    id item = self.actions[row];
+    if ([self isMenuActionItem:item]) return row;
+    if ([self isEndMenuActionItem:item]) return [self matchingIfIndexForEndAtIndex:row];
+    if ([self isMenuOptionActionItem:item]) return [self blockStartForBranchRow:row];
+    return NSNotFound;
 }
 
 // The rows of a menu's own options (not a nested menu's), in order
@@ -3190,142 +3167,6 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
         else if (depth == 0 && [self isMenuOptionActionItem:item]) [rows addObject:@(i)];
     }
     return rows;
-}
-
-// When the time limit runs out: Cancel, or one of the options
-- (void)presentMenuTimeoutChoiceForIndex:(NSInteger)index {
-    NSDictionary *menu = self.actions[index];
-    if ([menu[@"timeout"] doubleValue] <= 0) return;
-    NSArray<NSNumber *> *options = [self optionRowsForMenuAtIndex:index];
-    id current = menu[@"timeoutOption"];
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"When Time Runs Out"
-        message:@"What happens if nothing is picked in time." preferredStyle:UIAlertControllerStyleActionSheet];
-    void (^choose)(NSNumber *) = ^(NSNumber *option) {
-        NSMutableDictionary *updated = [self.actions[index] mutableCopy];
-        if (option) updated[@"timeoutOption"] = option; else [updated removeObjectForKey:@"timeoutOption"];
-        self.actions[index] = updated;
-        [self saveActions];
-        [self.tableView reloadData];
-    };
-    [sheet addAction:[UIAlertAction actionWithTitle:current ? @"Cancel the Trigger" : @"Cancel the Trigger \u2713" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) { choose(nil); }]];
-    [options enumerateObjectsUsingBlock:^(NSNumber *row, NSUInteger i, BOOL *stop) {
-        NSString *name = [self.actions[row.integerValue][@"name"] description] ?: @"Option";
-        BOOL ticked = current && [current integerValue] == (NSInteger)i;
-        [sheet addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"Pick \u201C%@\u201D%@", name, ticked ? @" \u2713" : @""] style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) { choose(@(i)); }]];
-    }];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Keep As Is" style:UIAlertActionStyleCancel handler:nil]];
-    [self configurePopoverSourceForAlert:sheet];
-    [self presentViewController:sheet animated:YES completion:nil];
-}
-
-// Tapping an option: its name, its icon, or deleting it
-- (void)presentMenuOptionActionsForIndex:(NSInteger)index {
-    NSString *name = [self.actions[index][@"name"] description] ?: @"Option";
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:name message:nil preferredStyle:UIAlertControllerStyleActionSheet];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Rename" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) { [self presentMenuOptionNameForIndex:index]; }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Icon" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) { [self presentMenuOptionIconForIndex:index]; }]];
-    NSInteger menu = [self blockStartForBranchRow:index];
-    if (menu != NSNotFound) {
-        [sheet addAction:[UIAlertAction actionWithTitle:@"Add Another Option" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) { [self addOptionToMenuAtIndex:menu]; }]];
-    }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Delete Option" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *a) { [self deleteMenuOptionAtIndex:index]; }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [self configurePopoverSourceForAlert:sheet];
-    [self presentViewController:sheet animated:YES completion:nil];
-}
-
-- (void)presentMenuOptionNameForIndex:(NSInteger)index {
-    if (index < 0 || index >= (NSInteger)self.actions.count) return;
-    NSDictionary *option = self.actions[index];
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Option" message:@"The name shown in the menu. {menu} holds it after it's picked." preferredStyle:UIAlertControllerStyleAlert];
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
-        field.text = [option[@"name"] description];
-        field.placeholder = @"Name";
-        field.autocapitalizationType = UITextAutocapitalizationTypeWords;
-        field.clearButtonMode = UITextFieldViewModeWhileEditing;
-    }];
-    UIAlertAction *save = [UIAlertAction actionWithTitle:@"Save" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
-        NSString *name = [alert.textFields.firstObject.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        if (!name.length) return;
-        NSMutableDictionary *updated = [self.actions[index] mutableCopy];
-        updated[@"name"] = name;
-        self.actions[index] = updated;
-        [self saveActions];
-        [self.tableView reloadData];
-    }];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:save];
-    alert.preferredAction = save;
-    [self presentViewController:alert animated:YES completion:nil];
-}
-
-// A few symbols to pick from, or none
-- (void)presentMenuOptionIconForIndex:(NSInteger)index {
-    if (index < 0 || index >= (NSInteger)self.actions.count) return;
-    NSArray<NSArray<NSString *> *> *icons = @[@[@"None", @""], @[@"Light", @"lightbulb.fill"], @[@"Home", @"house.fill"], @[@"Music", @"music.note"],
-                                              @[@"Phone", @"phone.fill"], @[@"Message", @"message.fill"], @[@"Car", @"car.fill"], @[@"Moon", @"moon.fill"],
-                                              @[@"Power", @"power"], @[@"Star", @"star.fill"], @[@"Bolt", @"bolt.fill"], @[@"Lock", @"lock.fill"]];
-    NSString *current = [self.actions[index][@"icon"] description] ?: @"";
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Option Icon" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
-    for (NSArray<NSString *> *icon in icons) {
-        if (icon[1].length && ![UIImage systemImageNamed:icon[1]]) continue;
-        UIAlertAction *choice = [UIAlertAction actionWithTitle:[icon[0] stringByAppendingString:[icon[1] isEqualToString:current] ? @" \u2713" : @""] style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
-            NSMutableDictionary *updated = [self.actions[index] mutableCopy];
-            if (icon[1].length) updated[@"icon"] = icon[1]; else [updated removeObjectForKey:@"icon"];
-            self.actions[index] = updated;
-            [self saveActions];
-            [self.tableView reloadData];
-        }];
-        if (icon[1].length) [choice setValue:[UIImage systemImageNamed:icon[1]] forKey:@"image"];
-        [sheet addAction:choice];
-    }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [self configurePopoverSourceForAlert:sheet];
-    [self presentViewController:sheet animated:YES completion:nil];
-}
-
-// A new option at the end of the menu, named for its place
-- (void)addOptionToMenuAtIndex:(NSInteger)index {
-    NSInteger end = [self matchingEndIndexForIfAtIndex:index];
-    if (end == NSNotFound) return;
-    NSString *name = [NSString stringWithFormat:@"Option %lu", (unsigned long)[self optionRowsForMenuAtIndex:index].count + 1];
-    [self.actions insertObject:@{ @"type": @"menu_option", @"name": name } atIndex:end];
-    [self saveActions];
-    [self.tableView reloadData];
-    [self presentMenuOptionNameForIndex:end];
-}
-
-// An option and its actions (up to the next option or End Menu); a timeout that picked it goes
-// back to Cancel, and one that picked a later option follows it
-- (void)deleteMenuOptionAtIndex:(NSInteger)row {
-    NSInteger menuIndex = [self blockStartForBranchRow:row];
-    if (menuIndex == NSNotFound) return;
-    NSArray<NSNumber *> *options = [self optionRowsForMenuAtIndex:menuIndex];
-    NSUInteger position = [options indexOfObject:@(row)];
-    NSInteger next = position + 1 < options.count ? options[position + 1].integerValue : [self matchingEndIndexForIfAtIndex:menuIndex];
-    if (position == NSNotFound || next == NSNotFound) return;
-    NSRange range = NSMakeRange(row, next - row);
-    void (^remove)(void) = ^{
-        NSMutableDictionary *menu = [self.actions[menuIndex] mutableCopy];
-        id timeoutOption = menu[@"timeoutOption"];
-        if (timeoutOption) {
-            NSInteger chosen = [timeoutOption integerValue];
-            if (chosen == (NSInteger)position) [menu removeObjectForKey:@"timeoutOption"];
-            else if (chosen > (NSInteger)position) menu[@"timeoutOption"] = @(chosen - 1);
-            self.actions[menuIndex] = menu;
-        }
-        [self.actions removeObjectsInRange:range];
-        [self saveActions];
-        [self.tableView reloadData];
-    };
-    if (range.length <= 1) { remove(); return; }
-    UIAlertController *confirm = [UIAlertController alertControllerWithTitle:@"Delete Option?"
-        message:[NSString stringWithFormat:@"Its %lu action%@ are deleted too.", (unsigned long)range.length - 1, range.length == 2 ? @"" : @"s"]
-        preferredStyle:UIAlertControllerStyleActionSheet];
-    [confirm addAction:[UIAlertAction actionWithTitle:@"Delete Option" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *a) { remove(); }]];
-    [confirm addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [self configurePopoverSourceForAlert:confirm];
-    [self presentViewController:confirm animated:YES completion:nil];
 }
 
 - (BOOL)isIfActionItem:(id)item {
@@ -5070,28 +4911,12 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             }
         }
         
-        // Choose from Menu: its title and time limit, its options
+        // Choose from Menu: its page, for any of its rows
         if ([self isMenuActionItem:item] || [self isMenuOptionActionItem:item] || [self isEndMenuActionItem:item]) {
-            NSInteger menuIndex = [self isMenuActionItem:item] ? indexPath.row
-                                : [self isEndMenuActionItem:item] ? [self matchingIfIndexForEndAtIndex:indexPath.row]
-                                : [self blockStartForBranchRow:indexPath.row];
+            NSInteger menuIndex = [self menuIndexForRow:indexPath.row];
             if (menuIndex != NSNotFound) {
                 [alert addAction:[UIAlertAction actionWithTitle:@"Edit Menu" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
                     [self presentMenuSettingsForIndex:menuIndex];
-                }]];
-                [alert addAction:[UIAlertAction actionWithTitle:@"Add Option" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-                    [self addOptionToMenuAtIndex:menuIndex];
-                }]];
-            }
-            if ([self isMenuOptionActionItem:item]) {
-                [alert addAction:[UIAlertAction actionWithTitle:@"Rename Option" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-                    [self presentMenuOptionNameForIndex:indexPath.row];
-                }]];
-                [alert addAction:[UIAlertAction actionWithTitle:@"Option Icon" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-                    [self presentMenuOptionIconForIndex:indexPath.row];
-                }]];
-                [alert addAction:[UIAlertAction actionWithTitle:@"Delete Option" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *action) {
-                    [self deleteMenuOptionAtIndex:indexPath.row];
                 }]];
             }
             [alert addAction:[UIAlertAction actionWithTitle:@"Add Nested If" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
@@ -5399,13 +5224,9 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
                 [self presentRepeatCountForIndex:indexPath.row];
             } else if ([[self actionTypeForItem:actionData] isEqualToString:@"set_variable"]) {
                 [self presentSetVariable:actionData existingIndex:indexPath.row];
-            } else if ([self isMenuActionItem:actionData]) {
-                [self presentMenuSettingsForIndex:indexPath.row];
-            } else if ([self isMenuOptionActionItem:actionData]) {
-                [self presentMenuOptionActionsForIndex:indexPath.row];
-            } else if ([self isEndMenuActionItem:actionData]) {
-                NSInteger menu = [self matchingIfIndexForEndAtIndex:indexPath.row];
-                if (menu != NSNotFound) [self addOptionToMenuAtIndex:menu];
+            } else if ([self isMenuActionItem:actionData] || [self isMenuOptionActionItem:actionData] || [self isEndMenuActionItem:actionData]) {
+                NSInteger menu = [self menuIndexForRow:indexPath.row];
+                if (menu != NSNotFound) [self presentMenuSettingsForIndex:menu];
             }
             return;
         }
