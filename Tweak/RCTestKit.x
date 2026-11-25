@@ -18,6 +18,8 @@
 //   POST /api/testkit/restore           put them back
 //   POST /api/testkit/lua               body (or ?code=): Lua; returns what it printed and returned
 //   GET  /api/testkit/suites            the test suites
+//   GET  /api/testkit/coverage          what the suites exercise here: trigger keys, condition keys and
+//                                       action commands, each with the suites that test it
 //   POST /api/testkit/suite/run?name=   run one (conditions, toggles, all, guided, differential, replay, addons);
 //                                       &wait=1 returns the report when done (or after 5 minutes);
 //                                       toggles: &disruptive=1 adds Wi-Fi etc.;
@@ -915,6 +917,63 @@ static NSArray<NSString *> *RCTKCapturedSince(unsigned long long since) {
     return keys;
 }
 
+// The longest a button trigger can still come after the last press: its click, sequence or hold
+// window (Settings > Buttons, 0.8 s at most), and a little for the tweak to act on it
+static double RCTKButtonQuietMs(void) {
+    NSDictionary *config = RCCopyTriggerConfig();
+    double longest = 0.5; // the defaults' longest, Power Hold
+    for (NSString *key in @[@"powerClickWindow", @"homeClickWindow", @"volumeSequenceWindow", @"volumeHoldTime", @"powerHoldTime"]) {
+        id value = config[key];
+        if ([value isKindOfClass:[NSNumber class]]) longest = MAX(longest, MIN([value doubleValue], 0.8));
+    }
+    return longest * 1000.0 + 250.0;
+}
+
+// Waits after an input for its triggers: until each expected key has fired (expect: key -> count,
+// or keys counted once) and quietMs has passed since the input with nothing new for that long, or
+// maxMs. Most steps end well before maxMs, which is what made the suites slow: they always waited
+// it out. Returns the ms it waited.
+static double RCTKSettle(unsigned long long since, id expect, double quietMs, double maxMs) {
+    double start = RCTKNowMs(), lastChange = start;
+    NSUInteger seen = 0;
+    while (RCTKNowMs() - start < maxMs) {
+        NSArray<NSString *> *got = RCTKCapturedSince(since);
+        if (got.count != seen) { seen = got.count; lastChange = RCTKNowMs(); }
+        NSCountedSet *counts = [[NSCountedSet alloc] initWithArray:got];
+        BOOL all = YES;
+        if ([expect isKindOfClass:[NSDictionary class]]) {
+            for (NSString *key in (NSDictionary *)expect) if ([counts countForObject:key] < [((NSDictionary *)expect)[key] unsignedIntegerValue]) all = NO;
+        } else {
+            for (NSString *key in (NSArray *)expect) if (![counts countForObject:key]) all = NO;
+        }
+        double now = RCTKNowMs();
+        if (all && now - start >= quietMs && now - lastChange >= quietMs * 0.6) break;
+        if (g_tkStopRun) break;
+        RCTKSleep(0.05);
+    }
+    return RCTKNowMs() - start;
+}
+
+// Waits for iOS's own response to settle: what a pass records (screen, lock, the app in front,
+// Siri, the switcher, the latest photo when one is expected) unchanged for quietMs, after at
+// least minMs, at most maxMs
+static double RCTKSettleOutcome(double minMs, double quietMs, double maxMs, BOOL photo) {
+    NSArray *(^fingerprint)(void) = ^NSArray *{
+        NSDictionary *p = RCTKProbeLight();
+        return @[p[@"screenOn"] ?: @"", p[@"locked"] ?: @"", p[@"frontApp"] ?: @"", p[@"siriVisible"] ?: @"", p[@"switcherVisible"] ?: @"",
+                 photo ? (RCTKLatestPhoto()[@"file"] ?: @"") : @""];
+    };
+    double start = RCTKNowMs(), lastChange = start;
+    NSArray *last = fingerprint();
+    while (RCTKNowMs() - start < maxMs && !g_tkStopRun) {
+        RCTKSleep(0.1);
+        NSArray *now = fingerprint();
+        if (![now isEqualToArray:last]) { last = now; lastChange = RCTKNowMs(); }
+        if (RCTKNowMs() - start >= minMs && RCTKNowMs() - lastChange >= quietMs) break;
+    }
+    return RCTKNowMs() - start;
+}
+
 // The group a guided or stock-vs-tweak step is listed under (the app's step picker)
 static NSString *RCTKStepGroup(NSString *stepId) {
     NSArray *groups = @[
@@ -1210,8 +1269,8 @@ static void RCTKSuiteGuided(NSMutableDictionary *run) {
     // passcode); the rest (ring/silent switch, shake, Touch ID, charger) are still asked for
     BOOL autoMode = [run[@"auto"] boolValue];
     if (autoMode) {
-        RCShowPrompt(@"Gestures & Sensors", @"Doing the screen gestures - you'll be asked for the rest", @"hand.point.up.left", 3.0);
-        RCTKSleep(2.0);
+        RCShowPrompt(@"Gestures & Sensors", @"Doing the screen gestures - you'll be asked for the rest", @"hand.point.up.left", 2.0);
+        RCTKSleep(1.2);
     }
     BOOL started = autoMode || RCTKWaitForReady(run, @"Gestures & Sensors", steps.count);
 
@@ -1230,9 +1289,9 @@ static void RCTKSuiteGuided(NSMutableDictionary *run) {
         BOOL scripted = autoMode && RCTKGuidedStepScripted(step);
         // A scripted step's banner is gone before its touch: it sits where the status bar gestures go
         RCShowPrompt(title, scripted ? [@"Doing: " stringByAppendingString:step[@"prompt"]] : step[@"prompt"],
-                     scripted ? @"play.circle" : @"hand.point.up.left", scripted ? 1.2 : 60.0);
+                     scripted ? @"play.circle" : @"hand.point.up.left", scripted ? 0.6 : 60.0);
         if (scripted) {
-            RCTKSleep(1.6);
+            RCTKSleep(1.0); // the banner is gone before the touch (it was 1.6 s)
             if (step[@"gesture"]) RCTKPerformGesture(step[@"gesture"]);
             else if ([step[@"auto"] isEqualToString:@"lock"]) { NSString *e = nil; RCTKReplaySend(RCTKParseReplay(@"vP@0 ^P@90", &e), NULL); }
             else RCTKUnlock();
@@ -1270,7 +1329,9 @@ static void RCTKSuiteGuided(NSMutableDictionary *run) {
             continue;
         }
         double detected = RCTKNowMs() - start;
-        RCTKSleep(1.2); // anything that fires a moment later counts too
+        // Anything that fires a moment later counts too: a tap's double-tap window, a swipe's end
+        // (until 0.6 s pass with nothing new; it was a fixed 1.2 s)
+        RCTKSettle(since, expect ?: @[], 600, 1200);
 
         NSMutableArray *got = [NSMutableArray array];
         NSSet *ambient = RCTKAmbientTriggerKeys();
@@ -1308,8 +1369,10 @@ static void RCTKSuiteGuided(NSMutableDictionary *run) {
         RCTKRecordResult(run, testId, pass ? @"pass" : @"fail", detail, detected);
         if ([step[@"enable"] count]) RCSetTriggerConfig(config);
         RCShowPrompt(title, pass ? @"Passed" : [@"Failed: " stringByAppendingString:problems.firstObject],
-                     pass ? @"checkmark.circle.fill" : @"xmark.circle.fill", 1.5);
-        RCTKSleep(2.0);
+                     pass ? @"checkmark.circle.fill" : @"xmark.circle.fill", scripted ? 0.6 : 1.5);
+        // A person reads the result before the next prompt; a scripted step only needs the screen
+        // to settle (the next banner replaces this one)
+        RCTKSleep(scripted ? 0.5 : 2.0);
     }
 
     g_tkCapture = NO;
@@ -1680,7 +1743,10 @@ static NSDictionary *RCTKDifferentialReplayPass(NSString *title, NSDictionary *s
     if (!sent) return nil;
     // Saving a screenshot can take a few seconds (an iPhone 8 on the lock screen); both passes
     // of a step that's defined to take one wait the same, longer time
-    RCTKSleep([step[@"defined"][@"screenshotSaved"] boolValue] ? 4.0 : 2.5);
+    // Until what iOS shows has stayed the same for 0.7 s, at least 1.2 s after the presses (it was
+    // a fixed 2.5 s, or 4 s); the same rule for both passes of a step
+    BOOL photo = [step[@"defined"][@"screenshotSaved"] boolValue];
+    RCTKSettleOutcome(1200, photo ? 1000 : 700, photo ? 4000 : 2500, photo);
     unsigned long long until = RCTKRecord(@"mark", @{ @"label": [title stringByAppendingString:@" (recorded)"] });
     NSDictionary *after = RCTKProbe();
     NSDictionary *outcome = RCTKOutcome(since, until, before, after);
@@ -2485,8 +2551,9 @@ static void RCTKSuiteReplay(NSMutableDictionary *run) {
     };
     g_tkCapture = YES;
     RCTKEvent(@"testkit.capture", @{ @"on": @YES });
-    RCShowPrompt(@"Button Triggers", @"Replaying button presses - leave the phone alone", @"play.circle", 3.0);
-    RCTKSleep(2.0);
+    RCShowPrompt(@"Button Triggers", @"Replaying button presses - leave the phone alone", @"play.circle", 2.0);
+    RCTKSleep(1.2);
+    double quietMs = RCTKButtonQuietMs();
 
     NSUInteger index = 0, passed = 0;
     NSMutableDictionary *timesRun = [NSMutableDictionary dictionary];
@@ -2525,7 +2592,9 @@ static void RCTKSuiteReplay(NSMutableDictionary *run) {
         unsigned long long since = RCTKRecord(@"mark", @{ @"label": testId });
         double startMs = 0;
         NSString *sent = RCTKReplaySend(events, &startMs);
-        RCTKSleep(1.5); // anything that fires a moment later counts too
+        // Anything that fires a moment later counts too: once the expected triggers are in and the
+        // longest button window has passed with nothing new (it was a fixed 1.5 s)
+        RCTKSettle(since, step[@"expect"] ?: @{}, quietMs, 1500);
 
         NSCountedSet *got = [[NSCountedSet alloc] init];
         NSMutableArray *gotList = [NSMutableArray array];
@@ -2777,7 +2846,7 @@ static NSDictionary *RCTKInfo(void) {
         @"session": g_tkSession ?: @"",
         @"tweakVersion": RCTKPackageVersion(),
         @"endpoints": @[@"info", @"probe", @"journal", @"journal/clear", @"mark", @"run", @"lua", @"capture", @"snapshot", @"restore",
-                        @"suites", @"suite/steps", @"suite/run", @"suite/skip", @"suite/stop", @"report", @"reports", @"report/delete", @"reports/clear",
+                        @"suites", @"coverage", @"suite/steps", @"suite/run", @"suite/skip", @"suite/stop", @"report", @"reports", @"report/delete", @"reports/clear",
                         @"replay", @"passcode", @"passcode/forget", @"passcode/renew", @"unlock"]
     };
 }
@@ -2792,6 +2861,52 @@ static NSDictionary *RCTKRun(NSString *command) {
     double start = RCTKNowMs();
     NSString *output = RCHandleCommand(command) ?: @"";
     return @{ @"command": command, @"output": output, @"ms": @(RCTKNowMs() - start) };
+}
+
+#pragma mark - Coverage
+
+// What the suites exercise on this phone, for the app's Coverage page (which compares it with
+// every trigger, action and condition the app offers): each trigger key, condition key and
+// action command, with the suites that test it. Read from the suites' own step lists (and the
+// conditions suite, which is read-only, run quietly to see what it checks), so a suite that gains
+// a step shows up here without anything else to update.
+static NSDictionary *RCTKCoverage(void) {
+    BOOL hasHome = RCTKHasHomeButton();
+    NSMutableDictionary<NSString *, NSMutableOrderedSet *> *triggers = [NSMutableDictionary dictionary], *conditions = [NSMutableDictionary dictionary], *actions = [NSMutableDictionary dictionary];
+    void (^add)(NSMutableDictionary *, NSString *, NSString *) = ^(NSMutableDictionary *into, NSString *key, NSString *suite) {
+        if (![key isKindOfClass:[NSString class]] || !key.length) return;
+        if (!into[key]) into[key] = [NSMutableOrderedSet orderedSet];
+        [into[key] addObject:suite];
+    };
+    for (NSDictionary *step in RCTKGuidedSteps(hasHome)) {
+        for (NSString *key in step[@"expect"]) add(triggers, key, @"guided");
+        for (NSString *key in step[@"oneOf"]) add(triggers, key, @"guided");
+    }
+    for (NSDictionary *step in RCTKReplaySteps(hasHome)) {
+        for (NSString *key in step[@"expect"]) add(triggers, key, @"replay");
+    }
+    for (NSDictionary *spec in RCTKToggleSpecs()) {
+        NSString *suite = [spec[@"disruptive"] boolValue] ? @"toggles (disruptive)" : @"toggles";
+        for (NSString *field in @[@"on", @"off", @"toggle"]) add(actions, spec[field], suite);
+        add(conditions, spec[@"condition"], suite);
+    }
+    // The conditions suite builds its checks from the phone's state: run it into a scratch run
+    NSMutableDictionary *scratch = [@{ @"suite": @"conditions", @"tests": [NSMutableArray array] } mutableCopy];
+    RCTKSuiteConditions(scratch);
+    for (NSDictionary *result in scratch[@"tests"]) {
+        NSArray *parts = [result[@"id"] componentsSeparatedByString:@"."];
+        if (parts.count >= 2) add(conditions, parts[1], @"conditions");
+    }
+    NSDictionary *(^plain)(NSDictionary *) = ^NSDictionary *(NSDictionary *from) {
+        NSMutableDictionary *out = [NSMutableDictionary dictionary];
+        for (NSString *key in from) out[key] = [from[key] array];
+        return out;
+    };
+    // Button presses compared with stock iOS (differential): not triggers of their own
+    NSMutableArray *presses = [NSMutableArray array];
+    for (NSDictionary *step in RCTKDifferentialSteps(hasHome)) if (step[@"name"]) [presses addObject:step[@"name"]];
+    return @{ @"triggers": plain(triggers), @"conditions": plain(conditions), @"actions": plain(actions),
+              @"comparedWithIOS": presses, @"homeButton": @(hasHome) };
 }
 
 // endpoint: the part after /api/testkit/; params: query items and/or body
@@ -2856,6 +2971,7 @@ static NSDictionary *RCTKDispatch(NSString *endpoint, NSDictionary<NSString *, N
         return RCTKUnlock();
     }
     if ([endpoint isEqualToString:@"suites"]) return RCTKSuites();
+    if ([endpoint isEqualToString:@"coverage"]) return RCTKCoverage();
     if ([endpoint isEqualToString:@"suite/run"]) {
         NSString *name = params[@"name"] ?: body;
         return RCTKRunSuite(name, params);

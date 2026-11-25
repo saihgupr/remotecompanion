@@ -23,7 +23,7 @@ RemoteCompanion_RESOURCE_FILES = Info.plist Icon.png AppIcon60x60@2x.png AppIcon
 RemoteCompanion_INSTALL_PATH = /Applications
 RemoteCompanion_FILES += RCDevicePickerViewController.m
 RemoteCompanion_FILES += RCBatteryTriggerViewController.m
-RemoteCompanion_FILES += RCTestKitViewController.m RCTestReportViewController.m RCTestKitSetupViewController.m
+RemoteCompanion_FILES += RCTestKitViewController.m RCTestReportViewController.m RCTestKitSetupViewController.m RCTestKitCoverageViewController.m
 
 # Shared UI components
 RemoteCompanion_FILES += RCCategoryBar.m RCActionTile.m RCTriggersGrid.m RCTriggerIcons.m
