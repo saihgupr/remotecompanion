@@ -988,11 +988,15 @@ static double RCTKSettleOutcome(double minMs, double quietMs, double maxMs, BOOL
     };
     double start = RCTKNowMs(), lastChange = start;
     NSArray *last = fingerprint();
+    // A step that saves a screenshot waits for the photo itself: on an iPhone 8's lock screen it
+    // can come ~3 s later, after everything else has settled. If none comes, the whole maxMs.
+    id photoBefore = last.lastObject;
     while (RCTKNowMs() - start < maxMs && !g_tkStopRun) {
         RCTKSleep(0.1);
         NSArray *now = fingerprint();
         if (![now isEqualToArray:last]) { last = now; lastChange = RCTKNowMs(); }
-        if (RCTKNowMs() - start >= minMs && RCTKNowMs() - lastChange >= quietMs) break;
+        BOOL photoIn = !photo || ![last.lastObject isEqual:photoBefore];
+        if (photoIn && RCTKNowMs() - start >= minMs && RCTKNowMs() - lastChange >= quietMs) break;
     }
     return RCTKNowMs() - start;
 }
@@ -1769,7 +1773,7 @@ static NSDictionary *RCTKDifferentialReplayPass(NSString *title, NSDictionary *s
     // Until what iOS shows has stayed the same for 0.7 s, at least 1.2 s after the presses (it was
     // a fixed 2.5 s, or 4 s); the same rule for both passes of a step
     BOOL photo = [step[@"defined"][@"screenshotSaved"] boolValue];
-    RCTKSettleOutcome(1200, photo ? 1000 : 700, photo ? 4000 : 2500, photo);
+    RCTKSettleOutcome(1200, photo ? 500 : 700, photo ? 4000 : 2500, photo);
     unsigned long long until = RCTKRecord(@"mark", @{ @"label": [title stringByAppendingString:@" (recorded)"] });
     NSDictionary *after = RCTKProbe();
     NSDictionary *outcome = RCTKOutcome(since, until, before, after);
