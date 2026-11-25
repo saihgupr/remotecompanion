@@ -5760,6 +5760,16 @@ static BOOL rc_value_needs_token(id value, int depth);
 // other in a loop, counts as needing the token.
 #define RC_TRIGGER_CHAIN_LIMIT 8
 
+// "addons root|set|enable|disable ..." (any letter case, any spacing): the add-on commands that change
+// something, as opposed to listing, reloading, checking or reading settings
+static BOOL rc_addons_command_changes_something(NSString *trimmed) {
+    NSArray<NSString *> *words = [[trimmed lowercaseString] componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    words = [words filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"length > 0"]];
+    if (words.count < 2) return NO;
+    if (![words[0] isEqualToString:@"addons"] && ![words[0] isEqualToString:@"add-ons"]) return NO;
+    return [@[@"root", @"set", @"enable", @"disable"] containsObject:words[1]];
+}
+
 static BOOL rc_command_needs_token(NSString *cmd, int depth) {
     if (!cmd || ![cmd isKindOfClass:[NSString class]]) return NO;
     NSString *trimmed = [cmd stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
@@ -5791,7 +5801,10 @@ static BOOL rc_command_needs_token(NSString *cmd, int depth) {
            [trimmed hasPrefix:@"unlock "] || [trimmed hasPrefix:@"lock-toggle "] || [trimmed hasPrefix:@"lock toggle "] ||
            [trimmed hasPrefix:@"unlock-passcode"] ||
            // Variables go into Terminal commands, and can hold anything (names, codes, output)
-           [trimmed isEqualToString:@"var"] || [trimmed hasPrefix:@"var "];
+           [trimmed isEqualToString:@"var"] || [trimmed hasPrefix:@"var "] ||
+           // Add-on changes: Run as Root lets an add-on's programs run with full access, and
+           // settings and on/off change what installed tweaks do
+           rc_addons_command_changes_something(trimmed);
 }
 
 // Whether a value holds, anywhere inside it, a command that needs the API token: an action, a
