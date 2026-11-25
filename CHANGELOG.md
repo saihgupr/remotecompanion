@@ -30,6 +30,7 @@ All notable changes to this project will be documented in this file.
 - **Tighter bar gesture zones**: the status bar and bottom bar gesture areas now cover 25pt from the edge instead of 50pt, so a touch has to land closer to the bar. Two-finger slides keep their wider 75pt landing zone.
 
 ### Fixed
+- **Blank icons in the Web UI**: about twenty icons named ones the Web UI's icon set doesn't have, so they drew nothing (If, Previous App, AirPlay, AudioMix, Screen Recording, Tap and Hold, REST API Call, Control Center buttons, several conditions and more). Each uses the nearest one the set has.
 - **Editing a Timer or Clear Notifications action in the Web UI**: tapping one already on a trigger did nothing, because the editor read the action through a helper that was missing. It opens with the action's settings now.
 - **Large title on the Triggers screen**: the main screen opened, and came back from a trigger, with the small title even though the list was at the top. The category bar added its space before the table was on screen, so the navigation bar started collapsed and only opened after a scroll. The space is added after the first layout now, so the large title shows from launch and on the way back.
 - **SSH tools come with the package**: RemoteCompanion now depends on `openssh-client` and `sshpass`, so SSH actions work right after installing instead of failing with `sshpass: not found`. Existing installs pick both up on the next upgrade.
