@@ -4423,6 +4423,12 @@ function nameForCmd(cmd) {
     if (t === 'repeat') { const n = String(cmd.count ?? 0); return n === '1' ? 'Repeat 1 Time' : `Repeat ${n} Times`; } // a number or "{times}"
     if (t === 'repeat_while') return (cmd.conditionKey === 'time_between') ? `Repeat While Time is Between ${cmd.expectedTitle||cmd.expectedValue||''}` : `Repeat While ${cmd.conditionTitle||'Condition'} is ${cmd.expectedTitle||'Value'}`;
     if (t === 'end_repeat') return 'End Repeat';
+    if (t === 'menu') {
+      const wait = Number(cmd.timeout ?? 10) > 0 ? ` (${Number(cmd.timeout ?? 10)} s)` : '';
+      return (cmd.title ? `Choose from Menu: ${cmd.title}` : 'Choose from Menu') + wait;
+    }
+    if (t === 'menu_option') return cmd.name || 'Option';
+    if (t === 'end_menu') return 'End Menu';
     if (t === 'exit_repeat') return 'Exit Repeat';
     if (t === 'wait_until') {
       const lim = parseInt(cmd.timeout, 10) > 0 ? parseInt(cmd.timeout, 10) : 60;
@@ -4697,6 +4703,9 @@ function iconForCmd(cmd) {
     if (t === 'if' || t === 'else_if' || t === 'else') return { icon:'arrow_triangle_branch', cls:'icon-purple' };
     if (t === 'end_if' || t === 'end') return { icon:'arrow_turn_up_left', cls:'icon-purple' };
     if (t === 'end_repeat') return { icon:'arrow_turn_up_left', cls:'icon-green' };
+    if (t === 'menu') return { icon:'list_bullet', cls:'icon-blue' };
+    if (t === 'menu_option') return { icon:'circle_fill', cls:'icon-blue' };
+    if (t === 'end_menu') return { icon:'arrow_turn_up_left', cls:'icon-blue' };
     if (t === 'exit_repeat') return { icon:'arrow_right_to_line', cls:'icon-green' };
     if (t === 'wait_until') return { icon:'hourglass', cls:'icon-orange' };
     if (t === 'set_variable') return { icon:'function', cls:'icon-orange' };
@@ -4901,6 +4910,7 @@ const ACTION_SECTIONS = [
   { title:'Scripting & Logic', actions:[
     { name:'If Condition…',     cmd:'__IF_CONDITION__',icon:'arrow_triangle_branch', needs_input:true },
     { name:'Repeat…',           cmd:'__REPEAT__',      icon:'repeat', needs_input:true },
+    { name:'Choose from Menu…', cmd:'__CHOOSE_MENU__', icon:'list_bullet', needs_input:true, keywords:'menu pick choose options list prompt ask' },
     { name:'Repeat While…',     cmd:'__REPEAT_WHILE__',icon:'repeat', needs_input:true },
     { name:'Exit Repeat',       cmd:'__EXIT_REPEAT__', icon:'arrow_right_to_line', needs_input:true },
     { name:'Wait Until…',       cmd:'__WAIT_UNTIL__',  icon:'hourglass', needs_input:true },
@@ -5974,8 +5984,8 @@ function renderActionList() {
   actions.forEach((action, idx) => {
     const isCtrl = typeof action === 'object';
     const type   = isCtrl ? (action.type||'').toLowerCase() : null;
-    const isEnd  = type === 'end_if' || type === 'end' || type === 'end_repeat';
-    const isElse = type === 'else';
+    const isEnd  = type === 'end_if' || type === 'end' || type === 'end_repeat' || type === 'end_menu';
+    const isElse = type === 'else' || type === 'menu_option'; // a branch of its block
     const isElseIf = type === 'else_if';
     const isIf   = type === 'if';
     const rowIndent = (isEnd || isElse || isElseIf) ? Math.max(0, indent - 1) : indent;
@@ -6140,7 +6150,7 @@ function renderActionList() {
     card.appendChild(row);
 
     // Update indent level for subsequent rows
-    if (isIf || type === 'repeat' || type === 'repeat_while') indent++;
+    if (isIf || type === 'repeat' || type === 'repeat_while' || type === 'menu') indent++;
     else if (isEnd) indent = Math.max(0, indent - 1);
   });
 
@@ -6371,6 +6381,21 @@ function removeAction(idx) {
   if (idx < 0 || idx >= actions.length) return;
   const action = actions[idx];
   const startType = typeof action === 'object' && action !== null ? (action.type || '').toLowerCase() : '';
+  // A Choose from Menu takes its End Menu and its own Option rows with it (their actions stay)
+  if (startType === 'menu') {
+    const remove = [idx];
+    let depth = 0;
+    for (let i = idx + 1; i < actions.length; i++) {
+      const t = (actions[i] && typeof actions[i] === 'object') ? (actions[i].type || '').toLowerCase() : '';
+      if (['if', 'repeat', 'repeat_while', 'menu'].includes(t)) depth++;
+      else if (['end_if', 'end', 'end_repeat', 'end_menu'].includes(t)) { if (depth === 0) { remove.push(i); break; } depth--; }
+      else if (depth === 0 && t === 'menu_option') remove.push(i);
+    }
+    remove.sort((a, b) => b - a).forEach(i => actions.splice(i, 1));
+    saveConfig();
+    renderActionList();
+    return;
+  }
   // An If or Repeat takes its End marker with it
   const isIf = startType === 'if' || startType === 'repeat' || startType === 'repeat_while';
 
@@ -6424,12 +6449,12 @@ function duplicateAction(idx) {
 
   let start = idx;
   const type = actionType(actions[idx]);
-  if (type === 'else' || type === 'else_if' || type === 'end_if' || type === 'end' || type === 'end_repeat') {
+  if (['else', 'else_if', 'menu_option', 'end_if', 'end', 'end_repeat', 'end_menu'].includes(type)) {
     let depth = 0;
     for (let i = idx - 1; i >= 0; i--) {
       const t = actionType(actions[i]);
-      if (t === 'end_if' || t === 'end' || t === 'end_repeat') depth++;
-      else if (t === 'if' || t === 'repeat' || t === 'repeat_while') {
+      if (t === 'end_if' || t === 'end' || t === 'end_repeat' || t === 'end_menu') depth++;
+      else if (t === 'if' || t === 'repeat' || t === 'repeat_while' || t === 'menu') {
         if (depth === 0) { start = i; break; }
         depth--;
       }
@@ -6438,12 +6463,12 @@ function duplicateAction(idx) {
 
   let end = start;
   const startType = actionType(actions[start]);
-  if (startType === 'if' || startType === 'repeat' || startType === 'repeat_while') {
+  if (startType === 'if' || startType === 'repeat' || startType === 'repeat_while' || startType === 'menu') {
     let depth = 1;
     for (let i = start + 1; i < actions.length; i++) {
       const t = actionType(actions[i]);
-      if (t === 'if' || t === 'repeat' || t === 'repeat_while') depth++;
-      else if (t === 'end_if' || t === 'end' || t === 'end_repeat') {
+      if (t === 'if' || t === 'repeat' || t === 'repeat_while' || t === 'menu') depth++;
+      else if (t === 'end_if' || t === 'end' || t === 'end_repeat' || t === 'end_menu') {
         depth--;
         if (depth === 0) { end = i; break; }
       }
@@ -7803,6 +7828,90 @@ function updateLogStats(total, exec, err, http) {
   if (elHttp) elHttp.textContent = http;
 }
 
+// Choose from Menu: { type:'menu', title, timeout (s; 0 until a pick), timeoutOption (the option a
+// timeout picks; Cancel when missing) } ... { type:'menu_option', name, icon } ... { type:'end_menu' }.
+// The menu always shows on the phone, in the middle of the screen. idx null: a new one, with two options.
+function promptMenuSettings(idx) {
+  const actions = triggerData(currentKey).actions || [];
+  const menu = idx === null ? { type: 'menu', timeout: 10 } : actions[idx];
+  const title = window.prompt('Menu title (optional)', menu.title || '');
+  if (title === null) return;
+  const limitText = window.prompt('Time limit in seconds (0 waits until a pick)', String(menu.timeout ?? 10));
+  if (limitText === null) return;
+  const updated = { ...menu };
+  if (title.trim()) updated.title = title.trim(); else delete updated.title;
+  updated.timeout = Math.max(0, Math.min(3600, parseInt(limitText, 10) || 0));
+  if (idx === null) {
+    actions.push(updated, { type: 'menu_option', name: 'Option 1' }, { type: 'menu_option', name: 'Option 2' }, { type: 'end_menu' });
+    triggerData(currentKey).actions = actions;
+  } else {
+    actions[idx] = updated;
+    const options = menuOptionRows(actions, idx);
+    if (updated.timeout > 0 && options.length) {
+      const names = options.map((row, i) => `${i + 1}: ${actions[row].name || 'Option'}`).join('\n');
+      const pick = window.prompt(`When time runs out: 0 cancels the trigger, or an option's number\n${names}`, updated.timeoutOption !== undefined ? String(updated.timeoutOption + 1) : '0');
+      if (pick !== null) {
+        const n = parseInt(pick, 10);
+        if (n >= 1 && n <= options.length) updated.timeoutOption = n - 1; else delete updated.timeoutOption;
+      }
+    }
+  }
+  saveConfig();
+  renderActionList();
+}
+
+// The rows of a menu's own options (not a nested menu's)
+function menuOptionRows(actions, menuIdx) {
+  const rows = [];
+  let depth = 0;
+  for (let i = menuIdx + 1; i < actions.length; i++) {
+    const t = (actions[i] && typeof actions[i] === 'object') ? (actions[i].type || '').toLowerCase() : '';
+    if (['if', 'repeat', 'repeat_while', 'menu'].includes(t)) depth++;
+    else if (['end_if', 'end', 'end_repeat', 'end_menu'].includes(t)) { if (depth === 0) break; depth--; }
+    else if (depth === 0 && t === 'menu_option') rows.push(i);
+  }
+  return rows;
+}
+
+// Rename an option; an empty name offers to delete it and its actions
+function promptMenuOption(idx) {
+  const actions = triggerData(currentKey).actions || [];
+  const option = actions[idx];
+  const name = window.prompt('Option name (empty to delete the option and its actions)', option.name || '');
+  if (name === null) return;
+  if (name.trim()) {
+    option.name = name.trim();
+  } else {
+    let end = idx + 1, depth = 0;
+    for (; end < actions.length; end++) {
+      const t = (actions[end] && typeof actions[end] === 'object') ? (actions[end].type || '').toLowerCase() : '';
+      if (['if', 'repeat', 'repeat_while', 'menu'].includes(t)) depth++;
+      else if (['end_if', 'end', 'end_repeat', 'end_menu'].includes(t)) { if (depth === 0) break; depth--; }
+      else if (depth === 0 && t === 'menu_option') break;
+    }
+    if (end - idx > 1 && !window.confirm(`Delete the option and its ${end - idx - 1} action(s)?`)) return;
+    actions.splice(idx, end - idx);
+  }
+  saveConfig();
+  renderActionList();
+}
+
+function addMenuOption(endIdx) {
+  const actions = triggerData(currentKey).actions || [];
+  let depth = 0, menuIdx = -1;
+  for (let i = endIdx - 1; i >= 0; i--) {
+    const t = (actions[i] && typeof actions[i] === 'object') ? (actions[i].type || '').toLowerCase() : '';
+    if (['end_if', 'end', 'end_repeat', 'end_menu'].includes(t)) depth++;
+    else if (['if', 'repeat', 'repeat_while', 'menu'].includes(t)) { if (depth === 0) { menuIdx = i; break; } depth--; }
+  }
+  const count = menuIdx >= 0 ? menuOptionRows(actions, menuIdx).length : 0;
+  const name = window.prompt('New option name', `Option ${count + 1}`);
+  if (!name || !name.trim()) return;
+  actions.splice(endIdx, 0, { type: 'menu_option', name: name.trim() });
+  saveConfig();
+  renderActionList();
+}
+
 function editAction(idx) {
   const actions = triggerData(currentKey).actions || [];
   const act = actions[idx];
@@ -7831,6 +7940,15 @@ function editAction(idx) {
     }
     else if (type === 'set_variable') {
       promptSetVariable(idx);
+    }
+    else if (type === 'menu') {
+      promptMenuSettings(idx);
+    }
+    else if (type === 'menu_option') {
+      promptMenuOption(idx);
+    }
+    else if (type === 'end_menu') {
+      addMenuOption(idx); // a new option at the end of its menu
     }
     else if (type === 'repeat') {
       promptRepeatCount(String(act.count || 1), 'Save', n => {
@@ -8294,6 +8412,8 @@ function selectPickerAction(act) {
     openCondPicker(null);
   } else if (c === '__SET_VARIABLE__') {
     promptSetVariable(null);
+  } else if (c === '__CHOOSE_MENU__') {
+    promptMenuSettings(null);
   } else if (c === '__REPEAT__') {
     promptRepeatCount('', 'Add', n => {
       const actions = triggerData(currentKey).actions || [];
@@ -11084,7 +11204,7 @@ function editHAAction(idx) {
 // toggle, match, exclude }. "match"/"exclude" patterns ending in " ", ":" or "-"
 // are prefixes; anything else must equal the (lowercased) command.
 // Not offered: entries that don't run an action of their own, and Set Flashlight (covered by Flashlight)
-const BANNER_SKIP = new Set(['__IF_CONDITION__', '__REPEAT__', '__REPEAT_WHILE__', '__EXIT_REPEAT__', '__WAIT_UNTIL__', '__SET_VARIABLE__', '__DELAY__', '__TOAST__', '__SET_FLASHLIGHT__', '__DEV_ANNOTATE__']);
+const BANNER_SKIP = new Set(['__IF_CONDITION__', '__CHOOSE_MENU__', '__REPEAT__', '__REPEAT_WHILE__', '__EXIT_REPEAT__', '__WAIT_UNTIL__', '__SET_VARIABLE__', '__DELAY__', '__TOAST__', '__SET_FLASHLIGHT__', '__DEV_ANNOTATE__']);
 // The app's names for the same actions, so both UIs share one setting
 const BANNER_ID_ALIASES = { '__SHORTCUT__': '__SHORTCUT_PICKER__', 'queuealbum': 'queue album', 'queueartist': 'queue artist',
   'shuffleall': 'shuffle all songs', 'deletesong': 'delete current song' };

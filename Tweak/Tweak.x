@@ -31,6 +31,7 @@
 #import <mach/mach_host.h>
 #import "native_curl.h"
 #import "RCTestKit.h"
+#import "RCMenuPrompt.h"
 #import "RCToastPill.h"
 #import "RCNotifyCommand.h"
 #import "RCClearNotificationsCommand.h"
@@ -5511,6 +5512,16 @@ static BOOL rc_own_banner_enabled(NSString *bannerId) {
 // Settings > Banners > Wake Screen: a toast that comes while the screen is off turns it on,
 // the way a press of the Power button would (the phone stays locked). One press for toasts
 // that come close together, so a second press can't turn the screen back off.
+// Choose from Menu (RCMenuPrompt.m): its card can't be picked from on a dark screen
+void RCMenuWakeScreenIfOff(void) {
+    __block BOOL on = YES;
+    void (^read)(void) = ^{ on = [[objc_getClass("SBBacklightController") sharedInstance] screenIsOn]; };
+    if ([NSThread isMainThread]) read(); else dispatch_sync(dispatch_get_main_queue(), read);
+    if (on) return;
+    SRLog(@"[Menu] Waking the screen for Choose from Menu");
+    inject_hid_event(kHIDPage_Consumer, kHIDUsage_Csmr_Power, 0, 0);
+}
+
 static void rc_toast_wake_screen_if_set(void) {
     static NSDate *lastWake = nil;
     load_trigger_config();
@@ -6499,6 +6510,66 @@ static void rc_execute_action_sequence_body(NSArray *actions, NSString *triggerK
                 break;
             }
         } else if ([type isEqualToString:@"end_if"] || [type isEqualToString:@"end"]) {
+            continue;
+        } else if ([type isEqualToString:@"menu"]) {
+            // Choose from Menu: { title, timeout (s, 0 for none; 10 when missing), timeoutOption (the
+            // option a timeout picks; Cancel when missing) } ... menu_option { name, icon } ...
+            // end_menu. The option picked runs; Cancel (or a tap outside the card) ends the run.
+            // Menus nest: only this one's own options count.
+            NSMutableArray<NSNumber *> *optionAt = [NSMutableArray array];
+            NSMutableArray<NSDictionary *> *options = [NSMutableArray array];
+            NSInteger depth = 0, end = NSNotFound;
+            for (NSInteger j = idx + 1; j < (NSInteger)actions.count; j++) {
+                NSString *inner = [actions[j] isKindOfClass:[NSDictionary class]] ? [[((NSDictionary *)actions[j])[@"type"] description] lowercaseString] : nil;
+                if ([inner isEqualToString:@"menu"]) depth++;
+                else if ([inner isEqualToString:@"end_menu"]) { if (depth == 0) { end = j; break; } depth--; }
+                else if (depth == 0 && [inner isEqualToString:@"menu_option"] && !rc_is_action_item_disabled(actions[j])) {
+                    NSDictionary *option = actions[j];
+                    [optionAt addObject:@(j)];
+                    [options addObject:@{ @"name": rc_fill_placeholders([option[@"name"] description] ?: @""), @"icon": [option[@"icon"] description] ?: @"" }];
+                }
+            }
+            if (end == NSNotFound) {
+                SRLog(@"[%@] Missing End Menu marker; stopping action execution.", triggerKey);
+                break;
+            }
+            if (!options.count) { idx = end; continue; }
+            double timeout = 10;
+            if (dictAction[@"timeout"] && !rc_number_from_setting(dictAction[@"timeout"], &timeout)) timeout = 10;
+            timeout = MAX(0, MIN(timeout, 3600));
+            NSString *title = rc_fill_placeholders([dictAction[@"title"] description] ?: @"");
+            SRLogMin(@"[%@] Choose from Menu '%@': %lu options", triggerKey, title, (unsigned long)options.count);
+            RCTKEvent(@"menu", @{ @"trigger": triggerKey ?: @"", @"title": title, @"options": [options valueForKey:@"name"] });
+            NSInteger picked = RCMenuPromptRun(title, options, timeout, ^BOOL { return rc_run_stopped(); });
+            if (picked == RCMenuPromptTimedOut) {
+                id choice = dictAction[@"timeoutOption"];
+                NSInteger index = [choice respondsToSelector:@selector(integerValue)] ? [choice integerValue] : -1;
+                picked = (choice && index >= 0 && index < (NSInteger)options.count) ? index : RCMenuPromptCancelled;
+                SRLogMin(@"[%@] Choose from Menu timed out -> %@", triggerKey, picked >= 0 ? options[picked][@"name"] : @"Cancel");
+            }
+            if (picked < 0 || picked >= (NSInteger)options.count) {
+                rc_run_trace(idx, @"picked", @"Cancel");
+                RCTKEvent(@"menu.picked", @{ @"trigger": triggerKey ?: @"", @"picked": [NSNull null] });
+                if (!rc_run_stopped()) SRLogMin(@"[%@] Choose from Menu cancelled - the rest of its actions were skipped", triggerKey);
+                break;
+            }
+            NSString *name = options[picked][@"name"];
+            rc_variable_set(@"menu", name, YES); // {menu}: the option picked, for this run
+            rc_run_trace(idx, @"picked", name);
+            RCTKEvent(@"menu.picked", @{ @"trigger": triggerKey ?: @"", @"picked": name, @"index": @(picked) });
+            SRLogMin(@"[%@] Choose from Menu -> %@", triggerKey, name);
+            idx = [optionAt[picked] integerValue]; // its actions come next
+        } else if ([type isEqualToString:@"menu_option"]) {
+            // The end of the option that ran: on past the rest, after this menu's End Menu
+            NSInteger depth = 0;
+            BOOL found = NO;
+            for (NSInteger j = idx + 1; j < (NSInteger)actions.count; j++) {
+                NSString *inner = [actions[j] isKindOfClass:[NSDictionary class]] ? [[((NSDictionary *)actions[j])[@"type"] description] lowercaseString] : nil;
+                if ([inner isEqualToString:@"menu"]) depth++;
+                else if ([inner isEqualToString:@"end_menu"]) { if (depth == 0) { idx = j; found = YES; break; } depth--; }
+            }
+            if (!found) break;
+        } else if ([type isEqualToString:@"end_menu"]) {
             continue;
         } else if ([type isEqualToString:@"repeat"] || [type isEqualToString:@"repeat_while"]) {
             BOOL isWhile = [type isEqualToString:@"repeat_while"];

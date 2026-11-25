@@ -27,6 +27,7 @@ LUA_FILES = $(wildcard lua/*.c)
 RemoteCommand_FILES = Tweak.x RCNFCManager.x $(LUA_FILES)
 RemoteCommand_FILES += RCTestKit.x
 RemoteCommand_FILES += RCGestures.m
+RemoteCommand_FILES += RCMenuPrompt.m
 RemoteCommand_FILES += RCScreen.m
 RemoteCommand_FILES += RCScreenSelect.m
 RemoteCommand_FILES += RCDevAnnotate.m

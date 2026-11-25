@@ -1939,6 +1939,17 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
             return [NSString stringWithFormat:@"Repeat While %@ is %@", conditionTitle, expectedTitle];
         } else if ([type isEqualToString:@"end_repeat"]) {
             return @"End Repeat";
+        } else if ([type isEqualToString:@"menu"]) {
+            // Choose from Menu: its title, and how long it waits (0: until a pick)
+            NSString *title = [dict[@"title"] description] ?: @"";
+            double timeout = dict[@"timeout"] ? [dict[@"timeout"] doubleValue] : 10;
+            NSString *wait = timeout > 0 ? [NSString stringWithFormat:@" (%.0f s)", timeout] : @"";
+            return title.length ? [NSString stringWithFormat:@"Choose from Menu: %@%@", title, wait] : [@"Choose from Menu" stringByAppendingString:wait];
+        } else if ([type isEqualToString:@"menu_option"]) {
+            NSString *name = [dict[@"name"] description] ?: @"";
+            return name.length ? name : @"Option";
+        } else if ([type isEqualToString:@"end_menu"]) {
+            return @"End Menu";
         } else if ([type isEqualToString:@"exit_repeat"]) {
             return @"Exit Repeat";
         } else if ([type isEqualToString:@"set_variable"]) {
@@ -2605,8 +2616,13 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
             return @"arrow.triangle.branch";
         } else if ([type isEqualToString:@"repeat"] || [type isEqualToString:@"repeat_while"]) {
             return @"repeat";
-        } else if ([type isEqualToString:@"end"] || [type isEqualToString:@"end_if"] || [type isEqualToString:@"end_repeat"]) {
+        } else if ([type isEqualToString:@"end"] || [type isEqualToString:@"end_if"] || [type isEqualToString:@"end_repeat"] || [type isEqualToString:@"end_menu"]) {
             return @"arrow.turn.up.left";
+        } else if ([type isEqualToString:@"menu"]) {
+            return @"list.bullet.rectangle";
+        } else if ([type isEqualToString:@"menu_option"]) {
+            NSString *icon = [dict[@"icon"] description];
+            return icon.length && [UIImage systemImageNamed:icon] ? icon : @"smallcircle.filled.circle";
         } else if ([type isEqualToString:@"exit_repeat"]) {
             return @"arrow.right.to.line";
         } else if ([type isEqualToString:@"set_variable"]) {
