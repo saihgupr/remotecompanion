@@ -7158,6 +7158,12 @@ function saveClearNotifDialog() {
 }
 
 // Puts a command at idx, keeping any settings around it
+// An action's command: actions are stored as the command itself, or as an object carrying one
+function actionCommand(action) {
+  if (typeof action === 'string') return action;
+  return action && typeof action.command === 'string' ? action.command : '';
+}
+
 function storeCommandAt(actions, idx, command) {
   if (actions[idx] && typeof actions[idx] === 'object' && typeof actions[idx].command === 'string') actions[idx].command = command;
   else actions[idx] = command;
