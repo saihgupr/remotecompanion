@@ -216,7 +216,7 @@ static NSString *RCItemType(id item) {
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     switch (section) {
         case RCMenuEditorSectionTitle: return @"Shown at the top of the menu.";
-        case RCMenuEditorSectionOptions: return @"Tap an option to rename it or change its icon. Drag to reorder: its actions move with it. Add actions under an option in the trigger's list.";
+        case RCMenuEditorSectionOptions: return @"Tap an option to rename it or change its icon. Drag to reorder: its actions move with it. To give an option actions, tap it in the trigger's list and choose Add Action to This Option.";
         case RCMenuEditorSectionTime: return [self timeLimit] > 0 ? @"The menu closes after this long if nothing is picked." : @"The menu stays until an option or Cancel is tapped.";
         case RCMenuEditorSectionTimeout: return [self timeLimit] > 0 ? @"Cancel stops the trigger there; an option runs as if it had been picked." : nil;
     }
@@ -256,7 +256,7 @@ static NSString *RCItemType(id item) {
         NSDictionary *option = self.options[indexPath.row];
         cell.textLabel.text = [option[@"option"][@"name"] description].length ? [option[@"option"][@"name"] description] : @"Option";
         NSUInteger count = [option[@"actions"] count];
-        cell.detailTextLabel.text = count ? [NSString stringWithFormat:@"%lu action%@", (unsigned long)count, count == 1 ? @"" : @"s"] : @"No actions";
+        cell.detailTextLabel.text = count ? [NSString stringWithFormat:@"%lu action%@", (unsigned long)count, count == 1 ? @"" : @"s"] : @"No actions yet";
         cell.imageView.image = [UIImage systemImageNamed:[self iconForOptionAt:indexPath.row]];
         cell.imageView.tintColor = [UIColor systemBlueColor];
         cell.showsReorderControl = YES;

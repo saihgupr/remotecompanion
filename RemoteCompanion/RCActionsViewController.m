@@ -877,6 +877,10 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
 // opened for, its panel (kept here so scrolling away and back doesn't lose what was typed), and
 // the height of the row above the panel
 @property (nonatomic, assign) NSInteger inlineEditorIndex;
+// Add Action Here: where the next action added goes (NSNotFound: the end), and how many rows there
+// were when the picker opened (what's added past them is moved there when it's saved)
+@property (nonatomic, assign) NSInteger pendingInsertIndex;
+@property (nonatomic, assign) NSUInteger pendingInsertBase;
 @property (nonatomic, copy) NSString *inlineEditorCommand;
 @property (nonatomic, assign) CGFloat inlineEditorRowHeight;
 // A choice or a text row's editor, open in place the same way: its value (kept here so scrolling
@@ -1758,6 +1762,7 @@ static NSArray *RCActionSnapshot(NSArray *actions) {
         _triggerKey = triggerKey;
         _runningIndex = NSNotFound;
         _inlineEditorIndex = NSNotFound;
+        _pendingInsertIndex = NSNotFound;
     }
     return self;
 }
@@ -2775,8 +2780,30 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
     return defaults[action];
 }
 
+// The picker, with what it adds going to index rather than the end (under a menu's option, say)
+- (void)addActionAtIndex:(NSInteger)index {
+    [self addAction];
+    if (index >= 0 && index <= (NSInteger)self.actions.count) {
+        self.pendingInsertIndex = index;
+        self.pendingInsertBase = self.actions.count;
+    }
+}
+
+// Where the next action added to the option at row goes: after its last action
+- (NSInteger)endOfMenuOptionAtRow:(NSInteger)row {
+    NSInteger depth = 0;
+    for (NSInteger i = row + 1; i < (NSInteger)self.actions.count; i++) {
+        id item = self.actions[i];
+        if (depth == 0 && ([self isMenuOptionActionItem:item] || [self isEndMenuActionItem:item])) return i;
+        if ([self isBlockStartItem:item]) depth++;
+        else if ([self isBlockEndItem:item]) depth--;
+    }
+    return self.actions.count;
+}
+
 - (void)addAction {
     if (self.inlineEditorIndex != NSNotFound) [self commitInlineRowEditor];
+    self.pendingInsertIndex = NSNotFound; // the end, unless Add Action Here set it
 
     RCActionPickerViewController *picker = [[RCActionPickerViewController alloc] init];
     __weak typeof(self) weakSelf = self;
@@ -3106,6 +3133,14 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
 }
 
 - (void)saveActions {
+    // Add Action Here: what was just added at the end goes where it was asked for
+    if (self.pendingInsertIndex != NSNotFound && self.actions.count > self.pendingInsertBase && self.pendingInsertIndex <= (NSInteger)self.pendingInsertBase) {
+        NSRange added = NSMakeRange(self.pendingInsertBase, self.actions.count - self.pendingInsertBase);
+        NSArray *items = [self.actions subarrayWithRange:added];
+        [self.actions removeObjectsInRange:added];
+        [self.actions insertObjects:items atIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(self.pendingInsertIndex, items.count)]];
+        self.pendingInsertIndex = NSNotFound;
+    }
     // A Remote RC action edited as its inner command gets its client wrapper back
     [self finishPendingRemoteEdit];
     [self finishAdding]; // closes the picker once this save is done
@@ -4227,7 +4262,12 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 - (void)appendInlineActionWithCommand:(NSString *)command {
     if (!command.length) return;
     NSInteger index = (NSInteger)self.actions.count;
-    [self.actions addObject:command];
+    // Add Action Here: at its place, so the inline editor opens on the right row
+    if (self.pendingInsertIndex != NSNotFound && self.pendingInsertIndex <= index) {
+        index = self.pendingInsertIndex;
+        self.pendingInsertIndex = NSNotFound;
+    }
+    [self.actions insertObject:command atIndex:index];
     [self saveActions];
 
     RCInlineRowItem *item = [self inlineRowItemForCommand:command];
@@ -4913,6 +4953,11 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         
         // Choose from Menu: its page, for any of its rows
         if ([self isMenuActionItem:item] || [self isMenuOptionActionItem:item] || [self isEndMenuActionItem:item]) {
+            if ([self isMenuOptionActionItem:item]) {
+                [alert addAction:[UIAlertAction actionWithTitle:@"Add Action to This Option" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+                    [self addActionAtIndex:[self endOfMenuOptionAtRow:indexPath.row]];
+                }]];
+            }
             NSInteger menuIndex = [self menuIndexForRow:indexPath.row];
             if (menuIndex != NSNotFound) {
                 [alert addAction:[UIAlertAction actionWithTitle:@"Edit Menu" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
@@ -5224,7 +5269,24 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
                 [self presentRepeatCountForIndex:indexPath.row];
             } else if ([[self actionTypeForItem:actionData] isEqualToString:@"set_variable"]) {
                 [self presentSetVariable:actionData existingIndex:indexPath.row];
-            } else if ([self isMenuActionItem:actionData] || [self isMenuOptionActionItem:actionData] || [self isEndMenuActionItem:actionData]) {
+            } else if ([self isMenuOptionActionItem:actionData]) {
+                // An option: what runs when it's picked goes under it
+                NSInteger row = indexPath.row;
+                NSString *name = [actionData[@"name"] description] ?: @"Option";
+                UIAlertController *sheet = [UIAlertController alertControllerWithTitle:name message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+                [sheet addAction:[UIAlertAction actionWithTitle:@"Add Action to This Option" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
+                    [self addActionAtIndex:[self endOfMenuOptionAtRow:row]];
+                }]];
+                [sheet addAction:[UIAlertAction actionWithTitle:@"Edit Menu" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
+                    NSInteger menu = [self menuIndexForRow:row];
+                    if (menu != NSNotFound) [self presentMenuSettingsForIndex:menu];
+                }]];
+                [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+                UIView *source = [tableView cellForRowAtIndexPath:indexPath];
+                sheet.popoverPresentationController.sourceView = source;
+                sheet.popoverPresentationController.sourceRect = source.bounds;
+                [self presentViewController:sheet animated:YES completion:nil];
+            } else if ([self isMenuActionItem:actionData] || [self isEndMenuActionItem:actionData]) {
                 NSInteger menu = [self menuIndexForRow:indexPath.row];
                 if (menu != NSNotFound) [self presentMenuSettingsForIndex:menu];
             }
