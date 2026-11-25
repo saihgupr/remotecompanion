@@ -4104,7 +4104,7 @@ function defaultNameForKey(key) {
 const CMD_NAMES = {
   'play':'Play','pause':'Pause','playpause':'Play/Pause','next':'Next Track','prev':'Previous Track',
   'volume up':'Volume Up','volume down':'Volume Down',
-  'queuealbum':'Queue Current Album','queue album':'Queue Current Album','queueartist':'Queue Artist (Shuffle)','queue artist':'Queue Artist (Shuffle)','player queue album':'Queue Album (Playing App)','player queue artist':'Queue Artist (Playing App)','shuffleall':'Shuffle All Songs','shuffle all songs':'Shuffle All Songs','deletesong':'Delete Currently Playing Song','delete song':'Delete Currently Playing Song','delete current song':'Delete Currently Playing Song',
+  'queuealbum':'Queue Current Album','queue album':'Queue Current Album','queueartist':'Queue Artist (Shuffle)','queue artist':'Queue Artist (Shuffle)','player queue album':'Queue Album (Playing App)','player queue artist':'Queue Artist (Playing App)','player like':'Like Song (Playing App)','player love':'Like Song (Playing App)','shuffleall':'Shuffle All Songs','shuffle all songs':'Shuffle All Songs','deletesong':'Delete Currently Playing Song','delete song':'Delete Currently Playing Song','delete current song':'Delete Currently Playing Song',
   'flashlight':'Flashlight Toggle','flashlight on':'Flashlight On','flashlight off':'Flashlight Off','flashlight toggle':'Flashlight Toggle',
   'dance party':'Dance Party','dance party toggle':'Dance Party','dance party on':'Dance Party On','dance party off':'Dance Party Off',
   'button triggers pause 15':'Button Triggers Pause 15 Minutes','button triggers pause 60':'Button Triggers Pause 1 Hour','button triggers pause':'Button Triggers Pause Until Resumed','button triggers resume':'Button Triggers Resume',
@@ -4706,7 +4706,7 @@ function iconForCmd(cmd) {
     'play':'play_fill','pause':'pause_fill','playpause':'playpause_fill',
     'next':'forward_fill','prev':'backward_fill',
     'volume up':'speaker_3_fill','volume down':'speaker_1_fill',
-    'queuealbum':'music_note_list','queue album':'music_note_list','queueartist':'music_mic','queue artist':'music_mic','player queue album':'music_note_list','player queue artist':'music_mic','shuffleall':'shuffle','shuffle all songs':'shuffle','deletesong':'trash','delete song':'trash','delete current song':'trash',
+    'queuealbum':'music_note_list','queue album':'music_note_list','queueartist':'music_mic','queue artist':'music_mic','player queue album':'music_note_list','player queue artist':'music_mic','player like':'heart_fill','player love':'heart_fill','shuffleall':'shuffle','shuffle all songs':'shuffle','deletesong':'trash','delete song':'trash','delete current song':'trash',
     'flashlight':'bolt_fill','flashlight on':'bolt_fill','flashlight off':'bolt_slash_fill','flashlight toggle':'bolt_fill',
     'dance party':'bolt_fill','dance party toggle':'bolt_fill','dance party on':'bolt_fill','dance party off':'bolt_slash_fill',
     'button triggers pause 15':'pause_circle','button triggers pause 60':'pause_circle','button triggers pause':'pause_circle','button triggers resume':'play_circle',
@@ -4806,6 +4806,7 @@ const ACTION_SECTIONS = [
     { name:'Queue Artist (Shuffle)', cmd:'queueartist', icon:'music_mic' },
     { name:'Queue Album (Playing App)', cmd:'player queue album', icon:'music_note_list' },
     { name:'Queue Artist (Playing App)', cmd:'player queue artist', icon:'music_mic' },
+    { name:'Like Song (Playing App)', cmd:'player like', icon:'heart_fill' },
     { name:'Shuffle All Songs', cmd:'shuffleall',   icon:'shuffle' },
     { name:'Delete Currently Playing Song', cmd:'deletesong', icon:'trash' },
   ]},
@@ -11095,7 +11096,7 @@ const BANNER_ID_ALIASES = { '__SHORTCUT__': '__SHORTCUT_PICKER__', 'queuealbum':
 const BANNER_OWN = new Set(['__CAMERA_PICKER__', '__CAMERA_VIDEO_PICKER__', 'camera record', '__HA_PICKER__', '__KM_TRIGGER__',
   '__MQTT_PUBLISH__', 'audiomix toggle', 'sneakycam photo', 'sneakycam video',
   'queue album', 'queue artist', 'shuffle all songs', 'delete current song',
-  'player queue album', 'player queue artist']);
+  'player queue album', 'player queue artist', 'player like', 'player love']);
 const BANNER_PLACEHOLDERS = {
   '__SET_VOLUME__': ['set-vol '],
   '__SET_BRIGHTNESS__': ['brightness '],

@@ -44,7 +44,8 @@ static NSSet<NSString *> *RCOwnBannerIds(void) {
                                     @"__HA_PICKER__", @"__KM_TRIGGER__", @"__MQTT_PUBLISH__", @"audiomix toggle",
                                     @"sneakycam photo", @"sneakycam video",
                                     @"queue album", @"queue artist", @"shuffle all songs", @"delete current song",
-                                    @"player queue album", @"player queue artist"]];
+                                    @"player queue album", @"player queue artist",
+                                    @"player like", @"player love"]];
     });
     return ids;
 }

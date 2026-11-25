@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file.
 - **Flashlight brightness options**: `rc flashlight low|medium|high|max` sets one of the four levels iOS's own slider uses, `rc flashlight up|down [N]` steps from the current level (25 by default), and `rc flashlight status` now prints the level, e.g. `Flashlight ON (75%)`. `on` takes the same names or a percentage, and `torch` and `flash` accept everything `flashlight` does.
 - **`previous` as an alias for `prev`**: `rc previous` skips to the previous track, the same as `rc prev`, in scripts and the CLI.
 - **Queue the playing album or artist**: `rc player queue album` and `rc player queue artist` queue from whichever music player is playing, using that app's add-on (Music through MusicRemote, Spotify through Zefy, AudioStream through its own add-on). `--player music|zefy|audiostream` picks one by hand. Both are in the action picker and the Web UI under Media.
+- **Like or love the playing song**: `rc player like` (or `rc player love`) toggles the heart on whichever music player is playing, through that app's add-on: MusicRemote's loved flag in Music, Zefy's like in Spotify. `--player music|zefy` picks one by hand. AudioStream keeps no liked state. It is in the action picker and the Web UI under Media.
 
 ### Changed
 - **Annotate toast**: a successful send to OpenCode is just "Sent to OpenCode" or "Pasted to OpenCode", without the session title underneath, which was long and often named the device.

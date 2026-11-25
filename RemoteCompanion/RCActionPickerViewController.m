@@ -262,6 +262,7 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
             // Not tied to AudioStream: these queue on Music and Spotify too, through their add-ons
             [media addObject:@{ @"name": @"Queue Album (Playing App)", @"command": @"player queue album", @"icon": @"music.note.list" }];
             [media addObject:@{ @"name": @"Queue Artist (Playing App)", @"command": @"player queue artist", @"icon": @"music.mic" }];
+            [media addObject:@{ @"name": @"Like Song (Playing App)", @"command": @"player like", @"icon": @"heart.fill" }];
             media;
         }),
         // Sound

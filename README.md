@@ -98,6 +98,7 @@ Access the desktop-class automation hub at `http://[DEVICE_IP]:8080` from any co
 ### Media, Sound & Volume
 - `rc play` / `rc pause` / `rc playpause` / `rc next` / `rc prev` (or `rc previous`) - Control media playback.
 - `rc player queue album` / `rc player queue artist` - Queue the album or artist of whatever is playing, through that app's add-on (Music, Spotify via Zefy, or AudioStream). Add `--player music|zefy|audiostream` to pick the app by hand.
+- `rc player like` (or `rc player love`) - Like or love the song that is playing, through that app's add-on (Music or Spotify). Add `--player music|zefy` to pick the app by hand.
 - `rc volume 0-100` - Set volume level.
 - `rc volume up [N]` / `rc volume down [N]` - Step volume up or down by N percent (default is 1 native step) and return the resulting volume percentage (e.g. `Volume: 45%`).
 - `rc mute [on|off|toggle|status]` - Control media mute state.

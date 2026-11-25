@@ -50,6 +50,7 @@ A sequence is a **JSON array** of actions. Each action is either:
 | `prev` / `previous` | Previous track |
 | `player queue album` | Queue the album of what is playing (add `--player music\|zefy\|audiostream` to pick the app) |
 | `player queue artist` | Queue the artist of what is playing (same `--player` option) |
+| `player like` / `player love` | Like or love the song that is playing (Music or Spotify through their add-ons, add `--player music\|zefy` to pick) |
 | `volume up` | Volume up one step |
 | `volume down` | Volume down one step |
 | `set-vol 75` | Set volume to 75% (0–100) |

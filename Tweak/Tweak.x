@@ -5542,7 +5542,7 @@ static BOOL rc_action_shows_own_banner(NSString *cmd) {
     if ([cmd isEqualToString:@"screen copy rect"] || [cmd hasPrefix:@"screen copy rect "]) return YES;
     NSSet *exact = [NSSet setWithArray:@[@"queuealbum", @"queue album", @"queueartist", @"queue artist", @"shuffleall", @"shuffle all songs",
                                          @"suffle all songs", @"deletesong", @"delete song", @"delete current song",
-                                         @"player queue album", @"player queue artist"]];
+                                         @"player queue album", @"player queue artist", @"player like", @"player love"]];
     return [exact containsObject:cmd];
 }
 
@@ -12401,6 +12401,7 @@ static NSArray *RCCommandHelpSections(void) {
             @[@"shuffle playlist <id>", @"Shuffle a Spotify playlist"],
             @[@"player queue album [--player <addon>]", @"Queue the playing app's album (music, zefy or audiostream)"],
             @[@"player queue artist [--player <addon>]", @"Queue the playing app's artist (music, zefy or audiostream)"],
+            @[@"player like|love [--player <addon>]", @"Like or love the playing song (music or zefy)"],
         ]},
         @{@"title": @"Device", @"rows": @[
             @[@"lock", @"Lock the screen"],
@@ -13453,29 +13454,39 @@ static NSString *rc_player_queue_addon_command(NSString *addOnId, BOOL album) {
     return nil;
 }
 
-// Queues on the add-on --player named (addOnId), or on the now-playing app when it is nil.
-// Called off the main thread: the now-playing client comes back on the main queue, which is
-// waited on for at most a second, like "player status". A paused app still names its player.
-static NSString *rc_player_queue_run(NSString *addOnId, BOOL album) {
-    NSString *shown = nil;
-    if (addOnId) {
-        shown = rc_player_name_for(addOnId);
-    } else {
-        __block NSString *bundleID = nil;
-        dispatch_semaphore_t sema = dispatch_semaphore_create(0);
-        MRMediaRemoteGetNowPlayingClient(dispatch_get_main_queue(), ^(void *clientObj) {
-            if (clientObj) {
-                CFStringRef bundleIDRef = MRNowPlayingClientGetBundleIdentifier(clientObj);
-                if (bundleIDRef) bundleID = [(__bridge NSString *)bundleIDRef copy];
-            }
-            dispatch_semaphore_signal(sema);
-        });
-        dispatch_semaphore_wait(sema, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)));
-        if (bundleID.length == 0) return @"Error: Nothing is playing (use --player music|zefy|audiostream)\n";
-        addOnId = rc_player_addon_for(bundleID);
-        if (!addOnId) return [NSString stringWithFormat:@"Error: %@ is not a supported player (music, zefy, audiostream)\n", bundleID];
-        shown = rc_player_name_for(addOnId);
+// The add-on of the now-playing app, or nil with the error to show. Called off the main
+// thread: the now-playing client comes back on the main queue, waited on for at most a
+// second, like "player status". A paused app still names its player.
+static NSString *rc_player_playing_addon(NSString **error) {
+    __block NSString *bundleID = nil;
+    dispatch_semaphore_t sema = dispatch_semaphore_create(0);
+    MRMediaRemoteGetNowPlayingClient(dispatch_get_main_queue(), ^(void *clientObj) {
+        if (clientObj) {
+            CFStringRef bundleIDRef = MRNowPlayingClientGetBundleIdentifier(clientObj);
+            if (bundleIDRef) bundleID = [(__bridge NSString *)bundleIDRef copy];
+        }
+        dispatch_semaphore_signal(sema);
+    });
+    dispatch_semaphore_wait(sema, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)));
+    if (bundleID.length == 0) {
+        if (error) *error = @"Error: Nothing is playing (use --player music|zefy|audiostream)\n";
+        return nil;
     }
+    NSString *addOnId = rc_player_addon_for(bundleID);
+    if (!addOnId && error) {
+        *error = [NSString stringWithFormat:@"Error: %@ is not a supported player (music, zefy, audiostream)\n", bundleID];
+    }
+    return addOnId;
+}
+
+// Queues on the add-on --player named (addOnId), or on the now-playing app when it is nil.
+static NSString *rc_player_queue_run(NSString *addOnId, BOOL album) {
+    if (!addOnId) {
+        NSString *error = nil;
+        addOnId = rc_player_playing_addon(&error);
+        if (!addOnId) return error;
+    }
+    NSString *shown = rc_player_name_for(addOnId);
 
     NSString *mapped = rc_player_queue_addon_command(addOnId, album);
     NSString *reply = RCAddOnsHandleCommand(mapped);
@@ -13491,23 +13502,64 @@ static NSString *rc_player_queue_run(NSString *addOnId, BOOL album) {
     return reply;
 }
 
-// "player queue album|artist [--player <music|zefy|audiostream>]": queues the album or artist of
-// whatever app is playing, through that app's add-on. Other "player ..." shapes get the usage
-// line rather than falling through to add-ons, so a typo doesn't run something unrelated.
+// Each add-on's command for the heart, where it has one. AudioStream keeps no liked state.
+static NSString *rc_player_like_addon_command(NSString *addOnId) {
+    if ([addOnId isEqualToString:@"music"]) return @"music love";
+    if ([addOnId isEqualToString:@"zefy"]) return @"zefy like";
+    return nil;
+}
+
+// Likes or loves the now-playing song through the app's own add-on. MusicRemote toggles
+// the Music loved flag, Zefy toggles the Spotify heart.
+static NSString *rc_player_like_run(NSString *addOnId) {
+    if (!addOnId) {
+        NSString *error = nil;
+        addOnId = rc_player_playing_addon(&error);
+        if (!addOnId) return error;
+    }
+    NSString *shown = rc_player_name_for(addOnId);
+    NSString *mapped = rc_player_like_addon_command(addOnId);
+    if (!mapped) {
+        return [NSString stringWithFormat:@"Error: %@ has no like command (music and zefy only)\n", shown];
+    }
+    NSString *reply = RCAddOnsHandleCommand(mapped);
+    if (reply.length == 0) {
+        return [NSString stringWithFormat:@"Error: The %@ add-on is not installed or is disabled\n", shown];
+    }
+    // Both add-ons define a banner; keep a toast for a future one that does not
+    if (!RCAddOnsCommandShowsOwnBanner(mapped) && rc_own_banner_enabled(@"player like")) {
+        rc_show_hud_toast(@"Liked", shown, @"heart.fill");
+    }
+    return reply;
+}
+
+// "player queue album|artist" and "player like|love", each with an optional
+// --player <music|zefy|audiostream>, act on whatever app is playing through its add-on.
+// Other "player ..." shapes get the usage line rather than falling through to add-ons, so
+// a typo doesn't run something unrelated.
 static NSString *rc_handle_player_command(NSString *cmd) {
-    static NSString *const usage = @"Usage: player queue album|artist [--player music|zefy|audiostream]\n";
+    static NSString *const usage = @"Usage: player queue album|artist | player like|love [--player music|zefy|audiostream]\n";
     NSMutableArray<NSString *> *words = [NSMutableArray array];
     for (NSString *word in [cmd.lowercaseString componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]) {
         if (word.length > 0) [words addObject:word];
     }
-    if (words.count < 3 || ![words[0] isEqualToString:@"player"] || ![words[1] isEqualToString:@"queue"]) return usage;
-    BOOL album;
-    if ([words[2] isEqualToString:@"album"]) album = YES;
-    else if ([words[2] isEqualToString:@"artist"]) album = NO;
-    else return usage;
+    if (words.count < 2 || ![words[0] isEqualToString:@"player"]) return usage;
+    BOOL like = [words[1] isEqualToString:@"like"] || [words[1] isEqualToString:@"love"];
+    BOOL queue = [words[1] isEqualToString:@"queue"];
+    if (!like && !queue) return usage;
+
+    BOOL album = NO;
+    NSUInteger flagStart = 2;
+    if (queue) {
+        if (words.count < 3) return usage;
+        if ([words[2] isEqualToString:@"album"]) album = YES;
+        else if ([words[2] isEqualToString:@"artist"]) album = NO;
+        else return usage;
+        flagStart = 3;
+    }
 
     NSString *requested = nil;
-    for (NSUInteger i = 3; i < words.count; i++) {
+    for (NSUInteger i = flagStart; i < words.count; i++) {
         NSString *word = words[i];
         if ([word isEqualToString:@"--player"]) {
             if (i + 1 >= words.count) return usage;
@@ -13526,16 +13578,21 @@ static NSString *rc_handle_player_command(NSString *cmd) {
     }
 
     // The Web UI's /api/command runs handle_command on the main thread and ignores the reply:
-    // queue in the background there and acknowledge now, so MediaRemote and the add-on's work
+    // run in the background there and acknowledge now, so MediaRemote and the add-on's work
     // can't hold or deadlock SpringBoard's main queue.
     if ([NSThread isMainThread]) {
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-            rc_player_queue_run(addOnId, album);
+            if (like) rc_player_like_run(addOnId);
+            else rc_player_queue_run(addOnId, album);
         });
+        if (like) {
+            return [NSString stringWithFormat:@"Liking on %@\n",
+                    addOnId ? rc_player_name_for(addOnId) : @"the playing app"];
+        }
         return [NSString stringWithFormat:@"Queueing %@ on %@\n", album ? @"album" : @"artist",
                 addOnId ? rc_player_name_for(addOnId) : @"the playing app"];
     }
-    return rc_player_queue_run(addOnId, album);
+    return like ? rc_player_like_run(addOnId) : rc_player_queue_run(addOnId, album);
 }
 
 static NSString *handle_command(NSString *cmd) {
@@ -13864,9 +13921,9 @@ static NSString *handle_command(NSString *cmd) {
         }
         return [NSString stringWithFormat:@"%@\n", status];
     } else if ([cleanCmd isEqualToString:@"player"] || [cleanCmd hasPrefix:@"player "]) {
-        // player queue album|artist: queue on whichever music player is playing (its add-on's
-        // own queue action). "player status" is the playback state above; other player
-        // subcommands get the usage line instead of falling through to add-ons.
+        // player queue album|artist and player like|love: act on whichever music player is
+        // playing (its add-on's own action). "player status" is the playback state above; other
+        // player subcommands get the usage line instead of falling through to add-ons.
         return rc_handle_player_command(cleanCmd);
     } else if ([cleanCmd isEqualToString:@"next"]) {
         MRMediaRemoteSendCommand(kMRNextTrack, nil);
