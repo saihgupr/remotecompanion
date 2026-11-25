@@ -12467,7 +12467,7 @@ static NSArray *RCCommandHelpSections(void) {
             @[@"cellular [on|off|toggle|status]", @"Cellular Data"],
             @[@"location [on|off|toggle|status]", @"Location Services"],
             @[@"airplane [on|off|toggle|status]", @"Airplane Mode"],
-            @[@"bluetooth connect|disconnect <name>", @"Manage paired devices"],
+            @[@"bluetooth connect|disconnect <name>", @"Manage paired or nearby devices"],
             @[@"carplay status", @"CarPlay connection state"],
             @[@"watch status", @"Apple Watch connection state"],
             @[@"watch charging", @"Apple Watch charging state"],
@@ -13419,6 +13419,321 @@ static NSArray<CBPeripheral *> *rc_connected_le_peripherals(void) {
     });
     NSArray *connected = [central retrieveConnectedPeripheralsWithServices:services];
     return connected ?: @[];
+}
+
+// ── Bluetooth through bluetoothd ─────────────────────────────────────────────
+// BluetoothManager's pairedDevices is the classic list, so low-energy devices
+// (an AssistiveTouch mouse such as Glisse, a BLE keyboard) never appear there.
+// bluetoothd owns every bond, and its C client is the one AssistiveTouch uses.
+// It can list, connect and drop an LE device, which is what Settings > Bluetooth's
+// Disconnect does. These are private functions, so they are looked up at runtime
+// and every path checks for a missing symbol.
+typedef struct BTSessionImpl *RCMBTSession;
+typedef struct BTDeviceImpl *RCMBTDevice;
+typedef struct BTLocalDeviceImpl *RCMBTLocalDevice;
+
+typedef void (*RCMBTSessionCallback)(RCMBTSession session, int32_t event, int32_t result, void *userData);
+typedef int32_t (*RCMBTSessionAttachFn)(const char *name, RCMBTSessionCallback *callback, void *userData, dispatch_queue_t queue);
+typedef int32_t (*RCMBTLocalDeviceGetDefaultFn)(RCMBTSession session, RCMBTLocalDevice *device);
+typedef int32_t (*RCMBTLocalDeviceGetDevicesFn)(RCMBTLocalDevice device, RCMBTDevice *devices, uint32_t *count, uint32_t maxCount);
+typedef int32_t (*RCMBTDeviceGetStringFn)(RCMBTDevice device, char *buffer, uint32_t size);
+typedef int32_t (*RCMBTDeviceGetConnectionStatusFn)(RCMBTDevice device, uint32_t *status);
+typedef int32_t (*RCMBTDeviceConnectFn)(RCMBTDevice device);
+typedef int32_t (*RCMBTDeviceConnectServicesFn)(RCMBTDevice device, uint32_t services);
+typedef int32_t (*RCMBTDeviceDisconnectFn)(RCMBTDevice device);
+
+
+static RCMBTSessionAttachFn g_rcMBTAttach = NULL;
+static RCMBTLocalDeviceGetDefaultFn g_rcMBTLocalDefault = NULL;
+static RCMBTLocalDeviceGetDevicesFn g_rcMBTPaired = NULL;
+static RCMBTLocalDeviceGetDevicesFn g_rcMBTConnected = NULL;
+static RCMBTDeviceGetStringFn g_rcMBTGetName = NULL;
+static RCMBTDeviceGetStringFn g_rcMBTGetDefaultName = NULL;
+static RCMBTDeviceGetStringFn g_rcMBTGetAddress = NULL;
+static RCMBTDeviceGetConnectionStatusFn g_rcMBTGetStatus = NULL;
+static RCMBTDeviceConnectFn g_rcMBTConnect = NULL;
+static RCMBTDeviceConnectServicesFn g_rcMBTConnectServices = NULL;
+static RCMBTDeviceDisconnectFn g_rcMBTDisconnect = NULL;
+static RCMBTDeviceDisconnectFn g_rcMBTPhysicalDisconnect = NULL;
+
+static RCMBTSession g_rcMBTSession = NULL;
+static RCMBTLocalDevice g_rcMBTLocalDevice = 0;
+static dispatch_queue_t g_rcMBTQueue = NULL;
+static dispatch_semaphore_t g_rcMBTReady = NULL;
+static NSObject *g_rcMBTLock = nil;
+
+static NSObject *rc_mbt_lock(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ g_rcMBTLock = [NSObject new]; });
+    return g_rcMBTLock;
+}
+
+static BOOL rc_mbt_load_symbols(void) {
+    static dispatch_once_t once;
+    static BOOL loaded = NO;
+    dispatch_once(&once, ^{
+        void *handle = dlopen("/System/Library/PrivateFrameworks/MobileBluetooth.framework/MobileBluetooth", RTLD_NOW);
+        if (!handle) return;
+        g_rcMBTAttach = (RCMBTSessionAttachFn)dlsym(handle, "BTSessionAttachWithQueue");
+        g_rcMBTLocalDefault = (RCMBTLocalDeviceGetDefaultFn)dlsym(handle, "BTLocalDeviceGetDefault");
+        g_rcMBTPaired = (RCMBTLocalDeviceGetDevicesFn)dlsym(handle, "BTLocalDeviceGetPairedDevices");
+        g_rcMBTConnected = (RCMBTLocalDeviceGetDevicesFn)dlsym(handle, "BTLocalDeviceGetConnectedDevices");
+        g_rcMBTGetName = (RCMBTDeviceGetStringFn)dlsym(handle, "BTDeviceGetName");
+        g_rcMBTGetDefaultName = (RCMBTDeviceGetStringFn)dlsym(handle, "BTDeviceGetDefaultName");
+        g_rcMBTGetAddress = (RCMBTDeviceGetStringFn)dlsym(handle, "BTDeviceGetAddressString");
+        g_rcMBTGetStatus = (RCMBTDeviceGetConnectionStatusFn)dlsym(handle, "BTDeviceGetConnectionStatus");
+        g_rcMBTConnect = (RCMBTDeviceConnectFn)dlsym(handle, "BTDeviceConnect");
+        g_rcMBTConnectServices = (RCMBTDeviceConnectServicesFn)dlsym(handle, "BTDeviceConnectServices");
+        g_rcMBTDisconnect = (RCMBTDeviceDisconnectFn)dlsym(handle, "BTDeviceDisconnect");
+        g_rcMBTPhysicalDisconnect = (RCMBTDeviceDisconnectFn)dlsym(handle, "BTDevicePhysicalLinkDisconnect");
+        loaded = g_rcMBTAttach && g_rcMBTLocalDefault && g_rcMBTPaired && g_rcMBTConnected &&
+                 g_rcMBTGetName && g_rcMBTGetAddress && g_rcMBTGetStatus &&
+                 g_rcMBTConnect && g_rcMBTDisconnect && g_rcMBTPhysicalDisconnect;
+    });
+    return loaded;
+}
+
+// Event 0 is attached (the call in AssistiveTouch.app follows the same numbers):
+// keep the session and ask it for the local device, which every other call needs.
+static void rc_mbt_session_event(RCMBTSession session, int32_t event, int32_t result, void *userData) {
+    if (event == 0 && result == 0 && session) {
+        RCMBTLocalDevice local = 0;
+        if (g_rcMBTLocalDefault && g_rcMBTLocalDefault(session, &local) == 0 && local) {
+            g_rcMBTSession = session;
+            g_rcMBTLocalDevice = local;
+        }
+        if (g_rcMBTReady) dispatch_semaphore_signal(g_rcMBTReady);
+    } else if (event == 1 || event == 2) {
+        if (!session || g_rcMBTSession == session) {
+            g_rcMBTSession = NULL;
+            g_rcMBTLocalDevice = 0;
+        }
+    }
+}
+
+static BOOL rc_mbt_ensure_session(void) {
+    if (g_rcMBTSession && g_rcMBTLocalDevice) return YES;
+    if (!rc_mbt_load_symbols()) return NO;
+    @synchronized (rc_mbt_lock()) {
+        if (g_rcMBTSession && g_rcMBTLocalDevice) return YES;
+        static dispatch_once_t queueOnce;
+        dispatch_once(&queueOnce, ^{
+            g_rcMBTQueue = dispatch_queue_create("com.remotecompanion.mobilebluetooth", NULL);
+        });
+        dispatch_semaphore_t ready = dispatch_semaphore_create(0);
+        g_rcMBTReady = ready;
+        RCMBTSessionCallback callback = rc_mbt_session_event;
+        int32_t attach = g_rcMBTAttach("com.remotecompanion.bluetooth", &callback, NULL, g_rcMBTQueue);
+        if (attach == 0) {
+            dispatch_semaphore_wait(ready, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC));
+        }
+        g_rcMBTReady = nil;
+        BOOL readyNow = (g_rcMBTSession && g_rcMBTLocalDevice) ? YES : NO;
+        if (!readyNow) SRLog(@"[BT] bluetoothd session attach=%d failed", attach);
+        return readyNow;
+    }
+}
+
+static NSArray<NSNumber *> *rc_mbt_device_numbers(BOOL connectedOnly) {
+    if (!rc_mbt_ensure_session()) return @[];
+    RCMBTDevice devices[64];
+    uint32_t count = 0;
+    int32_t result = connectedOnly
+        ? g_rcMBTConnected(g_rcMBTLocalDevice, devices, &count, 64)
+        : g_rcMBTPaired(g_rcMBTLocalDevice, devices, &count, 64);
+    if (result != 0) {
+        // The session may have been torn down under us; let the next call reattach.
+        SRLog(@"[BT] bluetoothd %@ list error %d", connectedOnly ? @"connected" : @"paired", result);
+        g_rcMBTSession = NULL;
+        g_rcMBTLocalDevice = 0;
+        return @[];
+    }
+    if (count > 64) count = 64;
+    NSMutableArray *numbers = [NSMutableArray arrayWithCapacity:count];
+    for (uint32_t i = 0; i < count; i++) {
+        // bluetoothd can leave a zero placeholder in the array; it has no device behind it.
+        if (!devices[i]) continue;
+        [numbers addObject:@((uint64_t)devices[i])];
+    }
+    return numbers;
+}
+
+static NSString *rc_mbt_device_string(RCMBTDevice device, BOOL address) {
+    char buffer[256] = {0};
+    RCMBTDeviceGetStringFn get = address ? g_rcMBTGetAddress : g_rcMBTGetName;
+    int32_t result = get ? get(device, buffer, sizeof(buffer)) : 1;
+    if (result != 0 && !address) {
+        // A disconnected device can have no cached name; the default name
+        // (often the model) is still worth matching against.
+        if (g_rcMBTGetDefaultName) result = g_rcMBTGetDefaultName(device, buffer, sizeof(buffer));
+    }
+    if (result != 0) return nil;
+    NSString *value = [NSString stringWithUTF8String:buffer];
+    return value.length ? value : nil;
+}
+
+static NSNumber *rc_mbt_find_device(NSString *deviceName, BOOL *outConnected, NSString **outName) {
+    NSString *needle = deviceName.lowercaseString;
+    if (needle.length == 0) return nil;
+    // Connected devices first, so "connect" can say it already is and
+    // "disconnect" acts on the live link.
+    for (int pass = 0; pass < 2; pass++) {
+        for (NSNumber *number in rc_mbt_device_numbers(pass == 0)) {
+            RCMBTDevice device = (RCMBTDevice)(uintptr_t)number.unsignedLongLongValue;
+            NSString *name = rc_mbt_device_string(device, NO);
+            NSString *address = rc_mbt_device_string(device, YES);
+            BOOL matches = (name && [name.lowercaseString containsString:needle]) ||
+                           (address && [address.lowercaseString containsString:needle]);
+            if (!matches) continue;
+            if (outName) *outName = name ?: address ?: deviceName;
+            if (outConnected) {
+                uint32_t status = 0;
+                *outConnected = (g_rcMBTGetStatus(device, &status) == 0) && status != 0;
+            }
+            return number;
+        }
+    }
+    return nil;
+}
+
+static NSArray<NSString *> *rc_mbt_all_device_names(void) {
+    NSMutableArray *names = [NSMutableArray array];
+    NSMutableSet *seen = [NSMutableSet set];
+    for (int pass = 0; pass < 2; pass++) {
+        for (NSNumber *number in rc_mbt_device_numbers(pass == 0)) {
+            RCMBTDevice device = (RCMBTDevice)(uintptr_t)number.unsignedLongLongValue;
+            NSString *name = rc_mbt_device_string(device, NO);
+            if (name.length == 0 || [seen containsObject:name.lowercaseString]) continue;
+            [names addObject:name];
+            [seen addObject:name.lowercaseString];
+        }
+    }
+    return names;
+}
+
+// A short CoreBluetooth scan, used only to tell the user that an unpaired
+// accessory is nearby before naming the one-time pairing step.
+@interface RCLENearbyScanner : NSObject <CBCentralManagerDelegate>
+@property (nonatomic, strong) CBCentralManager *central;
+@property (nonatomic, strong) NSMutableArray<NSDictionary *> *devices;
+@property (nonatomic, strong) dispatch_semaphore_t finished;
+- (NSArray<NSDictionary *> *)scanForSeconds:(NSTimeInterval)seconds;
+@end
+
+static RCLENearbyScanner *rc_le_scanner(NSTimeInterval seconds);
+
+// The rc CLI wraps an argument with spaces in double quotes before sending it.
+static NSString *rc_bt_clean_device_name(NSString *name) {
+    name = [name stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    while (name.length >= 2) {
+        unichar first = [name characterAtIndex:0];
+        unichar last = [name characterAtIndex:name.length - 1];
+        if ((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
+            name = [[name substringWithRange:NSMakeRange(1, name.length - 2)]
+                stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        } else {
+            break;
+        }
+    }
+    return name;
+}
+
+// Returns nil when bluetoothd is unavailable or the name is not one of its devices,
+// so the caller can fall back to the classic BluetoothManager list.
+static NSString *rc_mbt_connect(NSString *deviceName) {
+    if (!rc_mbt_ensure_session()) return nil;
+    BOOL connected = NO;
+    NSString *name = nil;
+    NSNumber *number = rc_mbt_find_device(deviceName, &connected, &name);
+    if (!number) {
+        // Not in bluetoothd's lists. See whether it is advertising nearby, so the
+        // answer can name the one-time step iOS requires. iOS does not let an
+        // app pair an LE accessory; Settings or AssistiveTouch has to do it once.
+        RCLENearbyScanner *scanner = rc_le_scanner(4.0);
+        NSString *needle = deviceName.lowercaseString;
+        for (NSDictionary *entry in scanner.devices) {
+            NSString *candidate = entry[@"name"];
+            if (![candidate.lowercaseString containsString:needle]) continue;
+            return [NSString stringWithFormat:@"Found %@ nearby. Pair it once in Settings > Bluetooth, or Settings > Accessibility > Touch > AssistiveTouch > Devices, then run this again.\n", candidate];
+        }
+        return nil;
+    }
+    if (connected) return [NSString stringWithFormat:@"%@ is already connected\n", name];
+    RCMBTDevice device = (RCMBTDevice)(uintptr_t)number.unsignedLongLongValue;
+    int32_t result = g_rcMBTConnect(device);
+    // A HID accessory (mouse, keyboard) sometimes needs the HID service bit.
+    if (result != 0 && g_rcMBTConnectServices) result = g_rcMBTConnectServices(device, 0x00002000);
+    if (result != 0) return [NSString stringWithFormat:@"Error: could not connect %@ (Bluetooth error %d)\n", name, result];
+    SRLog(@"MobileBluetooth connect: %@", name);
+    return [NSString stringWithFormat:@"Connecting to %@\n", name];
+}
+
+static NSString *rc_mbt_disconnect(NSString *deviceName) {
+    if (!rc_mbt_ensure_session()) return nil;
+    BOOL connected = NO;
+    NSString *name = nil;
+    NSNumber *number = rc_mbt_find_device(deviceName, &connected, &name);
+    if (!number) return nil;
+    if (!connected) return [NSString stringWithFormat:@"%@ is already disconnected\n", name];
+    RCMBTDevice device = (RCMBTDevice)(uintptr_t)number.unsignedLongLongValue;
+    int32_t result = g_rcMBTDisconnect(device);
+    // Dropping the services keeps the bond but does not always tear the link.
+    if (result != 0 && g_rcMBTPhysicalDisconnect) result = g_rcMBTPhysicalDisconnect(device);
+    if (result != 0) return [NSString stringWithFormat:@"Error: could not disconnect %@ (Bluetooth error %d)\n", name, result];
+    SRLog(@"MobileBluetooth disconnect: %@", name);
+    return [NSString stringWithFormat:@"Disconnecting %@\n", name];
+}
+
+@implementation RCLENearbyScanner
+
+- (instancetype)init {
+    if ((self = [super init])) {
+        _devices = [NSMutableArray array];
+        _finished = dispatch_semaphore_create(0);
+        dispatch_queue_t queue = dispatch_queue_create("com.remotecompanion.lescan", NULL);
+        _central = [[CBCentralManager alloc] initWithDelegate:self queue:queue options:@{CBCentralManagerOptionShowPowerAlertKey: @NO}];
+    }
+    return self;
+}
+
+- (void)centralManagerDidUpdateState:(CBCentralManager *)central {
+    switch (central.state) {
+        case CBManagerStatePoweredOn:
+            [central scanForPeripheralsWithServices:nil options:@{CBCentralManagerScanOptionAllowDuplicatesKey: @NO}];
+            break;
+        case CBManagerStatePoweredOff:
+        case CBManagerStateUnauthorized:
+        case CBManagerStateUnsupported:
+            dispatch_semaphore_signal(self.finished);
+            break;
+        default:
+            break;
+    }
+}
+
+- (void)centralManager:(CBCentralManager *)central didDiscoverPeripheral:(CBPeripheral *)peripheral
+     advertisementData:(NSDictionary<NSString *, id> *)advertisementData RSSI:(NSNumber *)RSSI {
+    NSString *name = advertisementData[CBAdvertisementDataLocalNameKey] ?: peripheral.name;
+    if (name.length == 0) return;
+    NSString *identifier = peripheral.identifier.UUIDString;
+    for (NSDictionary *entry in self.devices) {
+        if ([entry[@"id"] isEqualToString:identifier]) return;
+    }
+    [self.devices addObject:@{ @"name": name, @"id": identifier, @"peripheral": peripheral }];
+}
+
+- (NSArray<NSDictionary *> *)scanForSeconds:(NSTimeInterval)seconds {
+    dispatch_semaphore_wait(self.finished, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(seconds * NSEC_PER_SEC)));
+    [self.central stopScan];
+    return [self.devices copy];
+}
+
+@end
+
+static RCLENearbyScanner *rc_le_scanner(NSTimeInterval seconds) {
+    RCLENearbyScanner *scanner = [[RCLENearbyScanner alloc] init];
+    [scanner scanForSeconds:seconds];
+    return scanner;
 }
 
 static NSString *handle_command(NSString *cmd) {
@@ -15335,6 +15650,13 @@ static NSString *handle_command(NSString *cmd) {
                 }
             }
         }
+        // Every bond bluetoothd knows, including low-energy accessories that are
+        // paired but not connected. A BLE mouse or keyboard shows up here.
+        for (NSString *name in rc_mbt_all_device_names()) {
+            if ([listed containsObject:name.lowercaseString]) continue;
+            [output appendFormat:@"%@\n", name];
+            [listed addObject:name.lowercaseString];
+        }
         // Low-energy devices the classic list leaves out. A headset that pairs both ways
         // can be in both lists, so skip names already printed.
         for (CBPeripheral *peripheral in rc_connected_le_peripherals()) {
@@ -15349,8 +15671,12 @@ static NSString *handle_command(NSString *cmd) {
         if ([cleanCmd hasPrefix:@"bt connect "]) deviceName = [cleanCmd substringFromIndex:11];
         else if ([cleanCmd hasPrefix:@"bluetooth connect "]) deviceName = [cleanCmd substringFromIndex:18];
         else deviceName = [cleanCmd substringFromIndex:11];
-        deviceName = [deviceName stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        
+        deviceName = rc_bt_clean_device_name(deviceName);
+
+        // bluetoothd's list has the low-energy accessories BluetoothManager leaves out.
+        NSString *systemReply = rc_mbt_connect(deviceName);
+        if (systemReply) return systemReply;
+
         void *btHandle = dlopen("/System/Library/PrivateFrameworks/BluetoothManager.framework/BluetoothManager", RTLD_NOW);
         if (btHandle) {
             Class BluetoothManagerClass = objc_getClass("BluetoothManager");
@@ -15358,6 +15684,7 @@ static NSString *handle_command(NSString *cmd) {
                 BluetoothManager *btManager = [BluetoothManagerClass sharedInstance];
                 for (BluetoothDevice *device in [btManager pairedDevices]) {
                     if ([[device name] localizedCaseInsensitiveContainsString:deviceName]) {
+                        if ([device connected]) return [NSString stringWithFormat:@"%@ is already connected\n", [device name]];
                         [device connect];
                         SRLog(@"Connecting to BT device: %@", [device name]);
                         return [NSString stringWithFormat:@"Connecting to %@\n", [device name]];
@@ -15370,14 +15697,18 @@ static NSString *handle_command(NSString *cmd) {
                 return [NSString stringWithFormat:@"%@ is a low-energy device and is already connected\n", [peripheral name]];
             }
         }
-        return @"Error: Device not found or BluetoothManager failed\n";
+        return @"Error: Device not found. Pair it in Settings > Bluetooth first.\n";
     } else if ([cleanCmd hasPrefix:@"bt-disconnect "] || [cleanCmd hasPrefix:@"bt disconnect "] || [cleanCmd hasPrefix:@"bluetooth disconnect "]) {
         NSString *deviceName;
         if ([cleanCmd hasPrefix:@"bt disconnect "]) deviceName = [cleanCmd substringFromIndex:14];
         else if ([cleanCmd hasPrefix:@"bluetooth disconnect "]) deviceName = [cleanCmd substringFromIndex:21];
         else deviceName = [cleanCmd substringFromIndex:14];
-        deviceName = [deviceName stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        
+        deviceName = rc_bt_clean_device_name(deviceName);
+
+        // bluetoothd owns the low-energy links; the ObjC list never shows them.
+        NSString *systemReply = rc_mbt_disconnect(deviceName);
+        if (systemReply) return systemReply;
+
         void *btHandle = dlopen("/System/Library/PrivateFrameworks/BluetoothManager.framework/BluetoothManager", RTLD_NOW);
         if (btHandle) {
             Class BluetoothManagerClass = objc_getClass("BluetoothManager");
@@ -15385,6 +15716,7 @@ static NSString *handle_command(NSString *cmd) {
                 BluetoothManager *btManager = [BluetoothManagerClass sharedInstance];
                 for (BluetoothDevice *device in [btManager pairedDevices]) {
                     if ([[device name] localizedCaseInsensitiveContainsString:deviceName]) {
+                        if (![device connected]) return [NSString stringWithFormat:@"%@ is already disconnected\n", [device name]];
                         [device disconnect];
                         SRLog(@"Disconnecting BT device: %@", [device name]);
                         return [NSString stringWithFormat:@"Disconnecting %@\n", [device name]];
@@ -15394,10 +15726,10 @@ static NSString *handle_command(NSString *cmd) {
         }
         for (CBPeripheral *peripheral in rc_connected_le_peripherals()) {
             if ([[peripheral name] localizedCaseInsensitiveContainsString:deviceName]) {
-                return [NSString stringWithFormat:@"%@ is a low-energy device, which iOS doesn't let apps disconnect. Forget it in Settings > Bluetooth, or turn Bluetooth off and on with rc bt off and rc bt on.\n", [peripheral name]];
+                return [NSString stringWithFormat:@"%@ is connected, but iOS did not list it as a paired device, so it can't be disconnected from here. Pair it in Settings > Bluetooth first.\n", [peripheral name]];
             }
         }
-        return @"Error: Device not found or BluetoothManager failed\n";
+        return @"Error: Device not found. Pair it in Settings > Bluetooth first.\n";
     } else if ([cleanCmd hasPrefix:@"appearance "]) {
         NSString *arg = [[cleanCmd substringFromIndex:11] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         
@@ -17888,6 +18220,7 @@ static void start_web_server() {
                                     responseString = [NSString stringWithFormat:@"HTTP/1.1 403 Forbidden\r\n%@Content-Length: 17\r\n\r\nWeb UI is disabled", cors];
                                 } else {
                                     NSMutableArray *btNames = [NSMutableArray array];
+                                    NSMutableSet *btSeen = [NSMutableSet set];
                                     void *btHandle = dlopen("/System/Library/PrivateFrameworks/BluetoothManager.framework/BluetoothManager", RTLD_NOW);
                                     if (btHandle) {
                                         Class BluetoothManagerClass = objc_getClass("BluetoothManager");
@@ -17899,10 +18232,17 @@ static void start_web_server() {
                                                     NSString *name = [device name];
                                                     if (name && name.length > 0) {
                                                         [btNames addObject:name];
+                                                        [btSeen addObject:name.lowercaseString];
                                                     }
                                                 }
                                             }
                                         }
+                                    }
+                                    // bluetoothd also has low-energy bonds the classic list leaves out.
+                                    for (NSString *name in rc_mbt_all_device_names()) {
+                                        if ([btSeen containsObject:name.lowercaseString]) continue;
+                                        [btNames addObject:name];
+                                        [btSeen addObject:name.lowercaseString];
                                     }
                                     
                                     NSMutableArray *wifiNames = [NSMutableArray array];

@@ -105,8 +105,8 @@ A sequence is a **JSON array** of actions. Each action is either:
 | `location on` | Turn on Location Services |
 | `location off` | Turn off Location Services |
 | `airplane toggle` | Toggle Airplane Mode |
-| `bt connect Device Name` | Connect a Bluetooth device by name |
-| `bt disconnect Device Name` | Disconnect a Bluetooth device |
+| `bt connect Device Name` | Connect a paired Bluetooth device by name, classic or low-energy |
+| `bt disconnect Device Name` | Disconnect a Bluetooth device, classic or low-energy |
 | `airplay connect UID # Name` | Connect AirPlay to a device |
 | `airplay disconnect` | Disconnect AirPlay |
 

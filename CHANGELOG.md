@@ -15,7 +15,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - **Large title on the Triggers screen**: the main screen opened, and came back from a trigger, with the small title even though the list was at the top. The category bar added its space before the table was on screen, so the navigation bar started collapsed and only opened after a scroll. The space is added after the first layout now, so the large title shows from launch and on the way back.
-- **`rc bluetooth list` shows low-energy devices**: the Apple Watch and low-energy accessories such as an AssistiveTouch mouse or pointer were missing, because the command read BluetoothManager's paired list, which holds classic pairings only. The list now adds the devices CoreBluetooth reports as connected. `bt disconnect` on one of those says plainly that iOS doesn't allow apps to disconnect it, and points at Forget This Device in Settings > Bluetooth or `rc bt off` and `rc bt on`.
+- **Bluetooth low-energy connect and disconnect**: `rc bluetooth list`, `bt connect` and `bt disconnect` now read bluetoothd's paired and connected devices, the list Settings and AssistiveTouch use, as well as BluetoothManager's classic pairings. A paired low-energy mouse or keyboard such as Glisse can be connected and disconnected from the CLI, the app's Connect/Disconnect Bluetooth picker, the Web UI (its device field now suggests the known names) and triggers. A device that is not paired yet gets a plain one-time pairing step, and is named as nearby when it is already advertising, because iOS does not let an app pair an accessory; the old advice to forget the device or turn Bluetooth off and on is gone.
 
 ## [4.7.0] - 2026-11-19
 
