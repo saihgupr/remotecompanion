@@ -5541,7 +5541,8 @@ static BOOL rc_action_shows_own_banner(NSString *cmd) {
     }
     if ([cmd isEqualToString:@"screen copy rect"] || [cmd hasPrefix:@"screen copy rect "]) return YES;
     NSSet *exact = [NSSet setWithArray:@[@"queuealbum", @"queue album", @"queueartist", @"queue artist", @"shuffleall", @"shuffle all songs",
-                                         @"suffle all songs", @"deletesong", @"delete song", @"delete current song"]];
+                                         @"suffle all songs", @"deletesong", @"delete song", @"delete current song",
+                                         @"player queue album", @"player queue artist"]];
     return [exact containsObject:cmd];
 }
 
@@ -12398,6 +12399,8 @@ static NSArray *RCCommandHelpSections(void) {
             @[@"spotify <type> <id>", @"type: playlist, album, or artist"],
             @[@"playlist <id>", @"Play a Spotify playlist"],
             @[@"shuffle playlist <id>", @"Shuffle a Spotify playlist"],
+            @[@"player queue album [--player <addon>]", @"Queue the playing app's album (music, zefy or audiostream)"],
+            @[@"player queue artist [--player <addon>]", @"Queue the playing app's artist (music, zefy or audiostream)"],
         ]},
         @{@"title": @"Device", @"rows": @[
             @[@"lock", @"Lock the screen"],
@@ -13423,6 +13426,118 @@ static NSArray<CBPeripheral *> *rc_connected_le_peripherals(void) {
     return connected ?: @[];
 }
 
+// The music players with an add-on that queues the current album or artist, by bundle ID and
+// by the add-on id --player takes. AudioStream's add-on (com.saihgupr.audiostream) queues in its
+// own app, MusicRemote's (music, com.apple.Music) in Music, and Zefy's (zefy, com.spotify.client)
+// in Spotify.
+static NSString *rc_player_addon_for(NSString *selection) {
+    NSString *s = selection.lowercaseString;
+    if ([s isEqualToString:@"com.apple.music"] || [s isEqualToString:@"music"]) return @"music";
+    if ([s isEqualToString:@"com.spotify.client"] || [s isEqualToString:@"zefy"]) return @"zefy";
+    if ([s isEqualToString:@"com.saihgupr.audiostream"] || [s isEqualToString:@"audiostream"]) return @"audiostream";
+    return nil;
+}
+
+static NSString *rc_player_name_for(NSString *addOnId) {
+    if ([addOnId isEqualToString:@"music"]) return @"Music";
+    if ([addOnId isEqualToString:@"zefy"]) return @"Spotify";
+    if ([addOnId isEqualToString:@"audiostream"]) return @"AudioStream";
+    return addOnId;
+}
+
+// Each add-on's command for "queue album" / "queue artist" (Zefy words its own the other way)
+static NSString *rc_player_queue_addon_command(NSString *addOnId, BOOL album) {
+    if ([addOnId isEqualToString:@"music"]) return album ? @"music queue album" : @"music queue artist";
+    if ([addOnId isEqualToString:@"zefy"]) return album ? @"zefy album queue" : @"zefy artist queue";
+    if ([addOnId isEqualToString:@"audiostream"]) return album ? @"audiostream queue album" : @"audiostream queue artist";
+    return nil;
+}
+
+// Queues on the add-on --player named (addOnId), or on the now-playing app when it is nil.
+// Called off the main thread: the now-playing client comes back on the main queue, which is
+// waited on for at most a second, like "player status". A paused app still names its player.
+static NSString *rc_player_queue_run(NSString *addOnId, BOOL album) {
+    NSString *shown = nil;
+    if (addOnId) {
+        shown = rc_player_name_for(addOnId);
+    } else {
+        __block NSString *bundleID = nil;
+        dispatch_semaphore_t sema = dispatch_semaphore_create(0);
+        MRMediaRemoteGetNowPlayingClient(dispatch_get_main_queue(), ^(void *clientObj) {
+            if (clientObj) {
+                CFStringRef bundleIDRef = MRNowPlayingClientGetBundleIdentifier(clientObj);
+                if (bundleIDRef) bundleID = [(__bridge NSString *)bundleIDRef copy];
+            }
+            dispatch_semaphore_signal(sema);
+        });
+        dispatch_semaphore_wait(sema, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)));
+        if (bundleID.length == 0) return @"Error: Nothing is playing (use --player music|zefy|audiostream)\n";
+        addOnId = rc_player_addon_for(bundleID);
+        if (!addOnId) return [NSString stringWithFormat:@"Error: %@ is not a supported player (music, zefy, audiostream)\n", bundleID];
+        shown = rc_player_name_for(addOnId);
+    }
+
+    NSString *mapped = rc_player_queue_addon_command(addOnId, album);
+    NSString *reply = RCAddOnsHandleCommand(mapped);
+    if (reply.length == 0) {
+        return [NSString stringWithFormat:@"Error: The %@ add-on is not installed or is disabled\n", shown];
+    }
+    // Zefy's own action shows "Spotify / Album Queued" itself; only banner the ones that don't
+    if (!RCAddOnsCommandShowsOwnBanner(mapped) &&
+        rc_own_banner_enabled(album ? @"player queue album" : @"player queue artist")) {
+        rc_show_hud_toast(album ? @"Album Queued" : @"Artist Queued", shown,
+                          album ? @"music.note.list" : @"music.mic");
+    }
+    return reply;
+}
+
+// "player queue album|artist [--player <music|zefy|audiostream>]": queues the album or artist of
+// whatever app is playing, through that app's add-on. Other "player ..." shapes get the usage
+// line rather than falling through to add-ons, so a typo doesn't run something unrelated.
+static NSString *rc_handle_player_command(NSString *cmd) {
+    static NSString *const usage = @"Usage: player queue album|artist [--player music|zefy|audiostream]\n";
+    NSMutableArray<NSString *> *words = [NSMutableArray array];
+    for (NSString *word in [cmd.lowercaseString componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]) {
+        if (word.length > 0) [words addObject:word];
+    }
+    if (words.count < 3 || ![words[0] isEqualToString:@"player"] || ![words[1] isEqualToString:@"queue"]) return usage;
+    BOOL album;
+    if ([words[2] isEqualToString:@"album"]) album = YES;
+    else if ([words[2] isEqualToString:@"artist"]) album = NO;
+    else return usage;
+
+    NSString *requested = nil;
+    for (NSUInteger i = 3; i < words.count; i++) {
+        NSString *word = words[i];
+        if ([word isEqualToString:@"--player"]) {
+            if (i + 1 >= words.count) return usage;
+            requested = words[++i];
+        } else if ([word hasPrefix:@"--player="]) {
+            requested = [word substringFromIndex:9];
+        } else {
+            return usage;
+        }
+    }
+
+    NSString *addOnId = nil;
+    if (requested) {
+        addOnId = rc_player_addon_for(requested);
+        if (!addOnId) return [NSString stringWithFormat:@"Error: Unknown player '%@' (use music, zefy or audiostream)\n", requested];
+    }
+
+    // The Web UI's /api/command runs handle_command on the main thread and ignores the reply:
+    // queue in the background there and acknowledge now, so MediaRemote and the add-on's work
+    // can't hold or deadlock SpringBoard's main queue.
+    if ([NSThread isMainThread]) {
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            rc_player_queue_run(addOnId, album);
+        });
+        return [NSString stringWithFormat:@"Queueing %@ on %@\n", album ? @"album" : @"artist",
+                addOnId ? rc_player_name_for(addOnId) : @"the playing app"];
+    }
+    return rc_player_queue_run(addOnId, album);
+}
+
 static NSString *handle_command(NSString *cmd) {
     if (!cmd || ![cmd isKindOfClass:[NSString class]]) {
         SRLogMin(@"ERROR: handle_command received nil or invalid command string");
@@ -13748,6 +13863,11 @@ static NSString *handle_command(NSString *cmd) {
             return [status isEqualToString:@"Playing"] ? @"YES\n" : @"NO\n";
         }
         return [NSString stringWithFormat:@"%@\n", status];
+    } else if ([cleanCmd isEqualToString:@"player"] || [cleanCmd hasPrefix:@"player "]) {
+        // player queue album|artist: queue on whichever music player is playing (its add-on's
+        // own queue action). "player status" is the playback state above; other player
+        // subcommands get the usage line instead of falling through to add-ons.
+        return rc_handle_player_command(cleanCmd);
     } else if ([cleanCmd isEqualToString:@"next"]) {
         MRMediaRemoteSendCommand(kMRNextTrack, nil);
         return @"Next track\n";
