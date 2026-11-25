@@ -343,6 +343,11 @@ extern Boolean MRMediaRemoteSendCommandToApp(MRMediaRemoteCommand command, NSDic
 - (BOOL)reachabilityModeActive;
 @end
 
+// Spotlight over an app is a transient overlay; SpringBoard hears when it shows and goes, which
+// is how "spotlight open" and "spotlight close" know it's up there (the home screen's own
+// Spotlight answers isAnySearchVisibleOrTransitioning).
+static BOOL g_rcSpotlightOverlayShown = NO;
+
 
 // BluetoothManager APIs
 @interface BluetoothManager : NSObject
@@ -14095,8 +14100,8 @@ static NSString *handle_command(NSString *cmd) {
         }
     } else if ([cleanCmd isEqualToString:@"spotlight"] || [cleanCmd hasPrefix:@"spotlight "]) {
         // Spotlight, as a keyboard's Command-Space opens it: over the home screen or an app.
-        // "spotlight" opens it (or closes it if it's open on the home screen); toggle, open and close
-        // say which. SpringBoard's own call, on its main thread.
+        // "spotlight" opens it, or closes it if it's open; open and close only ever do the one.
+        // SpringBoard's own call, on its main thread.
         NSString *mode = [[cleanCmd substringFromIndex:9] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]].lowercaseString;
         if (!mode.length) mode = @"toggle";
         if (![@[@"toggle", @"open", @"close"] containsObject:mode]) return @"Usage: spotlight [toggle|open|close]\n";
@@ -14105,11 +14110,10 @@ static NSString *handle_command(NSString *cmd) {
             id sb = [UIApplication sharedApplication];
             SEL toggle = NSSelectorFromString(@"_toggleSearch");
             if (![sb respondsToSelector:toggle]) { result = @"Error: Spotlight can't be opened on this iOS version\n"; return; }
-            // Whether it's showing: the home screen's Spotlight (over an app it can't be read, so open
-            // and toggle open it there)
+            // Whether it's showing: over an app, or on the home screen
             id icons = [objc_getClass("SBIconController") respondsToSelector:@selector(sharedInstance)] ? [objc_getClass("SBIconController") performSelector:@selector(sharedInstance)] : nil;
             SEL visibleSel = NSSelectorFromString(@"isAnySearchVisibleOrTransitioning");
-            BOOL visible = [icons respondsToSelector:visibleSel] && ((BOOL (*)(id, SEL))objc_msgSend)(icons, visibleSel);
+            BOOL visible = g_rcSpotlightOverlayShown || ([icons respondsToSelector:visibleSel] && ((BOOL (*)(id, SEL))objc_msgSend)(icons, visibleSel));
             if (([mode isEqualToString:@"open"] && visible) || ([mode isEqualToString:@"close"] && !visible)) {
                 result = visible ? @"Spotlight is already open\n" : @"Spotlight isn't open\n";
                 return;
@@ -23707,6 +23711,16 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
 }
 
 %hook SpringBoard
+
+- (void)spotlightTransientOverlayViewControllerDidPresent:(id)controller {
+    %orig;
+    g_rcSpotlightOverlayShown = YES;
+}
+
+- (void)spotlightTransientOverlayViewControllerWillDismiss:(id)controller {
+    %orig;
+    g_rcSpotlightOverlayShown = NO;
+}
 
 - (void)noteActiveInterfaceOrientationDidChangeToOrientation:(long)orientation willAnimateWithSettings:(id)settings fromOrientation:(long)fromOrientation {
     %orig;
