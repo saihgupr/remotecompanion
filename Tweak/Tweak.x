@@ -1796,6 +1796,8 @@ static BOOL rc_has_home_button(void);
 static id g_rcHomeActions = nil;
 
 static void simulate_home_press() {
+    // Like the real button: the press answers with a tap before the screen changes
+    trigger_haptic();
     dispatch_async(dispatch_get_main_queue(), ^{
         SRLog(@"Executing Home simulation...");
 
