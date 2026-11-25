@@ -5760,10 +5760,11 @@ static BOOL rc_value_needs_token(id value, int depth);
 // other in a loop, counts as needing the token.
 #define RC_TRIGGER_CHAIN_LIMIT 8
 
-// "addons root|set|enable|disable ..." (any letter case, any spacing): the add-on commands that change
-// something, as opposed to listing, reloading, checking or reading settings
+// "addons root|set|enable|disable ..." (any letter case, any spacing or line breaks, split as the add-on
+// command handler splits it): the add-on commands that change something, as opposed to listing,
+// reloading, checking or reading settings
 static BOOL rc_addons_command_changes_something(NSString *trimmed) {
-    NSArray<NSString *> *words = [[trimmed lowercaseString] componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    NSArray<NSString *> *words = [[trimmed lowercaseString] componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     words = [words filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"length > 0"]];
     if (words.count < 2) return NO;
     if (![words[0] isEqualToString:@"addons"] && ![words[0] isEqualToString:@"add-ons"]) return NO;
@@ -5773,13 +5774,18 @@ static BOOL rc_addons_command_changes_something(NSString *trimmed) {
 static BOOL rc_command_needs_token(NSString *cmd, int depth) {
     if (!cmd || ![cmd isKindOfClass:[NSString class]]) return NO;
     NSString *trimmed = [cmd stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    // "trigger NAME" runs that trigger's actions, so it needs the token when they do
-    if ([trimmed hasPrefix:@"trigger "]) {
-        if (depth >= RC_TRIGGER_CHAIN_LIMIT) return YES;
-        NSString *key = [[trimmed substringFromIndex:8] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        id triggers = g_triggerConfig[@"triggers"];
+    // "trigger NAME", "trigger:NAME" and a trigger's bare key all run that trigger's actions (see
+    // handle_command), so each needs the token when they do
+    id triggers = g_triggerConfig[@"triggers"];
+    NSString *key = nil;
+    BOOL named = [trimmed hasPrefix:@"trigger "] || [trimmed hasPrefix:@"trigger:"];
+    if (named) key = [[trimmed substringFromIndex:8] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    else if ([triggers isKindOfClass:[NSDictionary class]] && [((NSDictionary *)triggers)[trimmed] isKindOfClass:[NSDictionary class]]) key = trimmed;
+    if (key) {
         id trigger = [triggers isKindOfClass:[NSDictionary class]] ? ((NSDictionary *)triggers)[key] : nil;
-        return [trigger isKindOfClass:[NSDictionary class]] && rc_value_needs_token(((NSDictionary *)trigger)[@"actions"], depth + 1);
+        BOOL needs = [trigger isKindOfClass:[NSDictionary class]] &&
+                     (depth >= RC_TRIGGER_CHAIN_LIMIT || rc_value_needs_token(((NSDictionary *)trigger)[@"actions"], depth + 1));
+        if (named || needs) return needs;
     }
     return [trimmed hasPrefix:@"root "] || [trimmed isEqualToString:@"root"] ||
            [trimmed hasPrefix:@"sudo "] || [trimmed isEqualToString:@"sudo"] ||
