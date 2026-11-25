@@ -10,6 +10,8 @@ All notable changes to this project will be documented in this file.
 - **`previous` as an alias for `prev`**: `rc previous` skips to the previous track, the same as `rc prev`, in scripts and the CLI.
 
 ### Changed
+- **Annotate toast**: a successful send to OpenCode is just "Sent to OpenCode" or "Pasted to OpenCode", without the session title underneath, which was long and often named the device.
+- **Home Button haptic**: the Home Button action gives a tap as it runs, like the real button, so a press that takes the screen away still answers. It is on by default and follows the Haptics switch and the Excluded Apps list, the same as `rc haptic`.
 - **New Trigger large title**: the New Trigger picker uses the same large title as the Triggers screen it opens from, instead of a small one at the top.
 - **Settings spacing**: the first section header sits closer under the large title, matching the Triggers screen, while the gaps between the rest of the sections stay the same.
 
