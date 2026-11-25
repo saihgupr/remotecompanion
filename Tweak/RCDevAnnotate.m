@@ -1426,9 +1426,8 @@ static void rc_dev_deliver_over_ssh(NSDictionary *targetHost,
         NSString *title = [NSString stringWithFormat:@"%@ %@", autoSend ? @"Sent to" : @"Pasted to", editorDisplay];
         NSString *subtitle = nil;
         if (detail.length > 0 && ![detail isEqualToString:editorDisplay]) {
-            if ([preset[@"strategy"] isEqualToString:@"opencode_api"] && autoSend) {
-                subtitle = [NSString stringWithFormat:@"Session: %@", detail];
-            } else {
+            // The OpenCode session title is long and reads like a task, so a send stays a short toast
+            if (![preset[@"strategy"] isEqualToString:@"opencode_api"]) {
                 subtitle = detail;
             }
         }
