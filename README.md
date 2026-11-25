@@ -35,19 +35,19 @@ RemoteCompanion provides fast, scriptable system control for modern rootless jai
 
 ## Features
 - **Hardware Triggers**: Bind actions to Power/Volume buttons, Home button, Touch ID (Tap/Hold), or the Ringer Switch.
-- **Only Unlock Out of Pocket**: an off-by-default option in Settings > Advanced Settings > Options that makes Unlock Device and lock toggle skip unlocking while the proximity sensor is covered, such as in a pocket.
+- **Only Unlock Out of Pocket**: an off-by-default option in Settings > Security that makes Unlock Device and lock toggle skip unlocking while the proximity sensor is covered, such as in a pocket.
 - **New Triggers**: Airplane Mode On / Off, Physical Orientation (Portrait Up, Landscape Left, Landscape Right, Portrait Upside Down), Rotated to Landscape / Portrait, Find My Sound (with optional silent ping), Incoming Call / Call Started / Call Ended, Battery Level (fires once at 1-100%), and Focus on / off for a chosen Focus or any Focus.
 - **Gesture Recorder**: Settings > Gestures records a mix of taps, swipes and scrolls, saves it under a name, and plays it back at 0.5x to 3x. Each recording can be trimmed, re-recorded, replaced, renamed, exported and imported.
 - **Two-Finger Slides**: two-finger slide up from the bottom bar and slide down from the status bar are their own triggers, with distance-based firing, a widened landing zone, and an optional Lock Scrolling During Gestures toggle.
-- **Compact Layout and Trigger Icons**: Triggers, Select Action and Settings > Banners can each show a grid of tiles instead of a list (Advanced Settings > Layout, list stays default). Button and gesture triggers show a small phone or screen-area icon, app triggers show the app icon, and "Screen Gestures" now reads "Status Bar".
+- **Compact Layout and Trigger Icons**: Triggers, Select Action and Settings > Banners can each show a grid of tiles instead of a list (Settings > Layout, list stays default). Button and gesture triggers show a small phone or screen-area icon, app triggers show the app icon, and "Screen Gestures" now reads "Status Bar".
 - **Copy and Paste Actions**: select actions in a trigger's ••• menu to copy or delete together, then paste into any trigger. An If block brings its whole block, and the clipboard survives closing the app.
 - **Loops and Waits**: Repeat and Repeat While blocks, Exit Repeat and Wait Until, with `{round}` for the current round and nesting inside If blocks.
 - **Running and Run History**: see what is running now, stop one run or all, follow a run with the current action highlighted, and keep the last 0 to 50 runs per trigger with the actions as they ran.
 - **Stop Trigger Picker**: choose the trigger to stop from a searchable list with icons and sections, instead of one long action sheet.
 - **Toasts on the Lock Screen**: toasts show over the lock screen, queue until the next wake when the screen is off, and can wake the screen with the Wake Screen switch.
-- **Variables**: the Set Variable action saves a value, `{name}` in action text becomes its value, a Variable condition compares it, and Settings > Advanced Settings > Variables lists saved values.
+- **Variables**: the Set Variable action saves a value, `{name}` in action text becomes its value, a Variable condition compares it, and Settings > Variables lists saved values.
 - **App Quick Action**: pick an app, then one of its registered shortcuts read live from SpringBoard, with same-type shortcuts told apart and stale entries reported instead of run.
-- **Excluded Apps**: Settings > Advanced Settings > Options lists every trigger that has actions and sets the apps where each trigger does not fire.
+- **Excluded Apps**: Settings > Excluded Apps lists every trigger that has actions and sets the apps where each trigger does not fire.
 - **Universal Search**: Instantly find triggers, actions, shortcuts, and devices with integrated search bars in every picker.
 - **Cross-Version Support**: Supports iOS 14 through iOS 17, with partial iOS 26 support, across Rootless, Rootful, and RootHide environments.
 - **Advanced Automation**: Full support for NFC tags, custom Lua scripts (with `objc_call` support), and native Siri integration.
@@ -107,7 +107,7 @@ Access the desktop-class automation hub at `http://[DEVICE_IP]:8080` from any co
 
 ### Device Control
 - `rc lock` - Lock the screen.
-- `rc unlock [pin]` - Wakes and unlocks the device (or wakes screen if pin omitted). With Settings > Advanced Settings > Options > Only Unlock Out of Pocket on, it skips the unlock while the proximity sensor is covered.
+- `rc unlock [pin]` - Wakes and unlocks the device (or wakes screen if pin omitted). With Settings > Security > Only Unlock Out of Pocket on, it skips the unlock while the proximity sensor is covered.
 - `rc lock-toggle [pin]` / `rc lock toggle [pin]` - Toggle screen lock/unlock state (unlocks with optional passcode if locked).
 - `rc autolock [toggle|30s|1m|2m|3m|4m|5m|never|off]` / `rc display sleep [duration]` / `rc display time off` - Configure display sleep / auto-lock timeout.
 - `rc timer <duration|stop|pause|resume|status> [--label "Name"]` - Start (e.g. `20m`, `1h30m`, `45s`, `20:00`), pause, resume, stop, or inspect a real Apple Clock timer (mirrors to Lock Screen and Apple Watch).
@@ -132,7 +132,7 @@ Access the desktop-class automation hub at `http://[DEVICE_IP]:8080` from any co
 - `rc vibration [silent-toggle|ring-toggle]` - System "Vibrate on Silent/Ring" settings.
 
 ### Tweaks
-The switches in Settings > Advanced Settings > Tweaks, also on the Web UI's Tweaks screen. Every switch is off by default.
+The switches in Settings > iOS Tweaks, also on the Web UI's Tweaks screen. Every switch is off by default.
 - `rc tweaks` - List every Tweaks switch and whether it is on.
 - `rc tweaks wake-on-power [on|off|toggle]` - Keep the screen dark when a charger connects or disconnects while the display is off or dimmed.
 - `rc tweaks power-haptics [on|off|toggle]` - Stop the charging vibration and chime when power connects.

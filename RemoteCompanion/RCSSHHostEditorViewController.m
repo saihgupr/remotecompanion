@@ -129,6 +129,8 @@
 
     self.authSegment = [[UISegmentedControl alloc] initWithItems:@[@"Password", @"Private Key"]];
     self.authSegment.selectedSegmentIndex = self.useKeyAuth ? 1 : 0;
+    // Laid out by its row's constraints, across the whole row (it kept its own size at the left)
+    self.authSegment.translatesAutoresizingMaskIntoConstraints = NO;
     [self.authSegment addTarget:self action:@selector(authSegmentChanged:) forControlEvents:UIControlEventValueChanged];
 }
 
@@ -198,7 +200,17 @@
     NSDictionary *hostDict = [self hostDictionaryFromFields];
     if (!hostDict) return;
     [[RCConfigManager sharedManager] addOrUpdateSSHHost:hostDict];
+    void (^onSave)(NSDictionary *) = self.onSave;
+    // Closed the way it was opened: dismissed when it's the first screen of one presented on its
+    // own, popped otherwise; onSave runs once it's gone
+    if (self.navigationController.viewControllers.firstObject == self && self.navigationController.presentingViewController != nil) {
+        [self.navigationController dismissViewControllerAnimated:YES completion:^{ if (onSave) onSave(hostDict); }];
+        return;
+    }
+    [CATransaction begin];
+    [CATransaction setCompletionBlock:^{ if (onSave) onSave(hostDict); }];
     [self.navigationController popViewControllerAnimated:YES];
+    [CATransaction commit];
 }
 
 // The host as it would be saved, or nil after telling the user what's missing. The Test button

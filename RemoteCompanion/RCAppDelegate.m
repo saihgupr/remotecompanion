@@ -6,7 +6,7 @@
 #import "RCHASettingsViewController.h"
 #import "RCKMSettingsViewController.h"
 #import "RCMQTTSettingsViewController.h"
-#import "RCAdvancedSettingsViewController.h"
+#import "RCSettingsPageViewController.h"
 #import "RCExcludedAppsViewController.h"
 #import "RCTestKitViewController.h"
 #import "RCWebUIAccessViewController.h"
@@ -239,16 +239,23 @@ didReceiveNotificationResponse:(UNNotificationResponse *)response
         return;
     }
 
-    if ([destination isEqualToString:@"advanced"]) {
+    // remotecompanion://layout, banners, buttons, swipes, nfc, security or diagnostics (developer
+    // until 4.7): that Settings page.
+    // remotecompanion://advanced (Advanced Settings until 4.7) opens Settings.
+    NSDictionary<NSString *, NSNumber *> *pages = @{ @"layout": @(RCSettingsPageLayout), @"banners": @(RCSettingsPageBanners),
+        @"buttons": @(RCSettingsPageButtons), @"swipes": @(RCSettingsPageSwipeTriggers), @"swipetriggers": @(RCSettingsPageSwipeTriggers),
+        @"nfc": @(RCSettingsPageNFC), @"developer": @(RCSettingsPageDiagnostics), @"diagnostics": @(RCSettingsPageDiagnostics),
+        @"security": @(RCSettingsPageSecurity) };
+    if (pages[destination] || [destination isEqualToString:@"advanced"]) {
+        NSNumber *page = pages[destination];
         [rootNav presentViewController:settingsNav animated:NO completion:^{
-            [settingsNav pushViewController:[[RCAdvancedSettingsViewController alloc] init] animated:NO];
+            if (page) [settingsNav pushViewController:[RCSettingsPageViewController viewControllerForPage:page.integerValue highlightRowID:nil] animated:NO];
         }];
         return;
     }
     
     if ([destination isEqualToString:@"excluded"] || [destination isEqualToString:@"excludedapps"]) {
         [rootNav presentViewController:settingsNav animated:NO completion:^{
-            [settingsNav pushViewController:[[RCAdvancedSettingsViewController alloc] init] animated:NO];
             [settingsNav pushViewController:[[RCExcludedAppsViewController alloc] init] animated:NO];
         }];
         return;
@@ -261,9 +268,11 @@ didReceiveNotificationResponse:(UNNotificationResponse *)response
         return;
     }
     
-    if ([destination isEqualToString:@"webui"]) {
+    // remotecompanion://webui and backup: those Settings pages
+    if ([destination isEqualToString:@"webui"] || [destination isEqualToString:@"backup"]) {
+        NSString *subpage = [destination isEqualToString:@"webui"] ? RCSettingsSubpageWebUI : RCSettingsSubpageBackup;
         [rootNav presentViewController:settingsNav animated:NO completion:^{
-            [settingsNav pushViewController:[[RCWebUIAccessViewController alloc] init] animated:NO];
+            [settingsNav pushViewController:[RCSettingsViewController subpage:subpage] animated:NO];
         }];
         return;
     }

@@ -653,6 +653,22 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
     [self saveConfig];
 }
 
+- (BOOL)isSettingLocked:(NSString *)key {
+    id list = _config[@"lockedSettings"];
+    return key.length && [list isKindOfClass:[NSArray class]] && [list containsObject:key];
+}
+
+- (void)setSetting:(NSString *)key locked:(BOOL)locked {
+    if (!key.length) return;
+    id list = _config[@"lockedSettings"];
+    NSMutableArray *keys = [list isKindOfClass:[NSArray class]] ? [list mutableCopy] : [NSMutableArray array];
+    [keys removeObject:key];
+    if (locked) [keys addObject:key];
+    if (keys.count) _config[@"lockedSettings"] = keys;
+    else [_config removeObjectForKey:@"lockedSettings"];
+    [self saveConfig];
+}
+
 - (double)swipeSettingForKey:(NSString *)key defaultValue:(double)defaultValue {
     id value = _config[key];
     double number = [value isKindOfClass:[NSNumber class]] ? [value doubleValue] : 0;

@@ -9,8 +9,10 @@
 // to read picked files the app sandbox refuses.
 + (NSString *)sendTweakCommand:(NSString *)command;
 
-// Ask the tweak for the full backup JSON.
+// Ask the tweak for the full backup JSON. secrets NO: passwords, tokens and passcodes typed into
+// actions are hidden, and importing it keeps the ones the device already has.
 + (NSData *)fullBackupJSONDataWithError:(NSError **)error;
++ (NSData *)fullBackupJSONDataIncludingSecrets:(BOOL)secrets error:(NSError **)error;
 
 // YES for a full backup, NO for the old configuration JSON (triggers only).
 + (BOOL)isFullBackupData:(NSData *)data;

@@ -153,8 +153,56 @@
     }];
 }
 
+// Picking several apps: the ticked ones in a "Selected" section at the top, by name, and the rest
+// below; ticking one moves it up there, unticking moves it back
+- (NSArray<LSApplicationProxy *> *)selectedRows {
+    if (!self.allowsMultipleApps) return @[];
+    NSMutableArray *rows = [NSMutableArray array];
+    for (LSApplicationProxy *app in self.filteredApps) {
+        if ([self chosenIndexForBundleID:app.applicationIdentifier] != NSNotFound) [rows addObject:app];
+    }
+    return rows;
+}
+
+- (NSArray<LSApplicationProxy *> *)otherRows {
+    if (!self.allowsMultipleApps) return self.filteredApps ?: @[];
+    NSMutableArray *rows = [NSMutableArray array];
+    for (LSApplicationProxy *app in self.filteredApps) {
+        if ([self chosenIndexForBundleID:app.applicationIdentifier] == NSNotFound) [rows addObject:app];
+    }
+    return rows;
+}
+
+- (BOOL)hasSelectedSection {
+    return [self selectedRows].count > 0;
+}
+
+- (LSApplicationProxy *)appAtIndexPath:(NSIndexPath *)indexPath {
+    BOOL selectedSection = [self hasSelectedSection] && indexPath.section == 0;
+    NSArray *rows = selectedSection ? [self selectedRows] : [self otherRows];
+    return indexPath.row < (NSInteger)rows.count ? rows[indexPath.row] : nil;
+}
+
+- (NSIndexPath *)indexPathForApp:(LSApplicationProxy *)app {
+    NSUInteger row = [[self selectedRows] indexOfObjectIdenticalTo:app];
+    if (row != NSNotFound) return [NSIndexPath indexPathForRow:row inSection:0];
+    row = [[self otherRows] indexOfObjectIdenticalTo:app];
+    if (row == NSNotFound) return nil;
+    return [NSIndexPath indexPathForRow:row inSection:[self hasSelectedSection] ? 1 : 0];
+}
+
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
+    return [self hasSelectedSection] ? 2 : 1;
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+    if (![self hasSelectedSection]) return nil;
+    return section == 0 ? @"Selected" : @"Apps";
+}
+
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    return self.filteredApps.count;
+    if ([self hasSelectedSection] && section == 0) return [self selectedRows].count;
+    return [self otherRows].count;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -165,7 +213,7 @@
     selBg.backgroundColor = [cm tweakColorForKey:@"selectionHighlight" defaultVal:0.15];
     cell.selectedBackgroundView = selBg;
     
-    LSApplicationProxy *app = self.filteredApps[indexPath.row];
+    LSApplicationProxy *app = [self appAtIndexPath:indexPath];
     cell.textLabel.text = app.localizedName ?: app.applicationIdentifier;
     cell.detailTextLabel.text = app.applicationIdentifier;
     
@@ -182,16 +230,30 @@
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     
-    LSApplicationProxy *app = self.filteredApps[indexPath.row];
+    LSApplicationProxy *app = [self appAtIndexPath:indexPath];
+    if (!app) return;
     NSString *bundleId = app.applicationIdentifier;
     NSString *name = app.localizedName ?: bundleId;
 
     if (self.allowsMultipleApps) {
+        BOOL hadSelected = [self hasSelectedSection];
         NSUInteger selectedIndex = [self chosenIndexForBundleID:bundleId];
         if (selectedIndex != NSNotFound) [self.chosen removeObjectAtIndex:selectedIndex];
         else [self.chosen addObject:bundleId];
         self.doneItem.enabled = self.allowsEmptySelection || self.chosen.count > 0;
-        [tableView reloadRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationNone];
+        BOOL hasSelected = [self hasSelectedSection];
+        NSIndexPath *to = [self indexPathForApp:app];
+        if (!to) { [tableView reloadData]; return; }
+        if (hadSelected != hasSelected) {
+            // The Selected section comes or goes, and the other section's title with it
+            [UIView transitionWithView:tableView duration:0.2 options:UIViewAnimationOptionTransitionCrossDissolve
+                            animations:^{ [tableView reloadData]; } completion:nil];
+            return;
+        }
+        [tableView performBatchUpdates:^{
+            [tableView deleteRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationFade];
+            [tableView insertRowsAtIndexPaths:@[to] withRowAnimation:UITableViewRowAnimationFade];
+        } completion:nil];
         return;
     }
     

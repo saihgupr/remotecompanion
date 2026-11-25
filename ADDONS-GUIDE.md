@@ -441,7 +441,7 @@ turn out to be one of these:
 | Nothing from your add-on works | Check that it isn't switched off on its page in Settings > Add-ons. |
 
 RemoteCompanion's log records every file with a problem and every program that couldn't start or
-ran too long, as lines starting with `[AddOns]`. If you set Settings > Advanced Settings > Logging
+ran too long, as lines starting with `[AddOns]`. If you set Settings > Diagnostics > Logging
 to Full, it also records each time the add-ons load and each action that runs, with its
 variables. The log is at `/var/jb/tmp/remotecommand.log` on rootless and `/tmp/remotecommand.log`
 on rootful.

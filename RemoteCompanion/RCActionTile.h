@@ -14,6 +14,8 @@
 - (void)setName:(NSString *)name icon:(NSString *)icon;
 // image: a picture of its own (an add-on's), shown instead of the symbol
 - (void)setName:(NSString *)name icon:(NSString *)icon image:(UIImage *)image;
+// Tile Names: Hide - the icon alone, centred and larger; the name stays for VoiceOver
+@property (nonatomic, assign) BOOL iconOnly;
 // Triggers in Compact: a trigger with no actions yet gets a quieter tile
 @property (nonatomic, assign) BOOL dimmed;
 // Triggers in Compact: how many actions it runs, in a small badge at the top right (0: none)
@@ -59,32 +61,56 @@ CGFloat RCGridWidth(UIScrollView *view);
 // A row's size in a list this wide
 CGSize RCActionRowSize(CGFloat listWidth, CGFloat height);
 
-#pragma mark - Layout setting (List or Compact, per screen)
+#pragma mark - Layout settings (per screen)
 
+// The four screens Settings > Layout sets up, each on its own
 extern NSString *const RCLayoutTriggers;
 extern NSString *const RCLayoutActionPicker;
 extern NSString *const RCLayoutBanners;
 // The + menu on Triggers (New Trigger)
 extern NSString *const RCLayoutNewTrigger;
-// Triggers in Compact: how many per row, 2, 3 or 4 (its setting row is keyed by this)
-extern NSString *const RCLayoutTriggerColumns;
-NSInteger RCLayoutTriggerColumnCount(void);
-// Triggers in Compact: one continuous grid without section titles ("Compact" here means hidden)
-extern NSString *const RCLayoutTriggerSections;
-// Category bars: 1, 2 or 3 lines of chips (its setting row and change notice are keyed by this)
-extern NSString *const RCLayoutCategoryBarLines;
-NSInteger RCLayoutCategoryBarLineCount(void);
-void RCLayoutSetCategoryBarLineCount(NSInteger count);
-void RCLayoutSetTriggerColumnCount(NSInteger count);
+// The icon picker (a Show Banner action's Icon, Control Center buttons, notifications): always a grid,
+// so it has Per Row, Tile Names and Category Bar Lines only
+extern NSString *const RCLayoutIcons;
+// The screens, in order: @[title, key]
+NSArray<NSArray<NSString *> *> *RCLayoutScreens(void);
+
+// A screen's options (the change notice's userInfo[RCLayoutOptionKey] says which one changed)
+extern NSString *const RCLayoutOptionCompact;      // List or Compact
+extern NSString *const RCLayoutOptionPerRow;       // tiles per row in Compact
+extern NSString *const RCLayoutOptionSections;     // section headings in Compact (Show / Hide)
+extern NSString *const RCLayoutOptionNames;        // names on the tiles in Compact (Show / Hide)
+extern NSString *const RCLayoutOptionBarLines;     // lines of category chips
+extern NSString *const RCLayoutOptionKey;
 // Posted when a screen's layout changes (object: the screen's key)
 extern NSString *const RCLayoutChangedNotification;
 
 BOOL RCLayoutIsCompact(NSString *screen);
 void RCLayoutSetCompact(NSString *screen, BOOL compact);
-// The screens, in order: @[title, key]
-NSArray<NSArray<NSString *> *> *RCLayoutScreens(void);
-// A settings row for one screen: its title and a List / Compact control (2 / 3 / 4 for Triggers per Row)
-UITableViewCell *RCLayoutSettingCell(NSString *title, NSString *screen);
+// Tiles per row: 2, 3 or 4 on Triggers (2 is wide cards), 4, 5 or 6 on Icons, 3, 4 or 5 on the others
+// (4 to begin with)
+NSInteger RCLayoutPerRow(NSString *screen);
+void RCLayoutSetPerRow(NSString *screen, NSInteger count);
+NSArray<NSNumber *> *RCLayoutPerRowChoices(NSString *screen);
+// One continuous grid, without section headings (while no category chip is picked)
+BOOL RCLayoutSectionsHidden(NSString *screen);
+void RCLayoutSetSectionsHidden(NSString *screen, BOOL hidden);
+// Icons alone, larger, on square tiles; the names stay for VoiceOver
+BOOL RCLayoutNamesHidden(NSString *screen);
+void RCLayoutSetNamesHidden(NSString *screen, BOOL hidden);
+// Category bar: 1, 2 or 3 lines of chips. A nil screen (Settings, the symbol picker) follows Triggers.
+NSInteger RCLayoutBarLines(NSString *screen);
+void RCLayoutSetBarLines(NSString *screen, NSInteger lines);
+
+// The options Settings > Layout shows for a screen, in order: @[title, option]. Per Row, Section
+// Headings and Tile Names only while it's in Compact (Icons: Per Row, Tile Names, Category Bar Lines).
+NSArray<NSArray<NSString *> *> *RCLayoutOptionRows(NSString *screen);
+// A settings row for one option of one screen: its title and a segmented control
+UITableViewCell *RCLayoutOptionCell(NSString *title, NSString *screen, NSString *option);
+
+// A tile's size on one of the tile screens in Compact, for a grid this wide: its Per Row (more on a
+// wider screen), square when its names are hidden
+CGSize RCActionTileSizeForScreen(CGFloat gridWidth, NSString *screen);
 
 #pragma mark - App icons
 

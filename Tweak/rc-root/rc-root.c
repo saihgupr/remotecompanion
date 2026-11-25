@@ -34,7 +34,7 @@ static int rc_parent_is_springboard(void) {
     return strcmp(path, "/System/Library/CoreServices/SpringBoard.app/SpringBoard") == 0;
 }
 
-// RemoteCommand's config, written by the app: Settings > Advanced Settings > Security
+// RemoteCommand's config, written by the app: Settings > Security
 #define RC_CONFIG_PATH "/var/mobile/Documents/rc_triggers.plist"
 
 // "Allow Direct Root Helper Calls", off unless the user turns it on. Reading this file is safe:
@@ -274,10 +274,10 @@ int main(int argc, char *argv[]) {
 
     // All privileged operations (shell and touch injection) are restricted to calls
     // made by SpringBoard (RemoteCommand's tweak), unless the user turned on
-    // Allow Direct Root Helper Calls in Advanced Settings
+    // Allow Direct Root Helper Calls in Settings > Security
     if (!rc_direct_calls_allowed() && !rc_parent_is_springboard()) {
         fprintf(stderr, "Error: rc-root may only be run by RemoteCommand (permission denied).\n");
-        fprintf(stderr, "To allow scripts and other tools to call rc-root directly, turn on Allow Direct Root Helper Calls in Settings > Advanced Settings > Security.\n");
+        fprintf(stderr, "To allow scripts and other tools to call rc-root directly, turn on Allow Direct Root Helper Calls in Settings > Security.\n");
         return 1;
     }
 

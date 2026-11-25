@@ -1059,7 +1059,7 @@ DESTINATIONS = {
     "advanced": "Settings > Advanced",
     "excluded": "Settings > Advanced > Excluded Apps",
     "excludedapps": "Settings > Advanced > Excluded Apps",
-    "testkit": "Settings > Test Kit",
+    "testkit": "Settings > Diagnostics > Test Kit",
     "webui": "Settings > Web UI",
     "scroll": "the screen in front, scrolled",
 }

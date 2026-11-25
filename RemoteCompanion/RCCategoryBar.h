@@ -10,6 +10,10 @@
 @property (nonatomic, copy) void (^onSelect)(NSInteger index);
 // 1, 2 or 3 lines of chips (Layout > Category Bar Lines sets it; it follows changes while shown)
 @property (nonatomic, assign) NSInteger rows;
+// Whose Category Bar Lines it follows: a Layout screen's key, or nil (Settings, the symbol picker),
+// which follows Triggers'
+@property (nonatomic, copy) NSString *layoutScreen;
+- (instancetype)initWithWidth:(CGFloat)width screen:(NSString *)screen;
 // The bar's height for its number of lines
 - (CGFloat)height;
 

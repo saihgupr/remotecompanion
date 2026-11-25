@@ -1,4 +1,5 @@
 #import "RCRemoteActionEditorViewController.h"
+#import "RCSetupShortcuts.h"
 #import "RCConfigManager.h"
 
 @interface RCRemoteActionEditorViewController () <UITextViewDelegate>
@@ -78,7 +79,7 @@
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == 0) {
-        return @"Pick the device this command runs on. Manage clients in Settings > Integrations > Remote RC Clients.";
+        return @"Pick the device this command runs on, or add one.";
     }
     return @"Runs on the other device through its Web UI, exactly as typed. Multiple lines are allowed.";
 }
@@ -157,11 +158,9 @@
 - (void)chooseClientFromView:(UIView *)sourceView {
     NSArray<NSDictionary *> *clients = [RCConfigManager sharedManager].rcClients;
     if (clients.count == 0) {
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"No Remote RC Clients"
-            message:@"Add a device in Settings > Integrations > Remote RC Clients first."
-            preferredStyle:UIAlertControllerStyleAlert];
-        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-        [self presentViewController:alert animated:YES completion:nil];
+        RCPresentSetupNeeded(self, RCSetupKindRemoteRC, @"No Devices", @"This command runs on another device with RemoteCompanion. Add one to pick it.", ^(NSDictionary *client) {
+            [self useNewClient:client];
+        });
         return;
     }
 
@@ -180,10 +179,18 @@
             [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:0] withRowAnimation:UITableViewRowAnimationNone];
         }]];
     }
+    [sheet addAction:RCSetupAddAction(self, RCSetupKindRemoteRC, ^(NSDictionary *client) { [self useNewClient:client]; })];
     [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     sheet.popoverPresentationController.sourceView = sourceView;
     sheet.popoverPresentationController.sourceRect = sourceView.bounds;
     [self presentViewController:sheet animated:YES completion:nil];
+}
+
+// A device just added here is the one picked
+- (void)useNewClient:(NSDictionary *)client {
+    if ([client[@"id"] length]) self.clientId = client[@"id"];
+    [self updateSaveButton];
+    [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:0] withRowAnimation:UITableViewRowAnimationNone];
 }
 
 #pragma mark - Editing

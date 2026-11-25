@@ -1,4 +1,5 @@
 #import "RCActionPickerViewController.h"
+#import "RCSetupShortcuts.h"
 #import "RCScreenActions.h"
 #import "RCAddOnCatalog.h"
 #import "RCAddOnActionsViewController.h"
@@ -605,7 +606,7 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
 // All + one chip per catalog section. Tapping one shows only that section;
 // search then filters within it.
 - (RCCategoryBar *)makeCategoryBar {
-    RCCategoryBar *bar = [[RCCategoryBar alloc] initWithWidth:self.view.bounds.size.width];
+    RCCategoryBar *bar = [[RCCategoryBar alloc] initWithWidth:self.view.bounds.size.width screen:RCLayoutActionPicker];
     [bar setChipTitles:self.sectionTitles];
     bar.selectedIndex = self.selectedCategory;
     __weak typeof(self) weakSelf = self;
@@ -655,14 +656,25 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
     return self.selectedCategory >= 0 && self.selectedCategory < (NSInteger)_sections.count;
 }
 
+// Section Headings: Hide (Compact, browsing everything) - every action in one grid, without headings
+- (BOOL)showsOneSection {
+    return [self compact] && RCLayoutSectionsHidden(RCLayoutActionPicker) && ![self isSearching] && ![self hasCategory] && self.groupActions.count == 0;
+}
+
 // What the table shows: search results, the selected category, or everything
 - (NSArray<NSArray<NSDictionary *> *> *)displaySections {
     if ([self isSearching]) return @[self.filteredActions ?: @[]];
     if ([self hasCategory]) return @[_browseSections[self.selectedCategory]];
+    if ([self showsOneSection]) {
+        NSMutableArray *all = [NSMutableArray array];
+        for (NSArray *section in _browseSections) [all addObjectsFromArray:section];
+        return @[all];
+    }
     return _browseSections;
 }
 
 - (NSString *)displayTitleForSection:(NSInteger)section {
+    if ([self showsOneSection]) return @"";
     if ([self isSearching]) return [self hasCategory] ? [NSString stringWithFormat:@"%@ Results", _sectionTitles[self.selectedCategory]] : @"Search Results";
     if ([self hasCategory]) return _sectionTitles[self.selectedCategory];
     return _sectionTitles[section];
@@ -724,11 +736,12 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
         return row;
     }
     RCActionTileCell *cell = [collectionView dequeueReusableCellWithReuseIdentifier:@"ActionTile" forIndexPath:indexPath];
+    cell.iconOnly = RCLayoutNamesHidden(RCLayoutActionPicker);
     NSDictionary *action = [self actionAtIndexPath:indexPath];
     NSString *icon = action[@"icon"];
     if (@available(iOS 15.0, *)) {} else if ([icon isEqualToString:@"ear.badge.checkmark"]) icon = @"ear";
     UIImage *custom = [action[@"image"] isKindOfClass:[UIImage class]] ? action[@"image"] : nil;   // an add-on's own picture
-    if ([action[@"command"] isEqualToString:@"__SET_VARIABLE__"]) custom = RCVariableMenuIconActionSized(22);
+    if ([action[@"command"] isEqualToString:@"__SET_VARIABLE__"]) custom = RCVariableMenuIconActionSized(cell.iconOnly ? 44 : 22);
     [cell setName:action[@"name"] icon:icon image:custom];
     cell.opensMore = [self actionOpensMore:action];
     return cell;
@@ -741,7 +754,7 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
 }
 
 - (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout sizeForItemAtIndexPath:(NSIndexPath *)indexPath {
-    return [self compact] ? RCActionTileSize(RCGridWidth(collectionView)) : RCActionRowSize(RCGridWidth(collectionView), 56);
+    return [self compact] ? RCActionTileSizeForScreen(RCGridWidth(collectionView), RCLayoutActionPicker) : RCActionRowSize(RCGridWidth(collectionView), 56);
 }
 
 - (CGFloat)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout minimumLineSpacingForSectionAtIndex:(NSInteger)section {
@@ -751,6 +764,7 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
 - (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout referenceSizeForHeaderInSection:(NSInteger)section {
     // A group's list already has its name in the title
     if (self.groupActions.count > 0) return CGSizeZero;
+    if ([self showsOneSection]) return CGSizeMake(collectionView.bounds.size.width, 8); // one grid, no heading
     // The first title sits just below the category bar
     return CGSizeMake(collectionView.bounds.size.width, section == 0 ? 30 : 38);
 }
@@ -1453,11 +1467,9 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
     RCConfigManager *cm = [RCConfigManager sharedManager];
     NSArray<NSDictionary *> *hosts = cm.sshHosts;
     if (hosts.count == 0) {
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"No SSH Hosts Configured"
-                                                                       message:@"You must add at least one SSH host before creating an SSH action.\nGo to Settings > Integrations > SSH Hosts."
-                                                                preferredStyle:UIAlertControllerStyleAlert];
-        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-        [self presentViewController:alert animated:YES completion:nil];
+        RCPresentSetupNeeded(self, RCSetupKindSSHHost, @"No Servers", @"An SSH action runs its command on a server. Add one to start.", ^(NSDictionary *host) {
+            [self handleSSHCommand];
+        });
         return;
     }
     
@@ -1478,6 +1490,7 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
             [weakSelf promptForSSHCommandWithHost:host];
         }]];
     }
+    [sheet addAction:RCSetupAddAction(self, RCSetupKindSSHHost, ^(NSDictionary *host) { [weakSelf promptForSSHCommandWithHost:host]; })];
     [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     [self presentViewController:sheet animated:YES completion:nil];
 }
@@ -1518,11 +1531,9 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
 - (void)handleDevAnnotate {
     NSArray<NSDictionary *> *hosts = [RCConfigManager sharedManager].sshHosts;
     if (hosts.count == 0) {
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"No SSH Hosts Configured"
-                                                                       message:@"You must add at least one SSH host before creating an Annotate & Send action.\nGo to Settings > Integrations > SSH Hosts."
-                                                                preferredStyle:UIAlertControllerStyleAlert];
-        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-        [self presentViewController:alert animated:YES completion:nil];
+        RCPresentSetupNeeded(self, RCSetupKindSSHHost, @"No Servers", @"Annotate & Send sends to a Mac over SSH. Add it as a server to start.", ^(NSDictionary *host) {
+            [self handleDevAnnotate];
+        });
         return;
     }
 
@@ -1559,11 +1570,9 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
 - (void)handleRemoteRCCommand {
     NSArray<NSDictionary *> *clients = [RCConfigManager sharedManager].rcClients;
     if (clients.count == 0) {
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"No Remote RC Clients Configured"
-                                                                       message:@"Add another device before creating a Remote RC action.\nGo to Settings > Integrations > Remote RC Clients."
-                                                                preferredStyle:UIAlertControllerStyleAlert];
-        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-        [self presentViewController:alert animated:YES completion:nil];
+        RCPresentSetupNeeded(self, RCSetupKindRemoteRC, @"No Devices", @"A Remote RC action runs on another device with RemoteCompanion. Add one to start.", ^(NSDictionary *client) {
+            [self handleRemoteRCCommand];
+        });
         return;
     }
 
@@ -1588,6 +1597,7 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
             [weakSelf enterRemoteModeWithClient:client];
         }]];
     }
+    [sheet addAction:RCSetupAddAction(self, RCSetupKindRemoteRC, ^(NSDictionary *client) { [weakSelf enterRemoteModeWithClient:client]; })];
     if (alreadyRemote) {
         [sheet addAction:[UIAlertAction actionWithTitle:@"Back to Local Actions" style:UIAlertActionStyleCancel handler:^(UIAlertAction *action) {
             [weakSelf leaveRemoteMode];

@@ -102,7 +102,7 @@
     self.emptyLabel.textAlignment = NSTextAlignmentCenter;
 
     // Chips for the sections, as on Triggers. A chip narrows the list or grid (and a search) to its section.
-    self.categoryBar = [[RCCategoryBar alloc] initWithWidth:self.view.bounds.size.width];
+    self.categoryBar = [[RCCategoryBar alloc] initWithWidth:self.view.bounds.size.width screen:RCLayoutNewTrigger];
     NSMutableArray *chipIcons = [NSMutableArray array];
     for (NSString *title in self.allSectionTitles) [chipIcons addObject:RCTriggerCategoryIcon(title) ?: [NSNull null]];
     [self.categoryBar setChipTitles:self.allSectionTitles icons:chipIcons];
@@ -134,7 +134,13 @@
 }
 
 - (void)layoutChanged:(NSNotification *)note {
-    if ([note.object isEqual:RCLayoutNewTrigger]) [self applyLayout];
+    if (![note.object isEqual:RCLayoutNewTrigger]) return;
+    NSString *option = note.userInfo[RCLayoutOptionKey];
+    if ([option isEqualToString:RCLayoutOptionCompact]) [self applyLayout];
+    else if (![option isEqualToString:RCLayoutOptionBarLines]) { // the category bar follows that one itself
+        [self.collectionView.collectionViewLayout invalidateLayout];
+        [self.collectionView reloadData];
+    }
 }
 
 // Shows the table or the grid; the other is hidden behind it. The category bar follows the active view.
@@ -376,17 +382,30 @@
 
 #pragma mark - Grid (Compact)
 
+// Section Headings: Hide - every kind in one grid, without headings (unless a category chip is picked)
+- (BOOL)gridIsOneSection {
+    return RCLayoutSectionsHidden(RCLayoutNewTrigger) && !self.selectedCategoryTitle;
+}
+
+- (NSArray<NSArray<NSDictionary *> *> *)gridSections {
+    if (![self gridIsOneSection]) return [self displayedSections];
+    NSMutableArray *all = [NSMutableArray array];
+    for (NSArray *section in [self displayedSections]) [all addObjectsFromArray:section];
+    return @[all];
+}
+
 - (NSInteger)numberOfSectionsInCollectionView:(UICollectionView *)collectionView {
-    return [self displayedSections].count;
+    return [self gridSections].count;
 }
 
 - (NSInteger)collectionView:(UICollectionView *)collectionView numberOfItemsInSection:(NSInteger)section {
-    return [self displayedSections][section].count;
+    return [self gridSections][section].count;
 }
 
 - (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView cellForItemAtIndexPath:(NSIndexPath *)indexPath {
     RCActionTileCell *cell = [collectionView dequeueReusableCellWithReuseIdentifier:@"Tile" forIndexPath:indexPath];
-    NSDictionary *item = [self displayedSections][indexPath.section][indexPath.item];
+    NSDictionary *item = [self gridSections][indexPath.section][indexPath.item];
+    cell.iconOnly = RCLayoutNamesHidden(RCLayoutNewTrigger);
     // The icon its triggers have in the Triggers list, when there is one
     UIImage *custom = [item[@"compactImage"] isKindOfClass:[UIImage class]] ? item[@"compactImage"]
                     : [item[@"image"] isKindOfClass:[UIImage class]] ? item[@"image"] : nil;
@@ -404,22 +423,23 @@
 
 - (UICollectionReusableView *)collectionView:(UICollectionView *)collectionView viewForSupplementaryElementOfKind:(NSString *)kind atIndexPath:(NSIndexPath *)indexPath {
     RCActionGridHeader *header = [collectionView dequeueReusableSupplementaryViewOfKind:kind withReuseIdentifier:@"Header" forIndexPath:indexPath];
-    NSString *title = [self displayedSectionTitles][indexPath.section];
-    [header setTitle:title icon:RCTriggerCategoryIcon(title)];
+    NSString *title = [self gridIsOneSection] ? @"" : [self displayedSectionTitles][indexPath.section];
+    [header setTitle:title icon:title.length ? RCTriggerCategoryIcon(title) : nil];
     return header;
 }
 
 - (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout sizeForItemAtIndexPath:(NSIndexPath *)indexPath {
-    return RCActionTileSize(RCGridWidth(collectionView));
+    return RCActionTileSizeForScreen(RCGridWidth(collectionView), RCLayoutNewTrigger);
 }
 
 - (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout referenceSizeForHeaderInSection:(NSInteger)section {
+    if ([self gridIsOneSection]) return CGSizeMake(collectionView.bounds.size.width, 8); // one grid, no heading
     return CGSizeMake(collectionView.bounds.size.width, section == 0 ? 30 : 38);
 }
 
 - (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)indexPath {
     [collectionView deselectItemAtIndexPath:indexPath animated:YES];
-    [self selectItem:[self displayedSections][indexPath.section][indexPath.item]];
+    [self selectItem:[self gridSections][indexPath.section][indexPath.item]];
 }
 
 #pragma mark - Choosing

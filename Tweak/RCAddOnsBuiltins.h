@@ -147,6 +147,7 @@ static NSString *const kRCAOBuiltinCommands[] = {
     @"app switcher",
     @"assistive touch",
     @"backup config",
+    @"backup config no-secrets",
     @"battery status",
     @"bluetooth list",
     @"bluetooth off",

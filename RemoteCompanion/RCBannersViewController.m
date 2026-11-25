@@ -34,6 +34,95 @@
 @end
 
 static NSString *const RCBannersEnabledTitle = @"Enabled";
+static NSString *const RCBannersWakeNote = @"Turns the screen on to show a banner. When off, a banner that comes while the screen is off waits until it turns on.";
+static const CGFloat RCBannersWakeCardHeight = 52;
+static const CGFloat RCBannersGridSide = 16; // the grid's side space (RCActionTile)
+
+// The first section's header on All: the Wake Screen switch in its own card, its note, then the
+// section's title, as the switches sit above the list in Select Shortcut
+@interface RCBannersTopHeader : RCActionGridHeader
+@property (nonatomic, strong) UISwitch *wakeSwitch;
+@property (nonatomic, strong) UIView *card;
+@property (nonatomic, strong) UILabel *note;
+@end
+
+@implementation RCBannersTopHeader
+
+- (instancetype)initWithFrame:(CGRect)frame {
+    self = [super initWithFrame:frame];
+    if (self) {
+        RCConfigManager *cm = [RCConfigManager sharedManager];
+        _card = [[UIView alloc] init];
+        _card.translatesAutoresizingMaskIntoConstraints = NO;
+        _card.backgroundColor = [cm tweakColorForKey:@"blockBackground" defaultVal:0.12];
+        _card.layer.cornerRadius = 10;
+        _card.layer.borderWidth = 1.0;
+        _card.layer.borderColor = [cm tweakColorForKey:@"borders" defaultVal:0.14].CGColor;
+        [self addSubview:_card];
+
+        UIImageView *icon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"sun.max.fill"]];
+        icon.tintColor = [UIColor systemYellowColor];
+        icon.contentMode = UIViewContentModeScaleAspectFit;
+        icon.translatesAutoresizingMaskIntoConstraints = NO;
+        [_card addSubview:icon];
+
+        UILabel *label = [[UILabel alloc] init];
+        label.text = @"Wake Screen";
+        label.font = [UIFont systemFontOfSize:17];
+        label.textColor = [UIColor labelColor];
+        label.translatesAutoresizingMaskIntoConstraints = NO;
+        [_card addSubview:label];
+
+        _wakeSwitch = [[UISwitch alloc] init];
+        _wakeSwitch.translatesAutoresizingMaskIntoConstraints = NO;
+        [_wakeSwitch addTarget:self action:@selector(wakeChanged:) forControlEvents:UIControlEventValueChanged];
+        [_card addSubview:_wakeSwitch];
+
+        _note = [[UILabel alloc] init];
+        _note.text = RCBannersWakeNote;
+        _note.font = [UIFont systemFontOfSize:13];
+        _note.textColor = [UIColor secondaryLabelColor];
+        _note.numberOfLines = 0;
+        _note.translatesAutoresizingMaskIntoConstraints = NO;
+        [self addSubview:_note];
+
+        UILayoutGuide *safe = self.safeAreaLayoutGuide;
+        [NSLayoutConstraint activateConstraints:@[
+            [_card.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:RCBannersGridSide],
+            [_card.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-RCBannersGridSide],
+            [_card.topAnchor constraintEqualToAnchor:self.topAnchor constant:8],
+            [_card.heightAnchor constraintEqualToConstant:RCBannersWakeCardHeight],
+            [icon.leadingAnchor constraintEqualToAnchor:_card.leadingAnchor constant:16],
+            [icon.centerYAnchor constraintEqualToAnchor:_card.centerYAnchor],
+            [icon.widthAnchor constraintEqualToConstant:24],
+            [label.leadingAnchor constraintEqualToAnchor:icon.trailingAnchor constant:12],
+            [label.centerYAnchor constraintEqualToAnchor:_card.centerYAnchor],
+            [_wakeSwitch.trailingAnchor constraintEqualToAnchor:_card.trailingAnchor constant:-16],
+            [_wakeSwitch.centerYAnchor constraintEqualToAnchor:_card.centerYAnchor],
+            [label.trailingAnchor constraintLessThanOrEqualToAnchor:_wakeSwitch.leadingAnchor constant:-8],
+            [_note.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:RCBannersGridSide + 4],
+            [_note.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-(RCBannersGridSide + 4)],
+            [_note.topAnchor constraintEqualToAnchor:_card.bottomAnchor constant:7],
+        ]];
+    }
+    return self;
+}
+
+- (void)setTitle:(NSString *)title icon:(UIImage *)icon {
+    [super setTitle:title icon:icon];
+    self.wakeSwitch.on = [RCConfigManager sharedManager].toastsWakeScreen;
+}
+
+- (void)wakeChanged:(UISwitch *)sender {
+    [RCConfigManager sharedManager].toastsWakeScreen = sender.on;
+}
+
+// The card, note and gap above the title
++ (CGFloat)extraHeightForWidth:(CGFloat)width {
+    return 8 + RCBannersWakeCardHeight + RCActionGridNoteHeight(RCBannersWakeNote, width) + 4;
+}
+
+@end
 
 // Catalog commands of the actions that show a banner of their own (the ids the tweak checks)
 static NSSet<NSString *> *RCOwnBannerIds(void) {
@@ -104,6 +193,7 @@ static NSArray<NSArray<NSDictionary *> *> *RCBannerCatalog(NSArray<NSString *> *
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(layoutChanged:) name:RCLayoutChangedNotification object:nil];
     [self.collectionView registerClass:[RCActionGridHeader class] forSupplementaryViewOfKind:UICollectionElementKindSectionHeader withReuseIdentifier:@"Header"];
     [self.collectionView registerClass:[RCActionGridHeader class] forSupplementaryViewOfKind:UICollectionElementKindSectionFooter withReuseIdentifier:@"Footer"];
+    [self.collectionView registerClass:[RCBannersTopHeader class] forSupplementaryViewOfKind:UICollectionElementKindSectionHeader withReuseIdentifier:@"TopHeader"];
 
     NSArray *titles = nil;
     self.sections = RCBannerCatalog(&titles);
@@ -119,7 +209,7 @@ static NSArray<NSArray<NSDictionary *> *> *RCBannerCatalog(NSArray<NSString *> *
     [self buildDisplaySections];
 
     // Category bar over the grid, as in Select Action. A chip shows only its actions.
-    self.categoryBar = [[RCCategoryBar alloc] initWithWidth:self.view.bounds.size.width];
+    self.categoryBar = [[RCCategoryBar alloc] initWithWidth:self.view.bounds.size.width screen:RCLayoutBanners];
     NSArray *chips = [@[RCBannersEnabledTitle] arrayByAddingObjectsFromArray:self.sectionTitles];
     NSMutableArray *chipIcons = [NSMutableArray array];
     for (NSString *title in chips) [chipIcons addObject:[self chipIconForCategory:title]];
@@ -190,6 +280,14 @@ static NSArray<NSArray<NSDictionary *> *> *RCBannerCatalog(NSArray<NSString *> *
     if (enabled.count) {
         [titles insertObject:RCBannersEnabledTitle atIndex:0];
         [sections insertObject:enabled atIndex:0];
+    }
+    // Section Headings: Hide (Compact) - every action in one grid, the checked ones first, without headings
+    if ([self compact] && RCLayoutSectionsHidden(RCLayoutBanners)) {
+        NSMutableArray *all = [NSMutableArray array];
+        for (NSArray *section in sections) [all addObjectsFromArray:section];
+        self.displayTitles = @[@""];
+        self.displaySections = @[all];
+        return;
     }
     self.displayTitles = titles;
     self.displaySections = sections;
@@ -328,11 +426,17 @@ static NSString *const RCBannersNote = @"Checked actions show a banner whenever 
     return self.displaySections[section].count;
 }
 
+// Wake Screen sits above the list on All (not over one chip's actions)
+- (BOOL)showsWakeCardInSection:(NSInteger)section {
+    return section == 0 && !self.selectedCategory;
+}
+
 - (BOOL)compact {
     return RCLayoutIsCompact(RCLayoutBanners);
 }
 
 - (void)layoutChanged:(NSNotification *)note {
+    if ([note.object isEqual:RCLayoutBanners]) [self buildDisplaySections]; // Section Headings, or List / Compact
     [self.collectionView.collectionViewLayout invalidateLayout];
     [self.collectionView reloadData];
 }
@@ -340,7 +444,9 @@ static NSString *const RCBannersNote = @"Checked actions show a banner whenever 
 // An add-on's banner under its own add-on's heading shows the action's name alone, without the
 // add-on's name in front; the Enabled section mixes add-ons, so it keeps the full name
 - (NSString *)nameForItem:(NSDictionary *)item inSection:(NSInteger)section {
-    BOOL mixed = section < (NSInteger)self.displayTitles.count && [self.displayTitles[section] isEqualToString:@"Enabled"];
+    // (one grid without headings mixes them too)
+    BOOL mixed = section < (NSInteger)self.displayTitles.count &&
+                 ([self.displayTitles[section] isEqualToString:@"Enabled"] || ![self.displayTitles[section] length]);
     NSString *shortName = item[@"shortName"];
     return !mixed && [shortName isKindOfClass:[NSString class]] && shortName.length ? shortName : item[@"name"];
 }
@@ -358,6 +464,7 @@ static NSString *const RCBannersNote = @"Checked actions show a banner whenever 
         return row;
     }
     RCActionTileCell *cell = [collectionView dequeueReusableCellWithReuseIdentifier:@"Tile" forIndexPath:indexPath];
+    cell.iconOnly = RCLayoutNamesHidden(RCLayoutBanners);
     [cell setName:name icon:item[@"icon"]];
     cell.checked = [self isChecked:item[@"command"]];
     cell.plainChecked = YES;
@@ -367,14 +474,20 @@ static NSString *const RCBannersNote = @"Checked actions show a banner whenever 
 // A title over each section; the explanation under the first
 - (UICollectionReusableView *)collectionView:(UICollectionView *)collectionView viewForSupplementaryElementOfKind:(NSString *)kind atIndexPath:(NSIndexPath *)indexPath {
     BOOL footer = [kind isEqualToString:UICollectionElementKindSectionFooter];
-    RCActionGridHeader *view = [collectionView dequeueReusableSupplementaryViewOfKind:kind withReuseIdentifier:footer ? @"Footer" : @"Header" forIndexPath:indexPath];
-    if (footer) [view setNote:indexPath.section == 0 ? RCBannersNote : nil];
-    else [view setTitle:self.displayTitles[indexPath.section]];
+    NSString *identifier = footer ? @"Footer" : ([self showsWakeCardInSection:indexPath.section] ? @"TopHeader" : @"Header");
+    RCActionGridHeader *view = [collectionView dequeueReusableSupplementaryViewOfKind:kind withReuseIdentifier:identifier forIndexPath:indexPath];
+    if (footer) {
+        [view setNote:indexPath.section == 0 ? RCBannersNote : nil];
+    } else {
+        NSString *title = self.displayTitles[indexPath.section];
+        id icon = [self chipIconForCategory:title];
+        [view setTitle:title icon:[icon isKindOfClass:[UIImage class]] ? icon : nil];
+    }
     return view;
 }
 
 - (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout sizeForItemAtIndexPath:(NSIndexPath *)indexPath {
-    return [self compact] ? RCActionTileSize(RCGridWidth(collectionView)) : RCActionRowSize(RCGridWidth(collectionView), 48);
+    return [self compact] ? RCActionTileSizeForScreen(RCGridWidth(collectionView), RCLayoutBanners) : RCActionRowSize(RCGridWidth(collectionView), 48);
 }
 
 - (CGFloat)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout minimumLineSpacingForSectionAtIndex:(NSInteger)section {
@@ -382,7 +495,11 @@ static NSString *const RCBannersNote = @"Checked actions show a banner whenever 
 }
 
 - (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout referenceSizeForHeaderInSection:(NSInteger)section {
-    return CGSizeMake(collectionView.bounds.size.width, section == 0 ? 34 : 38);
+    CGFloat width = collectionView.bounds.size.width;
+    CGFloat height = section == 0 ? 34 : 38;
+    if (![self.displayTitles[section] length]) height = 8; // one grid, no heading
+    if ([self showsWakeCardInSection:section]) height += [RCBannersTopHeader extraHeightForWidth:width];
+    return CGSizeMake(width, height);
 }
 
 - (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout referenceSizeForFooterInSection:(NSInteger)section {

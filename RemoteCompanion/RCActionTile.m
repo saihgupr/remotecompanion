@@ -16,6 +16,9 @@ static const CGFloat RCTileMinWidth = 80;
 @property (nonatomic, copy) void (^onFavorite)(void);
 @property (nonatomic, copy) void (^onDelete)(void);
 @property (nonatomic, assign) BOOL editing;
+// The icon above the name, or (icon only) centred in the tile at half its width
+@property (nonatomic, strong) NSArray<NSLayoutConstraint *> *namedConstraints;
+@property (nonatomic, strong) NSArray<NSLayoutConstraint *> *iconOnlyConstraints;
 @end
 
 @implementation RCActionTileCell
@@ -52,11 +55,19 @@ static const CGFloat RCTileMinWidth = 80;
         _badgeView.hidden = YES;
         [self.contentView addSubview:_badgeView];
 
-        [NSLayoutConstraint activateConstraints:@[
-            [_iconView.centerXAnchor constraintEqualToAnchor:self.contentView.centerXAnchor],
+        _namedConstraints = @[
             [_iconView.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:10],
             [_iconView.widthAnchor constraintEqualToConstant:30],
             [_iconView.heightAnchor constraintEqualToConstant:28],
+        ];
+        _iconOnlyConstraints = @[
+            [_iconView.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],
+            [_iconView.widthAnchor constraintEqualToAnchor:self.contentView.widthAnchor multiplier:0.5],
+            [_iconView.heightAnchor constraintEqualToAnchor:_iconView.widthAnchor],
+        ];
+        [NSLayoutConstraint activateConstraints:_namedConstraints];
+        [NSLayoutConstraint activateConstraints:@[
+            [_iconView.centerXAnchor constraintEqualToAnchor:self.contentView.centerXAnchor],
             [_nameLabel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:5],
             [_nameLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-5],
             [_nameLabel.topAnchor constraintEqualToAnchor:_iconView.bottomAnchor constant:4],
@@ -87,6 +98,16 @@ static const CGFloat RCTileMinWidth = 80;
     self.accessibilityTraits = UIAccessibilityTraitButton;
     UIImage *image = custom ?: (icon.length ? [UIImage systemImageNamed:icon] : nil);
     self.iconView.image = image ?: [UIImage systemImageNamed:@"square.dashed"];
+}
+
+- (void)setIconOnly:(BOOL)iconOnly {
+    if (iconOnly == _iconOnly) return;
+    _iconOnly = iconOnly;
+    [NSLayoutConstraint deactivateConstraints:iconOnly ? self.namedConstraints : self.iconOnlyConstraints];
+    [NSLayoutConstraint activateConstraints:iconOnly ? self.iconOnlyConstraints : self.namedConstraints];
+    self.nameLabel.hidden = iconOnly;
+    // A symbol drawn for the larger size, so it stays sharp
+    self.iconView.preferredSymbolConfiguration = [UIImageSymbolConfiguration configurationWithPointSize:iconOnly ? 40 : 22 weight:UIImageSymbolWeightRegular];
 }
 
 - (void)setOpensMore:(BOOL)opensMore {
@@ -476,91 +497,171 @@ CGSize RCActionRowSize(CGFloat listWidth, CGFloat height) {
     return CGSizeMake(MAX(0, listWidth - 2 * RCGridSide), height);
 }
 
-#pragma mark - Layout setting
+#pragma mark - Layout settings (per screen)
 
 NSString *const RCLayoutTriggers = @"triggers";
 NSString *const RCLayoutActionPicker = @"actionPicker";
 NSString *const RCLayoutBanners = @"banners";
 NSString *const RCLayoutNewTrigger = @"newTrigger";
-NSString *const RCLayoutTriggerColumns = @"triggerColumns";
-NSString *const RCLayoutTriggerSections = @"triggerSectionsHidden";
-NSString *const RCLayoutCategoryBarLines = @"categoryBarTwoLines";
+NSString *const RCLayoutIcons = @"icons";
+NSString *const RCLayoutOptionCompact = @"compact";
+NSString *const RCLayoutOptionPerRow = @"perRow";
+NSString *const RCLayoutOptionSections = @"sections";
+NSString *const RCLayoutOptionNames = @"names";
+NSString *const RCLayoutOptionBarLines = @"barLines";
+NSString *const RCLayoutOptionKey = @"option";
 NSString *const RCLayoutChangedNotification = @"RCLayoutChangedNotification";
 
-static NSString *RCLayoutDefaultsKey(NSString *screen) {
-    return [@"RCCompactLayout." stringByAppendingString:screen ?: @""];
+NSArray<NSArray<NSString *> *> *RCLayoutScreens(void) {
+    return @[@[@"Triggers", RCLayoutTriggers], @[@"New Trigger", RCLayoutNewTrigger],
+             @[@"Select Action", RCLayoutActionPicker], @[@"Banners", RCLayoutBanners], @[@"Icons", RCLayoutIcons]];
+}
+
+static BOOL RCLayoutIsTriggers(NSString *screen) { return !screen || [screen isEqualToString:RCLayoutTriggers]; }
+
+static void RCLayoutPostChange(NSString *screen, NSString *option) {
+    [[NSNotificationCenter defaultCenter] postNotificationName:RCLayoutChangedNotification object:screen ?: RCLayoutTriggers
+                                                      userInfo:@{ RCLayoutOptionKey: option }];
+}
+
+// Where each is kept. Triggers keeps the keys its settings always had (before they were per screen),
+// so nothing changes for it; the other screens' start out as they looked before.
+static NSString *RCLayoutKey(NSString *screen, NSString *option) {
+    BOOL triggers = RCLayoutIsTriggers(screen);
+    if ([option isEqualToString:RCLayoutOptionCompact]) return [@"RCCompactLayout." stringByAppendingString:screen ?: RCLayoutTriggers];
+    if ([option isEqualToString:RCLayoutOptionPerRow]) return triggers ? @"RCTriggerColumns" : [@"RCPerRow." stringByAppendingString:screen];
+    if ([option isEqualToString:RCLayoutOptionSections]) return triggers ? @"RCCompactLayout.triggerSectionsHidden" : [@"RCSectionsHidden." stringByAppendingString:screen];
+    if ([option isEqualToString:RCLayoutOptionNames]) return triggers ? @"RCCompactLayout.triggerTitlesHidden" : [@"RCNamesHidden." stringByAppendingString:screen];
+    return triggers ? @"RCCategoryBarLines" : [@"RCCategoryBarLines." stringByAppendingString:screen];
 }
 
 BOOL RCLayoutIsCompact(NSString *screen) {
-    return [[NSUserDefaults standardUserDefaults] boolForKey:RCLayoutDefaultsKey(screen)];
+    return [[NSUserDefaults standardUserDefaults] boolForKey:RCLayoutKey(screen, RCLayoutOptionCompact)];
 }
 
 void RCLayoutSetCompact(NSString *screen, BOOL compact) {
-    [[NSUserDefaults standardUserDefaults] setBool:compact forKey:RCLayoutDefaultsKey(screen)];
-    [[NSNotificationCenter defaultCenter] postNotificationName:RCLayoutChangedNotification object:screen];
+    [[NSUserDefaults standardUserDefaults] setBool:compact forKey:RCLayoutKey(screen, RCLayoutOptionCompact)];
+    RCLayoutPostChange(screen, RCLayoutOptionCompact);
 }
 
-NSInteger RCLayoutTriggerColumnCount(void) {
-    NSInteger count = [[NSUserDefaults standardUserDefaults] integerForKey:@"RCTriggerColumns"];
-    if (count < 2 || count > 4) count = RCLayoutIsCompact(RCLayoutTriggerColumns) ? 3 : 2; // the earlier 2 / 3 switch
-    return count;
+NSArray<NSNumber *> *RCLayoutPerRowChoices(NSString *screen) {
+    if ([screen isEqualToString:RCLayoutIcons]) return @[@4, @5, @6];
+    return RCLayoutIsTriggers(screen) ? @[@2, @3, @4] : @[@3, @4, @5];
 }
 
-NSInteger RCLayoutCategoryBarLineCount(void) {
-    NSInteger count = [[NSUserDefaults standardUserDefaults] integerForKey:@"RCCategoryBarLines"];
-    if (count < 1 || count > 3) count = RCLayoutIsCompact(RCLayoutCategoryBarLines) ? 2 : 1; // the earlier 1 / 2 switch
-    return count;
+NSInteger RCLayoutPerRow(NSString *screen) {
+    NSArray<NSNumber *> *choices = RCLayoutPerRowChoices(screen);
+    NSInteger count = [[NSUserDefaults standardUserDefaults] integerForKey:RCLayoutKey(screen, RCLayoutOptionPerRow)];
+    if ([choices containsObject:@(count)]) return count;
+    if (RCLayoutIsTriggers(screen)) return [[NSUserDefaults standardUserDefaults] boolForKey:@"RCCompactLayout.triggerColumns"] ? 3 : 2; // the earlier 2 / 3 switch
+    if ([screen isEqualToString:RCLayoutIcons]) return 6; // icons alone fit six across
+    return 4; // what the tile screens showed on a phone before
 }
 
-void RCLayoutSetCategoryBarLineCount(NSInteger count) {
-    [[NSUserDefaults standardUserDefaults] setInteger:MAX(1, MIN(3, count)) forKey:@"RCCategoryBarLines"];
-    [[NSNotificationCenter defaultCenter] postNotificationName:RCLayoutChangedNotification object:RCLayoutCategoryBarLines];
+void RCLayoutSetPerRow(NSString *screen, NSInteger count) {
+    NSArray<NSNumber *> *choices = RCLayoutPerRowChoices(screen);
+    count = MAX(choices.firstObject.integerValue, MIN(choices.lastObject.integerValue, count));
+    [[NSUserDefaults standardUserDefaults] setInteger:count forKey:RCLayoutKey(screen, RCLayoutOptionPerRow)];
+    RCLayoutPostChange(screen, RCLayoutOptionPerRow);
 }
 
-void RCLayoutSetTriggerColumnCount(NSInteger count) {
-    [[NSUserDefaults standardUserDefaults] setInteger:MAX(2, MIN(4, count)) forKey:@"RCTriggerColumns"];
-    [[NSNotificationCenter defaultCenter] postNotificationName:RCLayoutChangedNotification object:RCLayoutTriggerColumns];
+BOOL RCLayoutSectionsHidden(NSString *screen) {
+    return [[NSUserDefaults standardUserDefaults] boolForKey:RCLayoutKey(screen, RCLayoutOptionSections)];
 }
 
-NSArray<NSArray<NSString *> *> *RCLayoutScreens(void) {
-    return @[@[@"Triggers", RCLayoutTriggers], @[@"Triggers per Row", RCLayoutTriggerColumns], @[@"Compact Sections", RCLayoutTriggerSections], @[@"Category Bar Lines", RCLayoutCategoryBarLines],
-             @[@"New Trigger", RCLayoutNewTrigger], @[@"Select Action", RCLayoutActionPicker], @[@"Banners", RCLayoutBanners]];
+void RCLayoutSetSectionsHidden(NSString *screen, BOOL hidden) {
+    [[NSUserDefaults standardUserDefaults] setBool:hidden forKey:RCLayoutKey(screen, RCLayoutOptionSections)];
+    RCLayoutPostChange(screen, RCLayoutOptionSections);
 }
 
-// The segmented control's target: it carries its screen's key
+BOOL RCLayoutNamesHidden(NSString *screen) {
+    id value = [[NSUserDefaults standardUserDefaults] objectForKey:RCLayoutKey(screen, RCLayoutOptionNames)];
+    if (!value) return [screen isEqualToString:RCLayoutIcons]; // Icons begins with the symbols alone
+    return [value boolValue];
+}
+
+void RCLayoutSetNamesHidden(NSString *screen, BOOL hidden) {
+    [[NSUserDefaults standardUserDefaults] setBool:hidden forKey:RCLayoutKey(screen, RCLayoutOptionNames)];
+    RCLayoutPostChange(screen, RCLayoutOptionNames);
+}
+
+NSInteger RCLayoutBarLines(NSString *screen) {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSInteger count = [defaults integerForKey:RCLayoutKey(screen, RCLayoutOptionBarLines)];
+    if (count >= 1 && count <= 3) return count;
+    if ([screen isEqualToString:RCLayoutIcons]) return 2; // its nine categories on two lines
+    if (!RCLayoutIsTriggers(screen)) return RCLayoutBarLines(RCLayoutTriggers); // the one setting all screens had
+    return [defaults boolForKey:@"RCCompactLayout.categoryBarTwoLines"] ? 2 : 1; // the earlier 1 / 2 switch
+}
+
+void RCLayoutSetBarLines(NSString *screen, NSInteger lines) {
+    [[NSUserDefaults standardUserDefaults] setInteger:MAX(1, MIN(3, lines)) forKey:RCLayoutKey(screen, RCLayoutOptionBarLines)];
+    RCLayoutPostChange(screen, RCLayoutOptionBarLines);
+}
+
+NSArray<NSArray<NSString *> *> *RCLayoutOptionRows(NSString *screen) {
+    if ([screen isEqualToString:RCLayoutIcons]) {
+        // Always a grid in one piece: no List, no headings
+        return @[@[@"Per Row", RCLayoutOptionPerRow], @[@"Tile Names", RCLayoutOptionNames], @[@"Category Bar Lines", RCLayoutOptionBarLines]];
+    }
+    NSMutableArray *rows = [NSMutableArray arrayWithObject:@[@"Layout", RCLayoutOptionCompact]];
+    if (RCLayoutIsCompact(screen)) {
+        [rows addObject:@[@"Per Row", RCLayoutOptionPerRow]];
+        [rows addObject:@[@"Section Headings", RCLayoutOptionSections]];
+        [rows addObject:@[@"Tile Names", RCLayoutOptionNames]];
+    }
+    [rows addObject:@[@"Category Bar Lines", RCLayoutOptionBarLines]];
+    return rows;
+}
+
+// The segmented control's target: it carries its screen and option
 @interface RCLayoutSegmentTarget : NSObject
 @property (nonatomic, copy) NSString *screen;
+@property (nonatomic, copy) NSString *option;
 - (void)changed:(UISegmentedControl *)control;
 @end
 
 @implementation RCLayoutSegmentTarget
 - (void)changed:(UISegmentedControl *)control {
-    if ([self.screen isEqualToString:RCLayoutTriggerColumns]) RCLayoutSetTriggerColumnCount(control.selectedSegmentIndex + 2);
-    else if ([self.screen isEqualToString:RCLayoutCategoryBarLines]) RCLayoutSetCategoryBarLineCount(control.selectedSegmentIndex + 1);
-    else RCLayoutSetCompact(self.screen, control.selectedSegmentIndex == 1);
+    NSInteger i = control.selectedSegmentIndex;
+    if ([self.option isEqualToString:RCLayoutOptionPerRow]) RCLayoutSetPerRow(self.screen, RCLayoutPerRowChoices(self.screen)[i].integerValue);
+    else if ([self.option isEqualToString:RCLayoutOptionBarLines]) RCLayoutSetBarLines(self.screen, i + 1);
+    else if ([self.option isEqualToString:RCLayoutOptionSections]) RCLayoutSetSectionsHidden(self.screen, i == 1);
+    else if ([self.option isEqualToString:RCLayoutOptionNames]) RCLayoutSetNamesHidden(self.screen, i == 1);
+    else RCLayoutSetCompact(self.screen, i == 1);
     [[[UISelectionFeedbackGenerator alloc] init] selectionChanged];
 }
 @end
 
-UITableViewCell *RCLayoutSettingCell(NSString *title, NSString *screen) {
+UITableViewCell *RCLayoutOptionCell(NSString *title, NSString *screen, NSString *option) {
     RCConfigManager *cm = [RCConfigManager sharedManager];
     UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
     cell.backgroundColor = [cm tweakColorForKey:@"blockBackground" defaultVal:0.12];
     cell.selectionStyle = UITableViewCellSelectionStyleNone;
     cell.textLabel.text = title;
     cell.textLabel.textColor = [UIColor labelColor];
-    BOOL columns = [screen isEqualToString:RCLayoutTriggerColumns];
-    BOOL sections = [screen isEqualToString:RCLayoutTriggerSections];
-    BOOL lines = [screen isEqualToString:RCLayoutCategoryBarLines];
-    UISegmentedControl *control = [[UISegmentedControl alloc] initWithItems:columns ? @[@"2", @"3", @"4"] : sections ? @[@"Show", @"Hide"] : lines ? @[@"1", @"2", @"3"] : @[@"List", @"Compact"]];
-    control.selectedSegmentIndex = columns ? RCLayoutTriggerColumnCount() - 2 : lines ? RCLayoutCategoryBarLineCount() - 1 : (RCLayoutIsCompact(screen) ? 1 : 0);
-    control.accessibilityLabel = (columns || lines) ? title : [title stringByAppendingString:@" Layout"];
-    if (columns || lines) {
+    BOOL perRow = [option isEqualToString:RCLayoutOptionPerRow];
+    BOOL lines = [option isEqualToString:RCLayoutOptionBarLines];
+    BOOL showHide = [option isEqualToString:RCLayoutOptionSections] || [option isEqualToString:RCLayoutOptionNames];
+    NSMutableArray *items = [NSMutableArray array];
+    if (perRow) for (NSNumber *n in RCLayoutPerRowChoices(screen)) [items addObject:n.stringValue];
+    else if (lines) [items addObjectsFromArray:@[@"1", @"2", @"3"]];
+    else if (showHide) [items addObjectsFromArray:@[@"Show", @"Hide"]];
+    else [items addObjectsFromArray:@[@"List", @"Compact"]];
+    UISegmentedControl *control = [[UISegmentedControl alloc] initWithItems:items];
+    if (perRow) control.selectedSegmentIndex = [RCLayoutPerRowChoices(screen) indexOfObject:@(RCLayoutPerRow(screen))];
+    else if (lines) control.selectedSegmentIndex = RCLayoutBarLines(screen) - 1;
+    else if ([option isEqualToString:RCLayoutOptionSections]) control.selectedSegmentIndex = RCLayoutSectionsHidden(screen) ? 1 : 0;
+    else if ([option isEqualToString:RCLayoutOptionNames]) control.selectedSegmentIndex = RCLayoutNamesHidden(screen) ? 1 : 0;
+    else control.selectedSegmentIndex = RCLayoutIsCompact(screen) ? 1 : 0;
+    control.accessibilityLabel = title;
+    if (perRow || lines) {
         // Short choices: together as wide as List / Compact, so the controls line up
         for (NSInteger i = 0; i < 3; i++) [control setWidth:48 forSegmentAtIndex:i];
     }
     RCLayoutSegmentTarget *target = [[RCLayoutSegmentTarget alloc] init];
     target.screen = screen;
+    target.option = option;
     [control addTarget:target action:@selector(changed:) forControlEvents:UIControlEventValueChanged];
     // The control doesn't keep its target: the cell does
     static char RCLayoutTargetKey;
@@ -568,6 +669,16 @@ UITableViewCell *RCLayoutSettingCell(NSString *title, NSString *screen) {
     [control sizeToFit];
     cell.accessoryView = control;
     return cell;
+}
+
+CGSize RCActionTileSizeForScreen(CGFloat gridWidth, NSString *screen) {
+    NSInteger perRow = RCLayoutPerRow(screen);
+    CGFloat usable = MAX(0, gridWidth - 2 * RCGridSide);
+    // The narrowest a tile gets at this many per row on a phone; a wider screen fits more
+    CGFloat minimum = perRow <= 3 ? 104 : perRow == 4 ? RCTileMinWidth : 62;
+    NSInteger columns = MAX(perRow, (NSInteger)floor((usable + RCGridSpacing) / (minimum + RCGridSpacing)));
+    CGFloat width = floor((usable - RCGridSpacing * (columns - 1)) / columns);
+    return CGSizeMake(width, RCLayoutNamesHidden(screen) ? width : 90);
 }
 
 #pragma mark - App icons

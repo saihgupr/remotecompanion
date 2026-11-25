@@ -2,7 +2,7 @@
 
 ## User flow
 
-Settings → Advanced Settings → Options → **Excluded Apps** → an assigned trigger → app multi-picker.
+Settings → **Excluded Apps** → an assigned trigger → app multi-picker.
 Each trigger shows its name, assigned action labels and excluded-app count.
 Disabled triggers with assigned actions remain editable. A trigger without assigned
 actions is not listed. Done saves the selection; Back leaves it unchanged. Untick every
@@ -91,5 +91,5 @@ Required device matrix before claiming the feature works:
    disabled assigned triggers, empty picker/clear, and a previously uninstalled selected app.
 5. Save, quit/reopen the app, respring, and export/import; confirm per-trigger IDs and
    behavior persist. Back without Done must not change the prior selection.
-6. Confirm command-line blacklist behavior is unchanged and Web UI Access/Open Web UI
+6. Confirm command-line blacklist behavior is unchanged and Web UI Access/Open in Safari
    still navigate correctly.

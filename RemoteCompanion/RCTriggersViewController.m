@@ -429,7 +429,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     }
     self.tableView.contentInset = UIEdgeInsetsMake(0, 0, 0, 0); // Reset inset since we have large titles handling spacing better now
     
-    self.categoryBar = [[RCCategoryBar alloc] initWithWidth:self.view.bounds.size.width];
+    self.categoryBar = [[RCCategoryBar alloc] initWithWidth:self.view.bounds.size.width screen:RCLayoutTriggers];
     __weak typeof(self) weakSelf = self;
     self.categoryBar.onSelect = ^(NSInteger index) {
         weakSelf.selectedCategoryTitle = (index >= 0 && index < (NSInteger)weakSelf.sectionTitles.count) ? weakSelf.sectionTitles[index] : nil;
@@ -524,8 +524,10 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
 }
 
 - (void)layoutSettingChanged:(NSNotification *)note {
-    if ([note.object isEqual:RCLayoutTriggers]) [self applyLayout];
-    else if ([note.object isEqual:RCLayoutTriggerColumns] || [note.object isEqual:RCLayoutTriggerSections]) {
+    if (![note.object isEqual:RCLayoutTriggers]) return;
+    NSString *option = note.userInfo[RCLayoutOptionKey];
+    if ([option isEqualToString:RCLayoutOptionCompact]) [self applyLayout];
+    else if (![option isEqualToString:RCLayoutOptionBarLines]) { // the category bar follows that one itself
         [self.grid.collectionView.collectionViewLayout invalidateLayout];
         [self.grid reload];
     }
@@ -1735,7 +1737,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
 
 // Compact Sections: Hide (and no category picked) shows every trigger in one grid, without titles
 - (BOOL)gridIsOneSection {
-    return RCLayoutIsCompact(RCLayoutTriggerSections) && !self.selectedCategoryTitle;
+    return RCLayoutSectionsHidden(RCLayoutTriggers) && !self.selectedCategoryTitle;
 }
 
 - (NSInteger)gridSectionCount {
@@ -1779,7 +1781,9 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     UIImage *custom = [self customIconForTrigger:key];
     if (custom) return custom;
     UIImage *addOnImage = [RCAddOnCatalog isAddOnTriggerKey:key] ? [RCAddOnCatalog imageForTriggerKey:key] : nil;
-    return addOnImage ?: [self appIconForTrigger:key side:30] ?: RCTriggerIconImage(key, 26) ?: [self symbolIconForTrigger:key size:26];
+    // Compact Titles: Hide shows the icons alone and larger, so they're drawn larger too
+    BOOL large = RCLayoutNamesHidden(RCLayoutTriggers);
+    return addOnImage ?: [self appIconForTrigger:key side:large ? 60 : 30] ?: RCTriggerIconImage(key, large ? 52 : 26) ?: [self symbolIconForTrigger:key size:large ? 52 : 26];
 }
 
 - (NSInteger)gridActionCountForTrigger:(NSString *)key {

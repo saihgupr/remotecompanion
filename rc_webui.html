@@ -393,6 +393,14 @@
       }
     }
 
+    /* Test Kit: All / None and the step counts */
+    .tk-segmented { display:flex; border:1px solid var(--rc-blue); border-radius:8px; overflow:hidden; flex-shrink:0; }
+    .tk-segmented button { background:none; border:none; color:var(--rc-blue); font:inherit; font-size:14px; padding:4px 12px; cursor:pointer; }
+    .tk-segmented button + button { border-left:1px solid var(--rc-blue); }
+    .tk-stepper { display:flex; background:var(--rc-fill-strong); border-radius:8px; overflow:hidden; flex-shrink:0; margin-left:8px; }
+    .tk-stepper button { background:none; border:none; color:var(--rc-label); font-size:20px; width:44px; height:32px; cursor:pointer; }
+    .tk-stepper button + button { border-left:1px solid var(--rc-separator, rgba(84,84,88,.6)); }
+    .tk-stepper button:disabled { color:var(--rc-label-2); opacity:.5; cursor:default; }
     /* ── Device Diagnostics & Health (iOS Inset Grouped Styling) ── */
     .sysinfo-wrapper {
       max-width: 800px;
@@ -1050,6 +1058,7 @@
       -webkit-user-select: none;
     }
     .cat-chip:active { transform: scale(0.96); }
+    .settings-group-icon { font-size: 13px; margin-right: 6px; vertical-align: -1px; }
     .cat-chip.active { background: var(--rc-chip-bg); color: var(--rc-chip-fg); }
 
     /* ── Picker dialog category pills (same component, dialog sizing) ── */
@@ -1454,6 +1463,33 @@
       border-bottom: 0.5px solid var(--rc-border);
     }
     .settings-row:last-child { border-bottom: none; }
+    /* A number setting: name and value, then − slider + (rcSliderRow) */
+    .rc-slider-row { flex-direction: column; align-items: stretch; gap: 10px; }
+    .rc-slider-top { display: flex; align-items: center; }
+    .rc-slider-value { background: none; border: none; color: var(--rc-label-2); font-size: 17px; font-family: inherit;
+      font-variant-numeric: tabular-nums; cursor: pointer; padding: 0; }
+    .rc-slider-reset .f7-icons { font-size: 15px; line-height: 32px; }
+    .rc-slider-reset.undo { color: var(--rc-blue); }
+    .rc-slider-lock .f7-icons { font-size: 15px; line-height: 32px; }
+    .rc-slider-lock { color: var(--rc-label-2); }
+    .rc-slider-lock.locked { color: var(--rc-orange, #ff9500); }
+    /* held, not clicked (Default / Undo and the lock): a ring around it fills, and it acts once full */
+    .rc-hold { position: relative; overflow: visible; }
+    .rc-hold svg { position: absolute; left: -4px; top: -4px; width: 40px; height: 40px; pointer-events: none; transform: rotate(-90deg); }
+    .rc-hold circle { fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round;
+      stroke-dasharray: 110; stroke-dashoffset: 110; transition: stroke-dashoffset 0.15s ease-out; }
+    .rc-slider-lock:not(.locked) circle { stroke: var(--rc-orange, #ff9500); }
+    .rc-slider-lock.locked circle { stroke: var(--rc-label-2); }
+    .rc-hold.holding circle { stroke-dashoffset: 0; transition: stroke-dashoffset 0.6s linear; }
+    /* a quick click still fills a quarter of the ring, so it's plain it wants holding */
+    .rc-hold.nudge circle { animation: rc-hold-nudge 0.6s ease-out; }
+    @keyframes rc-hold-nudge { 0% { stroke-dashoffset: 110; } 30%, 55% { stroke-dashoffset: 82; } 100% { stroke-dashoffset: 110; } }
+    .rc-slider-bottom input[type=range]:disabled { opacity: 0.45; }
+    .rc-slider-bottom { display: flex; align-items: center; gap: 10px; }
+    .rc-slider-bottom input[type=range] { flex: 1; accent-color: var(--rc-blue); margin: 0; }
+    .rc-slider-step { width: 32px; height: 32px; border-radius: 16px; border: none; background: var(--rc-fill, rgba(120,120,128,0.24));
+      color: var(--rc-label); font-size: 18px; font-weight: 600; line-height: 32px; padding: 0; cursor: pointer; flex: none; }
+    .rc-slider-step:disabled { opacity: 0.35; cursor: default; }
     .settings-label { flex: 1; font-size: 17px; color: var(--rc-label); }
     .settings-btn { display: flex; align-items: center; }
     a { color: inherit; text-decoration: none; }
@@ -2174,7 +2210,7 @@
 <!-- Running: the triggers running now, like a task manager -->
 <div class="dialog-backdrop" id="running-dialog-backdrop" onclick="if (event.target === this) closeRunning()">
   <div class="dialog-box app-launch-dialog" style="max-width: 480px; width: 90%;">
-    <div class="dialog-title">Running</div>
+    <div class="dialog-title">Activity</div>
     <div class="dialog-msg" style="text-align:center;padding:0 16px 6px">Stop ends that run, even during a wait or a loop.</div>
     <div style="padding:0 14px 10px; display:flex; flex-direction:column; flex:1; min-height:0;">
       <div class="app-picker-list" id="running-content" style="max-height: 52vh; max-height: 52dvh; overflow-y: auto;"></div>
@@ -2211,185 +2247,123 @@
     <button class="panel-action" onclick="closeSettings()" style="color:var(--rc-blue)">Done</button>
   </div>
   <div class="panel-content">
-    <div class="action-list-header" style="margin-top:28px">General</div>
+    <div class="category-bar" id="settings-category-bar" style="padding:12px 16px 0"></div>
+
+    <div class="settings-group" data-group="" style="margin-top:20px">
     <div class="action-list-card">
-      <div class="settings-row">
-        <span class="settings-label">Enable All Triggers</span>
-        <div class="settings-btn">
-          <input type="checkbox" class="ios-toggle" id="setting-master" onchange="config.masterEnabled=this.checked;saveConfig()">
-        </div>
+      <div class="action-list-row">
+        <div class="action-row-icon icon-green"><i class="f7-icons">checkmark</i></div>
+        <div class="action-row-text" style="flex:1">Enable All Triggers</div>
+        <input type="checkbox" class="ios-toggle" id="setting-master" onchange="config.masterEnabled=this.checked;saveConfig()">
       </div>
-      <div class="settings-row">
-        <span class="settings-label">Web UI</span>
-        <div class="settings-btn">
-          <input type="checkbox" class="ios-toggle" id="setting-webui" onchange="config.webUIEnabled=this.checked;saveConfig()">
-        </div>
+    </div>
+    </div>
+
+    <div class="settings-group" data-group="Triggers" data-icon="bolt_fill">
+    <div class="action-list-header"><i class="f7-icons settings-group-icon">bolt_fill</i>Triggers</div>
+    <div class="action-list-card">
+      <div class="action-list-row" onclick="openSettingsPage('buttons')">
+        <div class="action-row-icon icon-orange"><i class="f7-icons">power</i></div>
+        <div class="action-row-text" style="flex:1">Buttons</div>
+        <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
       </div>
-      <div class="settings-row" onclick="openAccessPanel()" style="cursor:pointer;">
-        <div style="flex:1;">
-          <div style="font-size:17px;color:var(--rc-label);">Access</div>
-          <div id="setting-access-status" style="font-size:13px;color:var(--rc-label-2);font-weight:400;margin-top:2px;">Any Network</div>
-        </div>
+      <div class="action-list-row" onclick="openSettingsPage('swipes')">
+        <div class="action-row-icon icon-purple"><i class="f7-icons">hand_point_left_fill</i></div>
+        <div class="action-row-text" style="flex:1">Swipe Triggers</div>
+        <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
+      </div>
+      <div class="action-list-row" onclick="openSettingsPage('nfc')">
+        <div class="action-row-icon icon-green"><i class="f7-icons">wifi</i></div>
+        <div class="action-row-text" style="flex:1">NFC</div>
+        <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
+      </div>
+      <div class="action-list-row" onclick="openExcludedAppsPanel()">
+        <div class="action-row-icon icon-red"><i class="f7-icons">nosign</i></div>
+        <div class="action-row-text" style="flex:1">Excluded Apps</div>
         <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
       </div>
     </div>
+    </div>
 
-    <div class="action-list-header">Integrations</div>
+    <div class="settings-group" data-group="Appearance" data-icon="paintbrush_fill">
+    <div class="action-list-header"><i class="f7-icons settings-group-icon">paintbrush_fill</i>Appearance</div>
     <div class="action-list-card">
+      <div class="action-list-row" onclick="openSettingsPage('layout')">
+        <div class="action-row-icon icon-blue"><i class="f7-icons">square_grid_2x2_fill</i></div>
+        <div class="action-row-text" style="flex:1">Layout</div>
+        <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
+      </div>
+      <div class="action-list-row" onclick="openBannersPanel()">
+        <div class="action-row-icon icon-red"><i class="f7-icons">bell_fill</i></div>
+        <div class="action-row-text" style="flex:1">Banners<br><span id="setting-banners-count" style="font-size:13px;color:var(--rc-label-2);font-weight:400">Off</span></div>
+        <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
+      </div>
+    </div>
+    </div>
+
+    <div class="settings-group" data-group="Connections" data-icon="globe">
+    <div class="action-list-header"><i class="f7-icons settings-group-icon">globe</i>Connections</div>
+    <div class="action-list-card">
+      <div class="action-list-row" onclick="openSettingsPage('webui')">
+        <div class="action-row-icon icon-blue"><i class="f7-icons">globe</i></div>
+        <div class="action-row-text" style="flex:1">Web UI</div>
+        <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
+      </div>
       <div class="action-list-row" onclick="openIntegrationsPanel()">
         <div class="action-row-icon icon-indigo"><i class="f7-icons">globe</i></div>
         <div class="action-row-text" style="flex:1">Integrations<br><span id="setting-integrations-status" style="font-size:13px;color:var(--rc-label-2);font-weight:400">Disabled</span></div>
         <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
       </div>
-    </div>
-
-    <div class="action-list-header">Advanced Settings</div>
-    <div class="action-list-card">
-      <div class="action-list-row" onclick="openAdvancedPanel()">
-        <div class="action-row-icon icon-purple"><i class="f7-icons">gearshape_2_fill</i></div>
-        <div class="action-row-text">Advanced Settings</div>
+      <div class="action-list-row" onclick="openAddOnsPanel()">
+        <div class="action-row-icon icon-orange"><i class="f7-icons">cube_box_fill</i></div>
+        <div class="action-row-text" style="flex:1">Add-ons</div>
         <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
       </div>
+    </div>
+    </div>
+
+    <div class="settings-group" data-group="Data" data-icon="tray_full_fill">
+    <div class="action-list-header"><i class="f7-icons settings-group-icon">tray_full_fill</i>Data</div>
+    <div class="action-list-card">
+      <div class="action-list-row" onclick="openGesturesPanel()">
+        <div class="action-row-icon icon-pink"><i class="f7-icons">hand_draw</i></div>
+        <div class="action-row-text" style="flex:1">Gestures</div>
+        <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
+      </div>
+      <div class="action-list-row" onclick="openVariablesPanel()">
+        <div class="action-row-icon icon-orange"><i class="f7-icons">function</i></div>
+        <div class="action-row-text" style="flex:1">Variables</div>
+        <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
+      </div>
+      <div class="action-list-row" onclick="openSettingsPage('backup')">
+        <div class="action-row-icon icon-teal"><i class="f7-icons">tray_full_fill</i></div>
+        <div class="action-row-text" style="flex:1">Backup</div>
+        <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
+      </div>
+    </div>
+    </div>
+
+    <div class="settings-group" data-group="System" data-icon="gear_alt_fill">
+    <div class="action-list-header"><i class="f7-icons settings-group-icon">gear_alt_fill</i>System</div>
+    <div class="action-list-card">
       <div class="action-list-row" onclick="openTweaksPanel()">
-        <div class="action-row-icon icon-cyan"><i class="f7-icons">slider_horizontal_3</i></div>
-        <div class="action-row-text" style="flex:1">Tweaks</div>
+        <div class="action-row-icon icon-gray"><i class="f7-icons">slider_horizontal_3</i></div>
+        <div class="action-row-text" style="flex:1">iOS Tweaks</div>
+        <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
+      </div>
+      <div class="action-list-row" onclick="openSettingsPage('security')">
+        <div class="action-row-icon icon-indigo"><i class="f7-icons">lock_fill</i></div>
+        <div class="action-row-text" style="flex:1">Security</div>
+        <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
+      </div>
+      <div class="action-list-row" onclick="openSettingsPage('developer')">
+        <div class="action-row-icon icon-gray"><i class="f7-icons">waveform_path_ecg</i></div>
+        <div class="action-row-text" style="flex:1">Diagnostics</div>
         <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
       </div>
     </div>
-    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 32px 0">Advanced Settings holds NFC, banners, logging and display options. Tweaks changes how iOS behaves.</div>
-
-    <div class="action-list-header">Diagnostics</div>
-    <div class="action-list-card">
-      <div class="action-list-row" onclick="openRunning()">
-        <div class="action-row-icon icon-green"><i class="f7-icons">list_bullet</i></div>
-        <div class="action-row-text">Running</div>
-        <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
-      </div>
-      <div class="action-list-row" onclick="openSysInfoPanel()">
-        <div class="action-row-icon icon-blue"><i class="f7-icons">info_circle</i></div>
-        <div class="action-row-text">Device Diagnostics & Health</div>
-        <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
-      </div>
-    </div>
-    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 32px 0">System info, battery, storage, and logs for this device.</div>
-
-    <div class="action-list-header">Backup</div>
-    <div class="action-list-card">
-      <div class="action-list-row" onclick="exportConfig()">
-        <div class="action-row-icon icon-blue"><i class="f7-icons">square_arrow_up</i></div>
-        <div class="action-row-text">Export Configuration</div>
-      </div>
-      <div class="action-list-row" onclick="importConfig()">
-        <div class="action-row-icon icon-green"><i class="f7-icons">square_arrow_down</i></div>
-        <div class="action-row-text">Import Configuration</div>
-      </div>
-    </div>
-    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">Export your configuration to share or backup. Import to restore.</div>
-    <input type="file" id="import-file-input" accept=".json" style="display:none" onchange="handleImportFile(this)">
-
-  </div>
-</div>
-
-<!-- ══ ACCESS PANEL (Settings > Access) ═══════════════════════════════════ -->
-<div class="rc-panel" id="access-panel">
-  <div class="panel-navbar">
-    <button class="panel-back" onclick="closeAccessPanel()">
-      <i class="f7-icons">chevron_left</i> Settings
-    </button>
-    <div class="panel-title">Access</div>
-    <div style="width:80px"></div>
-  </div>
-  <div class="panel-content">
-    <div class="action-list-card" style="margin-top:28px">
-      <div class="action-list-row" onclick="setWebUIAccess('any')" style="cursor:pointer;">
-        <div class="action-row-icon icon-blue"><i class="f7-icons">globe</i></div>
-        <div class="action-row-text" style="flex:1">Any Network</div>
-        <i class="f7-icons" id="access-check-any" style="color:var(--rc-blue);font-size:16px;">checkmark</i>
-      </div>
-      <div class="action-list-row" onclick="setWebUIAccess('networks')" style="cursor:pointer;">
-        <div class="action-row-icon icon-teal"><i class="f7-icons">wifi</i></div>
-        <div class="action-row-text" style="flex:1">Trusted Networks</div>
-        <i class="f7-icons" id="access-check-networks" style="color:var(--rc-blue);font-size:16px;display:none;">checkmark</i>
-      </div>
-      <div class="action-list-row" onclick="setWebUIAccess('local')" style="cursor:pointer;">
-        <div class="action-row-icon icon-gray"><i class="f7-icons">device_phone_portrait</i></div>
-        <div class="action-row-text" style="flex:1">This iPhone Only</div>
-        <i class="f7-icons" id="access-check-local" style="color:var(--rc-blue);font-size:16px;display:none;">checkmark</i>
-      </div>
-    </div>
-    <div id="access-footer-text" style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 24px">
-      The Web UI can be reached from any device on the same network as this iPhone.
     </div>
 
-    <!-- Section: Trusted Networks (visible if config.webUIAccess === 'networks') -->
-    <div id="access-trusted-networks-section" style="display:none">
-      <div class="action-list-header">Trusted Networks</div>
-      <div class="action-list-card">
-        <div id="trusted-networks-list"></div>
-        <div class="action-list-row" onclick="promptAddTrustedNetwork()" style="cursor:pointer;">
-          <div class="action-row-icon icon-blue"><i class="f7-icons">plus_circle_fill</i></div>
-          <div class="action-row-text" style="color:var(--rc-blue);font-weight:500">Add Network…</div>
-        </div>
-      </div>
-      <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 24px">
-        Anyone can name a network the same as a trusted one, so add only private networks.
-      </div>
-    </div>
-
-    <!-- Section: API Token -->
-    <div class="action-list-header">API Token</div>
-
-    <!-- Authenticated / Open View -->
-    <div id="access-token-authenticated-view">
-      <div class="action-list-card">
-        <div class="settings-row" style="padding:10px 16px;">
-          <div style="flex:1; display:flex; align-items:center; gap:8px;">
-            <input type="password" id="setting-webui-token" placeholder="API Token (optional)" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="flex:1; background:var(--rc-surface-2); border:1px solid var(--rc-border-strong); border-radius:8px; color:var(--rc-label); padding:8px 12px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:13px;" onchange="onApiTokenChange(this.value)">
-            <button type="button" onclick="toggleWebUITokenVisibility()" style="background:none; border:none; color:var(--rc-label-2); cursor:pointer; padding:6px; display:flex; align-items:center;" title="Show/Hide Token">
-              <i class="f7-icons" id="webui-token-eye-icon" style="font-size:18px;">eye</i>
-            </button>
-            <button type="button" onclick="copyWebUIToken()" style="background:none; border:none; color:var(--rc-label-2); cursor:pointer; padding:6px; display:flex; align-items:center;" title="Copy Token">
-              <i class="f7-icons" style="font-size:18px;">doc_on_doc</i>
-            </button>
-          </div>
-        </div>
-        <div class="action-list-row" onclick="generateWebUIApiToken()" style="cursor:pointer;">
-          <div class="action-row-icon icon-blue" style="color:#fff; display:flex; align-items:center; justify-content:center;">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12.65 10A5.99 5.99 0 0 0 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6a5.99 5.99 0 0 0 5.65-4H17v4h4v-4h2v-4H12.65zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/></svg>
-          </div>
-          <div class="action-row-text" style="color:var(--rc-blue);font-weight:500">Generate New Token</div>
-        </div>
-        <div id="access-token-logout-row" class="action-list-row" onclick="lockWebUISession()" style="cursor:pointer; display:none;">
-          <div class="action-row-icon icon-gray" style="display:flex; align-items:center; justify-content:center;">
-            <i class="f7-icons" style="font-size:15px; color:#fff;">lock</i>
-          </div>
-          <div class="action-row-text" style="color:var(--rc-label-2);font-size:14px;">Lock Browser Session</div>
-        </div>
-      </div>
-      <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">
-        Protects raw shell and root commands from unauthenticated local network callers.
-      </div>
-    </div>
-
-    <!-- Locked / Unauthenticated View -->
-    <div id="access-token-locked-view" style="display:none;">
-      <div class="action-list-card">
-        <div class="settings-row" style="padding:10px 16px;">
-          <div style="flex:1; display:flex; align-items:center; gap:8px;">
-            <input type="password" id="setting-webui-unlock-input" placeholder="Enter API Token to unlock..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="flex:1; background:var(--rc-surface-2); border:1px solid var(--rc-border-strong); border-radius:8px; color:var(--rc-label); padding:8px 12px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:13px;" onkeydown="if(event.key==='Enter')authenticateWebUIToken()">
-            <button type="button" onclick="toggleUnlockTokenVisibility()" style="background:none; border:none; color:var(--rc-label-2); cursor:pointer; padding:6px; display:flex; align-items:center;" title="Show/Hide">
-              <i class="f7-icons" id="unlock-token-eye-icon" style="font-size:18px;">eye</i>
-            </button>
-            <button type="button" onclick="authenticateWebUIToken()" style="background:var(--rc-blue); border:none; color:#fff; border-radius:8px; font-size:13px; font-weight:600; padding:8px 14px; cursor:pointer; white-space:nowrap;">
-              Unlock
-            </button>
-          </div>
-        </div>
-      </div>
-      <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">
-        This iPhone is protected by an API Token. Enter the token from Settings &gt; Access on your iPhone to unlock privileged commands on this computer.
-      </div>
-    </div>
   </div>
 </div>
 
@@ -2552,26 +2526,53 @@
   </div>
 </div>
 
-<!-- ══ ADVANCED PANEL (Settings > Advanced Settings) ══════════════════════ -->
+<!-- ══ SETTINGS PAGE PANEL (Settings > Layout, Banners, Buttons, Swipe Triggers, NFC, Developer) ══
+     One panel for every page: openSettingsPage() shows the sections whose data-page matches -->
 <div class="rc-panel" id="advanced-panel">
   <div class="panel-navbar">
     <button class="panel-back" onclick="closeAdvancedPanel()">
       <i class="f7-icons">chevron_left</i> Settings
     </button>
-    <div class="panel-title">Advanced Settings</div>
+    <div class="panel-title" id="settings-page-title">Settings</div>
     <div style="width:80px"></div>
   </div>
   <div class="panel-content">
-    <div class="action-list-header" style="margin-top:28px">Banners</div>
+    <div class="settings-page-section" data-page="layout">
+    <div class="action-list-header" style="margin-top:28px">Names</div>
     <div class="action-list-card">
-      <div class="action-list-row" onclick="openBannersPanel()">
-        <div class="action-row-icon icon-purple"><i class="f7-icons">bell_fill</i></div>
-        <div class="action-row-text" style="flex:1">Banners<br><span id="setting-banners-count" style="font-size:13px;color:var(--rc-label-2);font-weight:400">Off</span></div>
-        <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
+      <div class="settings-row">
+        <span class="settings-label">Wrap Long Names</span>
+        <div class="settings-btn">
+          <input type="checkbox" class="ios-toggle" id="setting-wrap-names" onchange="onWrapLongNamesChange(this.checked)">
+        </div>
       </div>
     </div>
-    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 32px 0">Actions that show a banner when a trigger runs them.</div>
-    <div class="action-list-header">NFC</div>
+    </div>
+
+    <div class="settings-page-section" data-page="buttons">
+    <div class="action-list-header" style="margin-top:28px">Timing</div>
+    <div class="action-list-card" id="timing-settings-card"></div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">How long a press waits for the next one before it counts. A shorter time responds sooner and needs quicker presses.</div>
+
+    </div>
+
+    <div class="settings-page-section" data-page="swipes">
+    <div class="action-list-header" style="margin-top:28px">Zones and Distances</div>
+    <div class="action-list-card" id="swipe-settings-card"></div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">How far a swipe goes before a swipe trigger runs, and where a status bar, edge or bottom swipe has to start. Longer distances and smaller zones leave more room for the Home swipe and other gestures. Settings &gt; Swipe Triggers &gt; Adjust on Screen in the app draws them over any app.</div>
+    <div class="action-list-header">While Swiping</div>
+    <div class="action-list-card">
+      <div class="settings-row">
+        <span class="settings-label">Lock Scrolling During Gestures</span>
+        <div class="settings-btn">
+          <input type="checkbox" class="ios-toggle" id="setting-freeze-lists" onchange="config.freezeListsDuringGestures=this.checked;saveConfig()">
+        </div>
+      </div>
+    </div>
+    </div>
+
+    <div class="settings-page-section" data-page="nfc">
+    <div class="action-list-header" style="margin-top:28px">NFC</div>
     <div class="action-list-card">
       <div class="settings-row">
         <span class="settings-label">NFC Scanning</span>
@@ -2591,14 +2592,70 @@
       </div>
     </div>
     <div style="color:var(--rc-label-2);font-size:13px;margin:8px 32px 0" id="nfc-footer">NFC scanning options.</div>
-    <div class="action-list-header">Options</div>
+    </div>
+
+    <div class="settings-page-section" data-page="security">
+    <div class="action-list-header" style="margin-top:28px">Unlocking</div>
     <div class="action-list-card">
       <div class="settings-row">
-        <span class="settings-label">Wrap Long Names</span>
+        <span class="settings-label">Only Unlock Out of Pocket</span>
         <div class="settings-btn">
-          <input type="checkbox" class="ios-toggle" id="setting-wrap-names" onchange="onWrapLongNamesChange(this.checked)">
+          <input type="checkbox" class="ios-toggle" id="setting-only-unlock-out-of-pocket" onchange="config.onlyUnlockOutOfPocket=this.checked;saveConfig()">
         </div>
       </div>
+    </div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">Only Unlock Out of Pocket skips unlocking while the proximity sensor is covered, such as in a pocket. The passcode Unlock Device and Lock Toggle enter is saved in the app, in Settings &gt; Security.</div>
+    </div>
+
+    <div class="settings-page-section" data-page="webui">
+    <div class="action-list-header" style="margin-top:28px">Web UI</div>
+    <div class="action-list-card">
+      <div class="action-list-row">
+        <div class="action-row-icon icon-blue"><i class="f7-icons">globe</i></div>
+        <div class="action-row-text" style="flex:1">Web UI</div>
+        <input type="checkbox" class="ios-toggle" id="setting-webui" onchange="config.webUIEnabled=this.checked;saveConfig()">
+      </div>
+    </div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">The built-in Web UI configures RemoteCompanion from a browser on any device that can reach this iPhone. Turning it off here closes this page.</div>
+    <div class="action-list-header">Access</div>
+    <div class="action-list-card">
+      <div class="action-list-row" onclick="openAccessPanel()">
+        <div class="action-row-icon icon-blue"><i class="f7-icons">lock_shield_fill</i></div>
+        <div class="action-row-text" style="flex:1">Access<br><span id="setting-access-status" style="font-size:13px;color:var(--rc-label-2);font-weight:400">Any Network</span></div>
+        <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
+      </div>
+    </div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">Which networks can open the Web UI, and the password it asks for.</div>
+    </div>
+
+    <div class="settings-page-section" data-page="backup">
+    <div class="action-list-header" style="margin-top:28px">Backup</div>
+    <div class="action-list-card">
+      <div class="action-list-row" onclick="exportConfig()">
+        <div class="action-row-icon icon-blue"><i class="f7-icons">square_arrow_up</i></div>
+        <div class="action-row-text">Export Configuration</div>
+      </div>
+      <div class="action-list-row" onclick="importConfig()">
+        <div class="action-row-icon icon-green"><i class="f7-icons">square_arrow_down</i></div>
+        <div class="action-row-text">Import Configuration</div>
+      </div>
+    </div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">Export saves your configuration to share or back up. Import puts it back on any device.</div>
+    <div class="action-list-header">Passwords and Tokens</div>
+    <div class="action-list-card">
+      <div class="action-list-row">
+        <div class="action-row-icon icon-gray"><i class="f7-icons">lock_fill</i></div>
+        <div class="action-row-text" style="flex:1">Include Passwords and Tokens</div>
+        <input type="checkbox" class="ios-toggle" id="setting-export-secrets" onchange="onExportSecretsChange(this.checked)">
+      </div>
+    </div>
+    <div id="export-secrets-footer" style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0"></div>
+    <input type="file" id="import-file-input" accept=".json" style="display:none" onchange="handleImportFile(this)">
+    </div>
+
+    <div class="settings-page-section" data-page="developer">
+    <div class="action-list-header" style="margin-top:28px">Logging</div>
+    <div class="action-list-card">
       <div class="settings-row">
         <span class="settings-label">Logging</span>
         <div class="settings-btn">
@@ -2609,58 +2666,8 @@
           </select>
         </div>
       </div>
-      <div class="settings-row">
-        <span class="settings-label">Lock Scrolling During Gestures</span>
-        <div class="settings-btn">
-          <input type="checkbox" class="ios-toggle" id="setting-freeze-lists" onchange="config.freezeListsDuringGestures=this.checked;saveConfig()">
-        </div>
-      </div>
-      <div class="settings-row">
-        <span class="settings-label">Only Unlock Out of Pocket</span>
-        <div class="settings-btn">
-          <input type="checkbox" class="ios-toggle" id="setting-only-unlock-out-of-pocket" onchange="config.onlyUnlockOutOfPocket=this.checked;saveConfig()">
-        </div>
-      </div>
     </div>
-
-    <div class="action-list-header">Swipe Triggers</div>
-    <div class="action-list-card" id="swipe-settings-card"></div>
-    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">How far a swipe goes before a swipe trigger runs, and where an edge or bottom swipe has to start. Longer distances and smaller zones leave more room for the Home swipe and other gestures.</div>
-    <div class="action-list-header">Buttons</div>
-    <div class="action-list-card">
-      <div class="settings-row">
-        <span class="settings-label">Volume Sequence</span>
-        <div class="settings-btn">
-          <select id="setting-volume-seq" onchange="config.volumeSequenceWindow=parseFloat(this.value);saveConfig()" style="appearance:none;-webkit-appearance:none;background:none;border:none;color:var(--rc-label-2);font-size:17px;font-family:inherit;text-align:right;outline:none;cursor:pointer"></select>
-        </div>
-      </div>
-      <div class="settings-row">
-        <span class="settings-label">Power Clicks</span>
-        <div class="settings-btn">
-          <select id="setting-power-click" onchange="config.powerClickWindow=parseFloat(this.value);saveConfig()" style="appearance:none;-webkit-appearance:none;background:none;border:none;color:var(--rc-label-2);font-size:17px;font-family:inherit;text-align:right;outline:none;cursor:pointer"></select>
-        </div>
-      </div>
-      <div class="settings-row">
-        <span class="settings-label">Home Clicks</span>
-        <div class="settings-btn">
-          <select id="setting-home-click" onchange="config.homeClickWindow=parseFloat(this.value);saveConfig()" style="appearance:none;-webkit-appearance:none;background:none;border:none;color:var(--rc-label-2);font-size:17px;font-family:inherit;text-align:right;outline:none;cursor:pointer"></select>
-        </div>
-      </div>
-      <div class="settings-row">
-        <span class="settings-label">Volume Hold</span>
-        <div class="settings-btn">
-          <select id="setting-volume-hold" onchange="config.volumeHoldTime=parseFloat(this.value);saveConfig()" style="appearance:none;-webkit-appearance:none;background:none;border:none;color:var(--rc-label-2);font-size:17px;font-family:inherit;text-align:right;outline:none;cursor:pointer"></select>
-        </div>
-      </div>
-      <div class="settings-row">
-        <span class="settings-label">Power Hold</span>
-        <div class="settings-btn">
-          <select id="setting-power-hold" onchange="config.powerHoldTime=parseFloat(this.value);saveConfig()" style="appearance:none;-webkit-appearance:none;background:none;border:none;color:var(--rc-label-2);font-size:17px;font-family:inherit;text-align:right;outline:none;cursor:pointer"></select>
-        </div>
-      </div>
-    </div>
-    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">How long a press waits for the next one before it counts. A shorter time responds sooner and needs quicker presses.</div>
-
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">Minimal records triggers, their actions and conditions, and errors. Full records every step, for tracking down a problem.</div>
     <div class="action-list-header">Developer</div>
     <div class="action-list-card">
       <div class="settings-row">
@@ -2671,6 +2678,26 @@
       </div>
     </div>
     <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">Unlocks developer actions in the action picker, such as annotating a screenshot and sending it to your editor.</div>
+    <div class="action-list-header">This Device</div>
+    <div class="action-list-card">
+      <div class="action-list-row" onclick="openRunning()">
+        <div class="action-row-icon icon-green"><i class="f7-icons">list_bullet</i></div>
+        <div class="action-row-text" style="flex:1">Activity</div>
+        <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
+      </div>
+      <div class="action-list-row" onclick="openSysInfoPanel()">
+        <div class="action-row-icon icon-blue"><i class="f7-icons">info_circle</i></div>
+        <div class="action-row-text" style="flex:1">Device Diagnostics &amp; Health</div>
+        <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
+      </div>
+      <div class="action-list-row" onclick="openTestKitPanel()">
+        <div class="action-row-icon icon-teal"><i class="f7-icons">checkmark_rectangle</i></div>
+        <div class="action-row-text" style="flex:1">Test Kit</div>
+        <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
+      </div>
+    </div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">What's running, and system info, battery, storage and logs for this device. Test Kit runs tests on the phone and shows their results.</div>
+    </div>
   </div>
 </div>
 
@@ -3171,6 +3198,109 @@
 </div>
 
 
+<!-- ══ ACCESS PANEL (Settings > Web UI > Access) ═══════════════════════════════════ -->
+<div class="rc-panel" id="access-panel">
+  <div class="panel-navbar">
+    <button class="panel-back" onclick="closeAccessPanel()">
+      <i class="f7-icons">chevron_left</i> Settings
+    </button>
+    <div class="panel-title">Access</div>
+    <div style="width:80px"></div>
+  </div>
+  <div class="panel-content">
+    <div class="action-list-card" style="margin-top:28px">
+      <div class="action-list-row" onclick="setWebUIAccess('any')" style="cursor:pointer;">
+        <div class="action-row-icon icon-blue"><i class="f7-icons">globe</i></div>
+        <div class="action-row-text" style="flex:1">Any Network</div>
+        <i class="f7-icons" id="access-check-any" style="color:var(--rc-blue);font-size:16px;">checkmark</i>
+      </div>
+      <div class="action-list-row" onclick="setWebUIAccess('networks')" style="cursor:pointer;">
+        <div class="action-row-icon icon-teal"><i class="f7-icons">wifi</i></div>
+        <div class="action-row-text" style="flex:1">Trusted Networks</div>
+        <i class="f7-icons" id="access-check-networks" style="color:var(--rc-blue);font-size:16px;display:none;">checkmark</i>
+      </div>
+      <div class="action-list-row" onclick="setWebUIAccess('local')" style="cursor:pointer;">
+        <div class="action-row-icon icon-gray"><i class="f7-icons">device_phone_portrait</i></div>
+        <div class="action-row-text" style="flex:1">This iPhone Only</div>
+        <i class="f7-icons" id="access-check-local" style="color:var(--rc-blue);font-size:16px;display:none;">checkmark</i>
+      </div>
+    </div>
+    <div id="access-footer-text" style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 24px">
+      The Web UI can be reached from any device on the same network as this iPhone.
+    </div>
+
+    <!-- Section: Trusted Networks (visible if config.webUIAccess === 'networks') -->
+    <div id="access-trusted-networks-section" style="display:none">
+      <div class="action-list-header">Trusted Networks</div>
+      <div class="action-list-card">
+        <div id="trusted-networks-list"></div>
+        <div class="action-list-row" onclick="promptAddTrustedNetwork()" style="cursor:pointer;">
+          <div class="action-row-icon icon-blue"><i class="f7-icons">plus_circle_fill</i></div>
+          <div class="action-row-text" style="color:var(--rc-blue);font-weight:500">Add Network…</div>
+        </div>
+      </div>
+      <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 24px">
+        Anyone can name a network the same as a trusted one, so add only private networks.
+      </div>
+    </div>
+
+    <!-- Section: API Token -->
+    <div class="action-list-header">API Token</div>
+
+    <!-- Authenticated / Open View -->
+    <div id="access-token-authenticated-view">
+      <div class="action-list-card">
+        <div class="settings-row" style="padding:10px 16px;">
+          <div style="flex:1; display:flex; align-items:center; gap:8px;">
+            <input type="password" id="setting-webui-token" placeholder="API Token (optional)" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="flex:1; background:var(--rc-surface-2); border:1px solid var(--rc-border-strong); border-radius:8px; color:var(--rc-label); padding:8px 12px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:13px;" onchange="onApiTokenChange(this.value)">
+            <button type="button" onclick="toggleWebUITokenVisibility()" style="background:none; border:none; color:var(--rc-label-2); cursor:pointer; padding:6px; display:flex; align-items:center;" title="Show/Hide Token">
+              <i class="f7-icons" id="webui-token-eye-icon" style="font-size:18px;">eye</i>
+            </button>
+            <button type="button" onclick="copyWebUIToken()" style="background:none; border:none; color:var(--rc-label-2); cursor:pointer; padding:6px; display:flex; align-items:center;" title="Copy Token">
+              <i class="f7-icons" style="font-size:18px;">doc_on_doc</i>
+            </button>
+          </div>
+        </div>
+        <div class="action-list-row" onclick="generateWebUIApiToken()" style="cursor:pointer;">
+          <div class="action-row-icon icon-blue" style="color:#fff; display:flex; align-items:center; justify-content:center;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12.65 10A5.99 5.99 0 0 0 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6a5.99 5.99 0 0 0 5.65-4H17v4h4v-4h2v-4H12.65zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/></svg>
+          </div>
+          <div class="action-row-text" style="color:var(--rc-blue);font-weight:500">Generate New Token</div>
+        </div>
+        <div id="access-token-logout-row" class="action-list-row" onclick="lockWebUISession()" style="cursor:pointer; display:none;">
+          <div class="action-row-icon icon-gray" style="display:flex; align-items:center; justify-content:center;">
+            <i class="f7-icons" style="font-size:15px; color:#fff;">lock</i>
+          </div>
+          <div class="action-row-text" style="color:var(--rc-label-2);font-size:14px;">Lock Browser Session</div>
+        </div>
+      </div>
+      <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">
+        Protects raw shell and root commands from unauthenticated local network callers.
+      </div>
+    </div>
+
+    <!-- Locked / Unauthenticated View -->
+    <div id="access-token-locked-view" style="display:none;">
+      <div class="action-list-card">
+        <div class="settings-row" style="padding:10px 16px;">
+          <div style="flex:1; display:flex; align-items:center; gap:8px;">
+            <input type="password" id="setting-webui-unlock-input" placeholder="Enter API Token to unlock..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="flex:1; background:var(--rc-surface-2); border:1px solid var(--rc-border-strong); border-radius:8px; color:var(--rc-label); padding:8px 12px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:13px;" onkeydown="if(event.key==='Enter')authenticateWebUIToken()">
+            <button type="button" onclick="toggleUnlockTokenVisibility()" style="background:none; border:none; color:var(--rc-label-2); cursor:pointer; padding:6px; display:flex; align-items:center;" title="Show/Hide">
+              <i class="f7-icons" id="unlock-token-eye-icon" style="font-size:18px;">eye</i>
+            </button>
+            <button type="button" onclick="authenticateWebUIToken()" style="background:var(--rc-blue); border:none; color:#fff; border-radius:8px; font-size:13px; font-weight:600; padding:8px 14px; cursor:pointer; white-space:nowrap;">
+              Unlock
+            </button>
+          </div>
+        </div>
+      </div>
+      <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">
+        This iPhone is protected by an API Token. Enter the token from Settings &gt; Web UI &gt; Access on your iPhone to unlock privileged commands on this computer.
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ══ BANNERS PANEL (Settings > Banners) ═══════════════════════════════════ -->
 <div class="rc-panel" id="banners-panel">
   <div class="panel-navbar">
@@ -3181,59 +3311,156 @@
     <div style="width:80px"></div>
   </div>
   <div class="panel-content">
+    <div class="action-list-card" style="margin-top:20px">
+      <div class="settings-row">
+        <div class="action-row-icon icon-yellow"><i class="f7-icons">sun_max_fill</i></div>
+        <span class="settings-label" style="flex:1">Wake Screen</span>
+        <div class="settings-btn">
+          <input type="checkbox" class="ios-toggle" id="setting-toasts-wake-screen" onchange="config.toastsWakeScreen=this.checked;saveConfig()">
+        </div>
+      </div>
+    </div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">Turns the screen on to show a banner. When off, a banner that comes while the screen is off waits until it turns on.</div>
     <div style="color:var(--rc-label-2);font-size:13px;margin:20px 16px 0">Checked actions show a banner whenever a trigger runs them. Toggles show their new state; other actions show their name.</div>
     <div id="banners-list"></div>
   </div>
 </div>
 
-<!-- ══ TWEAKS PANEL (Settings > Advanced Settings > Tweaks) ═══════════════════ -->
+<!-- ══ EXCLUDED APPS PANEL (Settings > Excluded Apps) ═══════════════════ -->
+<div class="rc-panel" id="excluded-panel">
+  <div class="panel-navbar">
+    <button class="panel-back" onclick="closeExcludedAppsPanel()">
+      <i class="f7-icons">chevron_left</i> Settings
+    </button>
+    <div class="panel-title">Excluded Apps</div>
+    <div style="width:80px"></div>
+  </div>
+  <div class="panel-content">
+    <div style="color:var(--rc-label-2);font-size:13px;margin:20px 16px 0">A trigger doesn't run while one of its excluded apps is open. Tap a trigger to choose its apps.</div>
+    <div id="excluded-list"></div>
+  </div>
+</div>
+
+<!-- ══ GESTURES PANEL (Settings > Gestures) ═══════════════════ -->
+<div class="rc-panel" id="gestures-panel">
+  <div class="panel-navbar">
+    <button class="panel-back" onclick="closeGesturesPanel()">
+      <i class="f7-icons">chevron_left</i> Settings
+    </button>
+    <div class="panel-title">Gestures</div>
+    <div style="width:80px"></div>
+  </div>
+  <div class="panel-content">
+    <div class="action-list-card" style="margin-top:20px">
+      <div class="action-list-row" onclick="askRecordGesture()">
+        <div class="action-row-icon icon-red"><i class="f7-icons">smallcircle_fill_circle_fill</i></div>
+        <div class="action-row-text" style="flex:1">Record New Gesture</div>
+      </div>
+    </div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">Recording starts on the iPhone after a short countdown. Use the phone as usual, then tap Stop. Touches play back with the same timing, so start from the screen the gesture begins on.</div>
+    <div class="action-list-header" style="margin-top:24px">Saved Gestures</div>
+    <div class="action-list-card" id="gestures-list"></div>
+  </div>
+</div>
+
+<!-- ══ VARIABLES PANEL (Settings > Variables) ═══════════════════ -->
+<div class="rc-panel" id="variables-panel">
+  <div class="panel-navbar">
+    <button class="panel-back" onclick="closeVariablesPanel()">
+      <i class="f7-icons">chevron_left</i> Settings
+    </button>
+    <div class="panel-title">Variables</div>
+    <button class="panel-action" onclick="editVariable(null)" style="color:var(--rc-blue);width:80px;text-align:right"><i class="f7-icons">plus</i></button>
+  </div>
+  <div class="panel-content">
+    <div class="action-list-card" style="margin-top:20px" id="variables-list"></div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">Set Variable actions save variables here, for all triggers. In an action's text, {name} becomes the value. Tap one to change or delete it.</div>
+    <div id="variables-kept"></div>
+  </div>
+</div>
+
+<!-- ══ ADD-ONS PANEL (Settings > Add-ons) ═══════════════════ -->
+<div class="rc-panel" id="addons-panel">
+  <div class="panel-navbar">
+    <button class="panel-back" onclick="closeAddOnsPanel()">
+      <i class="f7-icons">chevron_left</i> Settings
+    </button>
+    <div class="panel-title">Add-ons</div>
+    <button class="panel-action" onclick="reloadAddOns()" style="color:var(--rc-blue);width:80px;text-align:right">Reload</button>
+  </div>
+  <div class="panel-content"><div id="addons-list"></div></div>
+</div>
+
+<!-- ══ ADD-ON PANEL (Settings > Add-ons > one add-on) ═══════════════════ -->
+<div class="rc-panel" id="addon-panel">
+  <div class="panel-navbar">
+    <button class="panel-back" onclick="addOnBack()">
+      <i class="f7-icons">chevron_left</i> <span id="addon-back-label">Add-ons</span>
+    </button>
+    <div class="panel-title" id="addon-title">Add-on</div>
+    <div style="width:80px"></div>
+  </div>
+  <div class="panel-content"><div id="addon-body"></div></div>
+</div>
+
+<!-- ══ TEST KIT PANEL (Settings > Diagnostics > Test Kit) ═══════════════════ -->
+<div class="rc-panel" id="testkit-panel">
+  <div class="panel-navbar">
+    <button class="panel-back" onclick="testKitBack()">
+      <i class="f7-icons">chevron_left</i> <span id="testkit-back-label">Diagnostics</span>
+    </button>
+    <div class="panel-title" id="testkit-title">Test Kit</div>
+    <button class="panel-action" id="testkit-action" style="color:var(--rc-blue);width:80px;text-align:right"></button>
+  </div>
+  <div class="panel-content"><div id="testkit-body"></div></div>
+</div>
+
+<!-- ══ TWEAKS PANEL (Settings > iOS Tweaks) ═══════════════════ -->
 <div class="rc-panel" id="tweaks-panel">
   <div class="panel-navbar">
     <button class="panel-back" onclick="closeTweaksPanel()">
       <i class="f7-icons">chevron_left</i> Settings
     </button>
-    <div class="panel-title">Tweaks</div>
+    <div class="panel-title">iOS Tweaks</div>
     <div style="width:80px"></div>
   </div>
   <div class="panel-content">
-    <div class="action-list-header" style="margin-top:28px">Power</div>
+    <div class="action-list-header" style="margin-top:28px"><i class="f7-icons settings-group-icon">bolt_fill</i>Power</div>
     <div class="action-list-card">
       <div class="settings-row">
-        <span class="settings-label">Disable Wake Screen On Power</span>
+        <div class="action-row-icon icon-yellow"><i class="f7-icons">sun_max_fill</i></div>
+        <span class="settings-label" style="flex:1">Wake Screen on Power</span>
         <div class="settings-btn">
-          <input type="checkbox" class="ios-toggle" id="setting-disable-wake-on-power" onchange="config.disableWakeOnPower=this.checked;saveConfig()">
+          <input type="checkbox" class="ios-toggle" id="setting-disable-wake-on-power" onchange="config.disableWakeOnPower=!this.checked;saveConfig()">
         </div>
       </div>
-    </div>
-    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 32px 0">Disable Wake Screen On Power keeps the screen off when power connects or disconnects while the display is off or dimmed.</div>
-    <div class="action-list-card" style="margin-top:10px">
       <div class="settings-row">
-        <span class="settings-label">Disable Power Connected Haptics</span>
+        <div class="action-row-icon icon-orange"><i class="f7-icons">bolt_circle_fill</i></div>
+        <span class="settings-label" style="flex:1">Charging Haptics</span>
         <div class="settings-btn">
-          <input type="checkbox" class="ios-toggle" id="setting-disable-power-haptics" onchange="config.disablePowerConnectedHaptics=this.checked;saveConfig()">
+          <input type="checkbox" class="ios-toggle" id="setting-disable-power-haptics" onchange="config.disablePowerConnectedHaptics=!this.checked;saveConfig()">
         </div>
       </div>
     </div>
-    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 32px 0">Disable Power Connected Haptics stops the charging vibration and chime when power connects. Battery status and charging triggers still update normally either way.</div>
-    <div class="action-list-header" style="margin-top:28px">Notifications</div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">Wake Screen on Power turns the screen on when power connects or disconnects. Charging Haptics plays the vibration and chime when power connects. Charging triggers run either way.</div>
+    <div class="action-list-header" style="margin-top:28px"><i class="f7-icons settings-group-icon">bell_fill</i>Notifications</div>
     <div class="action-list-card">
       <div class="settings-row">
-        <span class="settings-label">Disable Vibration When Unlocked</span>
+        <div class="action-row-icon icon-red"><i class="f7-icons">dot_radiowaves_left_right</i></div>
+        <span class="settings-label" style="flex:1">Vibrate When Unlocked</span>
         <div class="settings-btn">
-          <input type="checkbox" class="ios-toggle" id="setting-disable-unlocked-notif-vibration" onchange="config.disableUnlockedNotificationVibration=this.checked;saveConfig()">
+          <input type="checkbox" class="ios-toggle" id="setting-disable-unlocked-notif-vibration" onchange="config.disableUnlockedNotificationVibration=!this.checked;saveConfig()">
         </div>
       </div>
-    </div>
-    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 32px 0">Disable Vibration When Unlocked turns off notification vibration while the phone is unlocked (banners, sounds, alarms, timers, calls, and critical alerts still work normally).</div>
-    <div class="action-list-card" style="margin-top:10px">
       <div class="settings-row">
-        <span class="settings-label">Send to Watch When Unlocked</span>
+        <div class="action-row-icon icon-green"><i class="f7-icons">clock_fill</i></div>
+        <span class="settings-label" style="flex:1">Send to Watch When Unlocked</span>
         <div class="settings-btn">
           <input type="checkbox" class="ios-toggle" id="setting-send-watch-when-unlocked" onchange="config.sendNotificationsToWatchWhenUnlocked=this.checked;saveConfig()">
         </div>
       </div>
     </div>
-    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 32px 0">Send to Watch When Unlocked forwards notifications to your Apple Watch even while the iPhone is unlocked, respecting each app's Watch notification settings.</div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">Vibrate When Unlocked lets notifications vibrate while the phone is unlocked; banners, sounds, alarms, calls and critical alerts are the same either way. Send to Watch When Unlocked forwards notifications to Apple Watch even while the iPhone is unlocked, following each app's Watch settings.</div>
   </div>
 </div>
 
@@ -5006,8 +5233,8 @@ function savedVariableGroups(names) {
 }
 let addOnConditionDefs = [];   // the If picker's entries for add-on conditions
 
-function symbolId(symbol) { return (symbol || 'puzzlepiece_extension').replace(/\./g, '_'); }
-// An add-on's own icon (an SF Symbol), or the puzzle piece
+function symbolId(symbol) { return (symbol || 'cube_box').replace(/\./g, '_'); }
+// An add-on's own icon (an SF Symbol), or a box
 function iconIsImage(icon) { return /\.(png|jpe?g)$/i.test(icon || ''); }
 function addOnIcon(p) { return symbolId(p && !iconIsImage(p.icon) ? p.icon : null); }
 // A picture for an add-on whose icon names an image file (served by the tweak), else null
@@ -5017,10 +5244,10 @@ function ownImageUrl(p, icon) {
   if (icon) return iconIsImage(icon) ? `/api/addons/icon?id=${encodeURIComponent(p.id)}&file=${encodeURIComponent(icon)}` : null;
   return addOnImageUrl(p);
 }
-// The symbol for something's own icon: itself, or the add-on's symbol, or the puzzle piece
+// The symbol for something's own icon: itself, or the add-on's symbol, or a box
 function ownSymbol(p, icon) {
   if (icon && !iconIsImage(icon)) return icon;
-  return (!icon && p.icon && !iconIsImage(p.icon)) ? p.icon : 'puzzlepiece.extension';
+  return (!icon && p.icon && !iconIsImage(p.icon)) ? p.icon : 'cube.box';
 }
 // The icon markup for a list row: the add-on's picture, or the symbol
 function iconMarkup(act) { return act.iconUrl ? `<img class="addon-icon" src="${act.iconUrl}" alt="">` : `<i class="f7-icons">${act.icon}</i>`; }
@@ -9791,22 +10018,154 @@ function onApiTokenChange(val) {
   loadData();
 }
 
-// Swipe Triggers: each a config key, its default (the size the tweak always used) and the
-// values to pick from, in points unless unit says percent (the bottom zones' shares). The default removes the key, so the tweak keeps its own default.
+// Swipe Triggers: each a config key, its default (the size the tweak always used) and its range
+// (the same as Adjust on Screen's), in points unless unit says percent (the zones' shares). The
+// default removes the key, so the tweak keeps its own default.
 const SWIPE_SETTINGS = [
-  { key: 'swipeEdgeStrip', title: 'Edge Strip', def: 25, values: [15, 20, 25, 30, 35, 40] },
-  { key: 'swipeEdgeDistance', title: 'Edge Swipe', def: 30, values: [20, 30, 40, 50, 60, 80] },
-  { key: 'swipeStatusBarDistance', title: 'Status Bar Swipe', def: 50, values: [30, 40, 50, 60, 80, 100] },
-  { key: 'swipeTopDownDistance', title: 'Top Swipe Down', def: 45, values: [30, 45, 60, 80, 100] },
-  { key: 'swipeBottomBarDistance', title: 'Bottom Bar Swipe', def: 60, values: [40, 60, 80, 100, 120] },
-  { key: 'swipeBottomUpDistance', title: 'Bottom Swipe Up', def: 45, values: [30, 45, 60, 80, 100] },
-  { key: 'swipeStatusBarHeight', title: 'Status Bar Height', def: 25, values: [20, 25, 30, 35, 40, 45, 50] },
-  { key: 'swipeStatusBarLeftZone', title: 'Status Bar Left Zone', def: 33, unit: '%', values: [15, 20, 25, 33, 40, 50] },
-  { key: 'swipeStatusBarRightZone', title: 'Status Bar Right Zone', def: 33, unit: '%', values: [15, 20, 25, 33, 40, 50] },
-  { key: 'swipeBottomZoneHeight', title: 'Bottom Zone Height', def: 25, values: [15, 20, 25, 30, 40, 50] },
-  { key: 'swipeBottomLeftZone', title: 'Bottom Left Zone', def: 33, unit: '%', values: [15, 20, 25, 33, 40, 50] },
-  { key: 'swipeBottomRightZone', title: 'Bottom Right Zone', def: 33, unit: '%', values: [15, 20, 25, 33, 40, 50] },
+  { key: 'swipeEdgeStrip', title: 'Edge Strip', def: 25, min: 10, max: 60 },
+  { key: 'swipeEdgeDistance', title: 'Edge Swipe', def: 30, min: 10, max: 250 },
+  { key: 'swipeStatusBarDistance', title: 'Status Bar Swipe', def: 50, min: 10, max: 250 },
+  { key: 'swipeTopDownDistance', title: 'Top Swipe Down', def: 45, min: 10, max: 250 },
+  { key: 'swipeBottomBarDistance', title: 'Bottom Bar Swipe', def: 60, min: 10, max: 250 },
+  { key: 'swipeBottomUpDistance', title: 'Bottom Swipe Up', def: 45, min: 10, max: 250 },
+  { key: 'swipeStatusBarHeight', title: 'Status Bar Height', def: 25, min: 10, max: 100 },
+  { key: 'swipeStatusBarLeftZone', title: 'Status Bar Left Zone', def: 33, unit: '%', min: 5, max: 60 },
+  { key: 'swipeStatusBarRightZone', title: 'Status Bar Right Zone', def: 33, unit: '%', min: 5, max: 60 },
+  { key: 'swipeBottomZoneHeight', title: 'Bottom Zone Height', def: 25, min: 10, max: 100 },
+  { key: 'swipeBottomLeftZone', title: 'Bottom Left Zone', def: 33, unit: '%', min: 5, max: 60 },
+  { key: 'swipeBottomRightZone', title: 'Bottom Right Zone', def: 33, unit: '%', min: 5, max: 60 },
 ];
+
+// A number setting's row: name and value on top (the value can be tapped to type one, or to put the
+// default back), and a slider between − and + below. onCommit gets the value once a change is
+// finished: on letting go of the slider, on each − or + step (held, they repeat), after typing.
+// lockKey: the setting's config key; the lock after + (held) keeps the value from being changed by
+// accident until it's unlocked. Kept in the config's "lockedSettings", so the app and Adjust on
+// Screen leave it alone too.
+function rcSliderLocked(key) {
+  return !!(config && Array.isArray(config.lockedSettings) && config.lockedSettings.includes(key));
+}
+function rcSetSliderLocked(key, locked) {
+  if (!config) return;
+  const keys = (Array.isArray(config.lockedSettings) ? config.lockedSettings : []).filter(k => k !== key);
+  if (locked) keys.push(key);
+  if (keys.length) config.lockedSettings = keys; else delete config.lockedSettings;
+  saveConfig();
+}
+
+// A button that acts once held for 0.6 s, while a ring around it fills (.rc-hold, RC_HOLD_RING
+// inside it). Let go sooner and nothing happens; a quick click fills a quarter of the ring.
+const RC_HOLD_RING = '<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="17.5"/></svg>';
+function rcHoldButton(btn, onDone) {
+  let timer = null, started = 0;
+  btn.addEventListener('pointerdown', e => {
+    if (btn.disabled) return;
+    e.preventDefault();
+    clearTimeout(timer);
+    started = Date.now();
+    btn.classList.remove('nudge');
+    btn.classList.add('holding');
+    timer = setTimeout(() => { timer = null; btn.classList.remove('holding'); onDone(); }, 600);
+  });
+  const stop = () => {
+    if (!timer) return;
+    clearTimeout(timer);
+    timer = null;
+    btn.classList.remove('holding');
+    if (Date.now() - started < 150) {
+      void btn.offsetWidth; // restarts the animation
+      btn.classList.add('nudge');
+      setTimeout(() => btn.classList.remove('nudge'), 650);
+    }
+  };
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach(t => btn.addEventListener(t, stop));
+}
+
+function rcSliderRow({ title, value, min, max, step, def, format, onCommit, lockKey }) {
+  const decimals = step < 1 ? 2 : 0;
+  const round = v => Math.min(max, Math.max(min, Number((Math.round((v - min) / step) * step + min).toFixed(decimals))));
+  let current = round(value);
+  const row = document.createElement('div');
+  row.className = 'settings-row rc-slider-row';
+  row.innerHTML = '<div class="rc-slider-top"><span class="settings-label"></span><button type="button" class="rc-slider-value"></button></div>' +
+    '<div class="rc-slider-bottom"><button type="button" class="rc-slider-step rc-slider-reset rc-hold"></button>' +
+    '<button type="button" class="rc-slider-step" aria-label="Less">\u2212</button>' +
+    '<input type="range"><button type="button" class="rc-slider-step" aria-label="More">+</button>' +
+    '<button type="button" class="rc-slider-step rc-slider-lock rc-hold"></button></div>';
+  row.querySelector('.settings-label').textContent = title;
+  const valueBtn = row.querySelector('.rc-slider-value');
+  // Before − : back to the default when the value is another; after that, Undo puts the value from before back
+  const resetBtn = row.querySelector('.rc-slider-reset');
+  let undoValue = null;
+  const range = row.querySelector('input[type=range]');
+  const [minus, plus] = row.querySelectorAll('.rc-slider-step:not(.rc-slider-reset):not(.rc-slider-lock)');
+  const lockBtn = row.querySelector('.rc-slider-lock');
+  if (!lockKey) lockBtn.style.display = 'none';
+  const locked = () => !!lockKey && rcSliderLocked(lockKey);
+  range.min = String(min); range.max = String(max); range.step = String(step);
+  range.setAttribute('aria-label', title);
+  const show = v => {
+    current = v;
+    range.value = String(v);
+    const text = format(v);
+    const isDefault = Math.abs(v - def) < step / 2;
+    if (!isDefault) undoValue = null;
+    valueBtn.textContent = isDefault ? `${text} (Default)` : text;
+    // dimmed at the default with nothing to undo
+    const isLocked = locked();
+    resetBtn.disabled = isLocked || (isDefault && undoValue === null);
+    resetBtn.classList.toggle('undo', undoValue !== null);
+    resetBtn.innerHTML = `<i class="f7-icons">${undoValue !== null ? 'arrow_uturn_left' : 'arrow_counterclockwise'}</i>${RC_HOLD_RING}`;
+    resetBtn.setAttribute('aria-label', undoValue !== null ? `Undo, back to ${format(undoValue)}` : `Back to the default, ${format(def)}`);
+    minus.disabled = isLocked || v <= min + step / 2;
+    plus.disabled = isLocked || v >= max - step / 2;
+    range.disabled = isLocked;
+    lockBtn.classList.toggle('locked', isLocked);
+    lockBtn.innerHTML = `<i class="f7-icons">${isLocked ? 'lock_fill' : 'lock_open'}</i>${RC_HOLD_RING}`;
+    lockBtn.setAttribute('aria-label', isLocked ? 'Locked' : 'Lock');
+  };
+  rcHoldButton(lockBtn, () => { rcSetSliderLocked(lockKey, !locked()); show(current); });
+  lockBtn.setAttribute('title', 'Hold to lock or unlock');
+  const commit = v => { show(v); onCommit(v); };
+  range.oninput = () => show(round(Number(range.value)));
+  range.onchange = () => commit(round(Number(range.value)));
+  const hold = (btn, dir) => {
+    let timer = null;
+    const stepOnce = () => { const v = round(current + dir * step); if (v === current) { stop(); return; } commit(v); };
+    const stop = () => { clearTimeout(timer); clearInterval(timer); timer = null; };
+    btn.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      stepOnce();
+      timer = setTimeout(() => { timer = setInterval(stepOnce, 80); }, 450);
+    });
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach(t => btn.addEventListener(t, stop));
+  };
+  hold(minus, -1);
+  hold(plus, 1);
+  rcHoldButton(resetBtn, () => {
+    if (undoValue !== null) { const previous = undoValue; undoValue = null; commit(round(previous)); return; }
+    undoValue = current;
+    commit(round(def));
+  });
+  resetBtn.setAttribute('title', 'Hold for the default, or to undo it');
+  valueBtn.onclick = () => {
+    if (locked()) {
+      if (window.confirm(`${title}: ${format(min)} to ${format(max)}. Default ${format(def)}. Locked at ${format(current)}.\n\nUnlock it?`)) {
+        rcSetSliderLocked(lockKey, false);
+        show(current);
+      }
+      return;
+    }
+    const typed = window.prompt(`${title}: ${format(min)} to ${format(max)}. Default ${format(def)}. Leave empty for the default.`,
+      current.toFixed(decimals));
+    if (typed === null) return;
+    if (typed.trim() === '') { commit(round(def)); return; }
+    const v = parseFloat(typed.replace(',', '.'));
+    if (!isNaN(v)) commit(round(v));
+  };
+  show(current);
+  return row;
+}
 
 function renderSwipeSettings() {
   const card = document.getElementById('swipe-settings-card');
@@ -9815,33 +10174,15 @@ function renderSwipeSettings() {
   SWIPE_SETTINGS.forEach(item => {
     const raw = Number(config[item.key]);
     const current = (raw >= 5 && raw <= 400) ? raw : item.def;
-    const values = item.values.includes(current) ? item.values : [...item.values, current].sort((x, y) => x - y);
-    const row = document.createElement('div');
-    row.className = 'settings-row';
-    const label = document.createElement('span');
-    label.className = 'settings-label';
-    label.textContent = item.title;
-    const wrap = document.createElement('div');
-    wrap.className = 'settings-btn';
-    const select = document.createElement('select');
-    select.style.cssText = 'appearance:none;-webkit-appearance:none;background:none;border:none;color:var(--rc-label-2);font-size:17px;font-family:inherit;text-align:right;outline:none;cursor:pointer';
-    values.forEach(v => {
-      const option = document.createElement('option');
-      option.value = String(v);
-      const shown = item.unit === '%' ? `${v}%` : `${v} pt`;
-      option.textContent = v === item.def ? `${shown} (Default)` : shown;
-      if (v === current) option.selected = true;
-      select.appendChild(option);
-    });
-    select.onchange = () => {
-      const v = Number(select.value);
-      if (v === item.def) delete config[item.key]; else config[item.key] = v;
-      saveConfig();
-    };
-    wrap.appendChild(select);
-    row.appendChild(label);
-    row.appendChild(wrap);
-    card.appendChild(row);
+    card.appendChild(rcSliderRow({
+      title: item.title, value: current, min: item.min, max: item.max, step: 1, def: item.def,
+      format: v => item.unit === '%' ? `${v}%` : `${v} pt`,
+      lockKey: item.key,
+      onCommit: v => {
+        if (Math.abs(v - item.def) < 0.5) delete config[item.key]; else config[item.key] = v;
+        saveConfig();
+      },
+    }));
   });
 }
 
@@ -10078,6 +10419,9 @@ async function generateWebUIApiToken() {
 // ── Settings ─────────────────────────────────────────────────────────────────
 function openSettings() {
   document.getElementById('setting-master').checked = !!config.masterEnabled;
+  const onlyUnlockMainEl = document.getElementById('setting-only-unlock-out-of-pocket');
+  if (onlyUnlockMainEl) onlyUnlockMainEl.checked = !!config.onlyUnlockOutOfPocket;
+  renderSettingsChips();
   document.getElementById('setting-nfc').checked    = !!config.nfcEnabled;
   document.getElementById('setting-webui').checked  = !!config.webUIEnabled;
   const audioStreamAutoStartToggle = document.getElementById('setting-audiostream-autostart');
@@ -10245,8 +10589,12 @@ function onNFCEnabledChange(enabled) {
 
 function onExperimentalNFCChange(enabled) {
   config.nfcBackgroundReading = enabled;
-  if (enabled && nfcScreenOffSeconds() > 0) {
-    config.nfcScreenOffSeconds = 0;
+  let explained = false;
+  try { explained = localStorage.getItem('rcExperimentalNFCExplained') === '1'; } catch (e) {}
+  const changedScreenOff = enabled && nfcScreenOffSeconds() > 0;
+  if (changedScreenOff) config.nfcScreenOffSeconds = 0;
+  if (enabled) { try { localStorage.setItem('rcExperimentalNFCExplained', '1'); } catch (e) {} }
+  if (changedScreenOff || (enabled && !explained)) {
     showConfirm('Experimental NFC',
       'Enabling Experimental NFC gives control of the NFC sensor back to iOS. This is so that express cards, tags, and passes still work as intended. iOS has an internal NFC cooldown of about 3 seconds. For cards and keys to work while the phone is locked, keep NFC With Screen Off set to Off.',
       null, 'OK');
@@ -10342,40 +10690,71 @@ function updateAudioStreamAvailability() {
   section.style.display = installed ? '' : 'none';
 }
 
+// Settings' category chips: All, then one per group; a chip shows just its group
+let settingsGroupSelected = null;
+function renderSettingsChips() {
+  const bar = document.getElementById('settings-category-bar');
+  if (!bar) return;
+  const groups = [...document.querySelectorAll('#settings-panel .settings-group')];
+  bar.innerHTML = '';
+  const addChip = (title, value, icon) => {
+    const chip = document.createElement('button');
+    chip.className = 'cat-chip' + (settingsGroupSelected === value ? ' active' : '');
+    if (icon) {
+      const i = document.createElement('i');
+      i.className = 'f7-icons';
+      i.style.cssText = 'font-size:15px;margin-right:6px;vertical-align:-2px';
+      i.textContent = icon;
+      chip.appendChild(i);
+    }
+    chip.appendChild(document.createTextNode(title));
+    chip.onclick = () => { settingsGroupSelected = value; renderSettingsChips(); };
+    bar.appendChild(chip);
+  };
+  addChip('All', null, 'square_grid_2x2');
+  groups.filter(g => g.dataset.group).forEach(g => addChip(g.dataset.group, g.dataset.group, g.dataset.icon));
+  groups.forEach(g => { g.style.display = (!settingsGroupSelected || g.dataset.group === settingsGroupSelected) ? '' : 'none'; });
+}
+
+// Settings > Layout, Buttons, Swipe Triggers, NFC, Web UI, Backup, Security or Diagnostics: one panel, showing that page's sections
+const SETTINGS_PAGE_TITLES = { layout: 'Layout', banners: 'Banners', buttons: 'Buttons', swipes: 'Swipe Triggers', nfc: 'NFC', developer: 'Diagnostics', security: 'Security', webui: 'Web UI', backup: 'Backup' };
+function openSettingsPage(page) {
+  if (page === 'backup') updateExportSecretsFooter();
+  document.getElementById('settings-page-title').textContent = SETTINGS_PAGE_TITLES[page] || 'Settings';
+  document.querySelectorAll('#advanced-panel .settings-page-section').forEach(el => {
+    el.style.display = el.dataset.page === page ? '' : 'none';
+  });
+  const content = document.querySelector('#advanced-panel .panel-content');
+  if (content) content.scrollTop = 0;
+  openAdvancedPanel();
+}
+
 function closeAdvancedPanel() {
   document.getElementById('advanced-panel').classList.remove('active');
 }
 
-const RC_TIMING_OPTIONS = {
-  'setting-volume-seq': { key: 'volumeSequenceWindow', values: [0.20,0.25,0.30,0.38,0.45,0.55,0.65], def: 0.38 },
-  'setting-power-click': { key: 'powerClickWindow', values: [0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.50,0.60,0.70], def: 0.40 },
-  'setting-home-click': { key: 'homeClickWindow', values: [0.25,0.30,0.35,0.45,0.55,0.65], def: 0.35 },
-  'setting-volume-hold': { key: 'volumeHoldTime', values: [0.20,0.25,0.30,0.35,0.45,0.55,0.70], def: 0.35 },
-  'setting-power-hold': { key: 'powerHoldTime', values: [0.30,0.40,0.50,0.60,0.75], def: 0.50 }
-};
+// Button Timing, in seconds, within the range the tweak accepts
+const RC_TIMING_OPTIONS = [
+  { key: 'volumeSequenceWindow', title: 'Volume Sequence', def: 0.38, min: 0.15, max: 0.80 },
+  { key: 'powerClickWindow', title: 'Power Clicks', def: 0.40, min: 0.10, max: 0.80 },
+  { key: 'homeClickWindow', title: 'Home Clicks', def: 0.35, min: 0.25, max: 0.80 },
+  { key: 'volumeHoldTime', title: 'Volume Hold', def: 0.35, min: 0.20, max: 0.80 },
+  { key: 'powerHoldTime', title: 'Power Hold', def: 0.50, min: 0.30, max: 0.75 },
+];
 
 function populateTimingSelects() {
-  Object.keys(RC_TIMING_OPTIONS).forEach(id => {
-    const sel = document.getElementById(id);
-    if (!sel) return;
-    const opt = RC_TIMING_OPTIONS[id];
-    const current = (config[opt.key] != null) ? parseFloat(config[opt.key]) : opt.def;
-    sel.innerHTML = '';
-    opt.values.forEach(v => {
-      const o = document.createElement('option');
-      o.value = String(v);
-      o.textContent = v.toFixed(2) + ' s' + (Math.abs(v - opt.def) < 0.005 ? ' (Default)' : '');
-      if (Math.abs(v - current) < 0.005) o.selected = true;
-      sel.appendChild(o);
-    });
-    // If current value is custom (not in list), preserve it
-    if (!opt.values.some(v => Math.abs(v - current) < 0.005)) {
-      const o = document.createElement('option');
-      o.value = String(current);
-      o.textContent = current.toFixed(2) + ' s';
-      o.selected = true;
-      sel.appendChild(o);
-    }
+  const card = document.getElementById('timing-settings-card');
+  if (!card || !config) return;
+  card.innerHTML = '';
+  RC_TIMING_OPTIONS.forEach(opt => {
+    const raw = parseFloat(config[opt.key]);
+    const current = isNaN(raw) ? opt.def : Math.min(opt.max, Math.max(opt.min, raw));
+    card.appendChild(rcSliderRow({
+      title: opt.title, value: current, min: opt.min, max: opt.max, step: 0.01, def: opt.def,
+      format: v => `${v.toFixed(2)} s`,
+      lockKey: opt.key,
+      onCommit: v => { config[opt.key] = v; saveConfig(); },
+    }));
   });
 }
 
@@ -11258,6 +11637,8 @@ function updateBannersCount() {
 }
 
 function openBannersPanel() {
+  const wakeEl = document.getElementById('setting-toasts-wake-screen');
+  if (wakeEl) wakeEl.checked = !!config.toastsWakeScreen;
   renderBannersList();
   document.getElementById('banners-panel').classList.add('active');
 }
@@ -11267,13 +11648,663 @@ function closeBannersPanel() {
   updateBannersCount();
 }
 
+// ── Commands from these pages ────────────────────────────────────────────────
+// Sends one command; the phone runs it in the background and answers only that it got it.
+// A protected command (var, gesture) asks for the API token when this browser has none, then
+// sends again. Resolves true once the phone has it, so the page can reload a moment later.
+async function rcSend(cmd, retry) {
+  try {
+    const res = await sendCommand(cmd);
+    if (!res) return false;
+    if (res.status === 403) {
+      const text = await res.text().catch(() => '');
+      if (text.includes('requires valid token')) promptApiTokenModal(retry || (() => rcSend(cmd)));
+      else showToast('⚠ Enable Web UI in Settings first');
+      return false;
+    }
+    if (!res.ok) { showToast('⚠ Server Error'); return false; }
+    return true;
+  } catch (e) {
+    showToast('⚠ Could not connect to device');
+    return false;
+  }
+}
+
+const rcAfterCommand = fn => setTimeout(fn, 600);
+
+// A row for these pages: icon (HTML), title, optional subtitle, and what a tap does
+function rcListRow(iconHTML, title, subtitle, onTap) {
+  const row = document.createElement('div');
+  row.className = 'action-list-row';
+  row.innerHTML = `${iconHTML}<div class="action-row-text" style="flex:1;min-width:0">${escapeHtml(title)}${subtitle ? `<br><span style="font-size:13px;color:var(--rc-label-2);font-weight:400">${escapeHtml(subtitle)}</span>` : ''}</div>`;
+  if (onTap) {
+    row.onclick = onTap;
+    row.insertAdjacentHTML('beforeend', '<i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>');
+  }
+  return row;
+}
+
+function rcPlaceholderRow(text) {
+  const row = document.createElement('div');
+  row.className = 'action-list-row';
+  row.innerHTML = `<div class="action-row-text" style="flex:1;color:var(--rc-label-2)">${escapeHtml(text)}</div>`;
+  return row;
+}
+
+// ── Variables (Settings > Variables) ─────────────────────────────────────────
+let rcVariables = {};
+
+function openVariablesPanel() {
+  document.getElementById('variables-panel').classList.add('active');
+  loadVariables();
+}
+
+function closeVariablesPanel() {
+  document.getElementById('variables-panel').classList.remove('active');
+}
+
+// The add-on that keeps a variable (its name starts with one the add-on lists), or null
+function addOnKeepingVariable(name) {
+  return addOnCatalog.find(p => (p.variables || []).some(start => typeof start === 'string' && start && name.startsWith(start))) || null;
+}
+
+// The values come only with the API token (another device without it gets the names alone)
+async function loadVariables() {
+  const list = document.getElementById('variables-list');
+  const token = localStorage.getItem('rc_api_token');
+  if (!token) {
+    list.innerHTML = '';
+    list.appendChild(rcListRow('<div class="action-row-icon icon-indigo"><i class="f7-icons">lock_fill</i></div>', 'Enter API Token',
+      'Needed to see and change variables', () => promptApiTokenModal(loadVariables)));
+    document.getElementById('variables-kept').innerHTML = '';
+    return;
+  }
+  if (!Object.keys(rcVariables).length) { list.innerHTML = ''; list.appendChild(rcPlaceholderRow('Loading…')); }
+  try {
+    const res = await fetch('/api/variables', { headers: { 'Authorization': `Bearer ${token}` } });
+    if (res.status === 403) { list.innerHTML = ''; list.appendChild(rcPlaceholderRow('Enable Web UI in Settings first')); return; }
+    if (!res.ok) throw new Error();
+    rcVariables = (await res.json()) || {};
+  } catch (e) {
+    list.innerHTML = '';
+    list.appendChild(rcPlaceholderRow('Couldn’t fetch the variables'));
+    return;
+  }
+  renderVariables();
+}
+
+function renderVariables() {
+  const list = document.getElementById('variables-list');
+  const keptEl = document.getElementById('variables-kept');
+  list.innerHTML = '';
+  keptEl.innerHTML = '';
+  const own = [], kept = {};
+  Object.keys(rcVariables).forEach(name => {
+    const addOn = addOnKeepingVariable(name);
+    if (addOn) { (kept[addOn.id] = kept[addOn.id] || { addOn, count: 0 }).count++; }
+    else own.push(name);
+  });
+  own.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  const icon = '<div class="action-row-icon icon-orange"><i class="f7-icons">function</i></div>';
+  own.forEach(name => {
+    const value = String(rcVariables[name] ?? '');
+    list.appendChild(rcListRow(icon, name, value.length ? value : 'No value', () => variableSheet(name)));
+  });
+  if (!own.length) list.appendChild(rcPlaceholderRow('No Variables'));
+  const groups = Object.values(kept).sort((a, b) => (a.addOn.name || '').localeCompare(b.addOn.name || ''));
+  if (groups.length) {
+    keptEl.innerHTML = '<div class="action-list-header" style="margin-top:24px">Add-ons</div>';
+    const card = document.createElement('div');
+    card.className = 'action-list-card';
+    groups.forEach(g => card.appendChild(rcListRow(
+      `<div class="action-row-icon icon-orange"><i class="f7-icons">${escapeHtml(addOnIcon(g.addOn))}</i></div>`,
+      g.addOn.name || g.addOn.id, `${g.count} ${g.count === 1 ? 'Variable' : 'Variables'}`, null)));
+    keptEl.appendChild(card);
+    keptEl.insertAdjacentHTML('beforeend', '<div style="color:var(--rc-label-2);font-size:13px;margin:8px 16px 0">Variables these add-ons keep for themselves.</div>');
+  }
+}
+
+function variableSheet(name) {
+  showSheet(name, [
+    { label: 'Change Value', action() { setTimeout(() => editVariable(name), 250); } },
+    { label: 'Delete', destructive: true, action() {
+      setTimeout(() => showConfirm('Delete Variable?', `Actions that use {${name}} get an empty value.`, async () => {
+        if (await rcSend(`var delete ${name}`)) rcAfterCommand(loadVariables);
+      }, 'Delete'), 250);
+    } },
+  ]);
+}
+
+function variableNameAllowed(name) {
+  return /^[A-Za-z_][A-Za-z0-9_]{0,39}$/.test(name) && name !== 'round';
+}
+
+// A new variable (name null): its name, then its value. Otherwise a new value for one.
+function editVariable(name) {
+  const askValue = variable => {
+    showDialog(variable, 'Value', String(rcVariables[variable] ?? ''), 'Save', async value => {
+      const clean = String(value ?? '').replace(/\n/g, ' ');
+      if (await rcSend(`var set ${variable} ${clean}`)) rcAfterCommand(loadVariables);
+    });
+  };
+  if (name) { askValue(name); return; }
+  showDialog('New Variable', 'Letters, digits and _, not starting with a digit.', '', 'Next', entered => {
+    const variable = String(entered || '').trim();
+    if (!variableNameAllowed(variable)) {
+      setTimeout(() => showConfirm('Name Not Allowed', 'Use letters, digits and _, without spaces, not starting with a digit. "round" is reserved.'), 250);
+      return;
+    }
+    setTimeout(() => askValue(variable), 250);
+  });
+}
+
+// ── Gestures (Settings > Gestures) ───────────────────────────────────────────
+let rcGestures = null;
+
+function openGesturesPanel() {
+  document.getElementById('gestures-panel').classList.add('active');
+  loadGestures();
+}
+
+function closeGesturesPanel() {
+  document.getElementById('gestures-panel').classList.remove('active');
+}
+
+async function loadGestures() {
+  const list = document.getElementById('gestures-list');
+  if (!rcGestures) { list.innerHTML = ''; list.appendChild(rcPlaceholderRow('Loading Gestures…')); }
+  try {
+    const res = await fetch('/api/gestures');
+    if (res.status === 403) { list.innerHTML = ''; list.appendChild(rcPlaceholderRow('Enable Web UI in Settings first')); return; }
+    if (!res.ok) throw new Error();
+    rcGestures = await res.json();
+  } catch (e) {
+    list.innerHTML = '';
+    list.appendChild(rcPlaceholderRow('Couldn’t fetch the gestures'));
+    return;
+  }
+  renderGestures();
+}
+
+function renderGestures() {
+  const list = document.getElementById('gestures-list');
+  list.innerHTML = '';
+  const icon = '<div class="action-row-icon icon-pink"><i class="f7-icons">hand_draw</i></div>';
+  (rcGestures || []).forEach(g => {
+    const strokes = g.strokes || 0;
+    const detail = `${strokes} ${strokes === 1 ? 'Touch' : 'Touches'}, ${(+g.duration || 0).toFixed(1)} s`;
+    list.appendChild(rcListRow(icon, g.name, detail, () => gestureSheet(g.name)));
+  });
+  if (!(rcGestures || []).length) list.appendChild(rcPlaceholderRow('No Gestures'));
+}
+
+const gestureQuoted = name => `"${String(name).replace(/"/g, '')}"`;
+const gestureNamed = name => (rcGestures || []).find(g => g.name.toLowerCase() === String(name).toLowerCase());
+
+function gestureSheet(name) {
+  const later = fn => () => setTimeout(fn, 250);
+  showSheet(name, [
+    { label: 'Play', action: later(async () => {
+      if (await rcSend(`gesture play ${gestureQuoted(name)}`)) showToast('\u25B6 Playing on the iPhone');
+    }) },
+    { label: 'Replace Recording', action: later(() => confirmReplaceGesture(name)) },
+    { label: 'Rename', action: later(() => renameGesture(name)) },
+    { label: 'Delete', destructive: true, action: later(() => {
+      showConfirm('Delete Gesture?', 'Actions that play it stop working.', async () => {
+        if (await rcSend(`gesture delete ${gestureQuoted(name)}`)) rcAfterCommand(loadGestures);
+      }, 'Delete');
+    }) },
+  ]);
+}
+
+function suggestedGestureName() {
+  for (let n = 1; ; n++) if (!gestureNamed(`Gesture ${n}`)) return `Gesture ${n}`;
+}
+
+function askRecordGesture() {
+  const suggested = suggestedGestureName();
+  showDialog('New Gesture', 'Name', suggested, 'Record', entered => {
+    const name = String(entered || '').replace(/"/g, '').trim() || suggested;
+    if (gestureNamed(name)) setTimeout(() => confirmReplaceGesture(name), 250);
+    else recordGesture(name);
+  });
+}
+
+function confirmReplaceGesture(name) {
+  showConfirm('Replace Gesture?', `A gesture named “${name}” already exists. A new recording replaces it.`, () => recordGesture(name), 'Replace');
+}
+
+// The tweak counts down on the iPhone and records until Stop is tapped there
+async function recordGesture(name) {
+  if (!await rcSend(`gesture record ${gestureQuoted(name)}`)) return;
+  showToast('⏺ Recording on the iPhone in 3 seconds');
+  // The list picks the recording up once it's saved
+  [8000, 20000, 45000].forEach(ms => setTimeout(() => { if (document.getElementById('gestures-panel').classList.contains('active')) loadGestures(); }, ms));
+}
+
+function renameGesture(name) {
+  showDialog('Rename Gesture', 'Actions that play it need the new name.', name, 'Rename', async entered => {
+    const to = String(entered || '').replace(/"/g, '').trim();
+    if (!to || to === name) return;
+    const other = gestureNamed(to);
+    if (other && other.name.toLowerCase() !== name.toLowerCase()) {
+      setTimeout(() => showConfirm('Name Taken', `A gesture named “${other.name}” already exists.`), 250);
+      return;
+    }
+    if (await rcSend(`gesture rename ${gestureQuoted(name)} ${gestureQuoted(to)}`)) rcAfterCommand(loadGestures);
+  });
+}
+
+// ── Add-ons (Settings > Add-ons) ─────────────────────────────────────────────
+// The list: on, off, not installed and problems, as in the app. An add-on's page: on/off, Run as
+// Root, its settings, and what it adds. Changes go as add-on commands, which need the API token.
+let addOnsFull = { addons: [], disabled: [], absent: [], problems: [] };
+let addOnPage = null;   // { id, values (its settings, or null), list (a list setting being edited) }
+
+async function loadAddOnsFull() {
+  try {
+    const res = await fetch('/api/addons');
+    if (!res.ok) throw new Error();
+    const data = await res.json();
+    addOnsFull = { addons: data.addons || [], disabled: data.disabled || [], absent: data.absent || [], problems: data.problems || [] };
+    addOnCatalog = addOnsFull.addons;
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function addOnById(id) {
+  return addOnsFull.addons.find(a => a.id === id) || addOnsFull.disabled.find(a => a.id === id) || null;
+}
+
+function addOnIconHTML(p, icon, cls) {
+  const url = ownImageUrl(p, icon);
+  return url
+    ? `<div class="action-row-icon icon-image"><img class="addon-icon" src="${url}" alt=""></div>`
+    : `<div class="action-row-icon ${cls || 'icon-orange'}"><i class="f7-icons">${escapeHtml(symbolGlyph(ownSymbol(p, icon)))}</i></div>`;
+}
+
+async function openAddOnsPanel() {
+  document.getElementById('addons-panel').classList.add('active');
+  const host = document.getElementById('addons-list');
+  if (!host.childElementCount) { host.innerHTML = ''; host.appendChild(rcPlaceholderRow('Loading…')); }
+  if (!await loadAddOnsFull()) { host.innerHTML = ''; host.appendChild(rcPlaceholderRow('Couldn’t fetch the add-ons')); return; }
+  renderAddOnsList();
+}
+
+function closeAddOnsPanel() {
+  document.getElementById('addons-panel').classList.remove('active');
+}
+
+async function reloadAddOns() {
+  if (!await rcSend('addons reload')) return;
+  rcAfterCommand(async () => { await loadAddOnsFull(); renderAddOnsList(); showToast('✓ Add-ons Reloaded'); });
+}
+
+function addOnSection(host, title, rows, footer) {
+  if (title) host.insertAdjacentHTML('beforeend', `<div class="action-list-header" style="margin-top:24px">${escapeHtml(title)}</div>`);
+  const card = document.createElement('div');
+  card.className = 'action-list-card';
+  if (!title) card.style.marginTop = '20px';
+  rows.forEach(r => card.appendChild(r));
+  host.appendChild(card);
+  if (footer) host.insertAdjacentHTML('beforeend', `<div class="menu-ed-foot">${escapeHtml(footer)}</div>`);
+}
+
+function addOnSummary(p) {
+  const n = (p.actions || []).length;
+  return `${n} ${n === 1 ? 'Action' : 'Actions'}`;
+}
+
+function renderAddOnsList() {
+  const host = document.getElementById('addons-list');
+  host.innerHTML = '';
+  const byName = (a, b) => (a.name || '').localeCompare(b.name || '');
+  const on = addOnsFull.addons.slice().sort(byName);
+  addOnSection(host, '', on.length ? on.map(p => rcListRow(addOnIconHTML(p), p.name || p.id, addOnSummary(p), () => openAddOnPage(p.id)))
+    : [rcPlaceholderRow('None')], 'Added by other apps and tweaks.');
+  if (addOnsFull.disabled.length) {
+    addOnSection(host, 'Off', addOnsFull.disabled.slice().sort(byName).map(p => rcListRow(addOnIconHTML(p, null, 'icon-gray'), p.name || p.id, 'Off', () => openAddOnPage(p.id))));
+  }
+  if (addOnsFull.absent.length) {
+    addOnSection(host, 'Not Installed', addOnsFull.absent.slice().sort().map(name => rcListRow('<div class="action-row-icon icon-gray"><i class="f7-icons">cube_box</i></div>', name, '', null)),
+      'These add-ons appear once their app or tweak is installed.');
+  }
+  if (addOnsFull.problems.length) {
+    addOnSection(host, 'Problems', addOnsFull.problems.map(text => {
+      const row = rcListRow('<div class="action-row-icon icon-red"><i class="f7-icons">exclamationmark_triangle_fill</i></div>', text, '', null);
+      row.querySelector('.action-row-text').style.whiteSpace = 'normal';
+      return row;
+    }), 'A file with a problem isn’t loaded until it’s fixed.');
+  }
+}
+
+// ── One add-on ──
+async function openAddOnPage(id) {
+  addOnPage = { id, values: null, list: null };
+  document.getElementById('addon-panel').classList.add('active');
+  renderAddOnPage();
+  loadAddOnSettings();
+  // The variables it keeps, with their values (they come only with the API token)
+  const p = addOnById(id), token = localStorage.getItem('rc_api_token');
+  if (p && (p.variables || []).length && token) {
+    try {
+      const res = await fetch('/api/variables', { headers: { 'Authorization': `Bearer ${token}` } });
+      if (res.ok) { rcVariables = (await res.json()) || {}; if (addOnPage && addOnPage.id === id && !addOnPage.list) renderAddOnPage(); }
+    } catch (e) {}
+  }
+}
+
+function addOnBack() {
+  if (addOnPage && addOnPage.list) { addOnPage.list = null; renderAddOnPage(); return; }
+  document.getElementById('addon-panel').classList.remove('active');
+  addOnPage = null;
+  renderAddOnsList();
+}
+
+async function loadAddOnSettings() {
+  const page = addOnPage;
+  const p = page && addOnById(page.id);
+  if (!p || !(p.settings || []).length) return;
+  const token = localStorage.getItem('rc_api_token');
+  try {
+    const res = await fetch(`/api/addons/settings?id=${encodeURIComponent(page.id)}`, { headers: token ? { 'Authorization': `Bearer ${token}` } : {} });
+    if (res.status === 403) { page.values = 'token'; renderAddOnPage(); return; }
+    if (!res.ok) throw new Error();
+    page.values = await res.json();
+  } catch (e) {
+    page.values = 'error';
+  }
+  if (addOnPage === page) renderAddOnPage();
+}
+
+// After a change: the phone runs it in the background, then the page reads everything again
+function addOnChanged() {
+  rcAfterCommand(async () => {
+    await loadAddOnsFull();
+    if (!addOnPage) return;
+    if (!addOnById(addOnPage.id)) { addOnBack(); return; }
+    renderAddOnPage();
+    loadAddOnSettings();
+  });
+}
+
+function addOnNumberText(value, control) {
+  const n = Number(value);
+  const text = Number.isFinite(n) ? String(Math.round(n * 1e6) / 1e6) : String(value ?? '');
+  return control.unit ? `${text} ${control.unit}` : text;
+}
+
+function addOnValueText(control, value) {
+  if (value === undefined || value === null) return control.type === 'switch' ? '' : '…';
+  if (control.type === 'switch') return value ? 'On' : 'Off';
+  if (control.type === 'number') return addOnNumberText(value, control);
+  if (control.type === 'choice') {
+    const c = (control.choices || []).find(c => String(c.value) === String(value));
+    return c ? c.label : String(value);
+  }
+  if (control.type === 'list') { const n = Array.isArray(value) ? value.length : 0; return `${n} ${n === 1 ? 'Item' : 'Items'}`; }
+  return String(value).length ? String(value) : 'None';
+}
+
+function addOnSwitchRow(iconHTML, title, subtitle, checked, onChange) {
+  const row = rcListRow(iconHTML, title, subtitle, null);
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.className = 'ios-toggle';
+  input.checked = !!checked;
+  input.onchange = () => onChange(input.checked, input);
+  row.appendChild(input);
+  return row;
+}
+
+function renderAddOnPage() {
+  const page = addOnPage;
+  if (!page) return;
+  const p = addOnById(page.id);
+  const body = document.getElementById('addon-body');
+  body.innerHTML = '';
+  if (!p) { addOnSection(body, '', [rcPlaceholderRow('This add-on is gone')]); return; }
+  if (page.list) { renderAddOnListSetting(body, p, page.list); return; }
+  document.getElementById('addon-title').textContent = p.name || p.id;
+  document.getElementById('addon-back-label').textContent = 'Add-ons';
+  const on = addOnsFull.addons.some(a => a.id === p.id);
+
+  addOnSection(body, '', [addOnSwitchRow(addOnIconHTML(p), 'Add-On Enabled', '', on, async (want, input) => {
+    if (await rcSend(`addons ${want ? 'enable' : 'disable'} ${p.id}`)) addOnChanged(); else input.checked = !want;
+  })], 'When off, it adds nothing and its events stop.');
+
+  if (p._usesRoot) {
+    addOnSection(body, '', [addOnSwitchRow('<div class="action-row-icon icon-red"><i class="f7-icons">exclamationmark_shield_fill</i></div>', 'Run as Root', '', !!p._rootAllowed, (want, input) => {
+      input.checked = !want;   // until confirmed and sent
+      const send = async () => { if (await rcSend(`addons root ${p.id} ${want ? 'on' : 'off'}`)) { input.checked = want; addOnChanged(); } };
+      if (want) showConfirm('Run as Root?', 'Allows its programs to run with full access to the device.', send, 'Allow');
+      else send();
+    })], 'Allows its programs to run with full access to the device.');
+  }
+
+  const settings = (p.settings || []).filter(x => x && x.id);
+  if (settings.length) {
+    let rows;
+    if (page.values === 'token') {
+      rows = [rcListRow('<div class="action-row-icon icon-indigo"><i class="f7-icons">lock_fill</i></div>', 'Enter API Token', 'Needed to see and change settings',
+        () => promptApiTokenModal(loadAddOnSettings))];
+    } else if (page.values === 'error') {
+      rows = [rcPlaceholderRow('Couldn’t fetch the settings')];
+    } else if (!page.values) {
+      rows = [rcPlaceholderRow('Loading\u2026')];
+    } else {
+      rows = settings.map(setting => addOnSettingRow(p, setting));
+    }
+    addOnSection(body, 'Settings', rows);
+  }
+
+  const named = (list, fallbackIcon) => list.filter(x => x && (x.name || x.id)).map(x =>
+    rcListRow(addOnIconHTML(p, x.icon), x.name || x.id, x.description || '', null));
+  const actions = named(p.actions || []);
+  if (actions.length) addOnSection(body, 'Actions', actions);
+  const triggers = (p.events || []).filter(e => e && e.trigger).map(e => rcListRow(addOnIconHTML(p, e.trigger.icon || e.icon), e.trigger.name || e.id, '', null));
+  if (triggers.length) addOnSection(body, 'Triggers', triggers);
+  const conditions = named(p.conditions || []);
+  if (conditions.length) addOnSection(body, 'Conditions', conditions);
+  if ((p.variables || []).length) {
+    const kept = Object.keys(rcVariables || {}).filter(n => (p.variables || []).some(start => typeof start === 'string' && start && n.startsWith(start))).sort();
+    addOnSection(body, 'Variables', kept.length ? kept.map(n => rcListRow('<div class="action-row-icon icon-orange"><i class="f7-icons">function</i></div>', n,
+      String(rcVariables[n] ?? '') || 'No value', null)) : [rcPlaceholderRow('None yet')], 'What it keeps in RemoteCompanion variables.');
+  }
+  const about = [['Command', p.id], ['File', p._file], ['Folder', p._folder]].filter(([, v]) => typeof v === 'string' && v)
+    .map(([k, v]) => { const r = rcListRow('', k, v, null); r.querySelector('span').style.wordBreak = 'break-all'; return r; });
+  addOnSection(body, 'About', about);
+}
+
+function addOnSettingRow(p, setting) {
+  const values = addOnPage.values && typeof addOnPage.values === 'object' ? addOnPage.values : null;
+  const value = values ? values[setting.id] : undefined;
+  const note = typeof setting.note === 'string' ? setting.note : '';
+  if (setting.type === 'switch') {
+    return addOnSwitchRow('', setting.title || setting.id, note, !!value, async (want, input) => {
+      if (await rcSend(`addons set ${p.id} ${setting.id} ${want ? 'on' : 'off'}`)) addOnChanged(); else input.checked = !want;
+    });
+  }
+  const shown = addOnValueText(setting, value);
+  return rcListRow('', setting.title || setting.id, note ? `${shown} · ${note}` : shown, values ? () => editAddOnSetting(p, setting, value) : null);
+}
+
+function addOnSet(p, setting, text) {
+  rcSend(`addons set ${p.id} ${setting.id} ${text}`).then(ok => { if (ok) addOnChanged(); });
+}
+
+function editAddOnSetting(p, setting, value) {
+  if (setting.type === 'choice') {
+    const now = addOnValueText(setting, value);
+    showSheet(`${setting.title} — Now: ${now}`, (setting.choices || []).map(c => ({ label: c.label, action() { addOnSet(p, setting, String(c.value)); } })));
+  } else if (setting.type === 'number') {
+    const range = [];
+    if (setting.min !== undefined) range.push(`Lowest ${addOnNumberText(setting.min, setting)}`);
+    if (setting.max !== undefined) range.push(`${range.length ? 'highest' : 'Highest'} ${addOnNumberText(setting.max, setting)}`);
+    showDialog(setting.title, range.length ? range.join(', ') + '.' : '', value === undefined ? '' : String(value), 'Save', typed => {
+      const n = Number(String(typed).replace(',', '.').trim());
+      if (!String(typed).trim() || !Number.isFinite(n)) { setTimeout(() => showConfirm('Couldn’t Change', 'That isn’t a number.'), 250); return; }
+      addOnSet(p, setting, String(n));
+    });
+  } else if (setting.type === 'text') {
+    showDialog(setting.title, typeof setting.note === 'string' ? setting.note : '', value === undefined ? '' : String(value), 'Save', typed => addOnSet(p, setting, String(typed ?? '').replace(/\n/g, ' ')));
+  } else if (setting.type === 'list') {
+    addOnPage.list = { setting, items: Array.isArray(value) ? JSON.parse(JSON.stringify(value)) : [] };
+    renderAddOnPage();
+  }
+}
+
+// ── A list setting: its items, each named by its first field ──
+function renderAddOnListSetting(body, p, list) {
+  const { setting, items } = list;
+  const fields = (setting.fields || []).filter(f => f && f.id);
+  document.getElementById('addon-title').textContent = setting.title || setting.id;
+  document.getElementById('addon-back-label').textContent = p.name || 'Add-on';
+  const rows = items.map((item, i) => rcListRow('', String(item[fields[0] && fields[0].id] ?? '') || `Item ${i + 1}`,
+    fields.slice(1).map(f => `${f.title}: ${addOnValueText(f, item[f.id])}`).join(' · '), () => addOnListItemSheet(p, list, i)));
+  if (!rows.length) rows.push(rcPlaceholderRow('None'));
+  const add = rcListRow('<div class="action-row-icon icon-green"><i class="f7-icons">plus</i></div>', 'Add', '', () => {
+    const item = {};
+    fields.forEach(f => { item[f.id] = f.default !== undefined ? f.default : (f.type === 'switch' ? false : f.type === 'number' ? (f.min ?? 0) : f.type === 'choice' ? ((f.choices || [])[0] || {}).value : ''); });
+    const first = fields[0];
+    const addItem = () => {
+      list.items.push(item);
+      saveAddOnList(p, list);
+      setTimeout(() => addOnListItemSheet(p, list, list.items.length - 1), 250);
+    };
+    // Its name first (a text first field); the item is added only once it has one
+    if (first && first.type === 'text') {
+      showDialog('New Item', first.title, '', 'Add', typed => {
+        const name = String(typed ?? '').replace(/\n/g, ' ').trim();
+        if (!name) return;
+        item[first.id] = name;
+        addItem();
+      });
+    } else {
+      addItem();
+    }
+  });
+  add.querySelector('.action-row-text').style.color = 'var(--rc-blue)';
+  rows.push(add);
+  addOnSection(body, '', rows, 'Tap an item to change it, move it or delete it.');
+}
+
+function saveAddOnList(p, list) {
+  renderAddOnPage();
+  addOnSet(p, list.setting, JSON.stringify(list.items));
+}
+
+function addOnListItemSheet(p, list, i) {
+  const fields = (list.setting.fields || []).filter(f => f && f.id);
+  const item = list.items[i];
+  const later = fn => () => setTimeout(fn, 250);
+  const buttons = fields.map(f => ({ label: `${f.title}: ${addOnValueText(f, item[f.id])}`, action: later(() => editAddOnListField(p, list, i, f)) }));
+  if (i > 0) buttons.push({ label: 'Move Up', action() { list.items.splice(i - 1, 0, list.items.splice(i, 1)[0]); saveAddOnList(p, list); } });
+  if (i < list.items.length - 1) buttons.push({ label: 'Move Down', action() { list.items.splice(i + 1, 0, list.items.splice(i, 1)[0]); saveAddOnList(p, list); } });
+  buttons.push({ label: 'Delete', destructive: true, action() { list.items.splice(i, 1); saveAddOnList(p, list); } });
+  showSheet(String(item[fields[0] && fields[0].id] ?? '') || `Item ${i + 1}`, buttons);
+}
+
+function editAddOnListField(p, list, i, f) {
+  const item = list.items[i];
+  const done = v => { item[f.id] = v; saveAddOnList(p, list); };
+  if (f.type === 'switch') {
+    showSheet(f.title, [{ label: 'On', action() { done(true); } }, { label: 'Off', action() { done(false); } }]);
+  } else if (f.type === 'choice') {
+    showSheet(f.title, (f.choices || []).map(c => ({ label: c.label, action() { done(c.value); } })));
+  } else if (f.type === 'number') {
+    showDialog(f.title, '', String(item[f.id] ?? ''), 'Save', typed => {
+      const n = Number(String(typed).replace(',', '.').trim());
+      if (!String(typed).trim() || !Number.isFinite(n) || (f.min !== undefined && n < f.min) || (f.max !== undefined && n > f.max)) {
+        setTimeout(() => showConfirm('Couldn’t Change', f.min !== undefined || f.max !== undefined
+          ? `Use a number from ${addOnNumberText(f.min ?? '', f)} to ${addOnNumberText(f.max ?? '', f)}.` : 'That isn’t a number.'), 250);
+        return;
+      }
+      done(n);
+    });
+  } else {
+    showDialog(f.title, '', String(item[f.id] ?? ''), 'Save', typed => done(String(typed ?? '').replace(/\n/g, ' ')));
+  }
+}
+
+// ── Excluded Apps (Settings > Excluded Apps) ─────────────────────────────────
+// Each trigger with actions, grouped as on the Triggers screen; tap one to tick its apps
+function openExcludedAppsPanel() {
+  renderExcludedApps();
+  document.getElementById('excluded-panel').classList.add('active');
+  if (!cachedApps.length) fetch('/api/apps').then(r => r.ok ? r.json() : null).then(apps => {
+    if (apps) { cachedApps = apps; renderExcludedApps(); }
+  }).catch(() => {});
+}
+
+function closeExcludedAppsPanel() {
+  document.getElementById('excluded-panel').classList.remove('active');
+}
+
+function excludedAppsFor(key) {
+  const raw = (config.triggers[key] || {}).excludedApps;
+  return Array.isArray(raw) ? raw.filter(x => typeof x === 'string' && x.trim()).map(x => x.trim().toLowerCase()) : [];
+}
+
+function appNameFor(bundleId) {
+  const app = cachedApps.find(a => (a.bundleId || '').toLowerCase() === bundleId);
+  return app ? app.name : bundleId;
+}
+
+function renderExcludedApps() {
+  const host = document.getElementById('excluded-list');
+  host.innerHTML = '';
+  const withActions = key => ((config.triggers[key] || {}).actions || []).length > 0;
+  let any = false;
+  computeVisibleSections().forEach(({ sec, keys }) => {
+    const shown = keys.filter(withActions);
+    if (!shown.length) return;
+    any = true;
+    host.insertAdjacentHTML('beforeend', `<div class="action-list-header" style="margin-top:24px">${escapeHtml(sec.title)}</div>`);
+    const card = document.createElement('div');
+    card.className = 'action-list-card';
+    shown.forEach(key => {
+      const excluded = excludedAppsFor(key);
+      const subtitle = excluded.length ? excluded.map(appNameFor).join(', ') : 'None';
+      const { cls } = iconForKey(key);
+      const icon = `<div class="action-row-icon ${cls || 'icon-gray'}">${triggerIconHTML(key)}</div>`;
+      card.appendChild(rcListRow(icon, nameForKey(key), subtitle, () => pickExcludedApps(key)));
+    });
+    host.appendChild(card);
+  });
+  if (!any) {
+    const card = document.createElement('div');
+    card.className = 'action-list-card';
+    card.style.marginTop = '24px';
+    card.appendChild(rcPlaceholderRow('No triggers with actions yet'));
+    host.appendChild(card);
+  }
+}
+
+function pickExcludedApps(key) {
+  promptAppLaunchPicker(null, 'launch', excludedAppsFor(key), null, null, {
+    title: nameForKey(key),
+    message: 'This trigger doesn’t run while a ticked app is open.',
+    onDone(ids) {
+      const t = config.triggers[key];
+      if (!t) return;
+      const clean = [...new Set(ids.map(x => String(x).trim().toLowerCase()).filter(Boolean))];
+      if (clean.length) t.excludedApps = clean; else delete t.excludedApps;
+      saveConfig();
+      renderExcludedApps();
+    },
+  });
+}
+
 function openTweaksPanel() {
   const wakeEl = document.getElementById('setting-disable-wake-on-power');
-  if (wakeEl) wakeEl.checked = !!config.disableWakeOnPower;
+  if (wakeEl) wakeEl.checked = !config.disableWakeOnPower;
   const hapticsEl = document.getElementById('setting-disable-power-haptics');
-  if (hapticsEl) hapticsEl.checked = !!config.disablePowerConnectedHaptics;
+  if (hapticsEl) hapticsEl.checked = !config.disablePowerConnectedHaptics;
   const notifVibEl = document.getElementById('setting-disable-unlocked-notif-vibration');
-  if (notifVibEl) notifVibEl.checked = !!config.disableUnlockedNotificationVibration;
+  if (notifVibEl) notifVibEl.checked = !config.disableUnlockedNotificationVibration;
   const watchUnlockedEl = document.getElementById('setting-send-watch-when-unlocked');
   if (watchUnlockedEl) watchUnlockedEl.checked = !!config.sendNotificationsToWatchWhenUnlocked;
   document.getElementById('tweaks-panel').classList.add('active');
@@ -11292,15 +12323,72 @@ function closeSettings() {
   document.getElementById('footer-settings-fixed').style.display = 'none';
 }
 
+// Export Configuration leaves passwords and tokens out unless Include Passwords and Tokens is on
+// (in this browser). Left out, they read as the tweak hides them (••••••••), and importing the file
+// on this iPhone keeps the ones it has: the tweak puts saved values back where it finds those dots.
+const RC_HIDDEN = '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022';
+function exportIncludesSecrets() {
+  try { return localStorage.getItem('rcExportSecrets') === '1'; } catch (e) { return false; }
+}
+function onExportSecretsChange(on) {
+  try { localStorage.setItem('rcExportSecrets', on ? '1' : '0'); } catch (e) {}
+  updateExportSecretsFooter();
+}
+function updateExportSecretsFooter() {
+  const box = document.getElementById('setting-export-secrets');
+  if (box) box.checked = exportIncludesSecrets();
+  const footer = document.getElementById('export-secrets-footer');
+  if (!footer) return;
+  // Without the API token the phone sends them already hidden, so the switch can't put them in
+  const noToken = !localStorage.getItem('rc_api_token');
+  footer.textContent = exportIncludesSecrets()
+    ? (noToken ? 'Enter the API token to include them: without it, the phone keeps them hidden from this browser and the file has dots in their place.'
+               : 'The file holds the passwords and tokens saved for integrations, servers and devices, the API token, and passcodes typed into Unlock actions, so keep it private.')
+    : 'Left out of the file: the passwords and tokens saved for integrations, servers and devices, the API token, and passcodes typed into Unlock actions. Importing it on this iPhone keeps the ones it has; on another device, enter them again. Text inside actions, such as a command or a web request, stays as written.';
+}
+// A copy of the config with them hidden, as the tweak does it (rc_config_with_secrets_hidden)
+function configWithSecretsHidden(cfg) {
+  const copy = JSON.parse(JSON.stringify(cfg || {}));
+  ['webUIApiToken', 'haToken', 'mqttPassword', 'kmPassword'].forEach(k => {
+    if (typeof copy[k] === 'string' && copy[k].length) copy[k] = RC_HIDDEN;
+  });
+  const hideField = (list, field) => Array.isArray(list) ? list.map(item => {
+    if (item && typeof item === 'object' && typeof item[field] === 'string' && item[field].length) return { ...item, [field]: RC_HIDDEN };
+    return item;
+  }) : list;
+  if (copy.sshHosts) copy.sshHosts = hideField(copy.sshHosts, 'password');
+  if (copy.rcClients) copy.rcClients = hideField(copy.rcClients, 'token');
+  // "unlock 1234" and "lock-toggle 1234" (not "saved"), wherever an action is
+  const hidePasscodes = v => {
+    if (typeof v === 'string') {
+      const t = v.trim();
+      for (const verb of ['unlock ', 'lock-toggle ', 'lock toggle ']) {
+        if (!t.startsWith(verb)) continue;
+        const pin = t.slice(verb.length).trim();
+        return pin && pin !== 'saved' ? verb + RC_HIDDEN : v;
+      }
+      return v;
+    }
+    if (Array.isArray(v)) return v.map(hidePasscodes);
+    if (v && typeof v === 'object') { const o = {}; Object.keys(v).forEach(k => { o[k] = hidePasscodes(v[k]); }); return o; }
+    return v;
+  };
+  return hidePasscodes(copy);
+}
+
 function exportConfig() {
-  const json = JSON.stringify(config, null, 2);
+  const json = JSON.stringify(exportIncludesSecrets() ? config : configWithSecretsHidden(config), null, 2);
   const blob = new Blob([json], { type:'application/json' });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement('a');
   a.href = url; a.download = 'rc_triggers_backup.json';
   a.click();
   URL.revokeObjectURL(url);
-  showToast('Configuration exported. It may contain saved passwords and tokens, so keep it private.');
+  // Asked for, but the phone sent them hidden (no API token here): say what the file really has
+  const hiddenByPhone = JSON.stringify(config || {}).includes(RC_HIDDEN);
+  showToast(exportIncludesSecrets() && !hiddenByPhone ? 'Configuration exported, with passwords and tokens. Keep it private.'
+    : exportIncludesSecrets() ? 'Configuration exported. Passwords and tokens stay hidden without the API token.'
+    : 'Configuration exported, without passwords and tokens.');
 }
 
 function importConfig() {
@@ -11313,12 +12401,19 @@ function handleImportFile(input) {
   const reader = new FileReader();
   reader.onload = e => {
     try {
-      const imported = JSON.parse(e.target.result);
-      if (typeof imported !== 'object') throw new Error();
+      let imported = JSON.parse(e.target.result);
+      if (!imported || typeof imported !== 'object') throw new Error();
+      // A full backup from the app: its configuration (its add-on, gesture and other files are
+      // put back by Import Configuration in the app)
+      const fromApp = imported.format === 'rc-backup';
+      if (fromApp) {
+        if (!imported.config || typeof imported.config !== 'object') throw new Error();
+        imported = imported.config;
+      }
       config = imported;
       saveConfig();
       renderAll();
-      showToast('✓ Configuration Imported');
+      showToast(fromApp ? '✓ Configuration Imported (import it in the app for add-ons and gestures too)' : '✓ Configuration Imported');
     } catch(err) {
       showToast('⚠ Invalid Backup File');
     }
@@ -11333,19 +12428,22 @@ let appPickerKind = 'launch';
 let appPickerMulti = false;
 let appPickerChosen = [];        // bundle ids, in the order ticked
 let appPickerReplacingKey = null;
-async function promptAppLaunchPicker(callback, kind, preselected, replacingKey, titleOverride) {
+// Ticking apps for something else (a trigger's excluded apps): Done hands them over, none included
+let appPickerDone = null;
+async function promptAppLaunchPicker(callback, kind, preselected, replacingKey, titleOverride, ticking) {
   appPickerKind = (kind === 'exit' || kind === 'hold') ? kind : 'launch';
   appPickerMulti = !callback;
   appPickerChosen = (preselected || []).slice();
   appPickerReplacingKey = replacingKey || null;
-  document.getElementById('app-launch-dialog-title').textContent = titleOverride || (appPickerKind === 'exit' ? 'App Exit Trigger' : (appPickerKind === 'hold' ? 'App Long Press Trigger' : 'App Launch Trigger'));
-  document.getElementById('app-launch-dialog-msg').textContent = titleOverride
+  appPickerDone = ticking ? ticking.onDone : null;
+  document.getElementById('app-launch-dialog-title').textContent = (ticking && ticking.title) || titleOverride || (appPickerKind === 'exit' ? 'App Exit Trigger' : (appPickerKind === 'hold' ? 'App Long Press Trigger' : 'App Launch Trigger'));
+  document.getElementById('app-launch-dialog-msg').textContent = ticking ? (ticking.message || '') : titleOverride
     ? 'Pick the app this condition matches.'
     : (appPickerMulti
     ? (appPickerKind === 'exit' ? 'Fires when any selected app is switched away from.' : (appPickerKind === 'hold' ? 'Fires when any selected app icon is long pressed.' : 'Fires when any selected app is opened.'))
     : (appPickerKind === 'exit' ? 'Fires when an app is switched away from.' : (appPickerKind === 'hold' ? 'Fires when an app icon is long pressed.' : 'Fires when an app is opened on the device.')));
   document.getElementById('app-picker-done').style.display = appPickerMulti ? '' : 'none';
-  document.getElementById('app-picker-done').disabled = appPickerChosen.length === 0;
+  document.getElementById('app-picker-done').disabled = !appPickerDone && appPickerChosen.length === 0;
   const listEl = document.getElementById('app-picker-list');
   const loadingEl = document.getElementById('app-picker-loading');
   document.getElementById('app-picker-search').value = '';
@@ -11409,7 +12507,7 @@ function markChosenApps() {
     const mark = r.querySelector('.app-picker-mark');
     if (!mark) return;
     if (appPickerMulti) {
-      const on = appPickerChosen.includes(r.dataset.bundle);
+      const on = appPickerChosen.some(id => id.toLowerCase() === r.dataset.bundle.toLowerCase());
       mark.textContent = on ? 'checkmark_alt' : '';
       mark.style.color = on ? 'var(--rc-blue)' : 'var(--rc-glyph)';
     } else {
@@ -11417,7 +12515,7 @@ function markChosenApps() {
       mark.style.color = 'var(--rc-glyph)';
     }
   });
-  document.getElementById('app-picker-done').disabled = appPickerMulti && appPickerChosen.length === 0;
+  document.getElementById('app-picker-done').disabled = !appPickerDone && appPickerMulti && appPickerChosen.length === 0;
 }
 
 function filterAppPickerList() {
@@ -11431,7 +12529,7 @@ function filterAppPickerList() {
 
 function selectAppFromPicker(app) {
   if (appPickerMulti) {
-    const i = appPickerChosen.indexOf(app.bundleId);
+    const i = appPickerChosen.findIndex(id => id.toLowerCase() === (app.bundleId || '').toLowerCase());
     if (i >= 0) appPickerChosen.splice(i, 1); else appPickerChosen.push(app.bundleId);
     markChosenApps();
     return;
@@ -11446,6 +12544,12 @@ function selectAppFromPicker(app) {
 
 // Done, with one or more apps ticked
 function finishAppPicker() {
+  if (appPickerDone) {
+    const done = appPickerDone, ids = appPickerChosen.slice();
+    closeAppLaunchDialog();
+    done(ids);
+    return;
+  }
   if (!appPickerMulti || appPickerChosen.length === 0) return;
   const ids = appPickerChosen.slice();
   const names = ids.map(id => { const a = cachedApps.find(x => x.bundleId === id); return a ? a.name : id; });
@@ -11457,6 +12561,7 @@ function finishAppPicker() {
 function closeAppLaunchDialog() {
   document.getElementById('app-launch-dialog-backdrop').classList.remove('visible');
   dialogCallback = null;
+  appPickerDone = null;
 }
 
 // Saves an App Launch / App Exit / App Long Press trigger for these apps. Its key is the first
@@ -12006,6 +13111,541 @@ function populateDatalist(id, items) {
     if (item.text) opt.textContent = item.text;
     dl.appendChild(opt);
   });
+}
+
+// ── Test Kit (Settings > Diagnostics > Test Kit) ─────────────────────────────
+// The phone's own test kit API (/api/testkit/): run a suite, follow it, read its report.
+// One panel with its own pages: home, a suite's setup, a report, one test of a report.
+const TK_SUITE_NAMES = { conditions: 'If Conditions', toggles: 'Toggle Actions', all: 'Conditions + Toggles', guided: 'Gestures & Sensors',
+  differential: 'Stock vs Tweak', replay: 'Button Triggers', addons: 'Add-ons' };
+const TK_SUITE_BLURBS = {
+  conditions: 'Checks each If condition against the phone’s current state.',
+  toggles: 'Switches each toggle action and reads it back, then restores everything.',
+  guided: 'Checks that each gesture and sensor trigger fires once.',
+  differential: 'Compares each button press with the tweak off and on.',
+  replay: 'Checks that each button trigger fires once, with the presses done by the tweak.',
+  addons: 'Checks that add-on files are accepted or refused as they should be, and that the installed ones load.',
+};
+const TK_SUITE_ICONS = { conditions: 'question_diamond', toggles: 'slider_horizontal_3', guided: 'hand_point_left', differential: 'square_split_2x1',
+  replay: 'play_circle', addons: 'cube_box' };
+const TK_MAX_STEP_COUNT = 5;
+let tk = null; // { stack: [page...], suites, reports, run, passcode, timer, stopping }
+
+const tkSuiteName = s => TK_SUITE_NAMES[s || ''] || s || 'Test';
+const tkPage = () => tk && tk.stack[tk.stack.length - 1];
+
+async function tkRequest(endpoint, post) {
+  const token = localStorage.getItem('rc_api_token');
+  const res = await fetch('/api/testkit/' + endpoint, { method: post ? 'POST' : 'GET', cache: 'no-store',
+    headers: token ? { 'Authorization': `Bearer ${token}` } : {} });
+  if (res.status === 403) throw new Error('Enable Web UI in Settings first');
+  const json = await res.json().catch(() => null);
+  if (!json || typeof json !== 'object') throw new Error('The phone didn’t answer');
+  return json;
+}
+
+function openTestKitPanel() {
+  tk = { stack: [{ view: 'home' }], suites: null, reports: null, run: null, passcode: null, stopping: false, timer: null };
+  document.getElementById('testkit-panel').classList.add('active');
+  renderTestKit();
+  tkLoadSuites();
+  tkLoadReports();
+  tkPoll();
+  tk.timer = setInterval(tkPoll, 1500);
+}
+
+function closeTestKitPanel() {
+  if (tk && tk.timer) clearInterval(tk.timer);
+  tk = null;
+  document.getElementById('testkit-panel').classList.remove('active');
+}
+
+function tkPush(page) { tk.stack.push(page); renderTestKit(); document.querySelector('#testkit-panel .panel-content').scrollTop = 0; }
+
+function testKitBack() {
+  if (!tk || tk.stack.length <= 1) { closeTestKitPanel(); return; }
+  tk.stack.pop();
+  renderTestKit();
+}
+
+async function tkLoadSuites() {
+  try {
+    const json = await tkRequest('suites');
+    if (!tk) return;
+    tk.suites = (json.suites || []).filter(s => s && s.name && s.name !== 'all');
+  } catch (e) { if (tk) tk.suites = e.message; }
+  if (tkPage() && tkPage().view === 'home') renderTestKit();
+}
+
+async function tkLoadReports() {
+  try {
+    const json = await tkRequest('reports');
+    if (!tk) return;
+    tk.reports = Array.isArray(json.items) ? json.items : [];
+  } catch (e) { if (tk) tk.reports = []; }
+  if (tkPage() && tkPage().view === 'home') renderTestKit();
+}
+
+// The run in progress (shown at the top while it lasts; when it ends its report opens) and the passcode's status
+let tkPolling = false;
+async function tkPoll() {
+  if (!tk || tkPolling) return;
+  tkPolling = true;
+  try {
+    const [run, passcode] = await Promise.all([tkRequest('report'), tkRequest('passcode')]);
+    if (!tk) return;
+    const running = run.status === 'running';
+    const previous = tk.run;
+    tk.run = running ? run : null;
+    tk.passcode = passcode;
+    if (!running) tk.stopping = false;
+    if (previous && !running) {
+      await tkLoadReports();
+      if (run.id === previous.id && tkPage().view === 'home') { tkOpenReport(run.id); return; }
+    }
+    if (tkPage().view === 'home') renderTestKit();
+  } catch (e) {
+  } finally { tkPolling = false; }
+}
+
+function tkSection(host, title, rows, footer) {
+  if (title) host.insertAdjacentHTML('beforeend', `<div class="action-list-header" style="margin-top:24px">${escapeHtml(title)}</div>`);
+  const card = document.createElement('div');
+  card.className = 'action-list-card';
+  if (!title) card.style.marginTop = '20px';
+  rows.forEach(r => card.appendChild(r));
+  host.appendChild(card);
+  if (footer) host.insertAdjacentHTML('beforeend', `<div class="menu-ed-foot">${escapeHtml(footer)}</div>`);
+}
+
+const tkIcon = (name, color) => `<div class="action-row-icon ${color || 'icon-teal'}"><i class="f7-icons">${name}</i></div>`;
+
+// Subtitles keep their line breaks
+function tkRow(iconHTML, title, subtitle, onTap) {
+  const row = rcListRow(iconHTML, title, subtitle, onTap);
+  row.querySelector('.action-row-text').style.whiteSpace = 'pre-line';
+  return row;
+}
+
+function tkCenteredRow(text, color, onTap) {
+  const row = document.createElement('div');
+  row.className = 'action-list-row';
+  row.innerHTML = `<div class="action-row-text" style="flex:1;text-align:center;color:${color}">${escapeHtml(text)}</div>`;
+  if (onTap) row.onclick = onTap;
+  return row;
+}
+
+function renderTestKit() {
+  if (!tk) return;
+  const page = tkPage();
+  const body = document.getElementById('testkit-body');
+  const action = document.getElementById('testkit-action');
+  action.textContent = ''; action.onclick = null;
+  const below = tk.stack[tk.stack.length - 2];
+  document.getElementById('testkit-back-label').textContent = !below ? 'Diagnostics' : below.view === 'report' ? 'Report' : 'Test Kit';
+  body.innerHTML = '';
+  if (page.view === 'home') renderTestKitHome(body);
+  else if (page.view === 'setup') renderTestKitSetup(body, page, action);
+  else if (page.view === 'report') renderTestKitReport(body, page, action);
+  else renderTestKitTest(body, page);
+}
+
+// ── Home: the run in progress, the tests, unlocking, reports ──
+function tkPasscodeText(p) {
+  if (!p || !p.set) return 'Not set';
+  if (p.forever) return 'Kept until forgotten';
+  const minutes = Math.max(1, Math.ceil((p.expiresInSeconds || 0) / 60));
+  if (minutes >= 60) return minutes % 60 ? `Forgotten in ${Math.floor(minutes / 60)} h ${minutes % 60} min` : `Forgotten in ${minutes / 60} h`;
+  return minutes === 1 ? 'Forgotten in 1 minute' : `Forgotten in ${minutes} minutes`;
+}
+
+function tkCountsLine(summary) {
+  const s = summary || {};
+  return `${s.pass || 0} passed, ${s.fail || 0} failed, ${s.skip || 0} skipped`;
+}
+
+function tkWhen(ms) {
+  if (!ms) return '';
+  return new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+function renderTestKitHome(body) {
+  document.getElementById('testkit-title').textContent = 'Test Kit';
+  if (tk.run) {
+    const run = tk.run, progress = run.progress && typeof run.progress === 'object' ? run.progress : null;
+    let detail = progress && progress.phase === 'ready' ? 'Waiting to start: go to the home screen and press Volume Up.'
+      : progress ? `Step ${progress.step} of ${progress.of}: ${progress.title || ''}`
+      : `${(run.summary && run.summary.total) || 0} tests so far`;
+    if (run.summary && run.summary.total > 0) detail += '\n' + tkCountsLine(run.summary);
+    tkSection(body, 'Running', [
+      tkRow(tkIcon('timer'), tkSuiteName(run.suite), detail, null),
+      tkCenteredRow(tk.stopping ? 'Stopping…' : 'Stop Test', tk.stopping ? 'var(--rc-label-2)' : 'var(--rc-red)', tk.stopping ? null : tkStopRun),
+    ]);
+  }
+  const suites = tk.suites;
+  tkSection(body, 'Tests', typeof suites === 'string' ? [rcPlaceholderRow(suites)] : !suites ? [rcPlaceholderRow('Loading…')]
+    : suites.map(s => tkRow(tkIcon(TK_SUITE_ICONS[s.name] || 'list_bullet'), tkSuiteName(s.name), TK_SUITE_BLURBS[s.name] || '', () => tkConfirmSuite(s.name))),
+    'Your settings are put back when a test ends.');
+  const passcodeRow = tkRow(tkIcon('lock_open', tk.passcode && tk.passcode.set ? 'icon-orange' : 'icon-teal'), 'Passcode for Tests', tkPasscodeText(tk.passcode),
+    tk.passcode && tk.passcode.set ? tkPasscodeTapped : null);
+  tkSection(body, 'Unlocking', [passcodeRow],
+    'Optional. Tests that lock the phone can unlock it again with this. It can be entered only on the phone, in the app’s Test Kit.');
+  const reports = tk.reports;
+  body.insertAdjacentHTML('beforeend', `<div class="action-list-header" style="margin-top:24px;display:flex;align-items:baseline">
+    <span style="flex:1">Reports</span>${reports && reports.length ? '<button id="tk-clear-all" style="background:none;border:none;color:var(--rc-red);font-size:13px;font-family:inherit;cursor:pointer;text-transform:none;letter-spacing:0">Clear All</button>' : ''}</div>`);
+  const clear = document.getElementById('tk-clear-all');
+  if (clear) clear.onclick = tkClearReports;
+  const card = document.createElement('div');
+  card.className = 'action-list-card';
+  if (!reports) card.appendChild(rcPlaceholderRow('Loading…'));
+  else reports.forEach(r => {
+    const fail = r.summary && r.summary.fail;
+    const row = tkRow(tkIcon(fail ? 'xmark_circle_fill' : 'checkmark_circle_fill', fail ? 'icon-red' : 'icon-green'),
+      tkSuiteName(r.suite), `${tkWhen(r.started)}\n${tkCountsLine(r.summary)}`, () => tkOpenReport(r.id));
+    row.oncontextmenu = e => { e.preventDefault(); tkDeleteReport(r.id); };
+    card.appendChild(row);
+  });
+  if (reports && reports.length) body.appendChild(card);
+  if (reports && !reports.length) body.insertAdjacentHTML('beforeend', '<div class="menu-ed-foot">Reports of finished tests appear here.</div>');
+}
+
+function tkPasscodeTapped() {
+  showSheet('Passcode for Tests', [{ label: 'Forget Now', destructive: true, action: async () => {
+    try { tk.passcode = await tkRequest('passcode/forget', true); renderTestKit(); } catch (e) { showToast(e.message); }
+  } }]);
+}
+
+function tkClearReports() {
+  showSheet('Delete All Reports?', [{ label: 'Delete All', destructive: true, action: async () => {
+    try { await tkRequest('reports/clear', true); } catch (e) { showToast('Couldn’t Delete'); }
+    tkLoadReports();
+  } }]);
+}
+
+function tkDeleteReport(id) {
+  showSheet('Delete Report?', [{ label: 'Delete', destructive: true, action: async () => {
+    try {
+      const json = await tkRequest('report/delete?id=' + encodeURIComponent(id), true);
+      if (json.error) showToast(json.error);
+    } catch (e) { showToast('Couldn’t Delete'); }
+    if (tk && tkPage().view === 'report') testKitBack();
+    tkLoadReports();
+  } }]);
+}
+
+function tkStopRun() {
+  tk.stopping = true;
+  renderTestKit();
+  tkRequest('suite/stop', true).catch(() => {});
+}
+
+async function tkStartSuite(suite, options) {
+  try {
+    const json = await tkRequest(`suite/run?name=${encodeURIComponent(suite)}${options || ''}`, true);
+    if (json.error) { showConfirm('Couldn’t Start', json.error); return; }
+  } catch (e) { showConfirm('Couldn’t Start', e.message); return; }
+  if (!tk) return;
+  tk.stack = [{ view: 'home' }];
+  tkPoll();
+}
+
+function tkConfirmSuite(suite) {
+  if (tk.run) { showConfirm('A Test Is Running', 'Stop it first, or wait for it to finish.'); return; }
+  if (suite === 'toggles') {
+    showSheet('Each toggle is switched and put back afterwards. Toggles that drop connections for a moment are left out unless you include them.', [
+      { label: 'Run', action: () => tkStartSuite(suite) },
+      { label: 'Run, Including Connections', destructive: true, action: () => tkStartSuite(suite, '&disruptive=1') },
+    ]);
+  } else if (suite === 'guided' || suite === 'differential' || suite === 'replay') {
+    tkOpenSetup(suite);
+  } else {
+    tkStartSuite(suite);
+  }
+}
+
+// ── Setup: who does the steps, which ones and how many times ──
+function tkStored(key, fallback) {
+  try { const v = localStorage.getItem(key); return v === null ? fallback : JSON.parse(v); } catch (e) { return fallback; }
+}
+function tkStore(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) {} }
+
+function tkOpenSetup(suite) {
+  const page = { view: 'setup', suite, steps: null, error: null,
+    handsOff: tkStored('rc_tk_handsoff_' + suite, false), includeByHand: tkStored('rc_tk_byhand_' + suite, false),
+    counts: tkStored('rc_tk_counts_' + suite, {}) }; // only counts other than 1, so steps added later start out once
+  tkPush(page);
+  tkLoadSteps(page);
+}
+
+const tkHasMode = page => page.suite === 'guided' || page.suite === 'differential';
+const tkHasIncludeRow = page => page.handsOff && page.suite === 'guided';
+const tkCountFor = (page, id) => id in page.counts ? page.counts[id] : 1;
+function tkSetCount(page, id, count) {
+  if (count === 1) delete page.counts[id]; else page.counts[id] = count;
+  tkStore('rc_tk_counts_' + page.suite, page.counts);
+}
+
+// The steps in the order the run does them; automatic Gestures & Sensors puts the ones you do first
+async function tkLoadSteps(page) {
+  let request = 'suite/steps?name=' + encodeURIComponent(page.suite);
+  if (page.handsOff && page.suite === 'guided') request += '&auto=1';
+  try {
+    const json = await tkRequest(request);
+    page.steps = Array.isArray(json.steps) && json.steps.length ? json.steps : null;
+    page.error = page.steps ? null : (json.error || 'No steps');
+  } catch (e) { page.error = e.message; }
+  if (tkPage() === page) renderTestKit();
+}
+
+// The steps shown, in groups in the order their first step comes. Stock vs Tweak's timing sweep exists only when the
+// tweak does the presses; automatic Gestures & Sensors lists the steps only a person can do apart, first.
+function tkGroups(page) {
+  const apartByHand = tkHasIncludeRow(page);
+  const names = [], byGroup = {}, byHand = [];
+  let hidden = 0;
+  (page.steps || []).forEach(step => {
+    if (step.replayOnly && !page.handsOff) { hidden++; return; }
+    if (apartByHand && !step.scripted) { if (page.includeByHand) byHand.push(step); else hidden++; return; }
+    const group = step.group || 'Other';
+    if (!byGroup[group]) { byGroup[group] = []; names.push(group); }
+    byGroup[group].push(step);
+  });
+  const groups = names.map(n => ({ name: n, steps: byGroup[n] }));
+  if (byHand.length) groups.unshift({ name: 'Manual Steps', steps: byHand });
+  return { groups, hidden, shown: groups.flatMap(g => g.steps) };
+}
+
+function tkCountText(count) { return count === 0 ? 'Off' : count === 1 ? 'Once' : `${count} times`; }
+
+function tkSetupFooter(page) {
+  const swapped = 'Your triggers are swapped for test ones (their actions don’t run) and put back after.';
+  const begin = ' To begin, go to the home screen and press Volume Up.';
+  if (page.suite === 'replay') return swapped + ' Leave the phone alone while it runs; repeats vary the timing slightly. Power presses are limited for safety, run last, and may lock the phone.';
+  if (page.suite === 'guided') {
+    const text = swapped + ' Button presses are tested in Button Triggers.';
+    return page.handsOff ? text + ' With a passcode set under Unlocking, the tweak also unlocks the phone.' : text + begin;
+  }
+  const text = 'Each press is done twice: with the tweak off, then on. iOS responds to every press as it would to a real one.';
+  return page.handsOff ? text + ' Each pass starts from the same state: the lock screen, and the home screen too when a passcode is set under Unlocking.'
+    : text + ' Each pass starts unlocked on the home screen; with a passcode set under Unlocking, the tweak unlocks the phone itself.' + begin;
+}
+
+function renderTestKitSetup(body, page, action) {
+  document.getElementById('testkit-title').textContent = tkSuiteName(page.suite);
+  if (page.error) { tkSection(body, '', [rcPlaceholderRow('Couldn’t load the steps: ' + page.error)]); return; }
+  if (!page.steps) { tkSection(body, '', [rcPlaceholderRow('Loading…')]); return; }
+  const { groups, hidden, shown } = tkGroups(page);
+  let steps = 0, runs = 0;
+  shown.forEach(s => { const c = tkCountFor(page, s.id); if (c) steps++; runs += c; });
+  action.textContent = 'Start';
+  action.style.fontWeight = '600';
+  action.style.opacity = runs ? '1' : '0.4';
+  action.onclick = runs ? () => tkStartSetup(page) : null;
+
+  if (tkHasMode(page)) {
+    const modeRow = (label, icon, handsOff) => {
+      const row = tkRow(tkIcon(icon), label, '', () => tkSetMode(page, handsOff));
+      const chev = row.querySelector('.row-chevron');
+      if (chev) chev.remove();
+      if (page.handsOff === handsOff) row.insertAdjacentHTML('beforeend', '<i class="f7-icons" style="color:var(--rc-blue);font-size:18px">checkmark_alt</i>');
+      return row;
+    };
+    tkSection(body, 'Testing Method', [modeRow('Automatic', 'play_circle', true), modeRow('Manual', 'hand_point_left', false)]);
+  }
+  if (tkHasIncludeRow(page)) {
+    const row = tkRow('', 'Manual Steps', '', null);
+    row.insertAdjacentHTML('beforeend', `<div class="settings-btn"><input type="checkbox" class="ios-toggle" ${page.includeByHand ? 'checked' : ''}></div>`);
+    row.querySelector('input').onchange = e => { page.includeByHand = e.target.checked; tkStore('rc_tk_byhand_' + page.suite, page.includeByHand); renderTestKit(); };
+    tkSection(body, '', [row], 'Steps the phone can’t do by itself. They run first, so the phone can be left alone for the rest.');
+  }
+  // Totals, with All / None
+  const totals = tkRow('', runs === steps ? `${steps} of ${shown.length} Steps` : `${steps} Steps, ${runs} Runs`, '', null);
+  totals.insertAdjacentHTML('beforeend', `<div class="tk-segmented"><button>All</button><button>None</button></div>`);
+  const [all, none] = totals.querySelectorAll('.tk-segmented button');
+  all.onclick = () => { shown.forEach(s => tkSetCount(page, s.id, 1)); renderTestKit(); };
+  none.onclick = () => { shown.forEach(s => tkSetCount(page, s.id, 0)); renderTestKit(); };
+  tkSection(body, 'Steps', [totals], tkSetupFooter(page));
+  groups.forEach(g => tkSection(body, g.name, g.steps.map(step => tkStepRow(page, step))));
+}
+
+function tkStepRow(page, step) {
+  const count = tkCountFor(page, step.id);
+  let detail = tkCountText(count);
+  if (step.optional) detail += ' - optional, skipped after 15 s';
+  if (step.note) detail += '\n' + step.note;
+  // Tapping a step turns it off, or on once
+  const row = tkRow('', step.name || step.prompt || step.id, detail, () => { tkSetCount(page, step.id, count ? 0 : 1); renderTestKit(); });
+  const chev = row.querySelector('.row-chevron');
+  if (chev) chev.remove();
+  if (!count) row.querySelector('.action-row-text').style.color = 'var(--rc-label-2)';
+  row.insertAdjacentHTML('beforeend', `<div class="tk-stepper"><button ${count <= 0 ? 'disabled' : ''}>−</button><button ${count >= TK_MAX_STEP_COUNT ? 'disabled' : ''}>+</button></div>`);
+  const [minus, plus] = row.querySelectorAll('.tk-stepper button');
+  minus.onclick = e => { e.stopPropagation(); tkSetCount(page, step.id, Math.max(0, count - 1)); renderTestKit(); };
+  plus.onclick = e => { e.stopPropagation(); tkSetCount(page, step.id, Math.min(TK_MAX_STEP_COUNT, count + 1)); renderTestKit(); };
+  return row;
+}
+
+function tkSetMode(page, handsOff) {
+  if (page.handsOff === handsOff) return;
+  page.handsOff = handsOff;
+  tkStore('rc_tk_handsoff_' + page.suite, handsOff);
+  renderTestKit();
+  if (page.suite === 'guided') { page.steps = null; renderTestKit(); tkLoadSteps(page); } // another order
+}
+
+function tkStartSetup(page) {
+  const { hidden, shown } = tkGroups(page);
+  const items = [];
+  let everyOnce = true;
+  shown.forEach(step => {
+    const count = tkCountFor(page, step.id);
+    if (count !== 1) everyOnce = false;
+    if (count === 1) items.push(step.id);
+    else if (count > 1) items.push(`${step.id}:${count}`);
+  });
+  // Every step once is the default; steps left out need the list
+  let options = everyOnce && !hidden ? '' : '&steps=' + encodeURIComponent(items.join(','));
+  if (tkHasMode(page) && page.handsOff) options = (page.suite === 'guided' ? '&auto=1' : '&replay=1') + options;
+  tkStartSuite(page.suite, options);
+}
+
+// ── Report ──
+function tkDescribe(v) {
+  if (v === undefined || v === null) return 'none';
+  if (Array.isArray(v)) return v.length ? v.join(', ') : 'none';
+  if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';
+  return typeof v === 'object' ? JSON.stringify(v) : String(v);
+}
+
+// "statusbar swipe left" for "guided.statusbar_swipe_left"
+function tkTestName(test, suite) {
+  if (typeof test.name === 'string' && test.name) return test.name;
+  let name = test.id || '';
+  const dot = name.indexOf('.');
+  if (dot >= 0 && (suite === 'all' || name.slice(0, dot) === suite)) name = name.slice(dot + 1);
+  return name.replace(/_/g, ' ').replace(/\./g, ': ');
+}
+
+// One line on what happened, when the detail says something beyond pass/fail
+function tkTestOutcome(test) {
+  const d = test.detail && typeof test.detail === 'object' && !Array.isArray(test.detail) ? test.detail : null;
+  if (!d) return null;
+  if (typeof d.reason === 'string') return d.reason;
+  if (Array.isArray(d.problems) && d.problems.length) {
+    const problems = d.problems.join('; ');
+    return typeof d.seq === 'string' ? `${problems} - presses: ${d.seq}` : problems;
+  }
+  const defined = d.defined && typeof d.defined === 'object' ? d.defined : null;
+  const outcome = (side, key) => d[side] && d[side].outcome ? d[side].outcome[key] : undefined;
+  if (Array.isArray(d.differs)) {
+    return d.differs.map(key => defined && key in defined ? `${key}: should be ${tkDescribe(defined[key])}, tweak ${tkDescribe(outcome('tweak', key))}`
+      : `${key}: stock ${tkDescribe(outcome('stock', key))}, tweak ${tkDescribe(outcome('tweak', key))}`).join('; ');
+  }
+  if (defined && Array.isArray(d.stockDiffers)) {
+    return d.stockDiffers.map(key => `${key} ${tkDescribe(defined[key])} as defined (stock: ${tkDescribe(outcome('stock', key))})`).join('; ');
+  }
+  if (d.stock && d.tweak) return `stock and tweak: ${tkDescribe(outcome('stock', 'screen'))}`;
+  if (d.condition && d.expected !== undefined) return `${d.condition} = ${d.value}: expected ${tkDescribe(d.expected)}, got ${tkDescribe(d.got)}`;
+  if (d.want !== undefined) return `wanted ${tkDescribe(d.want)}, got ${tkDescribe(d.got)}`;
+  if (d.state) return `state ${d.state}, TRUE for ${tkDescribe(d.true)}`;
+  if (d.true) return `TRUE for ${tkDescribe(d.true)}`;
+  return null;
+}
+
+function tkTestSummary(test) {
+  const note = typeof test.note === 'string' && test.note ? test.note : null;
+  const outcome = tkTestOutcome(test);
+  return note && outcome ? `${note}\n${outcome}` : note || outcome || '';
+}
+
+function tkDeviceLine(report) {
+  const d = report.device;
+  if (!d || typeof d !== 'object') return '';
+  return `${d.model || '?'}, iOS ${d.ios || '?'} (${d.jailbreak || '?'}), RemoteCompanion ${d.tweakVersion || '?'}`;
+}
+
+function tkWhenLine(report) {
+  if (!report.started) return '';
+  const seconds = (report.durationMs || 0) / 1000;
+  return `${tkWhen(report.started)}, ` + (seconds < 60 ? `${Math.round(seconds)} s` : `${Math.floor(seconds / 60)} min ${Math.round(seconds % 60)} s`);
+}
+
+async function tkOpenReport(id) {
+  const page = { view: 'report', id, report: null, error: null };
+  tkPush(page);
+  // A report just finished can take a moment to be saved
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const json = await tkRequest('report?id=' + encodeURIComponent(id));
+      if (!json.error) { page.report = json; break; }
+      page.error = json.error;
+    } catch (e) { page.error = e.message; }
+    await new Promise(r => setTimeout(r, 500));
+  }
+  if (tk && tkPage() === page) renderTestKit();
+}
+
+function renderTestKitReport(body, page, action) {
+  const report = page.report;
+  document.getElementById('testkit-title').textContent = report ? tkSuiteName(report.suite) : 'Report';
+  if (!report) { tkSection(body, '', [rcPlaceholderRow(page.error ? 'Couldn’t load the report: ' + page.error : 'Loading…')]); return; }
+  action.textContent = 'Download';
+  action.style.fontWeight = '';
+  action.style.opacity = '1';
+  action.onclick = () => tkDownloadReport(page.id);
+  const fail = report.summary && report.summary.fail;
+  tkSection(body, 'Summary', [
+    tkRow(tkIcon(fail ? 'xmark_circle_fill' : 'checkmark_circle_fill', fail ? 'icon-red' : 'icon-green'), tkCountsLine(report.summary), '', null),
+    tkRow(tkIcon('device_phone_portrait', 'icon-gray'), tkDeviceLine(report), '', null),
+    tkRow(tkIcon('clock', 'icon-gray'), tkWhenLine(report), '', null),
+  ]);
+  const titles = { fail: 'Failed', skip: 'Skipped', pass: 'Passed' };
+  ['fail', 'skip', 'pass'].forEach(status => {
+    const tests = (report.tests || []).filter(t => t && t.status === status);
+    if (!tests.length) return;
+    tkSection(body, titles[status], tests.map(test => tkRow(
+      tkIcon(status === 'pass' ? 'checkmark_circle' : status === 'fail' ? 'xmark_circle' : 'minus_circle', status === 'pass' ? 'icon-green' : status === 'fail' ? 'icon-red' : 'icon-gray'),
+      tkTestName(test, report.suite), tkTestSummary(test), () => tkPush({ view: 'test', test, suite: report.suite }))));
+  });
+  tkSection(body, '', [tkCenteredRow('Delete Report', 'var(--rc-red)', () => tkDeleteReport(page.id))]);
+}
+
+function renderTestKitTest(body, page) {
+  document.getElementById('testkit-title').textContent = tkTestName(page.test, page.suite);
+  const pre = document.createElement('pre');
+  pre.style.cssText = 'margin:20px 16px;white-space:pre-wrap;word-break:break-word;font:12px ui-monospace,Menlo,monospace;color:var(--rc-label)';
+  pre.textContent = JSON.stringify(tkSorted(page.test), null, 2);
+  body.appendChild(pre);
+}
+
+function tkSorted(v) {
+  if (Array.isArray(v)) return v.map(tkSorted);
+  if (v && typeof v === 'object') return Object.keys(v).sort().reduce((o, k) => { o[k] = tkSorted(v[k]); return o; }, {});
+  return v;
+}
+
+// Personal values (Wi-Fi and Bluetooth names, the IDs of apps you've installed) are hidden unless you include them
+async function tkDownloadReport(id) {
+  const save = report => {
+    const blob = new Blob([JSON.stringify(tkSorted(report), null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `RemoteCompanion-${id}.json`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  };
+  try {
+    const redacted = await tkRequest(`report?id=${encodeURIComponent(id)}&redact=1`);
+    if (redacted.error) { showToast(redacted.error); return; }
+    if (!redacted.redacted) { save(redacted); return; }
+    showSheet('Wi-Fi and Bluetooth names and the IDs of apps you’ve installed are hidden unless you include them.', [
+      { label: 'Download', action: () => save(redacted) },
+      { label: 'Download With Personal Info', action: async () => {
+        try { const full = await tkRequest('report?id=' + encodeURIComponent(id)); if (!full.error) save(full); } catch (e) { showToast(e.message); }
+      } },
+    ]);
+  } catch (e) { showToast(e.message); }
 }
 
 // ── Generic Sheet System ──────────────────────────────────────────────────────
