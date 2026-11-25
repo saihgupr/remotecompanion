@@ -30,6 +30,7 @@ All notable changes to this project will be documented in this file.
 - **Tighter bar gesture zones**: the status bar and bottom bar gesture areas now cover 25pt from the edge instead of 50pt, so a touch has to land closer to the bar. Two-finger slides keep their wider 75pt landing zone.
 
 ### Fixed
+- **Editing a Timer or Clear Notifications action in the Web UI**: tapping one already on a trigger did nothing, because the editor read the action through a helper that was missing. It opens with the action's settings now.
 - **Large title on the Triggers screen**: the main screen opened, and came back from a trigger, with the small title even though the list was at the top. The category bar added its space before the table was on screen, so the navigation bar started collapsed and only opened after a scroll. The space is added after the first layout now, so the large title shows from launch and on the way back.
 - **SSH tools come with the package**: RemoteCompanion now depends on `openssh-client` and `sshpass`, so SSH actions work right after installing instead of failing with `sshpass: not found`. Existing installs pick both up on the next upgrade.
 - **Notification actions read as just the notification**: a notification now saves as `notify "Hi"` instead of `notify "Hi" "" --tap 1a2b3c4d5e`, with no empty message and no tap ID until a Notification Tap trigger picks it. The Actions list shows the same `notify "Hi"`, so the tap ID and the other options no longer trail off the end of the row.
