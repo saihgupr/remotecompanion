@@ -917,10 +917,33 @@ static NSArray<NSString *> *RCTKCapturedSince(unsigned long long since) {
     return keys;
 }
 
+// The settings that change when a press or a swipe counts (Settings > Buttons and > Swipe
+// Triggers). The suites' presses and gestures are timed and placed for the defaults, so a test
+// config leaves them out (the tweak then uses its defaults) - a Power Clicks of 0.20 s, say, made
+// a double press 220 ms apart read as two single presses. The run's report keeps the phone's own
+// values under "ranWithDefaults", so a result there can be told apart from one at the defaults.
+static NSArray<NSString *> *RCTKTuningKeys(void) {
+    return @[@"powerClickWindow", @"homeClickWindow", @"volumeSequenceWindow", @"volumeHoldTime", @"powerHoldTime",
+             @"swipeEdgeStrip", @"swipeEdgeDistance", @"swipeStatusBarDistance", @"swipeTopDownDistance", @"swipeBottomBarDistance",
+             @"swipeBottomUpDistance", @"swipeStatusBarHeight", @"swipeStatusBarLeftZone", @"swipeStatusBarRightZone",
+             @"swipeBottomZoneHeight", @"swipeBottomLeftZone", @"swipeBottomRightZone"];
+}
+
+static NSDictionary *RCTKWithDefaultTuning(NSDictionary *config, NSMutableDictionary *run) {
+    NSMutableDictionary *copy = [config mutableCopy] ?: [NSMutableDictionary dictionary];
+    NSMutableDictionary *own = [NSMutableDictionary dictionary];
+    for (NSString *key in RCTKTuningKeys()) {
+        if (copy[key]) own[key] = copy[key];
+        [copy removeObjectForKey:key];
+    }
+    if (run && own.count) { @synchronized (run) { run[@"ranWithDefaults"] = own; } }
+    return copy;
+}
+
 // The longest a button trigger can still come after the last press: its click, sequence or hold
 // window (Settings > Buttons, 0.8 s at most), and a little for the tweak to act on it
 static double RCTKButtonQuietMs(void) {
-    NSDictionary *config = RCCopyTriggerConfig();
+    NSDictionary *config = RCCopyTriggerConfig(); // the test config in place, so the defaults
     double longest = 0.5; // the defaults' longest, Power Hold
     for (NSString *key in @[@"powerClickWindow", @"homeClickWindow", @"volumeSequenceWindow", @"volumeHoldTime", @"powerHoldTime"]) {
         id value = config[key];
@@ -1235,7 +1258,7 @@ static void RCTKSuiteGuided(NSMutableDictionary *run) {
     @synchronized (run) { run[@"homeButton"] = @(hasHome); }
 
     // Bind every button/gesture trigger to a placeholder action, and record instead of running
-    NSMutableDictionary *config = [RCCopyTriggerConfig() mutableCopy] ?: [NSMutableDictionary dictionary];
+    NSMutableDictionary *config = [RCTKWithDefaultTuning(RCCopyTriggerConfig(), run) mutableCopy];
     NSMutableDictionary *triggers = [config[@"triggers"] mutableCopy] ?: [NSMutableDictionary dictionary];
     // Triggers a step lists under "enable" are on only during that step: the bottom swipe-up
     // zones take the bottom edge from iOS while on, which blocks swiping up to unlock or go home
@@ -1759,7 +1782,7 @@ static void RCTKSuiteDifferential(NSMutableDictionary *run) {
     BOOL hasHome = RCTKHasHomeButton();
     NSArray *steps = RCTKSelectSteps(RCTKDifferentialSteps(hasHome), run, NO);
     if (!steps) return;
-    NSDictionary *base = RCCopyTriggerConfig();
+    NSDictionary *base = RCTKWithDefaultTuning(RCCopyTriggerConfig(), run);
     NSDictionary *stockConfig = RCTKConfigWith(base, NO, NO);
     NSDictionary *tweakConfig = RCTKConfigWith(base, YES, YES);
     NSDictionary *tweakPlainConfig = RCTKConfigWith(base, YES, NO); // for "plain" steps
@@ -2536,8 +2559,9 @@ static void RCTKSuiteReplay(NSMutableDictionary *run) {
     // A test config with the replayed triggers bound to a placeholder (or only a step's "bind"),
     // with capture on so nothing runs
     NSDictionary *saved = RCCopyTriggerConfig() ?: @{};
+    NSDictionary *tuned = RCTKWithDefaultTuning(saved, run);
     NSDictionary *(^configBinding)(NSArray *) = ^NSDictionary *(NSArray *bound) {
-        NSMutableDictionary *config = [saved mutableCopy];
+        NSMutableDictionary *config = [tuned mutableCopy];
         NSMutableDictionary *triggers = [config[@"triggers"] mutableCopy] ?: [NSMutableDictionary dictionary];
         for (NSString *key in keys) {
             NSMutableDictionary *trigger = [triggers[key] mutableCopy] ?: [NSMutableDictionary dictionary];
