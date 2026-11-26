@@ -41,6 +41,7 @@
 #import "RCRunningViewController.h"
 #import "RCRunHistoryViewController.h"
 #import "RCScheduledTriggerViewController.h"
+#import "RCChainTriggerViewController.h"
 #import "RCNotificationTriggerViewController.h"
 #import "RCWiFiTriggerViewController.h"
 #import "RCActionsViewController+Selection.h"
@@ -1966,6 +1967,18 @@ static void RCSetRunWatching(BOOL watching) {
 
 - (void)viewWillDisappear:(BOOL)animated {
     [super viewWillDisappear:animated];
+    // Going back to a large title, the bar takes its full height as soon as the swipe starts, and
+    // in its own color it covered the top of this screen's wrapped name until the swipe ended. It's
+    // see-through for the length of the swipe (the list behind it is the same color), then itself again.
+    UINavigationBar *bar = self.navigationController.navigationBar;
+    id<UIViewControllerTransitionCoordinator> coordinator = self.transitionCoordinator;
+    if (self.titleInHeader && self.isMovingFromParentViewController && bar && coordinator) {
+        UIColor *barColor = bar.backgroundColor;
+        bar.backgroundColor = [UIColor clearColor];
+        [coordinator animateAlongsideTransition:nil completion:^(id<UIViewControllerTransitionCoordinatorContext> context) {
+            bar.backgroundColor = barColor;
+        }];
+    }
     // Leaving the screen with a value editor open keeps what it shows
     if (self.isMovingFromParentViewController || self.isBeingDismissed) [self commitInlineRowEditor];
     [self stopRunWatch];
@@ -2326,6 +2339,7 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
     NSMutableArray *rightItems = [NSMutableArray arrayWithArray:@[moreButton, plusButton]];
     
     BOOL isConfigurable = [_triggerKey hasPrefix:@"sched_"] ||
+                          [_triggerKey hasPrefix:@"chain_"] ||
                           [_triggerKey hasPrefix:@"notif_"] ||
                           [_triggerKey hasPrefix:@"notify_"] ||
                           [_triggerKey hasPrefix:@"trigger_device_focus_"] ||
@@ -2620,7 +2634,9 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
         return;
     }
     
-    if ([_triggerKey hasPrefix:@"sched_"]) {
+    if ([_triggerKey hasPrefix:@"chain_"]) {
+        vc = [[RCChainTriggerViewController alloc] initWithTriggerKey:_triggerKey];
+    } else if ([_triggerKey hasPrefix:@"sched_"]) {
         vc = [[RCScheduledTriggerViewController alloc] initWithTriggerKey:_triggerKey];
     } else if ([_triggerKey hasPrefix:@"notif_"] || [_triggerKey hasPrefix:@"notify_"]) {
         vc = [[RCNotificationTriggerViewController alloc] initWithTriggerKey:_triggerKey];

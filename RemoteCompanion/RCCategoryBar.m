@@ -43,6 +43,7 @@
 
 - (void)layoutSettingChanged:(NSNotification *)note {
     if (![note.userInfo[RCLayoutOptionKey] isEqual:RCLayoutOptionBarLines]) return;
+    if (self.picker) return;
     if ([note.object isEqual:self.layoutScreen ?: RCLayoutTriggers]) self.rows = RCLayoutBarLines(self.layoutScreen);
 }
 
@@ -82,8 +83,15 @@
     for (UIButton *chip in self.chips) [chip removeFromSuperview];
     [self.chips removeAllObjects];
 
-    NSMutableArray *titles = [NSMutableArray arrayWithObject:@"All"];
+    if (self.picker && _rows != 1) {
+        _rows = 1;
+        CGRect frame = self.frame;
+        frame.size.height = [self height];
+        self.frame = frame;
+    }
+    NSMutableArray *titles = self.picker ? [NSMutableArray array] : [NSMutableArray arrayWithObject:@"All"];
     [titles addObjectsFromArray:chipTitles];
+    NSInteger first = self.picker ? 0 : -1; // the first chip's index: All is -1
     CGFloat height = [self height];
     CGFloat x = 16;
     CGFloat lineX[3] = { 16, 16, 16 };
@@ -94,7 +102,8 @@
         chip.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
         // The icon before the name, when there are icons (All: a grid)
         id icon = nil;
-        if (icons) icon = i == 0 ? [UIImage systemImageNamed:@"square.grid.2x2.fill"] : (i - 1 < icons.count ? icons[i - 1] : nil);
+        if (icons && self.picker) icon = i < icons.count ? icons[i] : nil;
+        else if (icons) icon = i == 0 ? [UIImage systemImageNamed:@"square.grid.2x2.fill"] : (i - 1 < icons.count ? icons[i - 1] : nil);
         BOOL hasIcon = [icon isKindOfClass:[UIImage class]];
         if (hasIcon) {
             [chip setImage:icon forState:UIControlStateNormal];
@@ -122,7 +131,7 @@
             chip.frame = CGRectMake(x, (height - chip.bounds.size.height) / 2.0, chip.bounds.size.width, chip.bounds.size.height);
         }
         chip.layer.cornerRadius = chip.bounds.size.height / 2.0;
-        chip.tag = (NSInteger)i - 1; // -1 = All
+        chip.tag = (NSInteger)i + first; // -1 = All
         [chip addTarget:self action:@selector(chipTapped:) forControlEvents:UIControlEventTouchUpInside];
         [self addSubview:chip];
         [self.chips addObject:chip];
@@ -166,6 +175,9 @@
     self.revealed = [self height];
     self.lastOffset = 0;
     [tableView addSubview:self];
+    // Above the rows and cells whenever they're made: a reload on coming back to the screen put
+    // them over the bar (it was lost until the next scroll brought it to the front)
+    self.layer.zPosition = 1000;
     [self layoutInScrollView:tableView];
 }
 
@@ -223,9 +235,12 @@
     CGFloat delta = offset - self.lastOffset;
     self.lastOffset = offset;
 
+    // Only a scroll of the user's own hides or shows it: the list settling after a reload or a
+    // switch between List and Compact moved it too, which hid the bar until the next real scroll
+    BOOL byUser = scrollView.isTracking || scrollView.isDragging || scrollView.isDecelerating;
     if (offset <= 0) {
         self.revealed = height; // at the top (or pulling down): always shown
-    } else if (offset < maxOffset) {
+    } else if (offset < maxOffset && byUser) {
         // Slide with the scroll - down hides, up reveals. The rubber-band past the
         // bottom is ignored, so bouncing off the end doesn't flicker the bar.
         self.revealed = MIN(height, MAX(0, self.revealed - delta));
@@ -265,6 +280,7 @@
 
 - (void)chipTapped:(UIButton *)chip {
     // The chosen category again: back to All, the bar staying where it is
+    if (self.picker && chip.tag == self.selectedIndex) return;
     if (chip.tag == self.selectedIndex && chip.tag != -1) {
         self.selectedIndex = -1;
         if (self.onSelect) self.onSelect(-1);

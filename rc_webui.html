@@ -3905,6 +3905,7 @@ const TRIGGER_SECTIONS = [
   { title: 'App Long Press Triggers', id: 'apphold',  keys: [], dynamic: true, prefix: 'app_hold_',   deletable: true },
   { title: 'Add-on Triggers',         id: 'addon',     keys: [], dynamic: true, prefix: 'addon_', deletable: true },
   { title: 'Scheduled Triggers',     id: 'sched',     keys: [], dynamic: true, prefix: 'sched_',      deletable: true },
+  { title: 'Chained Triggers',       id: 'chain',     keys: [], dynamic: true, prefix: 'chain_',      deletable: true },
   { title: 'MQTT Subscription Triggers', id: 'mqtt', keys: [], dynamic: true, prefix: 'mqtt_sub_', prefix2: 'mqtt_', deletable: true },
   { title: 'Configuration',           id: 'config',  keys: ['trigger_sequence_edited'] },
 ];
@@ -4275,6 +4276,7 @@ function iconForKey(key) {
   if (key.startsWith('notif_') || key.startsWith('notify_'))      return { icon:'bell_circle_fill',              cls:'icon-red' };
   if (key.startsWith('addon_')) { const e = addOnTriggerEvents().find(x => x.key === key); return { icon: symbolId(e && e.icon), iconUrl: e && e.iconUrl, cls: e && e.iconUrl ? 'icon-image' : 'icon-purple' }; }
   if (key.startsWith('sched_'))      return { icon:'clock_fill',                    cls:'icon-orange' };
+  if (key.startsWith('chain_'))      return { icon:'link',                          cls:'icon-indigo' };
   if (key.startsWith('mqtt_sub_') || key.startsWith('mqtt_')) return { icon:'antenna_radiowaves_left_right', cls:'icon-blue' };
   if (key.startsWith('trigger_two_finger_rotate_')) return { icon:'rotate_right', cls:'icon-gray' };
   if (key.startsWith('trigger_two_finger_swipe_')) return { icon:'hand_draw', cls:'icon-gray' };
@@ -4284,7 +4286,7 @@ function iconForKey(key) {
 // Created triggers (a tag, a network, a device, an app, a notification, a time, a topic) can
 // have a name of their own ("customName"); the built-in ones keep theirs, so they always say
 // what they are. As in the app.
-const RENAMEABLE_PREFIXES = ['nfc_', 'wifi_', 'bt_', 'output_', 'app_launch_', 'app_exit_', 'app_hold_', 'notif_', 'notify_', 'sched_', 'mqtt_', 'trigger_cc_button_', 'trigger_watch_face_'];
+const RENAMEABLE_PREFIXES = ['nfc_', 'wifi_', 'bt_', 'output_', 'app_launch_', 'app_exit_', 'app_hold_', 'notif_', 'notify_', 'sched_', 'mqtt_', 'trigger_cc_button_', 'trigger_watch_face_', 'chain_'];
 function canRenameTrigger(key) {
   return RENAMEABLE_PREFIXES.some(prefix => key.startsWith(prefix));
 }
@@ -4347,6 +4349,7 @@ function defaultNameForKey(key) {
     return `Notif: ${key.slice(6)}`;
   }
   if (key.startsWith('sched_'))      return `Sched: ${key.slice(6)}`;
+  if (key.startsWith('chain_'))      return 'Chained Trigger';
   if (key.startsWith('mqtt_sub_'))   return `MQTT: ${key.slice(9)}`;
   if (key.startsWith('mqtt_'))       return `MQTT: ${key.slice(5)}`;
   return key;

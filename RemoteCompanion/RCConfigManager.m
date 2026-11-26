@@ -1335,10 +1335,33 @@ static NSString *RCActionCommand(id item) {
 // topic) can have a name of their own; the built-in ones (Power Double Click...) keep theirs, so
 // they always say what they are
 + (BOOL)canRenameTrigger:(NSString *)triggerKey {
-    for (NSString *prefix in @[@"nfc_", @"wifi_", @"bt_", @"output_", @"app_launch_", @"app_exit_", @"app_hold_", @"notif_", @"notify_", @"sched_", @"mqtt_", @"notiftap_", @"notifbtn_", @"trigger_cc_button_", @"trigger_watch_face_"]) {
+    for (NSString *prefix in @[@"nfc_", @"wifi_", @"bt_", @"output_", @"app_launch_", @"app_exit_", @"app_hold_", @"notif_", @"notify_", @"sched_", @"mqtt_", @"notiftap_", @"notifbtn_", @"trigger_cc_button_", @"trigger_watch_face_", @"chain_"]) {
         if ([triggerKey hasPrefix:prefix]) return YES;
     }
     return NO;
+}
+
+- (BOOL)isChainStepOnly:(NSString *)key {
+    NSDictionary *triggers = [_config[@"triggers"] isKindOfClass:[NSDictionary class]] ? _config[@"triggers"] : nil;
+    NSArray *own = triggers[key][@"actions"];
+    if ([own isKindOfClass:[NSArray class]] && own.count > 0) return NO;
+    for (NSString *chainKey in triggers) {
+        if (![chainKey hasPrefix:@"chain_"]) continue;
+        NSDictionary *chain = triggers[chainKey][@"chain"];
+        if ([chain isKindOfClass:[NSDictionary class]] && [chain[@"steps"] isKindOfClass:[NSArray class]] && [chain[@"steps"] containsObject:key]) return YES;
+    }
+    return NO;
+}
+
++ (BOOL)canBeChainStep:(NSString *)key {
+    if (![key isKindOfClass:[NSString class]] || [key hasPrefix:@"chain_"]) return NO;
+    for (NSString *prefix in @[@"volume_", @"power_", @"trigger_statusbar_", @"trigger_edge_", @"trigger_bottombar_",
+                               @"trigger_bottom_swipe_", @"trigger_bottom_two_finger_", @"trigger_home_", @"touchid_",
+                               @"trigger_ringer_", @"trigger_two_finger_", @"trigger_island_",
+                               @"nfc_", @"trigger_cc_button_"]) {
+        if ([key hasPrefix:prefix]) return YES;
+    }
+    return [@[@"shake", @"trigger_watch_ping", @"trigger_watch_ping_hold"] containsObject:key];
 }
 
 // A name the user gave a trigger ("Desk", "Car Dock"), or nil. Kept apart from the name a
@@ -1502,6 +1525,10 @@ static NSString *RCActionCommand(id item) {
 
     if ([triggerKey hasPrefix:@"trigger_cc_button_"]) {
         return [NSString stringWithFormat:@"Control Center Button %@", [triggerKey substringFromIndex:18]];
+    }
+    // A chained trigger: named after its steps when it was saved
+    if ([triggerKey hasPrefix:@"chain_"]) {
+        return _config[@"triggers"][triggerKey][@"name"] ?: @"Chained Trigger";
     }
 
     if ([triggerKey hasPrefix:@"wifi_"] || [triggerKey hasPrefix:@"bt_"] || [triggerKey hasPrefix:@"app_launch_"] || [triggerKey hasPrefix:@"app_exit_"] || [triggerKey hasPrefix:@"app_hold_"] || [triggerKey hasPrefix:@"output_"] || [triggerKey hasPrefix:@"notif_"] || [triggerKey hasPrefix:@"notify_"] || [triggerKey hasPrefix:@"sched_"] || [triggerKey hasPrefix:@"mqtt_"] || [triggerKey hasPrefix:@"mqtt_sub_"]) {

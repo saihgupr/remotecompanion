@@ -27,3 +27,9 @@ UIImage *RCTriggerCategoryIcon(NSString *sectionTitle);
 
 // The same for an action category ("Media", "Connectivity"...), and "Enabled". nil for an unknown one.
 UIImage *RCActionCategoryIcon(NSString *sectionTitle);
+
+// Any trigger icon (a template image) with a letter in the bottom-right corner, cut out of a filled
+// circle as a created trigger's letter is. The image as it is for no letter.
+UIImage *RCTriggerImageAddingLetter(UIImage *base, NSString *letter);
+// The same badge drawn into a context, in the bottom-right of a square (its icon's)
+void RCTriggerDrawLetterBadge(CGContextRef context, CGRect square, NSString *letter);

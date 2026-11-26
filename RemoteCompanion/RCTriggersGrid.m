@@ -7,6 +7,8 @@
 // a tile, its icon above its name. Dimmed when it has no actions yet, or when its integration is
 // switched off. In Edit, a star (favorite) and a minus (delete): on the card's right, or at the
 // tile's top right.
+@class RCIconMarquee;
+
 @interface RCTriggerCardCell : UICollectionViewCell
 @property (nonatomic, strong) UIImageView *iconView;
 @property (nonatomic, strong) UILabel *nameLabel;
@@ -33,6 +35,159 @@
 @property (nonatomic, strong) NSArray<NSLayoutConstraint *> *iconOnlyConstraints;
 @property (nonatomic, strong) NSLayoutConstraint *iconWidth;
 @property (nonatomic, strong) NSLayoutConstraint *iconHeight;
+// A Chained Trigger's steps, scrolling across the tile in place of the icon
+@property (nonatomic, strong) RCIconMarquee *marquee;
+@end
+
+// A row of icons that scrolls slowly and without end when it's wider than its place, its ends
+// fading out (as a long song title does in Music); a still row, centered, when it fits or with
+// Reduce Motion. A Chained Trigger's steps in Compact. Template icons take the view's tint.
+@interface RCIconMarquee : UIView
+- (void)setIcons:(NSArray<UIImage *> *)icons letter:(UIImage *)letter;
+@end
+
+@interface RCIconMarquee ()
+@property (nonatomic, copy) NSArray<UIImage *> *icons;
+@property (nonatomic, strong) UIView *strip;
+@property (nonatomic, strong) UIImageView *letterView;
+@property (nonatomic, strong) CAGradientLayer *fade;
+@property (nonatomic, assign) CGSize builtFor;
+@property (nonatomic, assign) CGFloat cycle; // one pass and its gap; 0 when it stands still
+- (void)step:(CFTimeInterval)now;
+@end
+
+// One display link moves every scrolling strip on screen. Each is placed from the clock on every
+// frame, so nothing can stop it: a Core Animation loop was dropped when the screen was covered and
+// shown again, and stood still until the app came back from the background.
+static NSHashTable<RCIconMarquee *> *RCMarqueesRunning;
+static CADisplayLink *RCMarqueeLink;
+
+@interface RCMarqueeTicker : NSObject
+@end
+@implementation RCMarqueeTicker
+- (void)tick:(CADisplayLink *)link {
+    CFTimeInterval now = CACurrentMediaTime();
+    for (RCIconMarquee *marquee in RCMarqueesRunning.allObjects) [marquee step:now];
+}
+@end
+
+static void RCMarqueeSetRunning(RCIconMarquee *marquee, BOOL running) {
+    if (!RCMarqueesRunning) RCMarqueesRunning = [NSHashTable weakObjectsHashTable];
+    if (running) [RCMarqueesRunning addObject:marquee]; else [RCMarqueesRunning removeObject:marquee];
+    BOOL any = RCMarqueesRunning.allObjects.count > 0;
+    if (any && !RCMarqueeLink) {
+        static RCMarqueeTicker *ticker;
+        if (!ticker) ticker = [[RCMarqueeTicker alloc] init];
+        RCMarqueeLink = [CADisplayLink displayLinkWithTarget:ticker selector:@selector(tick:)];
+        if (@available(iOS 15.0, *)) RCMarqueeLink.preferredFrameRateRange = CAFrameRateRangeMake(30, 60, 60);
+        else RCMarqueeLink.preferredFramesPerSecond = 60;
+        [RCMarqueeLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes]; // also while the list scrolls
+    } else if (!any && RCMarqueeLink) {
+        [RCMarqueeLink invalidate];
+        RCMarqueeLink = nil;
+    }
+}
+
+@implementation RCIconMarquee
+
+- (instancetype)initWithFrame:(CGRect)frame {
+    if ((self = [super initWithFrame:frame])) {
+        self.clipsToBounds = YES;
+        self.userInteractionEnabled = NO;
+        _strip = [[UIView alloc] init];
+        [self addSubview:_strip];
+        _letterView = [[UIImageView alloc] init];
+        _letterView.contentMode = UIViewContentModeScaleAspectFit;
+        [self addSubview:_letterView];
+        _fade = [CAGradientLayer layer];
+        _fade.startPoint = CGPointMake(0, 0.5);
+        _fade.endPoint = CGPointMake(1, 0.5);
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(rebuild) name:UIAccessibilityReduceMotionStatusDidChangeNotification object:nil];
+    }
+    return self;
+}
+
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+
+- (void)setIcons:(NSArray<UIImage *> *)icons letter:(UIImage *)letter {
+    self.letterView.image = letter;
+    self.letterView.hidden = !letter;
+    if ([icons isEqualToArray:self.icons ?: @[]]) { [self updateRunning]; return; }
+    self.icons = icons;
+    [self rebuild];
+}
+
+- (void)rebuild {
+    self.builtFor = CGSizeZero;
+    [self setNeedsLayout];
+}
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    CGFloat height = self.bounds.size.height;
+    self.letterView.frame = CGRectMake(self.bounds.size.width - height, 0, height, height);
+    if (CGSizeEqualToSize(self.builtFor, self.bounds.size)) return;
+    self.builtFor = self.bounds.size;
+    for (UIView *view in self.strip.subviews) [view removeFromSuperview];
+    self.cycle = 0;
+    CGFloat width = self.bounds.size.width;
+    if (!self.icons.count || height <= 0 || width <= 0) { [self updateRunning]; return; }
+    CGFloat spacing = height * 0.12;
+    CGFloat pitch = height + spacing;
+    CGFloat run = self.icons.count * pitch - spacing; // one pass of the steps
+    BOOL scrolls = run > width && !UIAccessibilityIsReduceMotionEnabled();
+    // Scrolling: the steps twice, a wider space between the passes, so it runs on without a seam
+    CGFloat cycle = run + height * 0.9;
+    NSUInteger passes = scrolls ? 2 : 1;
+    for (NSUInteger pass = 0; pass < passes; pass++) {
+        for (NSUInteger i = 0; i < self.icons.count; i++) {
+            UIImageView *view = [[UIImageView alloc] initWithImage:self.icons[i]];
+            view.contentMode = UIViewContentModeScaleAspectFit;
+            view.frame = CGRectMake(pass * cycle + i * pitch, 0, height, height);
+            [self.strip addSubview:view];
+        }
+    }
+    self.strip.frame = CGRectMake(scrolls ? 0 : MAX(0, (width - run) / 2), 0, passes * cycle, height);
+    // The ends fade, where the steps come in and go out
+    BOOL faded = run > width;
+    self.layer.mask = faded ? self.fade : nil;
+    if (faded) {
+        self.fade.frame = self.bounds;
+        CGFloat edge = MIN(0.18, 14.0 / width);
+        id clear = (id)[UIColor clearColor].CGColor, solid = (id)[UIColor blackColor].CGColor;
+        self.fade.colors = @[clear, solid, solid, clear];
+        self.fade.locations = @[@0, @(edge), @(1 - edge), @1];
+    }
+    self.cycle = scrolls ? cycle : 0;
+    [self updateRunning];
+    [self step:CACurrentMediaTime()];
+}
+
+// Slow: about 14 points a second, all strips in step with each other
+- (void)step:(CFTimeInterval)now {
+    if (self.cycle <= 0) return;
+    CGRect frame = self.strip.frame;
+    frame.origin.x = -fmod(now * 14.0, self.cycle);
+    self.strip.frame = frame;
+}
+
+// Moving only while it's on screen and has somewhere to go
+- (void)updateRunning {
+    RCMarqueeSetRunning(self, self.window && !self.hidden && self.cycle > 0);
+}
+
+- (void)didMoveToWindow {
+    [super didMoveToWindow];
+    [self updateRunning];
+}
+
+- (void)setHidden:(BOOL)hidden {
+    [super setHidden:hidden];
+    [self updateRunning];
+}
+
 @end
 
 @implementation RCTriggerCardCell
@@ -47,6 +202,9 @@
         _iconView.contentMode = UIViewContentModeScaleAspectFit;
         _iconView.translatesAutoresizingMaskIntoConstraints = NO;
         [self.contentView addSubview:_iconView];
+        _marquee = [[RCIconMarquee alloc] init];
+        _marquee.hidden = YES;
+        [self.contentView addSubview:_marquee];
 
         _nameLabel = [[UILabel alloc] init];
         _nameLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
@@ -233,6 +391,8 @@
     self.contentView.backgroundColor = [cm tweakColorForKey:@"blockBackground" defaultVal:0.12];
     self.iconView.tintColor = self.dimmed ? [UIColor tertiaryLabelColor] : [UIColor labelColor];
     self.iconView.alpha = self.dimmed ? 0.6 : 1; // an app's own icon isn't tinted
+    self.marquee.tintColor = self.iconView.tintColor;
+    self.marquee.alpha = self.iconView.alpha;
     self.nameLabel.textColor = self.dimmed ? [UIColor secondaryLabelColor] : [UIColor labelColor];
     self.accessibilityValue = self.dimmedReason;
 }
@@ -283,8 +443,28 @@
     }];
 }
 
+// A Chained Trigger's steps across the tile, where the icon would be (nil: the icon); letter: its
+// letter tag's badge, or nil
+- (void)setSteps:(NSArray<UIImage *> *)steps letter:(UIImage *)letter {
+    BOOL shown = steps.count > 0;
+    self.marquee.hidden = !shown;
+    self.iconView.hidden = shown; // still laid out: the strip takes its height and place
+    if (shown) [self.marquee setIcons:steps letter:letter];
+    [self setNeedsLayout];
+}
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    if (self.marquee.hidden) return;
+    CGRect icon = self.iconView.frame;
+    BOOL beside = self.perRow == 2 && !self.iconOnly;
+    // Beside the name, the strip keeps to the icon's place; above it (or alone), it's the tile's width
+    self.marquee.frame = beside ? icon : CGRectMake(4, icon.origin.y, self.contentView.bounds.size.width - 8, icon.size.height);
+}
+
 - (void)prepareForReuse {
     [super prepareForReuse];
+    [self setSteps:nil letter:nil];
     self.contentView.transform = CGAffineTransformIdentity;
     self.contentView.alpha = 1;
     [self hideEdit];
@@ -366,6 +546,10 @@
     NSString *key = [self keyAtIndexPath:indexPath];
     id<RCTriggersGridSource> source = self.source;
     [cell setName:[source gridNameForTrigger:key] detail:[source gridDetailForTrigger:key] image:[source gridImageForTrigger:key]];
+    if ([source respondsToSelector:@selector(gridStepImagesForTrigger:)]) {
+        NSArray *steps = [source gridStepImagesForTrigger:key];
+        [cell setSteps:steps letter:steps.count ? [source gridStepsLetterForTrigger:key] : nil];
+    }
     cell.dimmedReason = [source gridOffIntegrationForTrigger:key] ?: ([source gridActionCountForTrigger:key] == 0 ? @"No actions" : nil);
     cell.accessibilityHint = self.editing ? nil : @"Long press to run it now";
     if (self.editing) {

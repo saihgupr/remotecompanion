@@ -19,6 +19,7 @@
 #import "RCWrapSizing.h"
 #import "RCAppPickerViewController.h"
 #import "RCNotificationTriggerViewController.h"
+#import "RCChainTriggerViewController.h"
 #import "RCScheduledTriggerViewController.h"
 #import "RCMQTTTriggerViewController.h"
 #import "RCCategoryBar.h"
@@ -359,6 +360,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     if ([triggerKey hasPrefix:@"notiftap_"] || [triggerKey hasPrefix:@"notifbtn_"]) return @"bell.fill";
     if ([triggerKey hasPrefix:@"notif_"] || [triggerKey hasPrefix:@"notify_"]) return @"bell.badge.fill";
     if ([triggerKey hasPrefix:@"sched_"]) return @"clock.fill";
+    if ([triggerKey hasPrefix:@"chain_"]) return @"link";
     if ([triggerKey hasPrefix:@"mqtt_"] || [triggerKey hasPrefix:@"mqtt_sub_"]) return @"antenna.radiowaves.left.and.right";
     if ([triggerKey isEqualToString:@"shake"]) return @"waveform.path.ecg";
     if ([triggerKey isEqualToString:@"trigger_power_connect"]) return @"bolt.fill";
@@ -660,6 +662,11 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     [self updatePauseState];
 }
 
+- (void)viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated];
+    [self.categoryBar layoutInScrollView:[self activeScrollView]];
+}
+
 - (void)viewWillDisappear:(BOOL)animated {
     [super viewWillDisappear:animated];
     // The invitation belongs to this screen, not to the editor pushed above it
@@ -713,8 +720,10 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
 
     // Only a trigger that has been added is listed. A trigger is added when it has an
     // entry in the config: the + menu makes one, and deleting removes it.
+    // A trigger that's only a Chained Trigger's step (no actions of its own) isn't listed: the
+    // chain is what it's there for.
     NSPredicate *added = [NSPredicate predicateWithBlock:^BOOL(NSString *key, NSDictionary *bindings) {
-        return [config triggerDataForKey:key] != nil;
+        return [config triggerDataForKey:key] != nil && ![config isChainStepOnly:key];
     }];
 
     // Helper to filter out favorited triggers
@@ -929,6 +938,13 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     }
     addSection(schedKeys, @"Scheduled Triggers", YES);
 
+    // Chained Triggers Section
+    NSMutableArray *chainKeys = [NSMutableArray array];
+    for (NSString *key in [[RCConfigManager sharedManager] allConfiguredTriggerKeys]) {
+        if ([key hasPrefix:@"chain_"]) [chainKeys addObject:key];
+    }
+    addSection(chainKeys, @"Chained Triggers", YES);
+
     // MQTT Subscription Triggers Section
     NSMutableArray *mqttKeys = [NSMutableArray array];
     for (NSString *key in [[RCConfigManager sharedManager] allConfiguredTriggerKeys]) {
@@ -1093,6 +1109,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
         @{ @"title": @"Notification", @"icon": @"bell.badge", @"section": @"Apps", @"handler": ^{ push([[RCNotificationTriggerViewController alloc] init]); } },
         @{ @"title": @"Notification Tap", @"icon": @"hand.tap", @"image": RCTriggerIconImage(@"notiftap_", 22), @"section": @"Apps", @"handler": ^{ push([[RCNotificationTapTriggerViewController alloc] init]); } },
         @{ @"title": @"Scheduled Trigger", @"icon": @"calendar.badge.clock", @"section": @"Time", @"handler": ^{ push([[RCScheduledTriggerViewController alloc] init]); } },
+        @{ @"title": @"Chained Trigger", @"icon": @"link", @"section": @"Combinations", @"handler": ^{ push([[RCChainTriggerViewController alloc] initWithTriggerKey:nil]); } },
         @{ @"title": @"Battery Level", @"icon": [UIImage systemImageNamed:@"battery.50"] ? @"battery.50" : @"battery.25", @"section": @"Device State", @"handler": ^{ push([[RCBatteryTriggerViewController alloc] init]); } },
         @{ @"title": @"Focus", @"icon": @"moon.fill", @"section": @"Device State", @"handler": ^{ push([[RCFocusTriggerViewController alloc] init]); } },
     ] mutableCopy];
@@ -1502,7 +1519,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     // Using dark gray tint for a "premium" but subtle look
     UIImage *custom = [RCAddOnCatalog isAddOnTriggerKey:triggerKey] ? [RCAddOnCatalog imageForTriggerKey:triggerKey] : nil;   // an add-on's image icon
     // The trigger's own picture: its app's icon, the phone drawing, or its symbol with a letter
-    cell.imageView.image = custom ?: [self appIconForTrigger:triggerKey side:29] ?: RCTriggerIconImage(triggerKey, 22) ?: [self symbolIconForTrigger:triggerKey size:22];
+    cell.imageView.image = custom ?: [RCTriggersViewController chainRowIconForTrigger:triggerKey size:22] ?: [self appIconForTrigger:triggerKey side:29] ?: RCTriggerIconImage(triggerKey, 22) ?: [self symbolIconForTrigger:triggerKey size:22];
     cell.imageView.tintColor = custom ? nil : [UIColor systemGrayColor];
 
     cell.accessoryView = nil;
@@ -1696,8 +1713,187 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
 
 // A trigger's icon anywhere it's listed (Running, Stop Trigger): an add-on's picture, an app's
 // icon, the phone drawing, or its symbol with a created trigger's letter
+// A chained trigger's steps (nil for a chain of fewer than two) and its letter
++ (NSArray<NSString *> *)chainStepsForTrigger:(NSString *)triggerKey {
+    if (![triggerKey hasPrefix:@"chain_"]) return nil;
+    NSDictionary *chain = [[RCConfigManager sharedManager] triggerDataForKey:triggerKey][@"chain"];
+    NSArray *steps = [chain isKindOfClass:[NSDictionary class]] && [chain[@"steps"] isKindOfClass:[NSArray class]] ? chain[@"steps"] : nil;
+    return steps.count >= 2 ? steps : nil;
+}
+
++ (NSCache *)chainIconCache {
+    static NSCache *cache;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ cache = [[NSCache alloc] init]; });
+    return cache;
+}
+
+// "+3", drawn in black (the icons are templates) centered in a box
+static void RCDrawChainMore(NSUInteger count, CGRect box) {
+    NSString *more = [NSString stringWithFormat:@"+%lu", (unsigned long)count];
+    NSDictionary *attributes = @{ NSFontAttributeName: [UIFont systemFontOfSize:box.size.height * 0.42 weight:UIFontWeightHeavy],
+                                  NSForegroundColorAttributeName: [UIColor blackColor] };
+    CGSize textSize = [more sizeWithAttributes:attributes];
+    [more drawAtPoint:CGPointMake(CGRectGetMidX(box) - textSize.width / 2, CGRectGetMidY(box) - textSize.height / 2) withAttributes:attributes];
+}
+
+// A chained trigger's icon where one icon fits: its steps one at a time, each at full size, sliding
+// left to the next and round again; with Reduce Motion, all of them at once in a small grid. Its
+// letter sits in the corner.
++ (UIImage *)chainIconForTrigger:(NSString *)triggerKey size:(CGFloat)size {
+    NSArray<NSString *> *steps = [RCTriggersViewController chainStepsForTrigger:triggerKey];
+    if (!steps) return nil;
+    BOOL still = UIAccessibilityIsReduceMotionEnabled();
+    NSString *letter = [RCTriggersViewController letterForTrigger:triggerKey];
+    NSString *cacheKey = [NSString stringWithFormat:@"%@|%@|%d@%.1f", [steps componentsJoinedByString:@","], letter ?: @"", still, size];
+    UIImage *cached = [[RCTriggersViewController chainIconCache] objectForKey:cacheKey];
+    if (cached) return cached;
+    UIImage *icon = still ? [RCTriggersViewController chainGridIconForSteps:steps size:size letter:letter]
+                          : [RCTriggersViewController chainSlidingIconForSteps:steps size:size letter:letter];
+    if (icon) [[RCTriggersViewController chainIconCache] setObject:icon forKey:cacheKey];
+    return icon;
+}
+
++ (UIImage *)chainSlidingIconForSteps:(NSArray<NSString *> *)steps size:(CGFloat)size letter:(NSString *)letter {
+    NSMutableArray<UIImage *> *icons = [NSMutableArray array];
+    for (NSString *step in steps) {
+        UIImage *icon = [RCTriggersViewController iconImageForTrigger:step size:size];
+        if (!icon) return nil;
+        [icons addObject:icon];
+    }
+    CGFloat side = ceil(size * 1.45);
+    UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat preferredFormat];
+    format.scale = MIN(format.scale, 2.0); // many frames: 2x is sharp enough at these sizes
+    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(side, side) format:format];
+    UIImage *(^frame)(NSUInteger, CGFloat) = ^UIImage *(NSUInteger index, CGFloat progress) {
+        UIImage *drawn = [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
+            CGFloat shift = side * progress;
+            [icons[index] drawInRect:CGRectMake(-shift, 0, side, side)];
+            if (progress > 0) [icons[(index + 1) % icons.count] drawInRect:CGRectMake(side - shift, 0, side, side)];
+        }];
+        return RCTriggerImageAddingLetter([drawn imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate], letter);
+    };
+    // Each step held a second, then a quarter of a second sliding to the next (frames 0.05 s apart)
+    const NSUInteger holdFrames = 20, slideFrames = 5;
+    NSMutableArray<UIImage *> *frames = [NSMutableArray array];
+    for (NSUInteger i = 0; i < icons.count; i++) {
+        UIImage *held = frame(i, 0);
+        for (NSUInteger f = 0; f < holdFrames; f++) [frames addObject:held];
+        for (NSUInteger f = 1; f <= slideFrames; f++) {
+            CGFloat t = (CGFloat)f / (slideFrames + 1);
+            [frames addObject:frame(i, t * t * (3 - 2 * t))]; // eased
+        }
+    }
+    UIImage *animated = [UIImage animatedImageWithImages:frames duration:frames.count * 0.05];
+    return [animated imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+}
+
+// Two side by side, three in a triangle, four in a square; from five on, three and "+N"
++ (UIImage *)chainGridIconForSteps:(NSArray<NSString *> *)steps size:(CGFloat)size letter:(NSString *)letter {
+    NSUInteger shown = steps.count > 4 ? 3 : steps.count;
+    NSMutableArray<UIImage *> *icons = [NSMutableArray array];
+    for (NSUInteger i = 0; i < shown; i++) {
+        UIImage *icon = [RCTriggersViewController iconImageForTrigger:steps[i] size:size * 0.5];
+        if (!icon) return nil;
+        [icons addObject:icon];
+    }
+    CGFloat side = ceil(size * 1.45);
+    CGFloat gap = side * 0.04;
+    CGFloat tile = (side - gap) / 2; // the tiles meet with a little room between, never over each other
+    CGFloat near = 0, far = side - tile, middle = (side - tile) / 2;
+    NSArray<NSValue *> *spots;
+    if (shown == 2) {
+        spots = @[@(CGPointMake(near, middle)), @(CGPointMake(far, middle))];
+    } else if (shown == 3 && steps.count == 3) {
+        spots = @[@(CGPointMake(middle, near)), @(CGPointMake(near, far)), @(CGPointMake(far, far))];
+    } else {
+        spots = @[@(CGPointMake(near, near)), @(CGPointMake(far, near)), @(CGPointMake(near, far)), @(CGPointMake(far, far))];
+    }
+    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(side, side)];
+    UIImage *icon = [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
+        for (NSUInteger i = 0; i < icons.count; i++) {
+            CGPoint at = spots[i].CGPointValue;
+            [icons[i] drawInRect:CGRectMake(at.x, at.y, tile, tile)];
+        }
+        if (steps.count > 4) {
+            CGPoint at = spots[3].CGPointValue;
+            RCDrawChainMore(steps.count - 3, CGRectMake(at.x, at.y, tile, tile));
+        }
+    }];
+    return RCTriggerImageAddingLetter([icon imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate], letter);
+}
+
+// A chained trigger's icon in a list row: its steps left to right, each at full size, up to three;
+// a longer chain scrolls along them three at a time, a step at a time, a space between its last
+// step and its first (with Reduce Motion: the first three and "+N"). Its letter is on the right.
++ (UIImage *)chainRowIconForTrigger:(NSString *)triggerKey size:(CGFloat)size {
+    NSArray<NSString *> *steps = [RCTriggersViewController chainStepsForTrigger:triggerKey];
+    if (!steps) return nil;
+    BOOL still = UIAccessibilityIsReduceMotionEnabled();
+    NSString *letter = [RCTriggersViewController letterForTrigger:triggerKey];
+    NSString *cacheKey = [NSString stringWithFormat:@"row|%@|%@|%d@%.1f", [steps componentsJoinedByString:@","], letter ?: @"", still, size];
+    UIImage *cached = [[RCTriggersViewController chainIconCache] objectForKey:cacheKey];
+    if (cached) return cached;
+    NSMutableArray<UIImage *> *icons = [NSMutableArray array];
+    for (NSString *step in steps) {
+        UIImage *icon = [RCTriggersViewController iconImageForTrigger:step size:size];
+        if (!icon) return nil;
+        [icons addObject:icon];
+    }
+    const NSUInteger window = 3;
+    BOOL scrolls = icons.count > window && !still;
+    NSUInteger shown = MIN(icons.count, window);
+    CGFloat side = ceil(size * 1.45);
+    CGFloat spacing = side * 0.08;
+    CGFloat pitch = side + spacing;
+    CGFloat moreWidth = (!scrolls && icons.count > shown) ? side * 0.8 : 0;
+    CGFloat width = shown * side + (shown - 1) * spacing + (moreWidth > 0 ? spacing + moreWidth : 0);
+    UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat preferredFormat];
+    if (scrolls) format.scale = MIN(format.scale, 2.0); // many frames: 2x is sharp enough at these sizes
+    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(width, side) format:format];
+    CGRect lastSquare = CGRectMake((shown - 1) * pitch, 0, side, side);
+    UIImage *icon;
+    if (!scrolls) {
+        icon = [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
+            for (NSUInteger i = 0; i < shown; i++) [icons[i] drawInRect:CGRectMake(i * pitch, 0, side, side)];
+            if (moreWidth > 0) RCDrawChainMore(icons.count - shown, CGRectMake(shown * pitch, 0, moreWidth, side));
+            RCTriggerDrawLetterBadge(context.CGContext, lastSquare, letter);
+        }];
+        icon = [icon imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+    } else {
+        // The loop: the steps, then an empty place, then round again
+        NSMutableArray *loop = [icons mutableCopy];
+        [loop addObject:[NSNull null]];
+        NSUInteger count = loop.count;
+        UIImage *(^frame)(NSUInteger, CGFloat) = ^UIImage *(NSUInteger start, CGFloat progress) {
+            UIImage *drawn = [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
+                for (NSUInteger slot = 0; slot <= window; slot++) {
+                    id step = loop[(start + slot) % count];
+                    if ([step isKindOfClass:[UIImage class]]) [step drawInRect:CGRectMake((slot - progress) * pitch, 0, side, side)];
+                }
+                RCTriggerDrawLetterBadge(context.CGContext, lastSquare, letter);
+            }];
+            return [drawn imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+        };
+        // Each place held a second, then a quarter of a second moving along a step (frames 0.05 s apart)
+        const NSUInteger holdFrames = 20, slideFrames = 5;
+        NSMutableArray<UIImage *> *frames = [NSMutableArray array];
+        for (NSUInteger start = 0; start < count; start++) {
+            UIImage *held = frame(start, 0);
+            for (NSUInteger f = 0; f < holdFrames; f++) [frames addObject:held];
+            for (NSUInteger f = 1; f <= slideFrames; f++) {
+                CGFloat t = (CGFloat)f / (slideFrames + 1);
+                [frames addObject:frame(start, t * t * (3 - 2 * t))];
+            }
+        }
+        icon = [[UIImage animatedImageWithImages:frames duration:frames.count * 0.05] imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+    }
+    [[RCTriggersViewController chainIconCache] setObject:icon forKey:cacheKey];
+    return icon;
+}
+
 + (UIImage *)iconImageForTrigger:(NSString *)triggerKey size:(CGFloat)size {
-    UIImage *custom = nil;
+    UIImage *custom = [RCTriggersViewController chainIconForTrigger:triggerKey size:size];
     if (custom) return custom;
     for (NSString *prefix in @[@"app_launch_", @"app_exit_", @"app_hold_"]) {
         if ([triggerKey hasPrefix:prefix]) {
@@ -1777,13 +1973,38 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     return [RCTriggersViewController iconNameForTrigger:key];
 }
 
+// A Chained Trigger's steps across its tile (not with an icon of the user's own)
+- (NSArray<UIImage *> *)gridStepImagesForTrigger:(NSString *)key {
+    NSArray<NSString *> *steps = [RCTriggersViewController chainStepsForTrigger:key];
+    if (!steps || [self customIconForTrigger:key]) return nil;
+    CGFloat size = RCLayoutNamesHidden(RCLayoutTriggers) ? 52 : 26;
+    NSMutableArray *images = [NSMutableArray array];
+    for (NSString *step in steps) {
+        UIImage *image = [RCTriggersViewController iconImageForTrigger:step size:size];
+        if (image) [images addObject:image];
+    }
+    return images;
+}
+
+// Its letter tag alone, in the corner of an icon-sized square, to sit over the scrolling steps
+- (UIImage *)gridStepsLetterForTrigger:(NSString *)key {
+    NSString *letter = [RCTriggersViewController letterForTrigger:key];
+    if (!letter.length) return nil;
+    CGFloat side = ceil((RCLayoutNamesHidden(RCLayoutTriggers) ? 52 : 26) * 1.45);
+    UIImage *blank = [[[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(side, side)] imageWithActions:^(UIGraphicsImageRendererContext *context) {}];
+    return RCTriggerImageAddingLetter(blank, letter);
+}
+
 - (UIImage *)gridImageForTrigger:(NSString *)key {
     UIImage *custom = [self customIconForTrigger:key];
     if (custom) return custom;
+    // A chain's tile shows its steps scrolling (gridStepImagesForTrigger:): this only holds the icon's place
+    NSArray<NSString *> *chainSteps = [RCTriggersViewController chainStepsForTrigger:key];
+    if (chainSteps) return [RCTriggersViewController iconImageForTrigger:chainSteps.firstObject size:RCLayoutNamesHidden(RCLayoutTriggers) ? 52 : 26];
     UIImage *addOnImage = [RCAddOnCatalog isAddOnTriggerKey:key] ? [RCAddOnCatalog imageForTriggerKey:key] : nil;
     // Compact Titles: Hide shows the icons alone and larger, so they're drawn larger too
     BOOL large = RCLayoutNamesHidden(RCLayoutTriggers);
-    return addOnImage ?: [self appIconForTrigger:key side:large ? 60 : 30] ?: RCTriggerIconImage(key, large ? 52 : 26) ?: [self symbolIconForTrigger:key size:large ? 52 : 26];
+    return addOnImage ?: [RCTriggersViewController chainIconForTrigger:key size:large ? 52 : 26] ?: [self appIconForTrigger:key side:large ? 60 : 30] ?: RCTriggerIconImage(key, large ? 52 : 26) ?: [self symbolIconForTrigger:key size:large ? 52 : 26];
 }
 
 - (NSInteger)gridActionCountForTrigger:(NSString *)key {

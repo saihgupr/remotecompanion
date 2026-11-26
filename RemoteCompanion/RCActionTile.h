@@ -72,6 +72,8 @@ extern NSString *const RCLayoutNewTrigger;
 // The icon picker (a Show Banner action's Icon, Control Center buttons, notifications): always a grid,
 // so it has Per Row, Tile Names and Category Bar Lines only
 extern NSString *const RCLayoutIcons;
+// A Chained Trigger's Add Step page
+extern NSString *const RCLayoutChainSteps;
 // The screens, in order: @[title, key]
 NSArray<NSArray<NSString *> *> *RCLayoutScreens(void);
 
