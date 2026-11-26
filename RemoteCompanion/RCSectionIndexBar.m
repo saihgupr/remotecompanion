@@ -10,8 +10,15 @@ static const CGFloat RCSectionRailMaxRow = 30.0;
 static const CGFloat RCSectionRailTopInset = 10.0;
 static const CGFloat RCSectionRailBottomInset = 12.0;
 static const CGFloat RCSectionHighlightMaxSide = 18.0;
-static const CGFloat RCSectionBubbleHeight = 42.0;
 static const CGFloat RCSectionBubbleGap = 8.0;
+static const CGFloat RCSectionBubblePadding = 12.0;
+static const CGFloat RCSectionBubbleRowHeight = 24.0;
+static const CGFloat RCSectionBubbleIconSide = 16.0;
+static const CGFloat RCSectionBubbleIconGap = 8.0;
+
+static UIFont *RCSectionBubbleFont(void) {
+    return [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
+}
 
 #pragma mark - Entries
 
@@ -101,6 +108,65 @@ static NSString *RCSectionIndexLetterForTitle(NSString *title) {
 
 @end
 
+#pragma mark - Bubble row
+
+// One section inside the capsule: its icon, its name, and a quieter tint for
+// the rows below the one the list is about to show.
+@interface RCSectionBubbleRowView : UIView
+@property (nonatomic, strong) UIImageView *iconView;
+@property (nonatomic, strong) UILabel *label;
+@property (nonatomic, assign) BOOL emphasized;
+- (void)applyTitle:(NSString *)title icon:(UIImage *)icon emphasized:(BOOL)emphasized;
+- (void)applyColors;
+@end
+
+@implementation RCSectionBubbleRowView
+
+- (instancetype)initWithFrame:(CGRect)frame {
+    self = [super initWithFrame:frame];
+    if (self) {
+        self.userInteractionEnabled = NO;
+
+        _iconView = [[UIImageView alloc] initWithFrame:CGRectZero];
+        _iconView.contentMode = UIViewContentModeScaleAspectFit;
+        [self addSubview:_iconView];
+
+        _label = [[UILabel alloc] initWithFrame:CGRectZero];
+        _label.font = RCSectionBubbleFont();
+        _label.numberOfLines = 1;
+        _label.lineBreakMode = NSLineBreakByTruncatingTail;
+        [self addSubview:_label];
+    }
+    return self;
+}
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    CGFloat iconRoom = self.iconView.hidden ? 0.0 : (RCSectionBubbleIconSide + RCSectionBubbleIconGap);
+    self.iconView.frame = CGRectMake(0, (self.bounds.size.height - RCSectionBubbleIconSide) / 2.0,
+                                     RCSectionBubbleIconSide, RCSectionBubbleIconSide);
+    self.label.frame = CGRectMake(iconRoom, 0,
+                                  MAX(0.0, self.bounds.size.width - iconRoom),
+                                  self.bounds.size.height);
+}
+
+- (void)applyTitle:(NSString *)title icon:(UIImage *)icon emphasized:(BOOL)emphasized {
+    self.label.text = title;
+    self.iconView.image = icon;
+    self.iconView.hidden = (icon == nil);
+    self.emphasized = emphasized;
+    [self applyColors];
+    [self setNeedsLayout];
+}
+
+- (void)applyColors {
+    UIColor *color = self.emphasized ? [UIColor labelColor] : [UIColor secondaryLabelColor];
+    self.label.textColor = color;
+    self.iconView.tintColor = color;
+}
+
+@end
+
 #pragma mark - Bar
 
 @interface RCSectionIndexBar ()
@@ -111,8 +177,7 @@ static NSString *RCSectionIndexLetterForTitle(NSString *title) {
 @property (nonatomic, strong) UIView *stackView;
 @property (nonatomic, strong) UIView *highlight;
 @property (nonatomic, strong) UIView *bubble;
-@property (nonatomic, strong) UIImageView *bubbleIcon;
-@property (nonatomic, strong) UILabel *bubbleLabel;
+@property (nonatomic, strong) NSMutableArray<RCSectionBubbleRowView *> *bubbleRows;
 @property (nonatomic, strong) UISelectionFeedbackGenerator *haptics;
 @property (nonatomic, assign) NSInteger activeEntry;
 @property (nonatomic, assign) BOOL scrubbing;
@@ -145,6 +210,7 @@ static NSString *RCSectionIndexLetterForTitle(NSString *title) {
         self.hidden = YES;
         self.alpha = 0.0;
         _glyphs = [NSMutableArray array];
+        _bubbleRows = [NSMutableArray array];
         _activeEntry = -1;
         _haptics = [[UISelectionFeedbackGenerator alloc] init];
 
@@ -165,16 +231,6 @@ static NSString *RCSectionIndexLetterForTitle(NSString *title) {
         _bubble.alpha = 0.0;
         _bubble.userInteractionEnabled = NO;
         [self addSubview:_bubble];
-
-        _bubbleIcon = [[UIImageView alloc] initWithFrame:CGRectZero];
-        _bubbleIcon.contentMode = UIViewContentModeScaleAspectFit;
-        [_bubble addSubview:_bubbleIcon];
-
-        _bubbleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-        _bubbleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
-        _bubbleLabel.numberOfLines = 1;
-        _bubbleLabel.lineBreakMode = NSLineBreakByTruncatingTail;
-        [_bubble addSubview:_bubbleLabel];
 
         self.isAccessibilityElement = YES;
         self.accessibilityTraits = UIAccessibilityTraitAdjustable;
@@ -206,9 +262,8 @@ static NSString *RCSectionIndexLetterForTitle(NSString *title) {
     UIColor *card = [UIColor secondarySystemGroupedBackgroundColor];
     self.bubble.backgroundColor = card;
     self.bubble.layer.borderColor = [[UIColor separatorColor] colorWithAlphaComponent:0.8].CGColor;
-    self.bubbleLabel.textColor = [UIColor labelColor];
-    self.bubbleIcon.tintColor = [UIColor secondaryLabelColor];
     self.highlight.backgroundColor = [UIColor secondarySystemFillColor];
+    for (RCSectionBubbleRowView *row in self.bubbleRows) [row applyColors];
     [self updateGlyphColors];
 }
 
@@ -291,7 +346,8 @@ static NSString *RCSectionIndexLetterForTitle(NSString *title) {
     CGFloat available = MAX(120.0, bottomBound - chromeTop);
 
     // A generous, even pitch that never grows past a comfortable finger, and
-    // the column centred in the room below the chrome
+    // the column centred on the screen so the first and last letters sit an
+    // equal distance from the edges
     CGFloat row = available / (CGFloat)count;
     row = MIN(row, RCSectionRailMaxRow);
     row = MAX(row, RCSectionRailMinRow);
@@ -299,7 +355,13 @@ static NSString *RCSectionIndexLetterForTitle(NSString *title) {
         row = MAX(1.0, available / (CGFloat)count); // landscape with many letters
     }
     CGFloat height = row * (CGFloat)count;
-    CGFloat top = chromeTop + MAX(0.0, (available - height) / 2.0);
+    CGFloat top = (host.bounds.size.height - height) / 2.0;
+    CGFloat maxTop = bottomBound - height;
+    if (maxTop < chromeTop) {
+        top = chromeTop;
+    } else {
+        top = MIN(MAX(top, chromeTop), maxTop);
+    }
     CGFloat left = safe.left;
 
     self.rowHeight = row;
@@ -319,7 +381,7 @@ static NSString *RCSectionIndexLetterForTitle(NSString *title) {
     self.highlight.layer.cornerRadius = side / 2.0;
     [self positionHighlightForEntry:self.activeEntry];
 
-    if (self.activeEntry >= 0) [self positionBubbleForEntry:self.activeEntry];
+    if (self.activeEntry >= 0) [self updateBubbleForEntry:self.activeEntry];
 }
 
 #pragma mark - Showing
@@ -413,8 +475,7 @@ static NSString *RCSectionIndexLetterForTitle(NSString *title) {
     if (changed) {
         [self.haptics selectionChanged];
         [self updateGlyphColors];
-        [self updateBubbleContentForEntry:entry];
-        [self positionBubbleForEntry:entry];
+        [self updateBubbleForEntry:entry];
         [self positionHighlightForEntry:entry];
     }
 
@@ -500,58 +561,73 @@ static NSString *RCSectionIndexLetterForTitle(NSString *title) {
 
 #pragma mark - Bubble
 
-- (void)updateBubbleContentForEntry:(NSInteger)entry {
+// The capsule lists every section filed under the touched entry, the first one
+// (where the list is going) at full strength and the rest quieter. It grows
+// with the group, so its size and position are worked out per entry change,
+// never per frame.
+- (void)updateBubbleForEntry:(NSInteger)entry {
     if (!self.host || entry < 0 || entry >= (NSInteger)self.entries.count) return;
-    NSInteger section = self.entries[entry].section;
-    if (section < 0 || section >= (NSInteger)self.titles.count) return;
+    NSInteger firstSection = self.entries[entry].section;
+    if (firstSection < 0 || firstSection >= (NSInteger)self.titles.count) return;
+    NSInteger endSection = (entry + 1 < (NSInteger)self.entries.count)
+        ? self.entries[entry + 1].section
+        : (NSInteger)self.titles.count;
+    endSection = MIN(endSection, (NSInteger)self.titles.count);
+    NSUInteger rowCount = (NSUInteger)MAX(0, endSection - firstSection);
+    if (rowCount == 0) return;
 
-    NSString *title = self.titles[section];
-    id icon = (section < (NSInteger)self.icons.count) ? self.icons[section] : nil;
-    UIImage *image = [icon isKindOfClass:[UIImage class]] ? icon : nil;
-
-    self.bubbleLabel.text = title;
-    self.bubbleIcon.image = image;
-    self.bubbleIcon.hidden = (image == nil);
-
-    UIEdgeInsets safe = self.host.safeAreaInsets;
-    CGFloat left = self.stackLeft + RCSectionRailWidth + RCSectionBubbleGap;
-    CGFloat iconRoom = image ? (16.0 + 7.0) : 0.0;
-    CGFloat maxText = MAX(60.0, self.bounds.size.width - left - safe.right - 8.0 - 24.0 - iconRoom);
-    CGSize textSize = [title boundingRectWithSize:CGSizeMake(maxText, 22.0)
-                                          options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingTruncatesLastVisibleLine
-                                       attributes:@{NSFontAttributeName: self.bubbleLabel.font}
-                                          context:nil].size;
-    CGFloat textWidth = ceil(MIN(textSize.width, maxText));
-    CGFloat width = 12.0 + iconRoom + textWidth + 12.0;
-
-    CGRect frame = self.bubble.frame;
-    frame.size = CGSizeMake(width, RCSectionBubbleHeight);
-    self.bubble.frame = frame;
-
-    CGFloat x = 12.0;
-    if (image) {
-        self.bubbleIcon.frame = CGRectMake(12.0, (RCSectionBubbleHeight - 16.0) / 2.0, 16.0, 16.0);
-        x += iconRoom;
-    } else {
-        self.bubbleIcon.frame = CGRectZero;
+    while (self.bubbleRows.count < rowCount) {
+        RCSectionBubbleRowView *row = [[RCSectionBubbleRowView alloc] initWithFrame:CGRectZero];
+        [self.bubble addSubview:row];
+        [self.bubbleRows addObject:row];
     }
-    self.bubbleLabel.frame = CGRectMake(x, 0, textWidth, RCSectionBubbleHeight);
-}
 
-- (void)positionBubbleForEntry:(NSInteger)entry {
-    if (!self.host || entry < 0 || entry >= (NSInteger)self.entries.count) return;
+    // As wide as the longest name in the group, capped at the screen edge
     UIEdgeInsets safe = self.host.safeAreaInsets;
-    CGFloat centerY = self.stackTop + self.rowHeight * ((CGFloat)entry + 0.5);
-    CGFloat half = self.bubble.bounds.size.height / 2.0;
-    centerY = MAX(safe.top + half + 8.0, MIN(self.bounds.size.height - safe.bottom - half - 8.0, centerY));
-
     CGFloat x = self.stackLeft + RCSectionRailWidth + RCSectionBubbleGap;
-    CGFloat maxX = self.bounds.size.width - safe.right - 8.0 - self.bubble.bounds.size.width;
-    x = MIN(x, maxX);
+    CGFloat maxWidth = MAX(80.0, self.bounds.size.width - x - safe.right - 8.0);
+    CGFloat maxText = MAX(40.0, maxWidth - RCSectionBubblePadding * 2.0
+                         - RCSectionBubbleIconSide - RCSectionBubbleIconGap);
+    UIFont *font = RCSectionBubbleFont();
+    CGFloat widest = 0;
+    for (NSUInteger i = 0; i < rowCount; i++) {
+        NSString *title = self.titles[firstSection + (NSInteger)i];
+        CGSize size = [title boundingRectWithSize:CGSizeMake(maxText, 20.0)
+                                          options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingTruncatesLastVisibleLine
+                                       attributes:@{NSFontAttributeName: font}
+                                          context:nil].size;
+        widest = MAX(widest, ceil(MIN(size.width, maxText)));
+    }
+    CGFloat rowWidth = RCSectionBubbleIconSide + RCSectionBubbleIconGap + widest;
+    CGFloat width = RCSectionBubblePadding * 2.0 + rowWidth;
+    CGFloat height = RCSectionBubblePadding * 2.0 + RCSectionBubbleRowHeight * (CGFloat)rowCount;
 
-    CGRect frame = self.bubble.frame;
-    frame.origin = CGPointMake(x, centerY - half);
-    self.bubble.frame = frame;
+    for (NSUInteger i = 0; i < self.bubbleRows.count; i++) {
+        RCSectionBubbleRowView *row = self.bubbleRows[i];
+        if (i >= rowCount) {
+            row.hidden = YES;
+            continue;
+        }
+        NSInteger section = firstSection + (NSInteger)i;
+        id icon = (section < (NSInteger)self.icons.count) ? self.icons[section] : nil;
+        UIImage *image = [icon isKindOfClass:[UIImage class]] ? icon : nil;
+        [row applyTitle:self.titles[section] icon:image emphasized:(i == 0)];
+        row.hidden = NO;
+        row.frame = CGRectMake(RCSectionBubblePadding,
+                               RCSectionBubblePadding + RCSectionBubbleRowHeight * (CGFloat)i,
+                               rowWidth,
+                               RCSectionBubbleRowHeight);
+    }
+
+    // Centred on the letter under the finger, kept inside the safe area
+    CGFloat centerY = self.stackTop + self.rowHeight * ((CGFloat)entry + 0.5);
+    CGFloat topLimit = safe.top + 8.0;
+    CGFloat bottomLimit = self.bounds.size.height - safe.bottom - 8.0 - height;
+    CGFloat y = centerY - height / 2.0;
+    if (bottomLimit < topLimit) y = topLimit;
+    else y = MIN(MAX(y, topLimit), bottomLimit);
+
+    self.bubble.frame = CGRectMake(x, y, width, height);
 }
 
 #pragma mark - Scrolling
@@ -686,7 +762,7 @@ static NSString *RCSectionIndexLetterForTitle(NSString *title) {
     [self updateGlyphColors];
     [self positionHighlightForEntry:entry];
     self.highlight.alpha = 1.0;
-    [self updateBubbleContentForEntry:entry];
+    [self updateBubbleForEntry:entry];
     [self animateToOffset:[self targetOffsetForSection:section] duration:0.3];
     UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification, self.titles[section]);
 }
