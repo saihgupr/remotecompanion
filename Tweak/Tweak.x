@@ -3629,6 +3629,7 @@ static NSString *rc_handle_flashlight_command(NSString *cmd) {
 }
 
 // Forward declarations for gesture management functions
+static BOOL should_register_edge_side(BOOL isLeft, BOOL requireActionable);
 static BOOL should_register_edge_gestures();
 static BOOL should_register_bottom_up_gestures();
 static BOOL should_register_top_down_gestures();
@@ -22910,11 +22911,10 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
     if (!g_triggerConfig || !RC_MasterEnabled()) {
         return NO;
     }
-    NSDictionary *triggers = g_triggerConfig[@"triggers"];
-    return (rc_trigger_on(@"trigger_bottom_swipe_up_left") ||
-            rc_trigger_on(@"trigger_bottom_swipe_up_center") ||
-            rc_trigger_on(@"trigger_bottom_swipe_up_right") ||
-            rc_trigger_on(@"trigger_bottom_two_finger_swipe_up"));
+    return (RC_TriggerIsActionable(@"trigger_bottom_swipe_up_left") ||
+            RC_TriggerIsActionable(@"trigger_bottom_swipe_up_center") ||
+            RC_TriggerIsActionable(@"trigger_bottom_swipe_up_right") ||
+            RC_TriggerIsActionable(@"trigger_bottom_two_finger_swipe_up"));
 }
 
 static BOOL rc_recognizer_is_top_edge(UIGestureRecognizer *recognizer) {
@@ -22945,18 +22945,7 @@ static NSString *get_top_swipe_down_trigger_for_touch(CGPoint loc, UIInterfaceOr
 
 static BOOL rc_is_top_swipe_down_zone_enabled(NSString *triggerKey) {
     if (!triggerKey.length) return NO;
-    if (!g_triggerConfig) {
-        load_trigger_config();
-    }
-    if (!g_triggerConfig || !RC_MasterEnabled()) {
-        return NO;
-    }
-    NSDictionary *triggers = g_triggerConfig[@"triggers"];
-    NSDictionary *trigger = [triggers isKindOfClass:[NSDictionary class]] ? triggers[triggerKey] : nil;
-    if (!rc_trigger_on(triggerKey)) {
-        return NO;
-    }
-    return !RC_IsTriggerExcludedForForegroundApp(triggerKey);
+    return RC_TriggerIsActionable(triggerKey);
 }
 
 static inline BOOL rc_is_top_swipe_down_active(void) {
@@ -23053,125 +23042,10 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
         return NO;
     }
     
-    NSDictionary *triggers = g_triggerConfig[@"triggers"];
-    return rc_trigger_on(triggerKey);
+    return RC_TriggerIsActionable(triggerKey);
 }
 
-// ============ DYNAMIC ISLAND TAP + HOLD ============
-// A touch that starts on the island (in portrait, with the island not expanded) runs Dynamic Island
-// Tap when it's let go quickly, or Dynamic Island Hold after half a second, and the status bar's
-// zones don't see it. SpringBoard gets each touch twice: through the system gesture window, and on
-// the island's own window. Unless the triggers set keep the default action, the island's copy is
-// held back, so iOS doesn't open or expand the Live Activity as well.
-typedef NS_ENUM(NSInteger, RCIslandTouch) { RCIslandTouchNotOurs, RCIslandTouchOurs, RCIslandTouchHeldBack };
-static BOOL g_islandTouchActive = NO;
-static BOOL g_islandHoldFired = NO;
-static BOOL g_islandMovedAway = NO;
-static BOOL g_islandHoldBack = NO;
-static BOOL g_islandSawGestureCopy = NO; // the system gesture window's copy, which ends when the finger lifts
-static NSTimeInterval g_islandTouchBeganTime = 0;
-static CGPoint g_islandTouchStart;
-static NSTimer *g_islandHoldTimer = nil;
-static NSHashTable<UITouch *> *g_islandHeldBackTouches = nil;
-
-static BOOL rc_island_expanded(void) {
-    for (id element in rc_island_elements()) {
-        if (rc_island_element_layout_mode(element) >= 3) return YES;
-    }
-    return NO;
-}
-
-static void rc_island_end_touch(void) {
-    g_islandTouchActive = NO;
-    [g_islandHoldTimer invalidate];
-    g_islandHoldTimer = nil;
-}
-
-static RCIslandTouch rc_island_handle_touch(UITouch *touch, UIInterfaceOrientation orientation) {
-    BOOL onIslandWindow = [touch.window isKindOfClass:objc_getClass("SBSystemApertureWindow")];
-    if (!g_islandHeldBackTouches) g_islandHeldBackTouches = [NSHashTable weakObjectsHashTable];
-    BOOL heldBack = onIslandWindow && [g_islandHeldBackTouches containsObject:touch];
-    CGPoint loc = [touch locationInView:nil];
-
-    if (touch.phase == UITouchPhaseBegan) {
-        // The second copy of a touch already being followed
-        BOOL sameTouch = g_islandTouchActive && fabs(touch.timestamp - g_islandTouchBeganTime) < 0.05 &&
-                         hypot(loc.x - g_islandTouchStart.x, loc.y - g_islandTouchStart.y) < 3;
-        if (!sameTouch) {
-            rc_island_end_touch();
-            if (orientation != UIInterfaceOrientationPortrait || loc.y > 90) return RCIslandTouchNotOurs;
-            load_trigger_config();
-            BOOL tapOn = rc_status_bar_trigger_enabled(@"trigger_island_tap");
-            BOOL holdOn = rc_status_bar_trigger_enabled(@"trigger_island_hold");
-            if (!tapOn && !holdOn) return RCIslandTouchNotOurs;
-            CGRect island = rc_island_frame();
-            if (CGRectIsNull(island)) return RCIslandTouchNotOurs;
-            // A little room around it, and up to the top edge
-            CGRect hit = CGRectMake(CGRectGetMinX(island) - 10, 0, CGRectGetWidth(island) + 20, CGRectGetMaxY(island) + 8);
-            if (!CGRectContainsPoint(hit, loc) || rc_island_expanded()) return RCIslandTouchNotOurs;
-
-            g_islandTouchActive = YES;
-            g_islandHoldFired = NO;
-            g_islandMovedAway = NO;
-            g_islandTouchBeganTime = touch.timestamp;
-            g_islandTouchStart = loc;
-            g_islandSawGestureCopy = NO;
-            g_islandHoldBack = (tapOn && ![g_triggerConfig[@"triggers"][@"trigger_island_tap"][@"keepDefault"] boolValue]) ||
-                               (holdOn && ![g_triggerConfig[@"triggers"][@"trigger_island_hold"][@"keepDefault"] boolValue]);
-            SRLogMin(@"[RCIsland] Touch began at (%.0f, %.0f), tap=%d hold=%d holdBack=%d", loc.x, loc.y, tapOn, holdOn, g_islandHoldBack);
-            if (holdOn) {
-                g_islandHoldTimer = [NSTimer scheduledTimerWithTimeInterval:0.5 repeats:NO block:^(NSTimer *timer) {
-                    g_islandHoldTimer = nil;
-                    if (!g_islandTouchActive || g_islandMovedAway) return;
-                    g_islandHoldFired = YES;
-                    SRLogMin(@"[RCIsland] Hold");
-                    RCTriggerHapticFor(@"trigger_island_hold");
-                    RCExecuteTrigger(@"trigger_island_hold");
-                    SRLog(@"trigger_island_hold FIRED!");
-                }];
-            }
-        }
-        if (!g_islandTouchActive) return RCIslandTouchNotOurs;
-        if (!onIslandWindow) g_islandSawGestureCopy = YES;
-        if (onIslandWindow && g_islandHoldBack) {
-            [g_islandHeldBackTouches addObject:touch];
-            return RCIslandTouchHeldBack;
-        }
-        return RCIslandTouchOurs;
-    }
-
-    if (touch.phase == UITouchPhaseEnded || touch.phase == UITouchPhaseCancelled) {
-        if (heldBack) [g_islandHeldBackTouches removeObject:touch];
-        if (g_islandTouchActive) {
-            SRLogMin(@"[RCIsland] Touch %@ on %@ after %.2f s", touch.phase == UITouchPhaseEnded ? @"ended" : @"cancelled",
-                     NSStringFromClass([touch.window class]), touch.timestamp - g_islandTouchBeganTime);
-            // The island's own copy ends early when iOS takes the touch for its long press; the finger
-            // is still down until the system gesture window's copy ends
-            if (onIslandWindow && g_islandSawGestureCopy) return heldBack ? RCIslandTouchHeldBack : RCIslandTouchOurs;
-        }
-        if (g_islandTouchActive) {
-            if (touch.phase == UITouchPhaseEnded && !g_islandHoldFired && !g_islandMovedAway &&
-                rc_status_bar_trigger_enabled(@"trigger_island_tap")) {
-                RCTriggerHapticFor(@"trigger_island_tap");
-                RCExecuteTrigger(@"trigger_island_tap");
-                SRLog(@"trigger_island_tap FIRED!");
-            }
-            rc_island_end_touch();
-            return heldBack ? RCIslandTouchHeldBack : RCIslandTouchOurs;
-        }
-        return heldBack ? RCIslandTouchHeldBack : RCIslandTouchNotOurs;
-    }
-
-    // Moved or still: a touch that slides off isn't a tap or a hold
-    if (g_islandTouchActive && !g_islandMovedAway &&
-        hypot(loc.x - g_islandTouchStart.x, loc.y - g_islandTouchStart.y) > 15) {
-        g_islandMovedAway = YES;
-        [g_islandHoldTimer invalidate];
-        g_islandHoldTimer = nil;
-    }
-    if (heldBack) return RCIslandTouchHeldBack;
-    return g_islandTouchActive ? RCIslandTouchOurs : RCIslandTouchNotOurs;
-}
+// ============ DYNAMIC ISLAND TAP + HOLD =====}
 
 %hook UIApplication
 
@@ -23562,7 +23436,7 @@ static RCIslandTouch rc_island_handle_touch(UITouch *touch, UIInterfaceOrientati
                 // Early freeze: once horizontal intent is clear and that
                 // direction's trigger is actionable, hold the list (and any
                 // row swipe actions) still for the rest of the touch.
-                if (g_bottomBarTouchActive && isHoz && abs_udx > 10) {
+                if (g_bottomBarTouchActive && isHoz && abs_udx > 15) {
                     NSString *sideKey = (user_dx > 0) ? @"trigger_bottombar_swipe_right" : @"trigger_bottombar_swipe_left";
                     if (RC_TriggerIsActionable(sideKey)) RC_FreezeGestureScrolling();
                 }
@@ -23708,9 +23582,14 @@ static RCIslandTouch rc_island_handle_touch(UITouch *touch, UIInterfaceOrientati
 
 @implementation SREdgeGestureRecognizer
 
+// Let other system or tweak gestures (e.g. launcher tweaks) recognize alongside edge tracking
+- (BOOL)canPreventGestureRecognizer:(UIGestureRecognizer *)preventedGestureRecognizer {
+    return NO;
+}
+
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    // Early exit: Check if edge gestures should even be active
-    if (!should_register_edge_gestures()) {
+    // Only claim touches on a side that actually has an actionable edge trigger
+    if (!should_register_edge_side(self.isLeftEdge, YES)) {
         self.state = UIGestureRecognizerStateFailed;
         return;
     }
@@ -23759,14 +23638,14 @@ static RCIslandTouch rc_island_handle_touch(UITouch *touch, UIInterfaceOrientati
 
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     // The edge triggers are swipes up and down along the edge. A swipe in from the edge is
-    // someone else's (a launcher tweak, an app's back swipe): step aside as soon as it's clear,
-    // so their recognizers get it instead of this one holding it (#189).
+    // someone else's (a launcher tweak, an app's back swipe): step aside before UIPanGestureRecognizer
+    // enters Began, so their recognizers get it instead of this one holding it (#189).
     UITouch *touch = [touches anyObject];
     if (touch && !self.hasTriggered) {
         CGPoint loc = RC_TouchPoint(touch);
         CGFloat dx = 0, dy = 0;
         RC_UserDeltaForOrientation(loc.x - self.startPoint.x, loc.y - self.startPoint.y, get_current_interface_orientation(), &dx, &dy);
-        if (MAX(fabs(dx), fabs(dy)) > 10 && fabs(dx) > fabs(dy)) {
+        if (MAX(fabs(dx), fabs(dy)) > 6.0 && fabs(dx) > fabs(dy)) {
             SRLog(@"Edge Gesture: sideways (dx %.1f dy %.1f), stepping aside", dx, dy);
             self.state = (self.state == UIGestureRecognizerStatePossible) ? UIGestureRecognizerStateFailed : UIGestureRecognizerStateCancelled;
             return;
@@ -23785,6 +23664,10 @@ static RCIslandTouch rc_island_handle_touch(UITouch *touch, UIInterfaceOrientati
 @end
 
 @implementation SRBottomUpGestureRecognizer
+
+- (BOOL)canPreventGestureRecognizer:(UIGestureRecognizer *)preventedGestureRecognizer {
+    return NO;
+}
 
 - (void)reset {
     [super reset];
@@ -23853,7 +23736,8 @@ static RCIslandTouch rc_island_handle_touch(UITouch *touch, UIInterfaceOrientati
     // Upward intent past the threshold: claim the touch so the system
     // cancels app delivery, exactly like the edge recognizers. Firing
     // itself stays in the sendEvent path.
-    if (dy < -25 && ay > ax * 1.0) {
+    CGFloat minUp = MAX(20.0, RC_BOTTOM_UP_DISTANCE() * 0.55);
+    if (dy < -minUp && ay > ax * 1.5) {
         if (self.zoneTriggerKey && RC_TriggerIsActionable(self.zoneTriggerKey)) {
             RC_FreezeGestureScrolling();
         }
@@ -23878,6 +23762,10 @@ static RCIslandTouch rc_island_handle_touch(UITouch *touch, UIInterfaceOrientati
 @end
 
 @implementation SRTopDownGestureRecognizer
+
+- (BOOL)canPreventGestureRecognizer:(UIGestureRecognizer *)preventedGestureRecognizer {
+    return NO;
+}
 
 - (void)reset {
     [super reset];
@@ -23938,7 +23826,8 @@ static RCIslandTouch rc_island_handle_touch(UITouch *touch, UIInterfaceOrientati
     }
     // Downward intent past the threshold: claim the touch so the system
     // cancels app delivery, mirroring SRBottomUpGestureRecognizer.
-    if (dy > 25 && ay > ax * 1.0) {
+    CGFloat minDown = MAX(20.0, RC_TOP_DOWN_DISTANCE() * 0.55);
+    if (dy > minDown && ay > ax * 1.5) {
         if (self.zoneTriggerKey && RC_TriggerIsActionable(self.zoneTriggerKey)) {
             RC_FreezeGestureScrolling();
         }
@@ -23964,7 +23853,7 @@ static RCIslandTouch rc_island_handle_touch(UITouch *touch, UIInterfaceOrientati
 
 // --- SYSTEM GESTURE MANAGER HOOK ---
 
-@interface SRGestureHelper : NSObject
+@interface SRGestureHelper : NSObject <UIGestureRecognizerDelegate>
 + (instancetype)sharedInstance;
 - (void)handleEdgeGesture:(SREdgeGestureRecognizer *)gesture;
 - (void)handleBottomUpGesture:(SRBottomUpGestureRecognizer *)gesture;
@@ -23979,6 +23868,10 @@ static RCIslandTouch rc_island_handle_touch(UITouch *touch, UIInterfaceOrientati
         sharedInstance = [[SRGestureHelper alloc] init];
     });
     return sharedInstance;
+}
+
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherGestureRecognizer {
+    return YES;
 }
 
 - (void)handleEdgeGesture:(SREdgeGestureRecognizer *)gesture {
@@ -24076,24 +23969,31 @@ static SRBottomUpGestureRecognizer *bottomUpRecognizer;
 static SRTopDownGestureRecognizer *topDownRecognizer;
 static SBSystemGestureManager *g_gestureManager = nil;
 
-// Helper: Check if any edge gestures are enabled
-static BOOL should_register_edge_gestures() {
+// Helper: Check if edge gestures on a given side are enabled (or actionable in current context)
+static BOOL should_register_edge_side(BOOL isLeft, BOOL requireActionable) {
     if (!g_triggerConfig) return NO;
     if (!RC_MasterEnabled()) return NO;
     
     NSDictionary *triggers = g_triggerConfig[@"triggers"];
-    NSArray *edgeTriggers = @[@"trigger_edge_left_swipe_up", 
-                               @"trigger_edge_left_swipe_down",
-                               @"trigger_edge_right_swipe_up",
-                               @"trigger_edge_right_swipe_down"];
+    NSArray *edgeTriggers = isLeft
+        ? @[@"trigger_edge_left_swipe_up", @"trigger_edge_left_swipe_down"]
+        : @[@"trigger_edge_right_swipe_up", @"trigger_edge_right_swipe_down"];
     
     for (NSString *key in edgeTriggers) {
-        if (rc_trigger_on(key)) {
-            return YES; // At least one edge gesture is enabled
+        if (requireActionable) {
+            if (RC_TriggerIsActionable(key)) return YES;
+        } else {
+            if (rc_trigger_on(key)) return YES;
+        }
         }
     }
     
     return NO;
+}
+
+// Helper: Check if any edge gestures are enabled
+static BOOL should_register_edge_gestures() {
+    return should_register_edge_side(YES, NO) || should_register_edge_side(NO, NO);
 }
 
 // Bottom-up system recognizer: only wanted when the scroll-lock toggle is on
@@ -24133,6 +24033,7 @@ static void register_edge_gestures() {
     if (!leftEdgeRecognizer) {
         leftEdgeRecognizer = [[SREdgeGestureRecognizer alloc] initWithTarget:[SRGestureHelper sharedInstance] action:@selector(handleEdgeGesture:)];
         leftEdgeRecognizer.isLeftEdge = YES;
+        leftEdgeRecognizer.delegate = [SRGestureHelper sharedInstance];
         leftEdgeRecognizer.cancelsTouchesInView = NO; // Don't block other touches by default
         leftEdgeRecognizer.delaysTouchesBegan = NO;   // Don't add lag
         [g_gestureManager addGestureRecognizer:leftEdgeRecognizer withType:120];
@@ -24143,6 +24044,7 @@ static void register_edge_gestures() {
     if (!rightEdgeRecognizer) {
         rightEdgeRecognizer = [[SREdgeGestureRecognizer alloc] initWithTarget:[SRGestureHelper sharedInstance] action:@selector(handleEdgeGesture:)];
         rightEdgeRecognizer.isRightEdge = YES;
+        rightEdgeRecognizer.delegate = [SRGestureHelper sharedInstance];
         rightEdgeRecognizer.cancelsTouchesInView = NO; // Don't block other touches by default
         rightEdgeRecognizer.delaysTouchesBegan = NO;   // Don't add lag
         [g_gestureManager addGestureRecognizer:rightEdgeRecognizer withType:121];
@@ -24156,6 +24058,7 @@ static void register_edge_gestures() {
     // are set on anything, so Home and Control Center behave as before.
     if (!bottomUpRecognizer) {
         bottomUpRecognizer = [[SRBottomUpGestureRecognizer alloc] initWithTarget:[SRGestureHelper sharedInstance] action:@selector(handleBottomUpGesture:)];
+        bottomUpRecognizer.delegate = [SRGestureHelper sharedInstance];
         bottomUpRecognizer.cancelsTouchesInView = YES; // Cancel app touches on recognition
         bottomUpRecognizer.delaysTouchesBegan = NO;   // Don't add lag
         [g_gestureManager addGestureRecognizer:bottomUpRecognizer withType:122];
@@ -24164,6 +24067,7 @@ static void register_edge_gestures() {
 
     if (!topDownRecognizer) {
         topDownRecognizer = [[SRTopDownGestureRecognizer alloc] initWithTarget:[SRGestureHelper sharedInstance] action:@selector(handleTopDownGesture:)];
+        topDownRecognizer.delegate = [SRGestureHelper sharedInstance];
         topDownRecognizer.cancelsTouchesInView = YES; // Cancel app touches on recognition
         topDownRecognizer.delaysTouchesBegan = NO;   // Don't add lag
         [g_gestureManager addGestureRecognizer:topDownRecognizer withType:123];
@@ -24177,16 +24081,18 @@ static void register_edge_gestures() {
 // once the edge triggers had been turned off and on again, until a respring.
 static void update_edge_gestures() {
     @try {
-        BOOL wanted = should_register_edge_gestures();
+        BOOL leftWanted = should_register_edge_side(YES, NO);
+        BOOL rightWanted = should_register_edge_side(NO, NO);
+        BOOL wanted = leftWanted || rightWanted;
         if (wanted && !leftEdgeRecognizer && !rightEdgeRecognizer) {
             SRLog(@"Edge gestures enabled - registering...");
             register_edge_gestures();
         }
-        if (leftEdgeRecognizer.enabled != wanted || rightEdgeRecognizer.enabled != wanted) {
-            SRLog(@"Edge gestures %@", wanted ? @"on" : @"off");
+        if (leftEdgeRecognizer.enabled != leftWanted || rightEdgeRecognizer.enabled != rightWanted) {
+            SRLog(@"Edge gestures left=%@ right=%@", leftWanted ? @"on" : @"off", rightWanted ? @"on" : @"off");
         }
-        leftEdgeRecognizer.enabled = wanted;
-        rightEdgeRecognizer.enabled = wanted;
+        leftEdgeRecognizer.enabled = leftWanted;
+        rightEdgeRecognizer.enabled = rightWanted;
 
         BOOL bottomWanted = should_register_bottom_up_gestures();
         if ((wanted || bottomWanted) && !bottomUpRecognizer) {
@@ -24856,7 +24762,7 @@ static inline BOOL rc_is_top_gesture_suppressing_cc(void) {
 static BOOL RC_ShouldKeepBottomBarSideSwipe(void) {
     if (!g_bottomBarTouchActive) return NO;
     CGFloat ax = fabs(g_bottomBarUserDX), ay = fabs(g_bottomBarUserDY);
-    if (!(ax > ay * 1.8)) return NO; // the same "sideways" test the trigger uses
+    if (ax < 12.0 || !(ax > ay * 1.8)) return NO; // ignore micro-jitter at the start of an upward Home swipe (#189)
     return RC_TriggerIsActionable(g_bottomBarUserDX > 0 ? @"trigger_bottombar_swipe_right" : @"trigger_bottombar_swipe_left");
 }
 
