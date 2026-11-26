@@ -10979,7 +10979,13 @@ static NSArray<NSDictionary *> *rc_iamlazy_backups(void) {
     NSArray *names = [fm contentsOfDirectoryAtPath:dir error:NULL] ?: @[];
     NSMutableArray *out = [NSMutableArray array];
     for (NSString *name in names) {
-        if (![name.pathExtension isEqualToString:@"gz"]) continue;
+        // A backup is a tar archive: .tar.gz from the CLI, .tar.xz from older IAmLazy versions
+        NSString *lower = name.lowercaseString;
+        BOOL archive = NO;
+        for (NSString *suffix in @[@".tar.gz", @".tgz", @".tar.xz", @".tar.zst", @".gz"]) {
+            if ([lower hasSuffix:suffix]) { archive = YES; break; }
+        }
+        if (!archive) continue;
         NSString *path = [dir stringByAppendingPathComponent:name];
         NSDictionary *attrs = [fm attributesOfItemAtPath:path error:NULL];
         if (!attrs) continue;
