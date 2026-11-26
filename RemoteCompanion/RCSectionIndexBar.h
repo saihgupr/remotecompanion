@@ -3,8 +3,10 @@
 // The alphabet index down the left edge of the Triggers list: a star for
 // Favorites, then one letter per category initial, scrubbed with a finger. The
 // table glides to the first category filed under the letter, a small floating
-// capsule names it, and each new letter ticks the haptic. On lift the index
-// settles on the category and the scroll indicator stays out of the way.
+// capsule lists every category under it, and each new letter ticks the haptic.
+// A finger may slide right off the rail into that capsule and up or down its
+// rows to settle on any one of them. On lift the index settles on the category
+// and the scroll indicator stays out of the way.
 //
 // It floats over the screen rather than scrolling with the table, so it is
 // added to the view controller's view and given the table it drives.
