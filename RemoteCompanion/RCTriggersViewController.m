@@ -954,6 +954,31 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     if ([[RCConfigManager sharedManager] triggerDataForKey:@"trigger_sequence_edited"]) [configKeys addObject:@"trigger_sequence_edited"];
     addSection(configKeys, @"Configuration", YES);
 
+    // Favorites stays pinned at the top; the rest go alphabetical, so the list,
+    // the category chips and the letter rail all agree on where a category is
+    NSUInteger firstSortable = 0;
+    if (titles.count > 0 && [titles[0] isEqualToString:@"Favorites"]) firstSortable = 1;
+    if (titles.count - firstSortable > 1) {
+        NSMutableArray<NSNumber *> *order = [NSMutableArray arrayWithCapacity:titles.count - firstSortable];
+        for (NSUInteger i = firstSortable; i < titles.count; i++) [order addObject:@(i)];
+        [order sortUsingComparator:^NSComparisonResult(NSNumber *a, NSNumber *b) {
+            return [titles[a.unsignedIntegerValue] localizedCaseInsensitiveCompare:titles[b.unsignedIntegerValue]];
+        }];
+
+        NSMutableArray *sortedSections = [NSMutableArray arrayWithCapacity:titles.count];
+        NSMutableArray *sortedTitles = [NSMutableArray arrayWithCapacity:titles.count];
+        for (NSUInteger i = 0; i < firstSortable; i++) {
+            [sortedSections addObject:sections[i]];
+            [sortedTitles addObject:titles[i]];
+        }
+        for (NSNumber *index in order) {
+            [sortedSections addObject:sections[index.unsignedIntegerValue]];
+            [sortedTitles addObject:titles[index.unsignedIntegerValue]];
+        }
+        sections = sortedSections;
+        titles = sortedTitles;
+    }
+
     self.sections = sections;
     self.sectionTitles = titles;
 
@@ -969,7 +994,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     if (selected == NSNotFound) self.selectedCategoryTitle = nil;
     self.categoryBar.selectedIndex = (selected == NSNotFound) ? -1 : (NSInteger)selected;
 
-    // The left rail: one short code per section, the same icons as the chips
+    // The left rail: the alphabet, one letter per category initial, the same icons as the chips
     [self.sectionIndexBar setSectionTitles:titles icons:chipIcons];
     [self updateSectionIndexBarAnimated:NO];
 
