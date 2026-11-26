@@ -12358,7 +12358,8 @@ static NSString *rc_iamlazy_backup(void) {
     [fm removeItemAtPath:kRCIAmLazyLog error:NULL];
 
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        const char *rootPath = "/var/jb/usr/bin/rc-root";
+        // Rootless puts the helper under /var/jb; rootful in /usr/bin
+        const char *rootPath = access("/var/jb/usr/bin/rc-root", X_OK) == 0 ? "/var/jb/usr/bin/rc-root" : "/usr/bin/rc-root";
         NSString *command = [NSString stringWithFormat:@"sh %@", kRCIAmLazyScript];
         char *args[] = {(char *)rootPath, (char *)[command UTF8String], NULL};
         extern char **environ;
@@ -15940,7 +15941,8 @@ static NSString *handle_command(NSString *cmd) {
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
             // Use rc-root setuid helper with posix_spawn
             pid_t pid;
-            const char *rcRootPath = "/var/jb/usr/bin/rc-root";
+            // Rootless puts the helper under /var/jb; rootful in /usr/bin
+            const char *rcRootPath = access("/var/jb/usr/bin/rc-root", X_OK) == 0 ? "/var/jb/usr/bin/rc-root" : "/usr/bin/rc-root";
             char *args[] = {(char *)rcRootPath, (char *)[shellCmd UTF8String], NULL};
 
             extern char **environ;
