@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [4.6.0] - 2026-11-29
 
 ### Added
+- **What's New**: the first launch after an update shows a card with the version's new features, and a first install shows a short welcome on the same card. Settings has What's New at the top to see it again. New Trigger and Select Action list the version's new triggers and actions first, under New, each marked (a red dot in a list, a NEW badge on a tile) until it's used or dismissed (the cross or a swipe in a list, touch and hold on a tile, or Dismiss All).
 - **Airplane Mode triggers**: New Trigger > Device State adds Airplane Mode On and Airplane Mode Off, firing whenever Airplane Mode flips on or off from Control Center, Settings, Shortcuts, or `rc airplane`.
 - **Set Orientation action**: New Action > Device Controls > Set Orientation picks Portrait, Landscape Left, Landscape Right, Portrait Upside Down or Auto Rotate. The screen turns straight away and holds only while rotation lock is on; with lock off the phone takes over again as soon as it moves. Auto Rotate releases the hold. `orientation set <mode>` does the same in scripts, the Web UI and the CLI.
 - **Physical orientation triggers**: New Trigger > Physical Orientation adds Portrait Up, Landscape Left, Landscape Right or Portrait Upside Down, each its own trigger. They read the accelerometer, so they fire for the way the phone is actually held, even with orientation lock on and whichever app is in front. Face up and face down are ignored, and a quick tilt and back fires nothing. The existing Rotated to Landscape / Portrait triggers are unchanged and still follow the screen, so the two are listed separately.
@@ -24,6 +25,7 @@ All notable changes to this project will be documented in this file.
 - **Action Sequence Edited trigger**: fires when any trigger's action sequence changes, including this trigger's own, from the app or the Web UI. Add, remove, reorder or edit an action and it runs, with an optional debounce (15 seconds by default, Off, 5, 10, 30 seconds, 1, 2 or 5 minutes) that waits until the edits stop so a run of changes runs the sequence once.
 
 ### Changed
+- **Picker list icons**: in List layout, New Trigger and Select Action show the icons their Compact tiles have, larger and in the text's color, instead of small grey symbols.
 - **New Trigger large title**: the New Trigger picker uses the same large title as the Triggers screen it opens from, instead of a small one at the top.
 - **MCP server: one gesture tool**: tap, hold, swipe, drag, two-finger swipe and pinch are now one `gesture` tool with a `kind`, so the server lists 21 tools instead of 26 and sends about 650 fewer tokens of tool schemas.
 - **Clear Notifications action and CLI**: replaced **Clear RC Notifications** with **Clear Notifications**, letting you target Any App or specific apps (including RemoteCompanion) and add or paste as many case-insensitive text filters as you want. `rc clear notification` (and `rc notify clear`) now accepts `--all`, `--app`, inline filter strings, and line-by-line `.txt` files.

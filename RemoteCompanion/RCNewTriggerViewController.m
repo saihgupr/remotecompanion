@@ -1,4 +1,5 @@
 #import "RCNewTriggerViewController.h"
+#import "RCWhatsNew.h"
 #import "RCConfigManager.h"
 #import "RCActionsViewController.h"
 #import "RCActionTile.h"
@@ -25,6 +26,45 @@
 @property (nonatomic, assign) BOOL didSetInitialTop;
 // A chosen item waits here until the search that found it has finished closing
 @property (nonatomic, copy) void (^pendingHandler)(void);
+@end
+
+// A list row's icon: every one in the same 34-point square, centred, so the names line up
+static UIImage *RCNewTriggerListIcon(UIImage *image) {
+    if (!image) return nil;
+    const CGFloat side = 34;
+    CGSize size = image.size;
+    CGFloat scale = MIN(1, MIN(side / MAX(size.width, 1), side / MAX(size.height, 1)));
+    CGSize drawn = CGSizeMake(size.width * scale, size.height * scale);
+    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(side, side)];
+    UIImage *boxed = [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
+        [image drawInRect:CGRectMake((side - drawn.width) / 2, (side - drawn.height) / 2, drawn.width, drawn.height)];
+    }];
+    // An app's own picture keeps its colors; a symbol or drawing takes the row's tint
+    return image.renderingMode == UIImageRenderingModeAlwaysOriginal ? boxed : [boxed imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+}
+
+// A list row that can carry the New dot on its icon's top right
+@interface RCNewTriggerRowCell : UITableViewCell
+@property (nonatomic, assign) BOOL showsNew;
+@property (nonatomic, strong) UIView *freshBadge; // a red dot on the icon's top right corner
+@end
+
+@implementation RCNewTriggerRowCell
+- (void)setShowsNew:(BOOL)showsNew {
+    _showsNew = showsNew;
+    if (showsNew && !self.freshBadge) {
+        self.freshBadge = [RCWhatsNew newDot];
+        [self.contentView addSubview:self.freshBadge];
+    }
+    self.freshBadge.hidden = !showsNew;
+    [self setNeedsLayout];
+}
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    if (!self.showsNew) return;
+    [self.contentView layoutIfNeeded]; // the icon's place is known only once the content is laid out
+    [RCWhatsNew placeTag:self.freshBadge onIcon:self.imageView];
+}
 @end
 
 @implementation RCNewTriggerViewController
@@ -116,6 +156,7 @@
 
     // List or Compact (Settings), followed while open
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(layoutChanged:) name:RCLayoutChangedNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(newItemsDismissed) name:RCWhatsNewDismissedNotification object:nil];
     [self applyLayout];
 }
 
@@ -190,16 +231,74 @@
     if (scrollView == [self activeScrollView]) [self.categoryBar scrollViewDidScroll:scrollView];
 }
 
-// The sections shown: all of them (as the search left them), or the one the category chip picked
+// The sections shown: all of them (as the search left them), or the one the category chip picked.
+// Browsing everything, this version's new triggers come first, under New.
 - (NSArray<NSArray<NSDictionary *> *> *)displayedSections {
-    if (!self.selectedCategoryTitle) return self.sections;
+    if (!self.selectedCategoryTitle) {
+        NSArray *fresh = [self newItems];
+        return fresh.count ? [@[fresh] arrayByAddingObjectsFromArray:self.sections] : self.sections;
+    }
     NSUInteger at = [self.sectionTitles indexOfObject:self.selectedCategoryTitle];
     return at == NSNotFound ? @[] : @[self.sections[at]];
 }
 
 - (NSArray<NSString *> *)displayedSectionTitles {
-    if (!self.selectedCategoryTitle) return self.sectionTitles;
+    if (!self.selectedCategoryTitle) {
+        return [self newItems].count ? [@[kRCNewSectionTitle] arrayByAddingObjectsFromArray:self.sectionTitles] : self.sectionTitles;
+    }
     return [self.sectionTitles containsObject:self.selectedCategoryTitle] ? @[self.selectedCategoryTitle] : @[];
+}
+
+#pragma mark - New (What's New)
+
+static NSString *const kRCNewSectionTitle = @"New";
+
+// What's New knows a built-in trigger by its key, any other kind by its menu title
++ (NSString *)newIdForItem:(NSDictionary *)item {
+    return [item[@"key"] isKindOfClass:[NSString class]] ? item[@"key"] : item[@"title"];
+}
+
+// This version's new triggers not yet used or dismissed, in menu order (none while searching)
+- (NSArray<NSDictionary *> *)newItems {
+    if (self.lastSearchQuery.length) return @[];
+    NSMutableArray *fresh = [NSMutableArray array];
+    for (NSArray *section in self.allSections) {
+        for (NSDictionary *item in section) {
+            if ([RCWhatsNew isNewTrigger:[RCNewTriggerViewController newIdForItem:item]]) [fresh addObject:item];
+        }
+    }
+    return fresh;
+}
+
+- (BOOL)isNewSection:(NSInteger)section {
+    NSArray *titles = [self displayedSectionTitles];
+    return section < (NSInteger)titles.count && section == 0 && !self.selectedCategoryTitle && [titles.firstObject isEqualToString:kRCNewSectionTitle] && [self newItems].count;
+}
+
+- (void)dismissAllNew {
+    NSMutableArray *ids = [NSMutableArray array];
+    for (NSDictionary *item in [self newItems]) [ids addObject:[RCNewTriggerViewController newIdForItem:item]];
+    [RCWhatsNew dismissTriggers:ids];
+}
+
+- (void)dismissNewItem:(NSDictionary *)item {
+    [RCWhatsNew dismissTrigger:[RCNewTriggerViewController newIdForItem:item]];
+}
+
+- (void)newItemsDismissed {
+    [self reloadData];
+}
+
+// A list row's end in New: a cross to dismiss it
+- (UIView *)newAccessoryForItem:(NSDictionary *)item {
+    UIButton *cross = [UIButton buttonWithType:UIButtonTypeSystem];
+    [cross setImage:[UIImage systemImageNamed:@"xmark.circle.fill"] forState:UIControlStateNormal];
+    cross.tintColor = [UIColor tertiaryLabelColor];
+    cross.accessibilityLabel = @"Dismiss";
+    cross.frame = CGRectMake(0, 0, 34, 34);
+    __weak typeof(self) weakSelf = self;
+    [cross addAction:[UIAction actionWithHandler:^(__kindof UIAction *action) { [weakSelf dismissNewItem:item]; }] forControlEvents:UIControlEventTouchUpInside];
+    return cross;
 }
 
 // The grid's columns follow a rotation
@@ -315,7 +414,20 @@
     label.textColor = [UIColor secondaryLabelColor];
     [headerView addSubview:label];
 
-    UIImage *icon = RCTriggerCategoryIcon(title);
+    BOOL isNew = [self isNewSection:section];
+    UIImage *icon = isNew ? [UIImage systemImageNamed:@"sparkles"] : RCTriggerCategoryIcon(title);
+    if (isNew) {
+        UIButton *all = [UIButton buttonWithType:UIButtonTypeSystem];
+        all.translatesAutoresizingMaskIntoConstraints = NO;
+        [all setTitle:@"Dismiss All" forState:UIControlStateNormal];
+        all.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+        [all addTarget:self action:@selector(dismissAllNew) forControlEvents:UIControlEventTouchUpInside];
+        [headerView addSubview:all];
+        [NSLayoutConstraint activateConstraints:@[
+            [all.trailingAnchor constraintEqualToAnchor:headerView.safeAreaLayoutGuide.trailingAnchor constant:-20],
+            [all.centerYAnchor constraintEqualToAnchor:label.centerYAnchor],
+        ]];
+    }
     if (icon) {
         UIImageView *iconView = [[UIImageView alloc] initWithImage:icon];
         iconView.preferredSymbolConfiguration = [UIImageSymbolConfiguration configurationWithPointSize:13 weight:UIImageSymbolWeightSemibold];
@@ -353,20 +465,41 @@
     RCConfigManager *cm = [RCConfigManager sharedManager];
     NSDictionary *item = [self displayedSections][indexPath.section][indexPath.row];
 
-    UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:nil];
+    RCNewTriggerRowCell *cell = [[RCNewTriggerRowCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:nil];
     cell.backgroundColor = [cm tweakColorForKey:@"blockBackground" defaultVal:0.12];
     UIView *selBg = [[UIView alloc] init];
     selBg.backgroundColor = [cm tweakColorForKey:@"selectionHighlight" defaultVal:0.15];
     cell.selectedBackgroundView = selBg;
     cell.textLabel.text = item[@"title"];
     cell.textLabel.textColor = [UIColor labelColor];
-    UIImage *custom = [item[@"image"] isKindOfClass:[UIImage class]] ? item[@"image"] : nil;
-    cell.imageView.image = custom ?: [UIImage systemImageNamed:item[@"icon"] ?: @"circle"];
-    cell.imageView.tintColor = [UIColor secondaryLabelColor];
+    // The icon the Compact tiles show (its drawing where it has one), larger and in the text's color
+    UIImage *drawn = [item[@"compactImage"] isKindOfClass:[UIImage class]] ? item[@"compactImage"]
+                   : [item[@"image"] isKindOfClass:[UIImage class]] ? item[@"image"] : nil;
+    UIImage *symbol = [UIImage systemImageNamed:item[@"icon"] ?: @"circle"
+                              withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:22 weight:UIImageSymbolWeightRegular]];
+    cell.imageView.image = RCNewTriggerListIcon(drawn ?: symbol);
+    cell.imageView.tintColor = [UIColor labelColor];
     cell.detailTextLabel.text = item[@"detail"];
     cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
     cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    if ([self isNewSection:indexPath.section]) {
+        cell.accessoryView = [self newAccessoryForItem:item];
+        cell.showsNew = YES;
+    }
     return cell;
+}
+
+// New: swipe to dismiss
+- (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (![self isNewSection:indexPath.section]) return nil;
+    NSDictionary *item = [self displayedSections][indexPath.section][indexPath.row];
+    __weak typeof(self) weakSelf = self;
+    UIContextualAction *dismiss = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal title:@"Dismiss"
+                                                                        handler:^(UIContextualAction *action, UIView *view, void (^done)(BOOL)) {
+        done(YES);
+        dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf dismissNewItem:item]; });
+    }];
+    return [UISwipeActionsConfiguration configurationWithActions:@[dismiss]];
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -399,13 +532,30 @@
     cell.checked = detail.length > 0 && count == 0;
     cell.plainChecked = YES;
     cell.accessibilityValue = detail;
+    cell.showsNew = [self isNewSection:indexPath.section]; // touch and hold to dismiss
     return cell;
+}
+
+// New: touch and hold to dismiss
+- (UIContextMenuConfiguration *)collectionView:(UICollectionView *)collectionView contextMenuConfigurationForItemAtIndexPath:(NSIndexPath *)indexPath point:(CGPoint)point {
+    if (![self isNewSection:indexPath.section]) return nil;
+    NSDictionary *item = [self displayedSections][indexPath.section][indexPath.item];
+    __weak typeof(self) weakSelf = self;
+    return [UIContextMenuConfiguration configurationWithIdentifier:nil previewProvider:nil actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggested) {
+        return [UIMenu menuWithTitle:@"" children:@[
+            [UIAction actionWithTitle:@"Dismiss" image:[UIImage systemImageNamed:@"xmark"] identifier:nil handler:^(__kindof UIAction *action) { [weakSelf dismissNewItem:item]; }],
+            [UIAction actionWithTitle:@"Dismiss All" image:[UIImage systemImageNamed:@"xmark.circle"] identifier:nil handler:^(__kindof UIAction *action) { [weakSelf dismissAllNew]; }],
+        ]];
+    }];
 }
 
 - (UICollectionReusableView *)collectionView:(UICollectionView *)collectionView viewForSupplementaryElementOfKind:(NSString *)kind atIndexPath:(NSIndexPath *)indexPath {
     RCActionGridHeader *header = [collectionView dequeueReusableSupplementaryViewOfKind:kind withReuseIdentifier:@"Header" forIndexPath:indexPath];
     NSString *title = [self displayedSectionTitles][indexPath.section];
-    [header setTitle:title icon:RCTriggerCategoryIcon(title)];
+    BOOL isNew = [self isNewSection:indexPath.section];
+    [header setTitle:title icon:isNew ? [UIImage systemImageNamed:@"sparkles"] : RCTriggerCategoryIcon(title)];
+    __weak typeof(self) weakSelf = self;
+    [header setButtonTitle:isNew ? @"Dismiss All" : nil handler:^{ [weakSelf dismissAllNew]; }];
     return header;
 }
 
@@ -427,6 +577,8 @@
 - (void)selectItem:(NSDictionary *)item {
     void (^handler)(void) = item[@"handler"];
     if (!handler) return;
+    // A new trigger once used is no longer new
+    if ([RCWhatsNew isNewTrigger:[RCNewTriggerViewController newIdForItem:item]]) [self dismissNewItem:item];
     // The setup screen is pushed under a clean navigation bar, not an active search. Pushing while the
     // search is still closing is dropped (on iPad), so the choice runs once it has closed.
     if (!self.searchController.isActive) { handler(); return; }

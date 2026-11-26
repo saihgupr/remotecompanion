@@ -3,6 +3,8 @@
 // The action picker's and Banners' grid: square tiles (an icon over a name) under section titles.
 
 @interface RCActionTileCell : UICollectionViewCell
+// What's New: a NEW badge on the tile's top right corner
+@property (nonatomic, assign) BOOL showsNew;
 @property (nonatomic, strong, readonly) UIImageView *iconView;
 @property (nonatomic, strong, readonly) UILabel *nameLabel;
 // A small chevron in the corner: tapping opens another screen or asks for more
@@ -31,6 +33,8 @@
 // The same, with an icon before the title (nil: none)
 - (void)setTitle:(NSString *)title icon:(UIImage *)icon;
 - (void)setNote:(NSString *)note;
+// A button at the header's end ("Dismiss All"); nil title takes it away
+- (void)setButtonTitle:(NSString *)title handler:(void (^)(void))handler;
 @end
 
 // The layout both grids use
@@ -45,6 +49,10 @@ CGFloat RCActionGridNoteHeight(NSString *note, CGFloat gridWidth);
 // The List layout of the same screens: a row per action (an icon, its name, a chevron or a
 // checkmark), grouped into rounded cards like an inset-grouped table
 @interface RCActionRowCell : UICollectionViewCell
+// New Trigger and Select Action: the icon larger and in the text's color, as on the Compact tiles
+@property (nonatomic, assign) BOOL largeIcon;
+// What's New: a red dot on the icon's top right
+@property (nonatomic, assign) BOOL showsNew;
 @property (nonatomic, assign) BOOL opensMore;
 @property (nonatomic, assign) BOOL checked;
 - (void)setName:(NSString *)name icon:(NSString *)icon image:(UIImage *)image;
