@@ -2330,13 +2330,7 @@
         <div class="action-row-text" style="flex:1">Integrations<br><span id="setting-integrations-status" style="font-size:13px;color:var(--rc-label-2);font-weight:400">Disabled</span></div>
         <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
       </div>
-      <div class="action-list-row" onclick="openTweaksPanel()">
-        <div class="action-row-icon icon-cyan"><i class="f7-icons">slider_horizontal_3</i></div>
-        <div class="action-row-text" style="flex:1">Tweaks</div>
-        <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
-      </div>
     </div>
-    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 32px 0">Configure connections to external services, and Tweaks changes how iOS behaves.</div>
 
     <div class="action-list-header">Advanced Settings</div>
     <div class="action-list-card">
@@ -2345,8 +2339,13 @@
         <div class="action-row-text">Advanced Settings</div>
         <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
       </div>
+      <div class="action-list-row" onclick="openTweaksPanel()">
+        <div class="action-row-icon icon-cyan"><i class="f7-icons">slider_horizontal_3</i></div>
+        <div class="action-row-text" style="flex:1">Tweaks</div>
+        <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
+      </div>
     </div>
-    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 32px 0">Advanced Settings holds NFC, notification banners, logging and display options.</div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 32px 0">Advanced Settings holds NFC, notification banners, logging and display options. Tweaks changes how iOS behaves.</div>
 
     <div class="action-list-header">Diagnostics</div>
     <div class="action-list-card">
@@ -3294,7 +3293,7 @@
   </div>
 </div>
 
-<!-- ══ TWEAKS PANEL (Settings > Tweaks) ══════════════════════════════════════ -->
+<!-- ══ TWEAKS PANEL (Settings > Advanced Settings > Tweaks) ═══════════════════ -->
 <div class="rc-panel" id="tweaks-panel">
   <div class="panel-navbar">
     <button class="panel-back" onclick="closeTweaksPanel()">
@@ -10287,6 +10286,7 @@ function openAdvancedPanel() {
   updateNFCScreenOffLabel();
   updateNFCFooter();
   updateBannersCount();
+  updateTweaksCount();
   populateTimingSelects();
   document.getElementById('advanced-panel').classList.add('active');
 }

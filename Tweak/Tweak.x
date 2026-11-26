@@ -13278,7 +13278,7 @@ static NSString *rc_ssh_test_host(NSString *hostId) {
     return [NSString stringWithFormat:@"Error: %@\n", detail];
 }
 
-// Settings > Tweaks holds iOS behavior tweaks that are off by default.
+// Settings > Advanced Settings > Tweaks holds iOS behavior tweaks that are off by default.
 // Each is one config key, so the switches in the app, the Web UI, and here all agree.
 static NSArray<NSDictionary *> *rc_tweaks_specs(void) {
     return @[
