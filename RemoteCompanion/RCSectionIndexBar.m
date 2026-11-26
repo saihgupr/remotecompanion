@@ -2,9 +2,10 @@
 #import <QuartzCore/QuartzCore.h>
 
 // The rail lives in the margin left of the inset-grouped cards (20 pt on a
-// phone), so its letters never sit on a row. The bubble only appears under a
-// finger, and that finger may slide right off the rail and down the bubble's
-// rows to pick one of the categories filed under the letter.
+// phone), so its letters never sit on a row. The rail stays invisible until a
+// finger lands in that margin, and fades again when the finger lifts. The
+// bubble only appears under that finger, which may slide right off the rail and
+// down its rows to pick one of the categories filed under the letter.
 static const CGFloat RCSectionRailWidth = 20.0;
 static const CGFloat RCSectionRailMinRow = 10.0;
 static const CGFloat RCSectionRailMaxRow = 30.0;
@@ -202,6 +203,10 @@ static NSString *RCSectionIndexLetterForTitle(NSString *title) {
 @property (nonatomic, assign) BOOL scrubbing;
 @property (nonatomic, assign) BOOL shown;
 @property (nonatomic, assign) BOOL visible;
+// Whether the letters (and the circle that slides behind them) are faded in.
+// The bar itself never fades while available, so it can still take the touch
+// that wakes the rail.
+@property (nonatomic, assign) BOOL railRevealed;
 @property (nonatomic, assign) BOOL laidOut;
 @property (nonatomic, assign) BOOL keepActiveAfterScroll;
 @property (nonatomic, assign) CGFloat rowHeight;
@@ -227,7 +232,7 @@ static NSString *RCSectionIndexLetterForTitle(NSString *title) {
         self.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
         self.multipleTouchEnabled = NO;
         self.hidden = YES;
-        self.alpha = 0.0;
+        self.alpha = 1.0;
         _glyphs = [NSMutableArray array];
         _bubbleRows = [NSMutableArray array];
         _activeEntry = -1;
@@ -237,6 +242,7 @@ static NSString *RCSectionIndexLetterForTitle(NSString *title) {
         _stackView = [[UIView alloc] initWithFrame:CGRectZero];
         _stackView.backgroundColor = [UIColor clearColor];
         _stackView.userInteractionEnabled = NO;
+        _stackView.alpha = 0.0;
         [self addSubview:_stackView];
 
         _highlight = [[UIView alloc] initWithFrame:CGRectZero];
@@ -410,39 +416,56 @@ static NSString *RCSectionIndexLetterForTitle(NSString *title) {
 
 - (void)setShown:(BOOL)shown animated:(BOOL)animated {
     self.shown = shown;
-    BOOL visible = shown && self.entries.count > 1;
-    if (visible == self.visible) {
-        self.hidden = !visible;
-        self.userInteractionEnabled = visible;
+    BOOL available = shown && self.entries.count > 1;
+    if (available == self.visible) {
+        // A reload can land here with the same layout state. Keep the letters
+        // honest if the finger (or VoiceOver) that revealed them has gone.
+        if (!available) [self setRailRevealed:NO animated:NO];
         return;
     }
-    self.visible = visible;
-    self.userInteractionEnabled = visible;
+    self.visible = available;
+    self.userInteractionEnabled = available;
 
-    if (!visible) {
+    if (!available) {
         [self cancelScrollAnimation];
         self.scrubbing = NO;
         [self resetAppearanceAnimated:NO];
-    }
-
-    if (visible) self.hidden = NO;
-    if (!animated) {
-        self.alpha = visible ? 1.0 : 0.0;
-        self.hidden = !visible;
+        self.hidden = YES;
         return;
     }
-    [UIView animateWithDuration:0.18 delay:0 options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut
-                     animations:^{ self.alpha = visible ? 1.0 : 0.0; }
-                     completion:^(BOOL finished) { if (!self.visible) self.hidden = YES; }];
+
+    // The bar stays in the hierarchy at full alpha so the left margin keeps
+    // taking touches. Only its letters are faded out at rest.
+    self.hidden = NO;
+    self.alpha = 1.0;
+    [self setRailRevealed:NO animated:animated];
+}
+
+// The letters and the circle behind them fade in only while a finger owns the
+// rail. The bar itself never fades, so it can still receive the touch that
+// wakes it.
+- (void)setRailRevealed:(BOOL)revealed animated:(BOOL)animated {
+    if (revealed == self.railRevealed) return;
+    self.railRevealed = revealed;
+    if (!animated) {
+        self.stackView.alpha = revealed ? 1.0 : 0.0;
+        return;
+    }
+    [UIView animateWithDuration:revealed ? 0.14 : 0.2 delay:0
+                        options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut
+                     animations:^{ self.stackView.alpha = revealed ? 1.0 : 0.0; }
+                     completion:nil];
 }
 
 #pragma mark - Touch
 
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
     if (!self.visible || !self.laidOut) return NO;
-    // A little wider than the letters, like the system index, but never far
-    // enough right to cover a row's icon.
-    CGFloat right = self.stackLeft + RCSectionRailWidth + 12.0;
+    // At rest only the narrow strip over the letters is live, so a finger
+    // landing there wakes the rail without stealing an ordinary table scroll.
+    // A touch keeps its original target once claimed, so the capsule may sit
+    // much wider than this strip.
+    CGFloat right = self.stackLeft + RCSectionRailWidth + (self.railRevealed ? 12.0 : 4.0);
     CGFloat top = self.stackTop - 12.0;
     CGFloat bottom = self.stackTop + self.stackHeight + 12.0;
     return point.x >= 0 && point.x <= right && point.y >= top && point.y <= bottom;
@@ -451,6 +474,7 @@ static NSString *RCSectionIndexLetterForTitle(NSString *title) {
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     if (self.entries.count < 2) return;
     CGPoint point = [touches.anyObject locationInView:self];
+    [self setRailRevealed:YES animated:YES];
     [self beginScrubAtY:point.y];
 }
 
@@ -641,6 +665,7 @@ static NSString *RCSectionIndexLetterForTitle(NSString *title) {
     [self updateGlyphColors];
     [self hideBubbleAnimated:animated];
     [self hideHighlightAnimated:animated];
+    [self setRailRevealed:NO animated:animated];
 }
 
 #pragma mark - Bubble
@@ -851,6 +876,7 @@ static NSString *RCSectionIndexLetterForTitle(NSString *title) {
 - (void)accessibilityStep:(NSInteger)step {
     NSInteger count = (NSInteger)self.entries.count;
     if (count == 0) return;
+    [self setRailRevealed:YES animated:YES];
     // Nothing selected yet: the first step lands on the first entry
     NSInteger base = self.activeEntry >= 0 ? self.activeEntry : -1;
     NSInteger entry = MAX(0, MIN(count - 1, base + step));

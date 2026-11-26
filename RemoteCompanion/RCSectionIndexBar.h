@@ -2,8 +2,10 @@
 
 // The alphabet index down the left edge of the Triggers list: a star for
 // Favorites, then one letter per category initial, scrubbed with a finger. The
-// table glides to the first category filed under the letter, a small floating
-// capsule lists every category under it, and each new letter ticks the haptic.
+// rail stays out of sight until a finger lands in the left margin, then fades
+// away when it lifts. The table glides to the first category filed under the
+// letter, a small floating capsule lists every category under it, and each new
+// letter ticks the haptic.
 // A finger may slide right off the rail into that capsule and up or down its
 // rows to settle on any one of them. On lift the index settles on the category
 // and the scroll indicator stays out of the way.
@@ -30,7 +32,8 @@
 - (void)layoutInView:(UIView *)host;
 
 // Grid mode, an empty list or a single category all leave nothing to scrub.
-// A hidden bar takes no touches and fades in and out with the layout change.
+// With the rail available it is still invisible at rest: a finger landing in
+// the left margin wakes it, and it fades out again on lift.
 - (void)setShown:(BOOL)shown animated:(BOOL)animated;
 
 // A finger on the table wins over a glide that is still running.
