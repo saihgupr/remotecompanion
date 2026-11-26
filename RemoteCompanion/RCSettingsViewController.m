@@ -248,9 +248,9 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     if (section == RCSettingsSectionGeneral) {
         return @"Enable the built-in Web UI to configure RemoteCompanion from a browser.";
     } else if (section == RCSettingsSectionIntegrations) {
-        return @"Configure connections to external services and automations.";
+        return @"Configure connections to external services, automations, and iOS behavior tweaks.";
     } else if (section == RCSettingsSectionAdvanced) {
-        return @"Advanced Settings holds NFC, banners, logging and display options. Tweaks changes how iOS behaves, and Variables shows what Set Variable actions save.";
+        return @"Advanced Settings holds NFC, banners, logging and display options. Variables shows what Set Variable actions save.";
     } else if (section == RCSettingsSectionGestures) {
         return @"Recorded gestures and the recording tab's options.";
     } else if (section == RCSettingsSectionDiagnostics) {
@@ -263,6 +263,10 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     return nil;
 }
 
+- (NSInteger)tweaksRowInIntegrationsSection {
+    return [RCAddOnCatalog catalogAvailable] ? 2 : 1;
+}
+
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if (section == RCSettingsSectionGeneral) {
         return [RCConfigManager sharedManager].webUIEnabled ? 4 : 2;
@@ -271,14 +275,14 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
         return 2; // Export / Import
     }
     if (section == RCSettingsSectionAdvanced) {
-        return 3; // Advanced Settings / Variables / Tweaks
+        return 2; // Advanced Settings / Variables
     }
     if (section == RCSettingsSectionDiagnostics) {
         return 2; // Running, Test Kit
     }
     if (section == RCSettingsSectionIntegrations) {
-        // Integrations, then Add-ons (ADDONS.md) once the tweak has written its catalog
-        return [RCAddOnCatalog catalogAvailable] ? 2 : 1;
+        // Integrations, Add-ons (when catalog available), then Tweaks
+        return [RCAddOnCatalog catalogAvailable] ? 3 : 2;
     }
     if (section == RCSettingsSectionHoliday) {
         return 1; // Holiday Mode
@@ -331,7 +335,17 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
             cell.detailTextLabel.text = [self webUIUrlString];
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         }
-    } else if (indexPath.section == RCSettingsSectionIntegrations && indexPath.row == 1) {
+    } else if (indexPath.section == RCSettingsSectionIntegrations && indexPath.row == [self tweaksRowInIntegrationsSection]) {
+        cell.textLabel.text = @"Tweaks";
+        UIImage *img = [UIImage systemImageNamed:@"slider.horizontal.3"];
+        cell.imageView.image = img;
+        if (@available(iOS 15.0, *)) {
+            cell.imageView.tintColor = [UIColor systemCyanColor];
+        } else {
+            cell.imageView.tintColor = [UIColor systemTealColor];
+        }
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    } else if (indexPath.section == RCSettingsSectionIntegrations && [RCAddOnCatalog catalogAvailable] && indexPath.row == 1) {
         cell.textLabel.text = @"Add-ons";
         cell.imageView.image = [UIImage systemImageNamed:[RCAddOnCatalog defaultSymbol]];
         cell.imageView.tintColor = [UIColor systemOrangeColor];
@@ -349,16 +363,6 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
         cell.textLabel.text = @"Variables";
         cell.imageView.image = RCVariableMenuIcon();
         cell.imageView.tintColor = nil;
-        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-    } else if (indexPath.section == RCSettingsSectionAdvanced && indexPath.row == 2) {
-        cell.textLabel.text = @"Tweaks";
-        UIImage *img = [UIImage systemImageNamed:@"slider.horizontal.3"];
-        cell.imageView.image = img;
-        if (@available(iOS 15.0, *)) {
-            cell.imageView.tintColor = [UIColor systemCyanColor];
-        } else {
-            cell.imageView.tintColor = [UIColor systemTealColor];
-        }
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     } else if (indexPath.section == RCSettingsSectionAdvanced) {
         cell.textLabel.text = @"Advanced Settings";
@@ -414,15 +418,15 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
         [self.navigationController pushViewController:[[RCWebUIAccessViewController alloc] init] animated:YES];
     } else if (indexPath.section == RCSettingsSectionGeneral && indexPath.row == 3) {
         [self openWebUI];
-    } else if (indexPath.section == RCSettingsSectionIntegrations && indexPath.row == 1) {
+    } else if (indexPath.section == RCSettingsSectionIntegrations && indexPath.row == [self tweaksRowInIntegrationsSection]) {
+        [self.navigationController pushViewController:[[RCTweaksViewController alloc] init] animated:YES];
+    } else if (indexPath.section == RCSettingsSectionIntegrations && [RCAddOnCatalog catalogAvailable] && indexPath.row == 1) {
         [self.navigationController pushViewController:[[RCAddOnsViewController alloc] initShowing:RCAddOnsListAll] animated:YES];
     } else if (indexPath.section == RCSettingsSectionIntegrations) {
         RCIntegrationsViewController *integrationsVC = [[RCIntegrationsViewController alloc] init];
         [self.navigationController pushViewController:integrationsVC animated:YES];
     } else if (indexPath.section == RCSettingsSectionAdvanced && indexPath.row == 1) {
         [self.navigationController pushViewController:[[RCVariablesViewController alloc] init] animated:YES];
-    } else if (indexPath.section == RCSettingsSectionAdvanced && indexPath.row == 2) {
-        [self.navigationController pushViewController:[[RCTweaksViewController alloc] init] animated:YES];
     } else if (indexPath.section == RCSettingsSectionAdvanced) {
         [self.navigationController pushViewController:[[RCAdvancedSettingsViewController alloc] init] animated:YES];
     } else if (indexPath.section == RCSettingsSectionGestures) {
