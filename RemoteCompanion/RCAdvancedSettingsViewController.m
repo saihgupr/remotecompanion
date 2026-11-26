@@ -110,7 +110,7 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
 
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
     NSString *title;
-    if (section == RCAdvancedSettingsSectionBanners) title = @"Banners";
+    if (section == RCAdvancedSettingsSectionBanners) title = @"Notification Banners";
     else if (section == RCAdvancedSettingsSectionNFC) title = @"NFC";
     else if (section == RCAdvancedSettingsSectionOptions) title = @"Options";
     else if (section == RCAdvancedSettingsSectionLayout) title = @"Layout";
