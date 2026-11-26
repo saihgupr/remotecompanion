@@ -1561,6 +1561,8 @@ static NSString *RCActionCommand(id item) {
     if ([triggerKey hasPrefix:@"trigger_statusbar_"]) return YES;
     if ([triggerKey hasPrefix:@"trigger_bottombar_"]) return YES;
     if ([triggerKey hasPrefix:@"trigger_bottom_swipe_"]) return YES;
+    if ([triggerKey hasPrefix:@"trigger_bottom_two_finger_"]) return YES;
+    if ([triggerKey hasPrefix:@"trigger_two_finger_"]) return YES;
     if ([triggerKey hasPrefix:@"trigger_edge_"]) return YES;
     return NO;
 }

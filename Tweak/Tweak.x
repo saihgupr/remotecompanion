@@ -18942,6 +18942,8 @@ static BOOL RC_DefaultHapticsForTrigger(NSString *triggerKey) {
     if ([triggerKey hasPrefix:@"trigger_statusbar_"]) return YES;
     if ([triggerKey hasPrefix:@"trigger_bottombar_"]) return YES;
     if ([triggerKey hasPrefix:@"trigger_bottom_swipe_"]) return YES;
+    if ([triggerKey hasPrefix:@"trigger_bottom_two_finger_"]) return YES;
+    if ([triggerKey hasPrefix:@"trigger_two_finger_"]) return YES;
     if ([triggerKey hasPrefix:@"trigger_edge_"]) return YES;
     return NO;
 }
@@ -22130,6 +22132,7 @@ static void rc_two_finger_hid_process(uint32_t mask, const double *xs, const dou
         if (RC_IsForegroundAppExcluded()) return;
         if (!RC_TriggerIsActionable(triggerKey)) return;
         SRLogMin(@"[RCMultiFinger] %@ FIRED", triggerKey);
+        RCTriggerHapticFor(triggerKey);
         RCExecuteTrigger(triggerKey);
     });
 }
@@ -22689,7 +22692,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                         if (enabled) {
                             g_twoFingerTopTriggered = YES;
                             g_lastTwoFingerTopSwipeTriggerTime = [[NSDate date] timeIntervalSince1970];
-                            trigger_haptic();
+                            RCTriggerHapticFor(@"trigger_statusbar_two_finger_swipe_down");
                             if (RC_TriggerIsActionable(@"trigger_statusbar_two_finger_swipe_down")) RC_FreezeGestureScrolling();
                             RCExecuteTrigger(@"trigger_statusbar_two_finger_swipe_down");
                             SRLog(@"[RCMultiFinger] trigger_statusbar_two_finger_swipe_down FIRED during move at dy=%.1f", user_dy);
@@ -22710,7 +22713,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                         if (enabled) {
                             g_twoFingerBottomTriggered = YES;
                             g_lastTwoFingerBottomSwipeTriggerTime = [[NSDate date] timeIntervalSince1970];
-                            trigger_haptic();
+                            RCTriggerHapticFor(@"trigger_bottom_two_finger_swipe_up");
                             if (RC_TriggerIsActionable(@"trigger_bottom_two_finger_swipe_up")) RC_FreezeGestureScrolling();
                             RCExecuteTrigger(@"trigger_bottom_two_finger_swipe_up");
                             SRLog(@"[RCMultiFinger] trigger_bottom_two_finger_swipe_up FIRED during move at dy=%.1f", user_dy);
