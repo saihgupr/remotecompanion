@@ -42,8 +42,10 @@
 @property (nonatomic, copy) NSArray<NSDictionary *> *bannerActions;
 // Actions with a banner of their own that have been switched off in Settings > Banners
 @property (nonatomic, copy) NSArray<NSString *> *bannerOptOut;
-// A banner that comes while the screen is off turns it on (off: the banner waits for the screen to turn on)
+// A notification banner that comes while the screen is off turns the display on
 @property (nonatomic, assign) BOOL toastsWakeScreen;
+// A notification banner that comes while the screen is off is saved and shown when the screen turns on (on by default)
+@property (nonatomic, assign) BOOL bannersWaitForScreenOn;
 // Unlock Device and lock toggle skip unlocking while the proximity sensor is covered, such as
 // in a pocket. Off by default (Settings > Advanced Settings > Options).
 @property (nonatomic, assign) BOOL onlyUnlockOutOfPocket;

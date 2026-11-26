@@ -1278,14 +1278,14 @@ static BOOL set_cellular_state(BOOL state) {
 
 static UIWindow *g_rcHUDWindow = nil;
 
-// Toasts while the screen is off: one shown then would slide in and out on a dark screen,
-// so it waits and shows when the screen next turns on. Settings > Banners > Wake Screen
-// turns the screen on for it instead. The newest three wait; ones older than 30 minutes
-// are dropped.
+// Notification banners while the screen is off: Wait Until Screen Turns On saves up to three
+// (dropping ones older than 30 minutes) to show when the screen wakes. Wake Screen turns
+// the display on independently when one arrives while the screen is off.
 static NSMutableArray<NSDictionary *> *g_rcPendingToasts = nil;
 static int g_rcBlankedToken = -1;
 static void rc_show_hud_toast_ex(NSString *title, NSString *subtitle, NSString *iconSymbol, NSTimeInterval hold, BOOL passThrough);
 static void rc_toast_wake_screen_if_set(void);
+static BOOL rc_banners_wait_for_screen_on(void);
 
 static void rc_show_pending_toasts(void) {
     NSArray<NSDictionary *> *pending = [g_rcPendingToasts copy];
@@ -1370,9 +1370,19 @@ static void rc_show_hud_toast_ex(NSString *title, NSString *subtitle, NSString *
     dispatch_async(dispatch_get_main_queue(), ^{
         // Test kit prompts are for someone watching, so they never wait
         if (!passThrough && rc_screen_is_blanked()) {
-            rc_queue_toast(title, subtitle, iconSymbol);
-            rc_toast_wake_screen_if_set(); // the waiting toast shows once the screen is on
-            return;
+            load_trigger_config();
+            BOOL wake = [g_triggerConfig[@"toastsWakeScreen"] boolValue];
+            BOOL wait = rc_banners_wait_for_screen_on();
+            if (wait) {
+                rc_queue_toast(title, subtitle, iconSymbol);
+                if (wake) rc_toast_wake_screen_if_set(); // the waiting banner shows once the screen is on
+                return;
+            }
+            if (wake) {
+                rc_toast_wake_screen_if_set();
+            } else {
+                return;
+            }
         }
         if (g_rcHUDWindow) {
             [g_rcHUDWindow.layer removeAllAnimations];
@@ -5508,8 +5518,14 @@ static BOOL rc_own_banner_enabled(NSString *bannerId) {
     return !([off isKindOfClass:[NSArray class]] && [off containsObject:bannerId]);
 }
 
-// Settings > Banners > Wake Screen: a toast that comes while the screen is off turns it on,
-// the way a press of the Power button would (the phone stays locked). One press for toasts
+static BOOL rc_banners_wait_for_screen_on(void) {
+    load_trigger_config();
+    id val = g_triggerConfig[@"bannersWaitForScreenOn"];
+    return val ? [val boolValue] : YES;
+}
+
+// Settings > Notification Banners > Wake Screen: a banner that comes while the screen is off turns it on,
+// the way a press of the Power button would (the phone stays locked). One press for banners
 // that come close together, so a second press can't turn the screen back off.
 static void rc_toast_wake_screen_if_set(void) {
     static NSDate *lastWake = nil;

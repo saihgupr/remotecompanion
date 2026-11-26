@@ -134,7 +134,7 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == RCAdvancedSettingsSectionBanners) {
-        return @"Actions that show a banner when a trigger runs them. A banner that comes while the screen is off waits until it turns on, unless Wake Screen is on.";
+        return @"Actions that show a notification banner when a trigger runs them. Wake Screen turns the display on when a banner arrives while the screen is off. Wait Until Screen Turns On saves banners that arrive while the screen is off and shows them when it wakes.";
     } else if (section == RCAdvancedSettingsSectionNFC) {
         if (![RCConfigManager nfcBackgroundReadingSupported]) return @"Experimental NFC requires iPhone XS or later.";
         if ([RCConfigManager sharedManager].nfcBackgroundReading) {
@@ -158,7 +158,7 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    if (section == RCAdvancedSettingsSectionBanners) return 2; // Banners, Wake Screen
+    if (section == RCAdvancedSettingsSectionBanners) return 3; // Banners, Wake Screen, Wait Until Screen Turns On
     if (section == RCAdvancedSettingsSectionNFC) return 3;
     if (section == RCAdvancedSettingsSectionButtons) return (NSInteger)[self timingRows].count;
     if (section == RCAdvancedSettingsSectionSwipes) return (NSInteger)[self swipeRows].count;
@@ -175,7 +175,7 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
         return RCLayoutSettingCell(screen[0], screen[1]);
     }
     
-    BOOL isValueRow = (indexPath.section == RCAdvancedSettingsSectionBanners) ||
+    BOOL isValueRow = (indexPath.section == RCAdvancedSettingsSectionBanners && indexPath.row == 0) ||
                       (indexPath.section == RCAdvancedSettingsSectionNFC && indexPath.row == 2) ||
                       (indexPath.section == RCAdvancedSettingsSectionOptions && (indexPath.row == 2 || indexPath.row == 0)) ||
                       (indexPath.section == RCAdvancedSettingsSectionButtons) ||
@@ -202,6 +202,13 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
         wakeSwitch.on = cm.toastsWakeScreen;
         [wakeSwitch addTarget:self action:@selector(toastsWakeScreenChanged:) forControlEvents:UIControlEventValueChanged];
         cell.accessoryView = wakeSwitch;
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+    } else if (indexPath.section == RCAdvancedSettingsSectionBanners && indexPath.row == 2) {
+        cell.textLabel.text = @"Wait Until Screen Turns On";
+        UISwitch *waitSwitch = [[UISwitch alloc] init];
+        waitSwitch.on = cm.bannersWaitForScreenOn;
+        [waitSwitch addTarget:self action:@selector(bannersWaitForScreenOnChanged:) forControlEvents:UIControlEventValueChanged];
+        cell.accessoryView = waitSwitch;
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
     } else if (indexPath.section == RCAdvancedSettingsSectionBanners) {
         cell.textLabel.text = @"Banners";
@@ -436,6 +443,10 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
 }
 - (void)toastsWakeScreenChanged:(UISwitch *)sender {
     [RCConfigManager sharedManager].toastsWakeScreen = sender.on;
+}
+
+- (void)bannersWaitForScreenOnChanged:(UISwitch *)sender {
+    [RCConfigManager sharedManager].bannersWaitForScreenOn = sender.on;
 }
 
 - (void)chooseLogLevelFromView:(UIView *)sourceView {

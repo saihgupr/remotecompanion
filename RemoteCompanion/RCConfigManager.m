@@ -881,6 +881,18 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
     [self saveConfig];
 }
 
+- (BOOL)bannersWaitForScreenOn {
+    if (!_config[@"bannersWaitForScreenOn"]) {
+        return YES;
+    }
+    return [_config[@"bannersWaitForScreenOn"] boolValue];
+}
+
+- (void)setBannersWaitForScreenOn:(BOOL)bannersWaitForScreenOn {
+    _config[@"bannersWaitForScreenOn"] = @(bannersWaitForScreenOn);
+    [self saveConfig];
+}
+
 - (BOOL)hapticsEnabled {
     // Default to YES if missing
     if (!_config[@"hapticsEnabled"]) {

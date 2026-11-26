@@ -2659,8 +2659,20 @@
         <div class="action-row-text" style="flex:1">Banners<br><span id="setting-banners-count" style="font-size:13px;color:var(--rc-label-2);font-weight:400">Off</span></div>
         <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
       </div>
+      <div class="settings-row">
+        <span class="settings-label">Wake Screen</span>
+        <div class="settings-btn">
+          <input type="checkbox" class="ios-toggle" id="setting-toasts-wake-screen" onchange="config.toastsWakeScreen=this.checked;saveConfig()">
+        </div>
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">Wait Until Screen Turns On</span>
+        <div class="settings-btn">
+          <input type="checkbox" class="ios-toggle" id="setting-banners-wait-screen" checked onchange="config.bannersWaitForScreenOn=this.checked;saveConfig()">
+        </div>
+      </div>
     </div>
-    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 32px 0">Actions that show a banner when a trigger runs them.</div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 32px 0">Actions that show a notification banner when a trigger runs them. Wake Screen turns the display on when a banner arrives while the screen is off. Wait Until Screen Turns On saves banners that arrive while the screen is off and shows them when it wakes.</div>
     <div class="action-list-header">NFC</div>
     <div class="action-list-card">
       <div class="settings-row">
@@ -10253,6 +10265,10 @@ function openAdvancedPanel() {
   if (devModeEl) devModeEl.checked = !!config.developerMode;
   const wrapEl = document.getElementById('setting-wrap-names');
   if (wrapEl) wrapEl.checked = isWrapLongNamesEnabled();
+  const wakeScreenEl = document.getElementById('setting-toasts-wake-screen');
+  if (wakeScreenEl) wakeScreenEl.checked = !!config.toastsWakeScreen;
+  const waitScreenEl = document.getElementById('setting-banners-wait-screen');
+  if (waitScreenEl) waitScreenEl.checked = (config.bannersWaitForScreenOn == null) ? true : !!config.bannersWaitForScreenOn;
   syncExperimentalNFCUI();
   updateNFCScreenOffLabel();
   updateNFCFooter();
