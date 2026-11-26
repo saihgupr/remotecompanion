@@ -22,6 +22,7 @@
 #import "RCScheduledTriggerViewController.h"
 #import "RCMQTTTriggerViewController.h"
 #import "RCCategoryBar.h"
+#import "RCSectionIndexBar.h"
 #import "RCActionTile.h"
 #import "RCTriggersGrid.h"
 #import "RCTriggerIcons.h"
@@ -264,6 +265,8 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
 // Category bar: the section shown on its own, or nil for all. Kept by title because
 // sections come and go (Favorites, NFC, Wi-Fi, ... only appear when they have triggers).
 @property (nonatomic, strong) RCCategoryBar *categoryBar;
+// The section index down the left edge of the list (not the Compact grid)
+@property (nonatomic, strong) RCSectionIndexBar *sectionIndexBar;
 @property (nonatomic, copy) NSString *selectedCategoryTitle;
 // The width the visible cells' card backgrounds were drawn for
 @property (nonatomic, assign) CGFloat cardStyleWidth;
@@ -272,6 +275,8 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
 // The name and version footer under the list and the grid
 @property (nonatomic, strong) UIView *tableFooterView;
 @property (nonatomic, strong) UIView *gridFooterView;
+- (void)updateSectionIndexBarAnimated:(BOOL)animated;
+- (void)layoutSectionIndexBar;
 @end
 
 @implementation RCTriggersViewController
@@ -435,8 +440,15 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
         weakSelf.selectedCategoryTitle = (index >= 0 && index < (NSInteger)weakSelf.sectionTitles.count) ? weakSelf.sectionTitles[index] : nil;
         [weakSelf.tableView reloadData];
         [weakSelf.grid reload];
+        [weakSelf updateSectionIndexBarAnimated:YES];
     };
     [self.categoryBar attachToTableView:self.tableView];
+
+    // The section index down the left edge: built by reloadTableData once the
+    // sections are known, laid out with the view
+    self.sectionIndexBar = [[RCSectionIndexBar alloc] initWithFrame:CGRectZero];
+    self.sectionIndexBar.tableView = self.tableView;
+    [self.view addSubview:self.sectionIndexBar];
 
     // Pull-to-refresh
     self.refreshControl = [[UIRefreshControl alloc] init];
@@ -520,6 +532,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     } completion:^(__unused id<UIViewControllerTransitionCoordinatorContext> context) {
         [self.grid reload];
         [self.categoryBar layoutInScrollView:[self activeScrollView]];
+        [self layoutSectionIndexBar];
     }];
 }
 
@@ -552,6 +565,8 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     [self.tableView reloadData];
     [self.grid reload];
     [self.categoryBar layoutInScrollView:active];
+    [self updateSectionIndexBarAnimated:YES];
+    [self layoutSectionIndexBar];
 }
 
 - (void)handleTweaksChanged:(NSNotification *)note {
@@ -954,6 +969,10 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     if (selected == NSNotFound) self.selectedCategoryTitle = nil;
     self.categoryBar.selectedIndex = (selected == NSNotFound) ? -1 : (NSInteger)selected;
 
+    // The left rail: one short code per section, the same icons as the chips
+    [self.sectionIndexBar setSectionTitles:titles icons:chipIcons];
+    [self updateSectionIndexBarAnimated:NO];
+
     [self updatePauseState]; // the left button is Resume while paused, otherwise none
 
     [self updateEmptyState];
@@ -963,8 +982,24 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
 
 #pragma mark - Onboarding
 
+// The left rail belongs to the full list: the Compact grid, a single category
+// and an empty screen all leave nothing to scrub.
+- (void)updateSectionIndexBarAnimated:(BOOL)animated {
+    BOOL show = !self.compactLayout && self.selectedCategoryTitle == nil && self.sectionTitles.count > 1;
+    [self.sectionIndexBar setShown:show animated:animated];
+}
+
+// The rail starts below the navigation bar, the large title and the category
+// bar (one to three lines, per Settings > Layout). The table's adjusted inset
+// is exactly the top of its first visible row.
+- (void)layoutSectionIndexBar {
+    self.sectionIndexBar.topChrome = self.tableView.adjustedContentInset.top;
+    [self.sectionIndexBar layoutInView:self.view];
+}
+
 // With no trigger added, the list is empty: hide the category bar and show the invitation
 - (void)updateEmptyState {
+    [self updateSectionIndexBarAnimated:NO];
     BOOL empty = self.sections.count == 0;
     BOOL wasHidden = self.emptyView.hidden || self.emptyView.superview == nil;
     self.categoryBar.hidden = empty;
@@ -1380,9 +1415,15 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     [self.categoryBar scrollViewDidScroll:scrollView];
 }
 
+// A finger on the list takes over from a section glide still running
+- (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView {
+    [self.sectionIndexBar cancelScrollAnimation];
+}
+
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
     [self.categoryBar layoutInScrollView:[self activeScrollView]];
+    [self layoutSectionIndexBar];
 
     // Keep the invitation below the navigation bar when its height changes
     if (!self.emptyView.hidden) [self.emptyView setNeedsLayout];
