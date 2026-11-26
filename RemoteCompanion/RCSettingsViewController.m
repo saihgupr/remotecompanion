@@ -27,7 +27,7 @@
 @property (nonatomic, strong) UISwitch *webUISwitch;
 @end
 
-// Sections of the Settings table, in order. Holiday sits at the bottom, above the footer.
+// Sections of the Settings table, in order.
 typedef NS_ENUM(NSInteger, RCSettingsSection) {
     RCSettingsSectionGeneral,
     RCSettingsSectionIntegrations,
@@ -35,7 +35,6 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     RCSettingsSectionGestures,
     RCSettingsSectionDiagnostics,
     RCSettingsSectionBackup,
-    RCSettingsSectionHoliday,
 };
 
 @implementation RCSettingsViewController
@@ -212,7 +211,7 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
 #pragma mark - Table View Data Source
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    return RCSettingsSectionHoliday + 1;
+    return RCSettingsSectionBackup + 1;
 }
 
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
@@ -222,8 +221,7 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     else if (section == RCSettingsSectionAdvanced) title = @"Advanced Settings";
     else if (section == RCSettingsSectionGestures) title = @"Gestures";
     else if (section == RCSettingsSectionDiagnostics) title = @"Diagnostics";
-    else if (section == RCSettingsSectionBackup) title = @"Backup";
-    else title = @"Holiday";
+    else title = @"Backup";
     
     // The first header sits close under the large title; the other sections keep
     // the 10pt of air the old sectionHeaderTopPadding supplied, so the gaps
@@ -257,15 +255,13 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
         return @"See what's running on this device, and run tests that share their results.";
     } else if (section == RCSettingsSectionBackup) {
         return @"Export saves everything on this device: settings, integrations, triggers, add-ons, gestures and variables. Import puts it back on any device. The file may include saved passwords and tokens, so keep it private.";
-    } else if (section == RCSettingsSectionHoliday) {
-        return @"Show a slow snowfall in the app.";
     }
     return nil;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if (section == RCSettingsSectionGeneral) {
-        return [RCConfigManager sharedManager].webUIEnabled ? 4 : 2;
+        return [RCConfigManager sharedManager].webUIEnabled ? 5 : 3;
     }
     if (section == RCSettingsSectionBackup) {
         return 2; // Export / Import
@@ -280,16 +276,13 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
         // Integrations, then Add-ons (ADDONS.md) once the tweak has written its catalog
         return [RCAddOnCatalog catalogAvailable] ? 2 : 1;
     }
-    if (section == RCSettingsSectionHoliday) {
-        return 1; // Holiday Mode
-    }
     return 1; // Gestures
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     RCConfigManager *cm = [RCConfigManager sharedManager];
     
-    BOOL isLinkRow = (indexPath.section == RCSettingsSectionGeneral && indexPath.row >= 2);
+    BOOL isLinkRow = (indexPath.section == RCSettingsSectionGeneral && cm.webUIEnabled && (indexPath.row == 2 || indexPath.row == 3));
     UITableViewCellStyle style = isLinkRow ? UITableViewCellStyleValue1 : UITableViewCellStyleDefault;
     UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:style reuseIdentifier:nil];
     cell.backgroundColor = [cm tweakColorForKey:@"blockBackground" defaultVal:0.12];
@@ -322,14 +315,21 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
             [_webUISwitch addTarget:self action:@selector(webUIToggleChanged:) forControlEvents:UIControlEventValueChanged];
             cell.accessoryView = _webUISwitch;
             cell.selectionStyle = UITableViewCellSelectionStyleNone;
-        } else if (indexPath.row == 2) {
+        } else if (cm.webUIEnabled && indexPath.row == 2) {
             cell.textLabel.text = @"Access";
             cell.detailTextLabel.text = [RCWebUIAccessViewController titleForAccess:cm.webUIAccess];
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-        } else if (indexPath.row == 3) {
+        } else if (cm.webUIEnabled && indexPath.row == 3) {
             cell.textLabel.text = @"Open Web UI";
             cell.detailTextLabel.text = [self webUIUrlString];
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        } else {
+            cell.textLabel.text = @"Holiday Mode";
+            UISwitch *holidaySwitch = [[UISwitch alloc] init];
+            holidaySwitch.on = cm.holidayModeEnabled;
+            [holidaySwitch addTarget:self action:@selector(holidayModeToggleChanged:) forControlEvents:UIControlEventValueChanged];
+            cell.accessoryView = holidaySwitch;
+            cell.selectionStyle = UITableViewCellSelectionStyleNone;
         }
     } else if (indexPath.section == RCSettingsSectionIntegrations && indexPath.row == 1) {
         cell.textLabel.text = @"Add-ons";
@@ -395,13 +395,6 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
             cell.imageView.tintColor = [UIColor systemTealColor];
         }
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-    } else if (indexPath.section == RCSettingsSectionHoliday) {
-        cell.textLabel.text = @"Holiday Mode";
-        UISwitch *holidaySwitch = [[UISwitch alloc] init];
-        holidaySwitch.on = cm.holidayModeEnabled;
-        [holidaySwitch addTarget:self action:@selector(holidayModeToggleChanged:) forControlEvents:UIControlEventValueChanged];
-        cell.accessoryView = holidaySwitch;
-        cell.selectionStyle = UITableViewCellSelectionStyleNone;
     }
     
     return cell;
@@ -410,9 +403,10 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
 
-    if (indexPath.section == RCSettingsSectionGeneral && indexPath.row == 2) {
+    RCConfigManager *cm = [RCConfigManager sharedManager];
+    if (indexPath.section == RCSettingsSectionGeneral && cm.webUIEnabled && indexPath.row == 2) {
         [self.navigationController pushViewController:[[RCWebUIAccessViewController alloc] init] animated:YES];
-    } else if (indexPath.section == RCSettingsSectionGeneral && indexPath.row == 3) {
+    } else if (indexPath.section == RCSettingsSectionGeneral && cm.webUIEnabled && indexPath.row == 3) {
         [self openWebUI];
     } else if (indexPath.section == RCSettingsSectionIntegrations && indexPath.row == 1) {
         [self.navigationController pushViewController:[[RCAddOnsViewController alloc] initShowing:RCAddOnsListAll] animated:YES];
