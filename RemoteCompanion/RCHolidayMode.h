@@ -1,25 +1,20 @@
 #import <UIKit/UIKit.h>
 
-// Holiday Mode: the red present in the main screen's header and the slow snowfall it turns on.
+// Holiday Mode: slow snowfall in the app controlled by the Holiday Mode toggle in Settings.
 //
-// The setting lives in the shared config (`holidayModeEnabled`, on by default) so the Web UI can
-// change it too; the snow itself is only ever on after the present has been tapped, and it starts
-// off again on every launch.
+// The setting lives in the shared config (`holidayModeEnabled`, off by default) so the Web UI can
+// change it too.
 @interface RCHolidayMode : NSObject
 
 + (BOOL)isEnabled;
 + (void)setEnabled:(BOOL)enabled;
 
 + (BOOL)isSnowing;
-+ (void)toggleSnow;
++ (void)startSnow;
 + (void)stopSnow;
 
-// Settles the snow against the config: stops it when Holiday Mode has been turned off. Safe to
-// call as often as you like.
+// Settles the snow against the config: starts it when Holiday Mode is on, stops it when off.
+// Safe to call as often as you like.
 + (void)refresh;
-
-// The present: a red gift that toggles the snow. One bar button item per screen is enough;
-// keep the one it returns and reuse it.
-+ (UIBarButtonItem *)presentBarButtonItemWithTarget:(id)target action:(SEL)action;
 
 @end

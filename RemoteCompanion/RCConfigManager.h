@@ -49,8 +49,8 @@
 // Unlock Device and lock toggle skip unlocking while the proximity sensor is covered, such as
 // in a pocket. Off by default (Settings > Advanced Settings > Options).
 @property (nonatomic, assign) BOOL onlyUnlockOutOfPocket;
-// Show a red present in the main screen's header that toggles a slow snowfall. On by default
-// (Settings > Advanced Settings > Options, and the Web UI).
+// Show a slow snowfall in the app and Web UI. Off by default
+// (Settings > Advanced Settings > Options, Settings > Holiday Mode, and the Web UI).
 @property (nonatomic, assign) BOOL holidayModeEnabled;
 @property (nonatomic, assign) BOOL nfcEnabled;
 // Seconds the NFC scan keeps going after the screen turns off (0: only while the screen is on)

@@ -407,9 +407,9 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
             [self saveConfig];
         }
 
-        // Auto-add holidayModeEnabled (default to YES: the present shows until it is turned off)
+        // Auto-add holidayModeEnabled (default to NO: snowfall is off until enabled)
         if (_config[@"holidayModeEnabled"] == nil) {
-            _config[@"holidayModeEnabled"] = @YES;
+            _config[@"holidayModeEnabled"] = @NO;
             [self saveConfig];
         }
 
@@ -453,7 +453,7 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
             @"freezeListsDuringGestures": @YES,
             @"allowDirectRootHelper": @NO,
             @"onlyUnlockOutOfPocket": @NO,
-            @"holidayModeEnabled": @YES,
+            @"holidayModeEnabled": @NO,
             @"developerMode": @NO,
             @"disableWakeOnPower": @NO,
             @"disablePowerConnectedHaptics": @NO,
@@ -650,11 +650,8 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
     [self saveConfig];
 }
 
-// Missing means on: the present is there for anyone who has not turned Holiday Mode off
+// Missing means off: Holiday Mode snowfall is opt-in
 - (BOOL)holidayModeEnabled {
-    if (!_config[@"holidayModeEnabled"]) {
-        return YES;
-    }
     return [_config[@"holidayModeEnabled"] boolValue];
 }
 

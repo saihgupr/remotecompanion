@@ -262,7 +262,6 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
 @property (nonatomic, strong) UIBarButtonItem *resumeItem;
 // The red present at the left of the header: turns the holiday snow on and off. Only in the
 // list while Holiday Mode is on.
-@property (nonatomic, strong) UIBarButtonItem *holidayItem;
 @property (nonatomic, assign) UITableViewStyle tableStyle;
 @property (nonatomic, strong) NSArray<NSArray<NSString *> *> *sections;
 @property (nonatomic, strong) NSArray<NSString *> *sectionTitles;
@@ -517,45 +516,15 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     [self applyLayout];
 }
 
-// The top left: the holiday present, Edit in Compact, and Resume while button triggers are
-// paused by the action
+// The top left: Edit in Compact, and Resume while button triggers are paused by the action
 - (void)updateLeftItems {
     NSMutableArray *items = [NSMutableArray array];
-    // The present first, so it keeps its place as Edit and Resume come and go
-    if ([RCHolidayMode isEnabled]) [items addObject:self.holidayItem];
     if ([self compactLayout] && self.grid) [items addObject:self.editButtonItem];
     if (self.pausedByAction) {
         if (!self.resumeItem) self.resumeItem = [[UIBarButtonItem alloc] initWithTitle:@"Resume" style:UIBarButtonItemStylePlain target:self action:@selector(resumeButtonTriggers)];
         [items addObject:self.resumeItem];
     }
     self.navigationItem.leftBarButtonItems = items;
-}
-
-// One present for the life of this screen, so it keeps its glow and its place
-- (UIBarButtonItem *)holidayItem {
-    if (!_holidayItem) {
-        _holidayItem = [RCHolidayMode presentBarButtonItemWithTarget:self action:@selector(toggleHolidaySnow)];
-    }
-    return _holidayItem;
-}
-
-- (void)toggleHolidaySnow {
-    [RCHolidayMode toggleSnow];
-}
-
-// Hide the present when the large title collapses into the compact inline bar on scroll
-- (void)updateHolidayItemVisibility {
-    if (!_holidayItem) return;
-    UINavigationBar *navBar = self.navigationController.navigationBar;
-    BOOL collapsed = navBar && CGRectGetHeight(navBar.bounds) <= 56.0;
-    UIView *view = _holidayItem.customView;
-    view.userInteractionEnabled = !collapsed;
-    CGFloat targetAlpha = collapsed ? 0.0 : 1.0;
-    if (view.alpha != targetAlpha) {
-        [UIView animateWithDuration:0.15 delay:0 options:UIViewAnimationOptionBeginFromCurrentState animations:^{
-            view.alpha = targetAlpha;
-        } completion:nil];
-    }
 }
 
 // The grid's columns and margins follow a rotation (and the Dynamic Island in landscape)
@@ -1476,7 +1445,6 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
 
 - (void)scrollViewDidScroll:(UIScrollView *)scrollView {
     [self.categoryBar scrollViewDidScroll:scrollView];
-    [self updateHolidayItemVisibility];
 }
 
 // A finger on the list takes over from a section glide still running
@@ -1488,7 +1456,6 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     [super viewDidLayoutSubviews];
     [self.categoryBar layoutInScrollView:[self activeScrollView]];
     [self layoutSectionIndexBar];
-    [self updateHolidayItemVisibility];
 
     // Keep the invitation below the navigation bar when its height changes
     if (!self.emptyView.hidden) [self.emptyView setNeedsLayout];

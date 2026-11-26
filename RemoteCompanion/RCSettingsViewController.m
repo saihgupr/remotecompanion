@@ -258,7 +258,7 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     } else if (section == RCSettingsSectionBackup) {
         return @"Export saves everything on this device: settings, integrations, triggers, add-ons, gestures and variables. Import puts it back on any device. The file may include saved passwords and tokens, so keep it private.";
     } else if (section == RCSettingsSectionHoliday) {
-        return @"Show the holiday present in the header to toggle snowfall.";
+        return @"Show a slow snowfall in the app.";
     }
     return nil;
 }
