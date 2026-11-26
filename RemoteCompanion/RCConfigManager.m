@@ -2388,9 +2388,9 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
             }
             firstArg = [firstArg stringByReplacingOccurrencesOfString:@"\\\"" withString:@"\""];
             if (firstArg.length > 0) {
-                result = [NSString stringWithFormat:@"Toast %@", firstArg];
+                result = [NSString stringWithFormat:@"Notification Banner %@", firstArg];
             } else {
-                result = @"Toast";
+                result = @"Notification Banner";
             }
         } else if ([cmd hasPrefix:@"snapper "] || [cmd isEqualToString:@"snapper"]) {
             NSString *sub = [cmd hasPrefix:@"snapper "] ? [cmd substringFromIndex:8] : @"";

@@ -465,7 +465,7 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
             @{ @"name": @"Delay", @"command": @"__DELAY__", @"icon": @"hourglass" },
             @{ @"name": @"Stop Trigger...", @"command": @"__STOP_TRIGGER__", @"icon": @"stop.circle" },
             @{ @"name": @"Terminal Command", @"command": @"__CUSTOM__", @"icon": @"terminal.fill" },
-            @{ @"name": @"Toast...", @"command": @"__TOAST__", @"icon": @"text.bubble.fill" },
+            @{ @"name": @"Notification Banner...", @"command": @"__TOAST__", @"icon": @"text.bubble.fill", @"keywords": @"toast hud banner" },
             @{ @"name": @"Notification...", @"command": @"__NOTIFICATION__", @"icon": @"bell.badge.fill", @"keywords": @"notify alert banner apple watch only" },
             @{ @"name": @"Clear Notifications...", @"command": @"__CLEAR_NOTIFICATIONS__", @"icon": @"bell.slash.fill" },
             @{ @"name": @"Haptic Feedback", @"command": @"haptic", @"icon": @"hand.tap.fill" }

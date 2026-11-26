@@ -48,7 +48,7 @@ with the reason.
 ## Example
 
 The [`examples/`](examples) folder has files you can try without any other tweak:
-`hello.json` (`hello greet goodbye` shows a toast), `uptime.json` (the guide's first add-on) and
+`hello.json` (`hello greet goodbye` shows a notification banner), `uptime.json` (the guide's first add-on) and
 `cookbook.json` (every pattern in the guide).
 
 Here's a fuller one, for an imaginary night light tweak:

@@ -250,7 +250,7 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     } else if (section == RCSettingsSectionIntegrations) {
         return @"Configure connections to external services, automations, and iOS behavior tweaks.";
     } else if (section == RCSettingsSectionAdvanced) {
-        return @"Advanced Settings holds NFC, banners, logging and display options. Variables shows what Set Variable actions save.";
+        return @"Advanced Settings holds NFC, notification banners, logging and display options. Variables shows what Set Variable actions save.";
     } else if (section == RCSettingsSectionGestures) {
         return @"Recorded gestures and the recording tab's options.";
     } else if (section == RCSettingsSectionDiagnostics) {

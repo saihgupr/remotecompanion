@@ -296,7 +296,7 @@ for a number keyboard.
 
 Typed text stays text even if it happens to contain one of the action's choice words. If it
 starts with one, the app quietly puts `--` in front so it's still read as text. This example
-uses a `command` step, which runs any RemoteCompanion command; here it shows a toast.
+uses a `command` step, which runs any RemoteCompanion command; here it shows a notification banner.
 
 ### Wait for your tweak to confirm
 

@@ -1301,7 +1301,7 @@ static void rc_show_pending_toasts(void) {
         });
         shown++;
     }
-    if (pending.count) SRLog(@"[RCToast] Screen on: showing %lu waiting toast(s)", (unsigned long)shown);
+    if (pending.count) SRLog(@"[RCBanner] Screen on: showing %lu waiting notification banner(s)", (unsigned long)shown);
 }
 
 // YES while the screen is off. The first call starts watching for it to turn back on.
@@ -1326,7 +1326,7 @@ static void rc_queue_toast(NSString *title, NSString *subtitle, NSString *iconSy
     toast[@"icon"] = iconSymbol;
     [g_rcPendingToasts addObject:toast];
     while (g_rcPendingToasts.count > 3) [g_rcPendingToasts removeObjectAtIndex:0];
-    SRLog(@"[RCToast] Screen off: '%@' waits for the screen to turn on", title ?: @"");
+    SRLog(@"[RCBanner] Screen off: '%@' waits for the screen to turn on", title ?: @"");
 }
 
 static NSArray<NSString *> *rc_parse_quoted_arguments(NSString *argString) {
@@ -1363,7 +1363,7 @@ static NSArray<NSString *> *rc_parse_quoted_arguments(NSString *argString) {
 static void rc_show_hud_toast_ex(NSString *title, NSString *subtitle, NSString *iconSymbol, NSTimeInterval hold, BOOL passThrough) {
     if (!passThrough) {
         if ([[NSThread currentThread].threadDictionary[@"rcRunToastsDisabled"] boolValue]) {
-            SRLog(@"[Toast] Suppressed: toasts disabled for this trigger sequence");
+            SRLog(@"[RCBanner] Suppressed: notification banners disabled for this trigger sequence");
             return;
         }
     }
@@ -5533,7 +5533,7 @@ static void rc_toast_wake_screen_if_set(void) {
     if (![g_triggerConfig[@"toastsWakeScreen"] boolValue]) return;
     if (lastWake && [[NSDate date] timeIntervalSinceDate:lastWake] < 3.0) return;
     lastWake = [NSDate date];
-    SRLog(@"[RCToast] Waking the screen for a toast");
+    SRLog(@"[RCBanner] Waking the screen for a notification banner");
     inject_hid_event(kHIDPage_Consumer, kHIDUsage_Csmr_Power, 0, 0);
 }
 
@@ -12469,7 +12469,7 @@ static NSArray *RCCommandHelpSections(void) {
             @[@"type \"Text\"", @"Type text"],
             @[@"paste \"Text\"", @"Paste text"],
             @[@"key <hex>", @"Press a HID key (0x28 is Return)"],
-            @[@"toast \"Title\" [\"Subtitle\"] [\"Symbol\"]", @"Show a HUD toast"],
+            @[@"toast \"Title\" [\"Subtitle\"] [\"Symbol\"]", @"Show a notification banner"],
             @[@"notify \"Title\" [\"Body\"] [--urgent] [--watch [only]]", @"Post a notification"],
             @[@"clear-notifications", @"Dismiss notifications"],
             @[@"watch theater [on|off|toggle]", @"Set or toggle Apple Watch Theater Mode"],
@@ -14613,8 +14613,8 @@ static NSString *handle_command(NSString *cmd) {
             return [NSString stringWithFormat:@"AudioMix %@\n", !current ? @"Enabled" : @"Disabled"];
         }
     } else if ([cleanCmd isEqualToString:@"toast"]) {
-        rc_show_hud_toast(@"Test Toast", nil, nil);
-        return @"Toast displayed\n";
+        rc_show_hud_toast(@"Test Notification Banner", nil, nil);
+        return @"Notification banner displayed\n";
     } else if ([cleanCmd hasPrefix:@"toast "]) {
         NSString *argsStr = [[cleanCmd substringFromIndex:6] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         NSArray *arguments = rc_parse_quoted_arguments(argsStr);
@@ -14640,7 +14640,7 @@ static NSString *handle_command(NSString *cmd) {
         }
         
         rc_show_hud_toast(title, subtitle, icon);
-        return [NSString stringWithFormat:@"Toast displayed: '%@' - '%@' (%@)\n", title ?: @"", subtitle ?: @"", icon ?: @"none"];
+        return [NSString stringWithFormat:@"Notification banner displayed: '%@' - '%@' (%@)\n", title ?: @"", subtitle ?: @"", icon ?: @"none"];
     } else if ([cleanCmd isEqualToString:@"queuealbum"] || [cleanCmd isEqualToString:@"queue album"]) {
         // Signal AudioReceiver app to queue the album of the currently playing song
         [@"queuealbum" writeToFile:@"/tmp/audiostream_pending_cmd" atomically:YES encoding:NSUTF8StringEncoding error:nil];

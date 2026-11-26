@@ -2346,7 +2346,7 @@
         <i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>
       </div>
     </div>
-    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 32px 0">Advanced Settings holds NFC, banners, logging and display options.</div>
+    <div style="color:var(--rc-label-2);font-size:13px;margin:8px 32px 0">Advanced Settings holds NFC, notification banners, logging and display options.</div>
 
     <div class="action-list-header">Diagnostics</div>
     <div class="action-list-card">
@@ -3220,8 +3220,8 @@
 <!-- ══ TOAST ACTION DIALOG ═════════════════════════════════════════════ -->
 <div class="dialog-backdrop" id="toast-dialog-backdrop">
   <div class="dialog-box toast-dialog">
-    <div class="dialog-title" id="toast-dialog-title">Toast Notification</div>
-    <div class="dialog-msg">Shows a small alert on the device.</div>
+    <div class="dialog-title" id="toast-dialog-title">Notification Banner</div>
+    <div class="dialog-msg">Shows a notification banner on the device.</div>
 
     <div class="toast-dialog-body">
       <div class="toast-section-header">Content</div>
@@ -3264,7 +3264,7 @@
         <div class="toast-preview-chip" id="toast-live-preview">
           <span class="toast-preview-icon"><i class="f7-icons" id="toast-preview-icon">text_bubble</i></span>
           <div class="toast-preview-text">
-            <span class="toast-preview-title" id="toast-preview-title">Toast Title</span>
+            <span class="toast-preview-title" id="toast-preview-title">Notification Banner</span>
             <span class="toast-preview-subtitle" id="toast-preview-subtitle">Subtitle</span>
           </div>
         </div>
@@ -4601,6 +4601,20 @@ function nameForCmd(cmd) {
   if (lowCmd === 'dance party' || lowCmd === 'dance party toggle') return 'Dance Party';
   if (lowCmd === 'dance party on') return 'Dance Party On';
   if (lowCmd === 'dance party off') return 'Dance Party Off';
+  if (lowCmd === 'toast') return 'Notification Banner';
+  if (lowCmd.startsWith('toast ')) {
+    const argStr = cmd.slice(6).trim();
+    let first = argStr;
+    if (argStr.startsWith('"')) {
+      const endQ = argStr.indexOf('"', 1);
+      first = endQ !== -1 ? argStr.slice(1, endQ) : argStr.slice(1);
+    } else {
+      const sp = argStr.indexOf(' ');
+      if (sp !== -1) first = argStr.slice(0, sp);
+    }
+    first = first.replaceAll('\\"', '"');
+    return first ? `Notification Banner ${first}` : 'Notification Banner';
+  }
   if (lowCmd.startsWith('flashlight ')) return `Flashlight ${cmd.slice(11)}%`;
   if (lowCmd.startsWith('lua:'))          return `Lua: ${cmd.slice(4)}`;
   if (lowCmd.startsWith('delay '))        return `Delay ${cmd.slice(6)}s`;
@@ -5019,7 +5033,7 @@ const ACTION_SECTIONS = [
     { name:'Delay…',            cmd:'__DELAY__',     icon:'hourglass', needs_input:true },
     { name:'Terminal Command…', cmd:'__CUSTOM__',    icon:'chevron_right_square_fill', needs_input:true },
     { name:'Lua Script…',       cmd:'__LUA_SCRIPT__',icon:'doc_text_fill', needs_input:true },
-    { name:'HUD Toast…',        cmd:'__TOAST__',     icon:'text_bubble', needs_input:true },
+    { name:'Notification Banner…', cmd:'__TOAST__',     icon:'text_bubble', needs_input:true, keywords:'toast hud banner' },
     { name:'Clear Notifications…', cmd:'__CLEAR_NOTIFICATIONS__', icon:'bell_slash_fill', needs_input:true },
     { name:'Haptic Feedback',   cmd:'haptic',        icon:'hand_raised_fill' },
     { name:'Set Volume…',       cmd:'__SET_VOLUME__',icon:'slider_horizontal_3', needs_input:true },
@@ -7305,7 +7319,7 @@ function promptLevelAction(prefix, idx) {
 function promptToastModal(initialCmd = '', editIdx = null) {
   g_editingToastIdx = editIdx;
   varEdStart({ mode: 'toast', typed: {}, nameText: '', picked: null, typingNew: false }, null); // names for the + menus
-  const title = (editIdx !== null) ? 'Edit Toast Notification' : 'Toast Notification';
+  const title = (editIdx !== null) ? 'Edit Notification Banner' : 'Notification Banner';
   document.getElementById('toast-dialog-title').textContent = title;
   
   let tTitle = '';
@@ -7339,7 +7353,7 @@ function setToastIconPreset(iconName) {
 }
 
 function updateToastPreview() {
-  const tTitle = document.getElementById('toast-title-input').value.trim() || 'Toast Title';
+  const tTitle = document.getElementById('toast-title-input').value.trim() || 'Notification Banner';
   const tSub = document.getElementById('toast-subtitle-input').value.trim();
   const tIcon = document.getElementById('toast-icon-input').value.trim() || 'text_bubble';
   
@@ -9739,7 +9753,7 @@ function showEllipsisMenu(e) {
       action: () => toggleCurrentTriggerHaptics()
     },
     {
-      label: toastsEnabled ? 'Disable Toasts' : 'Enable Toasts',
+      label: toastsEnabled ? 'Disable Notification Banners' : 'Enable Notification Banners',
       icon: toastsEnabled ? 'slash_circle' : 'text_bubble',
       action: () => toggleCurrentTriggerToasts()
     },
@@ -9775,7 +9789,7 @@ function toggleCurrentTriggerToasts() {
   } else {
     t.toasts = false;
   }
-  showToast(next ? '✓ Toasts Enabled' : '✓ Toasts Disabled');
+  showToast(next ? '✓ Notification Banners Enabled' : '✓ Notification Banners Disabled');
   saveConfig();
 }
 
