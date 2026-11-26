@@ -338,10 +338,14 @@ if [[ "$1" == "pull-backup" ]]; then
     fi
 
     if [[ "$IP" == "127.0.0.1" ]]; then
-        NEWEST=$(ls -t "$REMOTE_DIR"/*.tar.gz 2>/dev/null | head -n1)
+        # The newest archive: .tar.gz from the CLI, .tar.xz from older IAmLazy versions (the folder
+        # listed and filtered by name, not globs, which zsh refuses when one has no match)
+        NEWEST=$(ls -t "$REMOTE_DIR" 2>/dev/null | grep -E '\.(tar\.(gz|xz|zst)|tgz)$' | head -n1)
+        [ -n "$NEWEST" ] && NEWEST="$REMOTE_DIR/$NEWEST"
         REMOTE_SIZE=$(wc -c < "$NEWEST" 2>/dev/null | tr -d ' ')
     else
-        NEWEST=$(ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no mobile@$IP "ls -t '$REMOTE_DIR'/*.tar.gz 2>/dev/null | head -n1")
+        NEWEST=$(ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no mobile@$IP "ls -t '$REMOTE_DIR'" 2>/dev/null | grep -E '\.(tar\.(gz|xz|zst)|tgz)$' | head -n1)
+        [ -n "$NEWEST" ] && NEWEST="$REMOTE_DIR/$NEWEST"
         if [ -n "$NEWEST" ]; then
             REMOTE_SIZE=$(ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no mobile@$IP "wc -c < '$NEWEST'" 2>/dev/null | tr -d ' ')
         fi
