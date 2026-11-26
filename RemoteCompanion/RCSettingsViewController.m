@@ -27,7 +27,7 @@
 @property (nonatomic, strong) UISwitch *webUISwitch;
 @end
 
-// Sections of the Settings table, in order. Backup sits at the bottom.
+// Sections of the Settings table, in order. Holiday sits at the bottom, above the footer.
 typedef NS_ENUM(NSInteger, RCSettingsSection) {
     RCSettingsSectionGeneral,
     RCSettingsSectionIntegrations,
@@ -35,6 +35,7 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     RCSettingsSectionGestures,
     RCSettingsSectionDiagnostics,
     RCSettingsSectionBackup,
+    RCSettingsSectionHoliday,
 };
 
 @implementation RCSettingsViewController
@@ -211,7 +212,7 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
 #pragma mark - Table View Data Source
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    return RCSettingsSectionBackup + 1;
+    return RCSettingsSectionHoliday + 1;
 }
 
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
@@ -221,7 +222,8 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     else if (section == RCSettingsSectionAdvanced) title = @"Advanced Settings";
     else if (section == RCSettingsSectionGestures) title = @"Gestures";
     else if (section == RCSettingsSectionDiagnostics) title = @"Diagnostics";
-    else title = @"Backup";
+    else if (section == RCSettingsSectionBackup) title = @"Backup";
+    else title = @"Holiday";
     
     // The first header sits close under the large title; the other sections keep
     // the 10pt of air the old sectionHeaderTopPadding supplied, so the gaps
@@ -255,6 +257,8 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
         return @"See what's running on this device, and run tests that share their results.";
     } else if (section == RCSettingsSectionBackup) {
         return @"Export saves everything on this device: settings, integrations, triggers, add-ons, gestures and variables. Import puts it back on any device. The file may include saved passwords and tokens, so keep it private.";
+    } else if (section == RCSettingsSectionHoliday) {
+        return @"Show the holiday present in the header to toggle snowfall.";
     }
     return nil;
 }
@@ -275,6 +279,9 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     if (section == RCSettingsSectionIntegrations) {
         // Integrations, then Add-ons (ADDONS.md) once the tweak has written its catalog
         return [RCAddOnCatalog catalogAvailable] ? 2 : 1;
+    }
+    if (section == RCSettingsSectionHoliday) {
+        return 1; // Holiday Mode
     }
     return 1; // Gestures
 }
@@ -388,6 +395,13 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
             cell.imageView.tintColor = [UIColor systemTealColor];
         }
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    } else if (indexPath.section == RCSettingsSectionHoliday) {
+        cell.textLabel.text = @"Holiday Mode";
+        UISwitch *holidaySwitch = [[UISwitch alloc] init];
+        holidaySwitch.on = cm.holidayModeEnabled;
+        [holidaySwitch addTarget:self action:@selector(holidayModeToggleChanged:) forControlEvents:UIControlEventValueChanged];
+        cell.accessoryView = holidaySwitch;
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
     }
     
     return cell;
@@ -437,6 +451,10 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
 - (void)webUIToggleChanged:(UISwitch *)sender {
     [RCConfigManager sharedManager].webUIEnabled = sender.on;
     [self.tableView reloadData];
+}
+
+- (void)holidayModeToggleChanged:(UISwitch *)sender {
+    [RCConfigManager sharedManager].holidayModeEnabled = sender.on;
 }
 
 - (void)openWebUI {
