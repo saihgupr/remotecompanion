@@ -1,4 +1,5 @@
 #import "RCActionPickerViewController.h"
+#import "RCWhatsNew.h"
 #import "RCScreenActions.h"
 #import "RCAddOnCatalog.h"
 #import "RCAddOnActionsViewController.h"
@@ -139,6 +140,7 @@
     
     // List or Compact (Settings), followed while open
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(layoutChanged:) name:RCLayoutChangedNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(newActionsDismissed) name:RCWhatsNewDismissedNotification object:nil];
     
     [self applyTweaks];
 
@@ -655,17 +657,66 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
     return self.selectedCategory >= 0 && self.selectedCategory < (NSInteger)_sections.count;
 }
 
-// What the table shows: search results, the selected category, or everything
+// What the table shows: search results, the selected category, or everything (this version's new
+// actions first, under New)
 - (NSArray<NSArray<NSDictionary *> *> *)displaySections {
     if ([self isSearching]) return @[self.filteredActions ?: @[]];
     if ([self hasCategory]) return @[_browseSections[self.selectedCategory]];
-    return _browseSections;
+    NSArray *fresh = [self newActions];
+    return fresh.count ? [@[fresh] arrayByAddingObjectsFromArray:_browseSections] : _browseSections;
 }
 
 - (NSString *)displayTitleForSection:(NSInteger)section {
     if ([self isSearching]) return [self hasCategory] ? [NSString stringWithFormat:@"%@ Results", _sectionTitles[self.selectedCategory]] : @"Search Results";
     if ([self hasCategory]) return _sectionTitles[self.selectedCategory];
+    if ([self newActions].count) return section == 0 ? @"New" : _sectionTitles[section - 1];
     return _sectionTitles[section];
+}
+
+#pragma mark - New (What's New)
+
+// This version's new actions not yet used or dismissed, in menu order; not in a group's own list,
+// a remote device's or a search
+- (NSArray<NSDictionary *> *)newActions {
+    if (self.groupActions.count > 0 || self.remoteClientId.length > 0 || [self isSearching]) return @[];
+    NSMutableArray *fresh = [NSMutableArray array];
+    for (NSArray *section in _sections) {
+        for (NSDictionary *action in section) {
+            NSArray *all = [action[@"children"] isKindOfClass:[NSArray class]] ? [@[action] arrayByAddingObjectsFromArray:action[@"children"]] : @[action];
+            for (NSDictionary *one in all) {
+                NSString *command = one[@"command"];
+                if ([command isKindOfClass:[NSString class]] && [RCWhatsNew isNewAction:command] && ![fresh containsObject:one]) [fresh addObject:one];
+            }
+        }
+    }
+    return fresh;
+}
+
+- (BOOL)isNewSection:(NSInteger)section {
+    return section == 0 && ![self hasCategory] && [self newActions].count > 0;
+}
+
+- (void)dismissAllNew {
+    NSMutableArray *commands = [NSMutableArray array];
+    for (NSDictionary *action in [self newActions]) [commands addObject:action[@"command"]];
+    [RCWhatsNew dismissActions:commands];
+}
+
+- (void)newActionsDismissed {
+    [self.collectionView reloadData];
+}
+
+// New: touch and hold to dismiss
+- (UIContextMenuConfiguration *)collectionView:(UICollectionView *)collectionView contextMenuConfigurationForItemAtIndexPath:(NSIndexPath *)indexPath point:(CGPoint)point {
+    if (![self isNewSection:indexPath.section]) return nil;
+    NSString *command = [self actionAtIndexPath:indexPath][@"command"];
+    __weak typeof(self) weakSelf = self;
+    return [UIContextMenuConfiguration configurationWithIdentifier:nil previewProvider:nil actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggested) {
+        return [UIMenu menuWithTitle:@"" children:@[
+            [UIAction actionWithTitle:@"Dismiss" image:[UIImage systemImageNamed:@"xmark"] identifier:nil handler:^(__kindof UIAction *action) { [RCWhatsNew dismissAction:command]; }],
+            [UIAction actionWithTitle:@"Dismiss All" image:[UIImage systemImageNamed:@"xmark.circle"] identifier:nil handler:^(__kindof UIAction *action) { [weakSelf dismissAllNew]; }],
+        ]];
+    }];
 }
 
 - (NSDictionary *)actionAtIndexPath:(NSIndexPath *)indexPath {
@@ -712,6 +763,7 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
     if (![self compact]) {
         // List: a row, in a rounded card per section
         RCActionRowCell *row = [collectionView dequeueReusableCellWithReuseIdentifier:@"ActionRow" forIndexPath:indexPath];
+        row.largeIcon = YES; // as the Compact tiles show them
         NSDictionary *action = [self actionAtIndexPath:indexPath];
         NSString *icon = action[@"icon"];
         if (@available(iOS 15.0, *)) {} else if ([icon isEqualToString:@"ear.badge.checkmark"]) icon = @"ear";
@@ -721,6 +773,7 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
         row.opensMore = [self actionOpensMore:action];
         NSInteger count = [collectionView numberOfItemsInSection:indexPath.section];
         [row setFirst:indexPath.item == 0 last:indexPath.item == count - 1];
+        row.showsNew = [self isNewSection:indexPath.section];
         return row;
     }
     RCActionTileCell *cell = [collectionView dequeueReusableCellWithReuseIdentifier:@"ActionTile" forIndexPath:indexPath];
@@ -731,12 +784,17 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
     if ([action[@"command"] isEqualToString:@"__SET_VARIABLE__"]) custom = RCVariableMenuIconActionSized(22);
     [cell setName:action[@"name"] icon:icon image:custom];
     cell.opensMore = [self actionOpensMore:action];
+    cell.showsNew = [self isNewSection:indexPath.section];
     return cell;
 }
 
 - (UICollectionReusableView *)collectionView:(UICollectionView *)collectionView viewForSupplementaryElementOfKind:(NSString *)kind atIndexPath:(NSIndexPath *)indexPath {
     RCActionGridHeader *header = [collectionView dequeueReusableSupplementaryViewOfKind:kind withReuseIdentifier:@"Header" forIndexPath:indexPath];
-    [header setTitle:[self displayTitleForSection:indexPath.section]];
+    BOOL isNew = [self isNewSection:indexPath.section];
+    if (isNew) [header setTitle:[self displayTitleForSection:indexPath.section] icon:[UIImage systemImageNamed:@"sparkles"]];
+    else [header setTitle:[self displayTitleForSection:indexPath.section]];
+    __weak typeof(self) weakSelf = self;
+    [header setButtonTitle:isNew ? @"Dismiss All" : nil handler:^{ [weakSelf dismissAllNew]; }];
     return header;
 }
 
@@ -765,6 +823,8 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
     NSDictionary *action = self.selectedActionOverride ?: [self actionAtIndexPath:indexPath];
     NSString *command = action[@"command"];
     if (self.isBeingDismissed || self.navigationController.isBeingDismissed) return; // already picked, closing
+    // A new action once used is no longer new
+    if ([command isKindOfClass:[NSString class]] && [RCWhatsNew isNewAction:command]) [RCWhatsNew dismissAction:command];
     
     // An add-on opens a list of its actions; the one picked comes back through here
     if ([command hasPrefix:@"__ADDON__"]) {

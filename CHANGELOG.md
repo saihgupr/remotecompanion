@@ -5,11 +5,13 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **What's New**: the first launch after an update shows a card with the version's new features, and a first install shows a short welcome on the same card. Settings has What's New at the top to see it again. New Trigger and Select Action list the version's new triggers and actions first, under New, each marked (a red dot in a list, a NEW badge on a tile) until it's used or dismissed (the cross or a swipe in a list, touch and hold on a tile, or Dismiss All).
 - **Dance Party**: `rc dance party [on|off]` runs the torch with the music playing in the room, following the bass. Bare `rc dance party` toggles it. It stops after about 15 seconds of quiet or a 15 minute timeout, and headphones or Bluetooth mean the microphone hears nothing to follow. It is also under Device Controls in the action picker as a toggle, like Flashlight.
 - **Flashlight brightness options**: `rc flashlight low|medium|high|max` sets one of the four levels iOS's own slider uses, `rc flashlight up|down [N]` steps from the current level (25 by default), and `rc flashlight status` now prints the level, e.g. `Flashlight ON (75%)`. `on` takes the same names or a percentage, and `torch` and `flash` accept everything `flashlight` does.
 - **`previous` as an alias for `prev`**: `rc previous` skips to the previous track, the same as `rc prev`, in scripts and the CLI.
 
 ### Changed
+- **Picker list icons**: in List layout, New Trigger and Select Action show the icons their Compact tiles have, larger and in the text's color, instead of small grey symbols.
 - **Annotate toast**: a successful send to OpenCode is just "Sent to OpenCode" or "Pasted to OpenCode", without the session title underneath, which was long and often named the device.
 - **Home Button haptic**: the Home Button action gives a tap as it runs, like the real button, so a press that takes the screen away still answers. It is on by default and follows the Haptics switch and the Excluded Apps list, the same as `rc haptic`.
 - **New Trigger large title**: the New Trigger picker uses the same large title as the Triggers screen it opens from, instead of a small one at the top.
