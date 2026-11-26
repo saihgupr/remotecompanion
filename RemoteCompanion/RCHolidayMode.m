@@ -26,24 +26,30 @@
         _halo.alpha = 0;
         [self addSubview:_halo];
 
-        // The gift itself: the SF Symbol where this iOS has it, the emoji where it doesn't
-        UIImage *gift = nil;
-        if (@available(iOS 13.0, *)) {
-            UIImageSymbolConfiguration *configuration =
-                [UIImageSymbolConfiguration configurationWithPointSize:23 weight:UIImageSymbolWeightSemibold];
-            gift = [UIImage systemImageNamed:@"gift.fill" withConfiguration:configuration];
-        }
+        // The gift itself: bundled artwork, with SF Symbol / emoji fallback
+        UIImage *gift = [[UIImage imageNamed:@"HolidayPresent"] imageWithRenderingMode:UIImageRenderingModeAlwaysOriginal];
         if (gift) {
             UIImageView *imageView = [[UIImageView alloc] initWithImage:gift];
-            imageView.tintColor = [UIColor systemRedColor];
-            imageView.contentMode = UIViewContentModeCenter;
+            imageView.contentMode = UIViewContentModeScaleAspectFit;
             _glyph = imageView;
         } else {
-            UILabel *label = [[UILabel alloc] init];
-            label.text = @"\U0001F381";   // 🎁
-            label.font = [UIFont systemFontOfSize:20];
-            label.textAlignment = NSTextAlignmentCenter;
-            _glyph = label;
+            if (@available(iOS 13.0, *)) {
+                UIImageSymbolConfiguration *configuration =
+                    [UIImageSymbolConfiguration configurationWithPointSize:23 weight:UIImageSymbolWeightSemibold];
+                gift = [UIImage systemImageNamed:@"gift.fill" withConfiguration:configuration];
+            }
+            if (gift) {
+                UIImageView *imageView = [[UIImageView alloc] initWithImage:gift];
+                imageView.tintColor = [UIColor systemRedColor];
+                imageView.contentMode = UIViewContentModeCenter;
+                _glyph = imageView;
+            } else {
+                UILabel *label = [[UILabel alloc] init];
+                label.text = @"\U0001F381";   // 🎁
+                label.font = [UIFont systemFontOfSize:20];
+                label.textAlignment = NSTextAlignmentCenter;
+                _glyph = label;
+            }
         }
         _glyph.userInteractionEnabled = NO;
         [self addSubview:_glyph];
@@ -69,7 +75,7 @@
 
 - (void)layoutSubviews {
     [super layoutSubviews];
-    _halo.center = CGPointMake(CGRectGetMidX(self.bounds), CGRectGetMidY(self.bounds));
+    _halo.center = CGPointMake(CGRectGetMidX(self.bounds), CGRectGetMidY(self.bounds) + 5.0);
     _glyph.frame = CGRectMake(0, 0, 32, 32);
     _glyph.center = _halo.center;
 }
