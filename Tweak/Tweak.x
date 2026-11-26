@@ -1285,6 +1285,7 @@ static NSMutableArray<NSDictionary *> *g_rcPendingToasts = nil;
 static int g_rcBlankedToken = -1;
 static void rc_show_hud_toast_ex(NSString *title, NSString *subtitle, NSString *iconSymbol, NSTimeInterval hold, BOOL passThrough);
 static void rc_toast_wake_screen_if_set(void);
+static BOOL rc_banners_wake_screen(void);
 static BOOL rc_banners_wait_for_screen_on(void);
 
 static void rc_show_pending_toasts(void) {
@@ -1370,8 +1371,7 @@ static void rc_show_hud_toast_ex(NSString *title, NSString *subtitle, NSString *
     dispatch_async(dispatch_get_main_queue(), ^{
         // Test kit prompts are for someone watching, so they never wait
         if (!passThrough && rc_screen_is_blanked()) {
-            load_trigger_config();
-            BOOL wake = [g_triggerConfig[@"toastsWakeScreen"] boolValue];
+            BOOL wake = rc_banners_wake_screen();
             BOOL wait = rc_banners_wait_for_screen_on();
             if (wait) {
                 rc_queue_toast(title, subtitle, iconSymbol);
@@ -5516,6 +5516,11 @@ static BOOL rc_own_banner_enabled(NSString *bannerId) {
     load_trigger_config();
     NSArray *off = g_triggerConfig[@"bannerOptOut"];
     return !([off isKindOfClass:[NSArray class]] && [off containsObject:bannerId]);
+}
+
+static BOOL rc_banners_wake_screen(void) {
+    load_trigger_config();
+    return [g_triggerConfig[@"toastsWakeScreen"] boolValue];
 }
 
 static BOOL rc_banners_wait_for_screen_on(void) {
