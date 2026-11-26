@@ -282,7 +282,7 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     RCConfigManager *cm = [RCConfigManager sharedManager];
     
-    BOOL isLinkRow = (indexPath.section == RCSettingsSectionGeneral && cm.webUIEnabled && (indexPath.row == 2 || indexPath.row == 3));
+    BOOL isLinkRow = (indexPath.section == RCSettingsSectionGeneral && cm.webUIEnabled && (indexPath.row == 3 || indexPath.row == 4));
     UITableViewCellStyle style = isLinkRow ? UITableViewCellStyleValue1 : UITableViewCellStyleDefault;
     UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:style reuseIdentifier:nil];
     cell.backgroundColor = [cm tweakColorForKey:@"blockBackground" defaultVal:0.12];
@@ -302,34 +302,34 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     
     if (indexPath.section == RCSettingsSectionGeneral) {
         if (indexPath.row == 0) {
-            cell.textLabel.text = @"Enable All Triggers";
-            _masterSwitch = [[UISwitch alloc] init];
-            _masterSwitch.on = cm.masterEnabled;
-            [_masterSwitch addTarget:self action:@selector(masterToggleChanged:) forControlEvents:UIControlEventValueChanged];
-            cell.accessoryView = _masterSwitch;
-            cell.selectionStyle = UITableViewCellSelectionStyleNone;
-        } else if (indexPath.row == 1) {
-            cell.textLabel.text = @"Web UI";
-            _webUISwitch = [[UISwitch alloc] init];
-            _webUISwitch.on = cm.webUIEnabled;
-            [_webUISwitch addTarget:self action:@selector(webUIToggleChanged:) forControlEvents:UIControlEventValueChanged];
-            cell.accessoryView = _webUISwitch;
-            cell.selectionStyle = UITableViewCellSelectionStyleNone;
-        } else if (cm.webUIEnabled && indexPath.row == 2) {
-            cell.textLabel.text = @"Access";
-            cell.detailTextLabel.text = [RCWebUIAccessViewController titleForAccess:cm.webUIAccess];
-            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-        } else if (cm.webUIEnabled && indexPath.row == 3) {
-            cell.textLabel.text = @"Open Web UI";
-            cell.detailTextLabel.text = [self webUIUrlString];
-            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-        } else {
             cell.textLabel.text = @"Holiday Mode";
             UISwitch *holidaySwitch = [[UISwitch alloc] init];
             holidaySwitch.on = cm.holidayModeEnabled;
             [holidaySwitch addTarget:self action:@selector(holidayModeToggleChanged:) forControlEvents:UIControlEventValueChanged];
             cell.accessoryView = holidaySwitch;
             cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        } else if (indexPath.row == 1) {
+            cell.textLabel.text = @"Enable All Triggers";
+            _masterSwitch = [[UISwitch alloc] init];
+            _masterSwitch.on = cm.masterEnabled;
+            [_masterSwitch addTarget:self action:@selector(masterToggleChanged:) forControlEvents:UIControlEventValueChanged];
+            cell.accessoryView = _masterSwitch;
+            cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        } else if (indexPath.row == 2) {
+            cell.textLabel.text = @"Web UI";
+            _webUISwitch = [[UISwitch alloc] init];
+            _webUISwitch.on = cm.webUIEnabled;
+            [_webUISwitch addTarget:self action:@selector(webUIToggleChanged:) forControlEvents:UIControlEventValueChanged];
+            cell.accessoryView = _webUISwitch;
+            cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        } else if (cm.webUIEnabled && indexPath.row == 3) {
+            cell.textLabel.text = @"Access";
+            cell.detailTextLabel.text = [RCWebUIAccessViewController titleForAccess:cm.webUIAccess];
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        } else if (cm.webUIEnabled && indexPath.row == 4) {
+            cell.textLabel.text = @"Open Web UI";
+            cell.detailTextLabel.text = [self webUIUrlString];
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         }
     } else if (indexPath.section == RCSettingsSectionIntegrations && indexPath.row == 1) {
         cell.textLabel.text = @"Add-ons";
@@ -404,9 +404,9 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
 
     RCConfigManager *cm = [RCConfigManager sharedManager];
-    if (indexPath.section == RCSettingsSectionGeneral && cm.webUIEnabled && indexPath.row == 2) {
+    if (indexPath.section == RCSettingsSectionGeneral && cm.webUIEnabled && indexPath.row == 3) {
         [self.navigationController pushViewController:[[RCWebUIAccessViewController alloc] init] animated:YES];
-    } else if (indexPath.section == RCSettingsSectionGeneral && cm.webUIEnabled && indexPath.row == 3) {
+    } else if (indexPath.section == RCSettingsSectionGeneral && cm.webUIEnabled && indexPath.row == 4) {
         [self openWebUI];
     } else if (indexPath.section == RCSettingsSectionIntegrations && indexPath.row == 1) {
         [self.navigationController pushViewController:[[RCAddOnsViewController alloc] initShowing:RCAddOnsListAll] animated:YES];
