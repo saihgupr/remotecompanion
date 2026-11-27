@@ -299,7 +299,7 @@ Requires `me.lightmann.iamlazy-cli` (`/var/jb/usr/local/bin/ial`) on the device.
   rc backup /Volumes/Backups   # /Volumes/Backups/IAL-20261114_1.tar.gz
   rc backup ~/Desktop/my.tar.gz
   ```
-- `rc pull-backup [dir]` - Move the newest existing IAmLazy `.tar.gz` archive from the device to `<dir>` (default: `~/Desktop/RC-Backups/iamlazy`), deleting it from the device once verified.
+- `rc pull-backup [dir]` - Move the newest existing IAmLazy archive (`.tar.gz`, or `.tar.xz` from older versions) from the device to `<dir>` (default: `~/Desktop/RC-Backups/iamlazy`), deleting it from the device once verified.
 - `rc ialazy backup` - Start an on-device IAmLazy backup in the background (leaving the `.tar.gz` on the device).
 - `rc ialazy list` - List `.tar.gz` archives currently in the device's IAmLazy backup folder.
 
