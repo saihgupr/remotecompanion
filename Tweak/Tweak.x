@@ -1288,14 +1288,15 @@ static BOOL set_cellular_state(BOOL state) {
 
 static UIWindow *g_rcHUDWindow = nil;
 
-// Toasts while the screen is off: one shown then would slide in and out on a dark screen,
-// so it waits and shows when the screen next turns on. Settings > Banners > Wake Screen
-// turns the screen on for it instead. The newest three wait; ones older than 30 minutes
-// are dropped.
+// Notification banners while the screen is off: Wait Until Screen Turns On saves up to three
+// (dropping ones older than 30 minutes) to show when the screen wakes. Wake Screen turns
+// the display on independently when one arrives while the screen is off.
 static NSMutableArray<NSDictionary *> *g_rcPendingToasts = nil;
 static int g_rcBlankedToken = -1;
 static void rc_show_hud_toast_ex(NSString *title, NSString *subtitle, NSString *iconSymbol, NSTimeInterval hold, BOOL passThrough);
 static void rc_toast_wake_screen_if_set(void);
+static BOOL rc_banners_wake_screen(void);
+static BOOL rc_banners_wait_for_screen_on(void);
 
 static void rc_show_pending_toasts(void) {
     NSArray<NSDictionary *> *pending = [g_rcPendingToasts copy];
@@ -1311,7 +1312,7 @@ static void rc_show_pending_toasts(void) {
         });
         shown++;
     }
-    if (pending.count) SRLog(@"[RCToast] Screen on: showing %lu waiting toast(s)", (unsigned long)shown);
+    if (pending.count) SRLog(@"[RCBanner] Screen on: showing %lu waiting notification banner(s)", (unsigned long)shown);
 }
 
 // YES while the screen is off. The first call starts watching for it to turn back on.
@@ -1336,7 +1337,7 @@ static void rc_queue_toast(NSString *title, NSString *subtitle, NSString *iconSy
     toast[@"icon"] = iconSymbol;
     [g_rcPendingToasts addObject:toast];
     while (g_rcPendingToasts.count > 3) [g_rcPendingToasts removeObjectAtIndex:0];
-    SRLog(@"[RCToast] Screen off: '%@' waits for the screen to turn on", title ?: @"");
+    SRLog(@"[RCBanner] Screen off: '%@' waits for the screen to turn on", title ?: @"");
 }
 
 static NSArray<NSString *> *rc_parse_quoted_arguments(NSString *argString) {
@@ -1373,16 +1374,25 @@ static NSArray<NSString *> *rc_parse_quoted_arguments(NSString *argString) {
 static void rc_show_hud_toast_ex(NSString *title, NSString *subtitle, NSString *iconSymbol, NSTimeInterval hold, BOOL passThrough) {
     if (!passThrough) {
         if ([[NSThread currentThread].threadDictionary[@"rcRunToastsDisabled"] boolValue]) {
-            SRLog(@"[Toast] Suppressed: toasts disabled for this trigger sequence");
+            SRLog(@"[RCBanner] Suppressed: notification banners disabled for this trigger sequence");
             return;
         }
     }
     dispatch_async(dispatch_get_main_queue(), ^{
         // Test kit prompts are for someone watching, so they never wait
         if (!passThrough && rc_screen_is_blanked()) {
-            rc_queue_toast(title, subtitle, iconSymbol);
-            rc_toast_wake_screen_if_set(); // the waiting toast shows once the screen is on
-            return;
+            BOOL wake = rc_banners_wake_screen();
+            BOOL wait = rc_banners_wait_for_screen_on();
+            if (wait) {
+                rc_queue_toast(title, subtitle, iconSymbol);
+                if (wake) rc_toast_wake_screen_if_set(); // the waiting banner shows once the screen is on
+                return;
+            }
+            if (wake) {
+                rc_toast_wake_screen_if_set();
+            } else {
+                return;
+            }
         }
         if (g_rcHUDWindow) {
             [g_rcHUDWindow.layer removeAllAnimations];
@@ -5670,8 +5680,19 @@ static BOOL rc_own_banner_enabled(NSString *bannerId) {
     return !([off isKindOfClass:[NSArray class]] && [off containsObject:bannerId]);
 }
 
-// Settings > Banners > Wake Screen: a toast that comes while the screen is off turns it on,
-// the way a press of the Power button would (the phone stays locked). One press for toasts
+static BOOL rc_banners_wake_screen(void) {
+    load_trigger_config();
+    return [g_triggerConfig[@"toastsWakeScreen"] boolValue];
+}
+
+static BOOL rc_banners_wait_for_screen_on(void) {
+    load_trigger_config();
+    id val = g_triggerConfig[@"bannersWaitForScreenOn"];
+    return val ? [val boolValue] : YES;
+}
+
+// Settings > Notification Banners > Wake Screen: a banner that comes while the screen is off turns it on,
+// the way a press of the Power button would (the phone stays locked). One press for banners
 // that come close together, so a second press can't turn the screen back off.
 // Choose from Menu (RCMenuPrompt.m): its card can't be picked from on a dark screen
 void RCMenuWakeScreenIfOff(void) {
@@ -5689,7 +5710,7 @@ static void rc_toast_wake_screen_if_set(void) {
     if (![g_triggerConfig[@"toastsWakeScreen"] boolValue]) return;
     if (lastWake && [[NSDate date] timeIntervalSinceDate:lastWake] < 3.0) return;
     lastWake = [NSDate date];
-    SRLog(@"[RCToast] Waking the screen for a toast");
+    SRLog(@"[RCBanner] Waking the screen for a notification banner");
     inject_hid_event(kHIDPage_Consumer, kHIDUsage_Csmr_Power, 0, 0);
 }
 
@@ -12897,6 +12918,7 @@ static NSArray *RCCommandHelpSections(void) {
             @[@"control center status", @"Print OPEN or CLOSED"],
             @[@"notification center status", @"Print OPEN or CLOSED"],
             @[@"orientation set <mode>", @"Rotate screen (portrait, landscape left/right, upside down, auto)"],
+            @[@"orientation rotate <direction>", @"Turn the screen a quarter turn (clockwise, counterclockwise)"],
             @[@"appearance [dark|light|toggle]", @"Light or dark appearance"],
             @[@"dnd [on|off|toggle|status]", @"Do Not Disturb"],
             @[@"assistive touch [on|off|toggle|status]", @"AssistiveTouch on-screen button"],
@@ -12936,7 +12958,7 @@ static NSArray *RCCommandHelpSections(void) {
             @[@"type \"Text\"", @"Type text"],
             @[@"paste \"Text\"", @"Paste text"],
             @[@"key <hex>", @"Press a HID key (0x28 is Return)"],
-            @[@"toast \"Title\" [\"Subtitle\"] [\"Symbol\"]", @"Show a HUD toast"],
+            @[@"toast \"Title\" [\"Subtitle\"] [\"Symbol\"]", @"Show a notification banner"],
             @[@"notify \"Title\" [\"Body\"] [--urgent] [--watch [only]]", @"Post a notification"],
             @[@"clear-notifications", @"Dismiss notifications"],
             @[@"watch theater [on|off|toggle]", @"Set or toggle Apple Watch Theater Mode"],
@@ -15176,8 +15198,8 @@ static NSString *handle_command(NSString *cmd) {
             return [NSString stringWithFormat:@"AudioMix %@\n", !current ? @"Enabled" : @"Disabled"];
         }
     } else if ([cleanCmd isEqualToString:@"toast"]) {
-        rc_show_hud_toast(@"Test Toast", nil, nil);
-        return @"Toast displayed\n";
+        rc_show_hud_toast(@"Test Notification Banner", nil, nil);
+        return @"Notification banner displayed\n";
     } else if ([cleanCmd hasPrefix:@"toast "]) {
         NSString *argsStr = [[cleanCmd substringFromIndex:6] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         NSArray *arguments = rc_parse_quoted_arguments(argsStr);
@@ -15203,7 +15225,7 @@ static NSString *handle_command(NSString *cmd) {
         }
         
         rc_show_hud_toast(title, subtitle, icon);
-        return [NSString stringWithFormat:@"Toast displayed: '%@' - '%@' (%@)\n", title ?: @"", subtitle ?: @"", icon ?: @"none"];
+        return [NSString stringWithFormat:@"Notification banner displayed: '%@' - '%@' (%@)\n", title ?: @"", subtitle ?: @"", icon ?: @"none"];
     } else if ([cleanCmd isEqualToString:@"queuealbum"] || [cleanCmd isEqualToString:@"queue album"]) {
         // Signal AudioReceiver app to queue the album of the currently playing song
         [@"queuealbum" writeToFile:@"/tmp/audiostream_pending_cmd" atomically:YES encoding:NSUTF8StringEncoding error:nil];
@@ -15413,6 +15435,39 @@ static NSString *handle_command(NSString *cmd) {
         if ([NSThread isMainThread]) orientationBlock();
         else dispatch_sync(dispatch_get_main_queue(), orientationBlock);
         return result;
+    } else if ([[cleanCmd lowercaseString] isEqualToString:@"orientation rotate"] || [[cleanCmd lowercaseString] hasPrefix:@"orientation rotate "]) {
+        // A quarter turn from where the screen is now, in the direction asked. Clockwise goes
+        // portrait, landscape right, upside down, landscape left, and counterclockwise the reverse.
+        NSString *dir = [[[cleanCmd lowercaseString] substringFromIndex:[@"orientation rotate" length]] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        BOOL clockwise;
+        if ([dir isEqualToString:@"clockwise"] || [dir isEqualToString:@"cw"]) {
+            clockwise = YES;
+        } else if ([dir isEqualToString:@"counterclockwise"] || [dir isEqualToString:@"counter-clockwise"] || [dir isEqualToString:@"anticlockwise"] || [dir isEqualToString:@"ccw"]) {
+            clockwise = NO;
+        } else {
+            return @"Usage: rc orientation rotate <clockwise|counterclockwise>\n";
+        }
+
+        __block UIInterfaceOrientation current = UIInterfaceOrientationPortrait;
+        void (^currentBlock)(void) = ^{
+            SpringBoard *sb = (SpringBoard *)[UIApplication sharedApplication];
+            if ([sb respondsToSelector:@selector(activeInterfaceOrientation)]) {
+                UIInterfaceOrientation active = [sb activeInterfaceOrientation];
+                if (active >= UIInterfaceOrientationPortrait && active <= UIInterfaceOrientationLandscapeRight) current = active;
+            }
+        };
+        if ([NSThread isMainThread]) currentBlock();
+        else dispatch_sync(dispatch_get_main_queue(), currentBlock);
+
+        NSString *next;
+        switch (current) {
+            case UIInterfaceOrientationLandscapeRight:    next = clockwise ? @"portrait upside down" : @"portrait"; break;
+            case UIInterfaceOrientationPortraitUpsideDown: next = clockwise ? @"landscape left" : @"landscape right"; break;
+            case UIInterfaceOrientationLandscapeLeft:     next = clockwise ? @"portrait" : @"portrait upside down"; break;
+            default:                                      next = clockwise ? @"landscape right" : @"landscape left"; break;
+        }
+        SRLogMin(@"📱 [RCSystem] Orientation rotate %@: %@", clockwise ? @"clockwise" : @"counterclockwise", next);
+        return handle_command([@"orientation set " stringByAppendingString:next]);
     } else if ([[cleanCmd lowercaseString] isEqualToString:@"orientation set"] || [[cleanCmd lowercaseString] hasPrefix:@"orientation set "]) {
         NSString *lower = [cleanCmd lowercaseString];
         if ([lower isEqualToString:@"orientation set"]) {
@@ -19461,6 +19516,8 @@ static BOOL RC_DefaultHapticsForTrigger(NSString *triggerKey) {
     if ([triggerKey hasPrefix:@"trigger_statusbar_"]) return YES;
     if ([triggerKey hasPrefix:@"trigger_bottombar_"]) return YES;
     if ([triggerKey hasPrefix:@"trigger_bottom_swipe_"]) return YES;
+    if ([triggerKey hasPrefix:@"trigger_bottom_two_finger_"]) return YES;
+    if ([triggerKey hasPrefix:@"trigger_two_finger_"]) return YES;
     if ([triggerKey hasPrefix:@"trigger_edge_"]) return YES;
     if ([triggerKey hasPrefix:@"trigger_island_"]) return YES;
     return NO;
@@ -22736,6 +22793,7 @@ static void rc_two_finger_hid_process(uint32_t mask, const double *xs, const dou
         if (RC_IsForegroundAppExcluded()) return;
         if (!RC_TriggerIsActionable(triggerKey)) return;
         SRLogMin(@"[RCMultiFinger] %@ FIRED", triggerKey);
+        RCTriggerHapticFor(triggerKey);
         RCExecuteTrigger(triggerKey);
     });
 }
@@ -23396,7 +23454,7 @@ static RCIslandTouch rc_island_handle_touch(UITouch *touch, UIInterfaceOrientati
                         if (enabled) {
                             g_twoFingerTopTriggered = YES;
                             g_lastTwoFingerTopSwipeTriggerTime = [[NSDate date] timeIntervalSince1970];
-                            trigger_haptic();
+                            RCTriggerHapticFor(@"trigger_statusbar_two_finger_swipe_down");
                             if (RC_TriggerIsActionable(@"trigger_statusbar_two_finger_swipe_down")) RC_FreezeGestureScrolling();
                             RCExecuteTrigger(@"trigger_statusbar_two_finger_swipe_down");
                             SRLog(@"[RCMultiFinger] trigger_statusbar_two_finger_swipe_down FIRED during move at dy=%.1f", user_dy);
@@ -23417,7 +23475,7 @@ static RCIslandTouch rc_island_handle_touch(UITouch *touch, UIInterfaceOrientati
                         if (enabled) {
                             g_twoFingerBottomTriggered = YES;
                             g_lastTwoFingerBottomSwipeTriggerTime = [[NSDate date] timeIntervalSince1970];
-                            trigger_haptic();
+                            RCTriggerHapticFor(@"trigger_bottom_two_finger_swipe_up");
                             if (RC_TriggerIsActionable(@"trigger_bottom_two_finger_swipe_up")) RC_FreezeGestureScrolling();
                             RCExecuteTrigger(@"trigger_bottom_two_finger_swipe_up");
                             SRLog(@"[RCMultiFinger] trigger_bottom_two_finger_swipe_up FIRED during move at dy=%.1f", user_dy);

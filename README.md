@@ -44,7 +44,7 @@ RemoteCompanion provides fast, scriptable system control for modern rootless jai
 - **Loops and Waits**: Repeat and Repeat While blocks, Exit Repeat and Wait Until, with `{round}` for the current round and nesting inside If blocks.
 - **Running and Run History**: see what is running now, stop one run or all, follow a run with the current action highlighted, and keep the last 0 to 50 runs per trigger with the actions as they ran.
 - **Stop Trigger Picker**: choose the trigger to stop from a searchable list with icons and sections, instead of one long action sheet.
-- **Toasts on the Lock Screen**: toasts show over the lock screen, queue until the next wake when the screen is off, and can wake the screen with the Wake Screen switch.
+- **Notification Banners on the Lock Screen**: notification banners show over the lock screen, can wait until the screen turns on with Wait Until Screen Turns On, and can wake the screen with the Wake Screen switch.
 - **Variables**: the Set Variable action saves a value, `{name}` in action text becomes its value, a Variable condition compares it, and Settings > Variables lists saved values.
 - **App Quick Action**: pick an app, then one of its registered shortcuts read live from SpringBoard, with same-type shortcuts told apart and stale entries reported instead of run.
 - **Excluded Apps**: Settings > Excluded Apps lists every trigger that has actions and sets the apps where each trigger does not fire.
@@ -116,6 +116,7 @@ Access the desktop-class automation hub at `http://[DEVICE_IP]:8080` from any co
 - `rc flashlight [on|off|toggle|status] [level]` - Control the torch. A level is 0-100, a fraction like 0.5, or `low`, `medium`, `high`, `max`; `up [N]` and `down [N]` step it from the current level (25 by default). `torch` and `flash` take the same options.
 - `rc dance party [on|off|status]` - Run the torch in time with the music playing in the room. Bare `rc dance party` toggles it, `on` starts it and `off` stops it. It follows the bass through the microphone, so headphones or Bluetooth mean nothing to follow, and it stops after about 15 seconds of quiet or a 15 minute timeout.
 - `rc rotate [lock|unlock|toggle]` - Orientation lock control.
+- `rc orientation rotate <clockwise|counterclockwise>` - Turn the screen a quarter turn from where it is now, in the direction you choose. It holds the same way `orientation set` does.
 - `rc orientation set <portrait|landscape left|landscape right|portrait upside down|auto>` - Turn the screen to that orientation; it holds while rotation lock is on, otherwise the phone takes over when moved.
 - `rc appearance [dark|light|toggle]` - Set light/dark appearance.
 - `rc dnd [on|off|toggle]` - Toggle Do Not Disturb.
@@ -161,7 +162,7 @@ The switches in Settings > iOS Tweaks, also on the Web UI's Tweaks screen. Every
 ### Text & Notifications
 - `rc type "Text"` - Type text (supports symbols).
 - `rc paste "Text"` - Paste into clipboard.
-- `rc toast "Title" ["Subtitle"] ["SF Symbol"]` - Display a HUD toast notification. *(Use single quotes if passing special characters like `!` to prevent shell history expansion).*
+- `rc toast "Title" ["Subtitle"] ["SF Symbol"]` - Display a notification banner. *(Use single quotes if passing special characters like `!` to prevent shell history expansion).*
 - `rc notify "Title" ["Message"] [--urgent] [--remove-after SECONDS] [--image "sf:NAME"|"app:BUNDLE"] [--image-url URL] [--wait SECONDS]` - Post a standard iOS notification (banner, sound, Notification Center), also when the app is closed. `--urgent` makes it Time Sensitive; `--remove-after` takes it out of Notification Center after that many seconds; `--image` shows a symbol or an app's icon in place of RC's; `--image-url` attaches a photo from the web, shown beside the notification and larger when it is held; `--wait` waits for a tap, button, clear or the time limit and prints the answer (in a trigger it becomes `{notify_response}`). Allow notifications for RC when asked (the first Notification action you save asks).
 - `rc notify clear` - Remove all of RC's notifications from Notification Center.
 - `rc clear notification [--all] [--app BUNDLE|rc] [--text TEXT] [FILE.txt|TEXT...]` - Clear notifications across any app or selected apps, optionally matching text in their title, subtitle, or message (accepts inline filter phrases or a line-by-line `.txt` file).
@@ -270,7 +271,7 @@ Combine status queries with actions for smart automation:
 - **Orientation-Awareness**: `If Orientation is Landscape` -> `Flashlight Toggle`.
 - **Bluetooth/Wi-Fi State**: `If Wi-Fi is OFF` -> `Wi-Fi ON`.
 - **Time of Day**: `If Time is Between 22:00 and 07:00` -> `Do Not Disturb ON`.
-- **Variables**: `If Variable score is above 10` -> `Toast "High score"` (set with the Set Variable action, used as `{score}` in action text).
+- **Variables**: `If Variable score is above 10` -> `Notification Banner "High score"` (set with the Set Variable action, used as `{score}` in action text).
 
 > [!NOTE]
 > **Proximity Sensor Cooldown**: To conserve battery, the proximity sensor is only powered on dynamically during button holds and is shut off immediately on release. Due to iOS kernel-level hardware power-gating, rapid consecutive clicks (within ~5 seconds) may temporarily bypass proximity evaluation until the sensor's hardware cooldown window resets.

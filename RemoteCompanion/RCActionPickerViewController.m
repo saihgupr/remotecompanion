@@ -316,6 +316,8 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
             @{ @"name": @"Dance Party", @"command": @"dance party toggle", @"icon": @"flashlight.on.fill", @"keywords": @"flashlight torch party music light dance" },
             @{ @"name": @"Rotation Lock", @"command": @"rotate toggle", @"icon": @"lock.rotation" },
             @{ @"name": @"Set Orientation...", @"command": @"__SET_ORIENTATION__", @"icon": @"rotate.right", @"keywords": @"rotate rotation landscape portrait orientation screen sideways" },
+            @{ @"name": @"Rotate Screen Clockwise", @"command": @"orientation rotate clockwise", @"icon": @"rotate.right", @"keywords": @"rotate turn orientation screen quarter 90 degrees cw right landscape portrait" },
+            @{ @"name": @"Rotate Screen Counterclockwise", @"command": @"orientation rotate counterclockwise", @"icon": ([UIImage systemImageNamed:@"rotate.left"] ? @"rotate.left" : @"rotate.right"), @"keywords": @"rotate turn orientation screen quarter 90 degrees ccw anticlockwise left landscape portrait" },
             @{ @"name": @"Lock Device", @"command": @"lock", @"icon": @"lock.fill" },
             @{ @"name": @"Unlock Device...", @"command": @"__UNLOCK_DEVICE__", @"icon": @"lock.open.fill" },
             @{ @"name": @"Lock Toggle...", @"command": @"__LOCK_TOGGLE__", @"icon": @"lock.circle" },
@@ -472,7 +474,7 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
             @{ @"name": @"Delay", @"command": @"__DELAY__", @"icon": @"hourglass" },
             @{ @"name": @"Stop Trigger...", @"command": @"__STOP_TRIGGER__", @"icon": @"stop.circle" },
             @{ @"name": @"Terminal Command", @"command": @"__CUSTOM__", @"icon": @"terminal.fill" },
-            @{ @"name": @"Toast...", @"command": @"__TOAST__", @"icon": @"text.bubble.fill" },
+            @{ @"name": @"Notification Banner...", @"command": @"__TOAST__", @"icon": @"text.bubble.fill", @"keywords": @"toast hud banner" },
             @{ @"name": @"Notification...", @"command": @"__NOTIFICATION__", @"icon": @"bell.badge.fill", @"keywords": @"notify alert banner apple watch only" },
             @{ @"name": @"Clear Notifications...", @"command": @"__CLEAR_NOTIFICATIONS__", @"icon": @"bell.slash.fill" },
             @{ @"name": @"Haptic Feedback", @"command": @"haptic", @"icon": @"hand.tap.fill" }
@@ -668,7 +670,6 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
     return [self compact] && RCLayoutSectionsHidden(RCLayoutActionPicker) && ![self isSearching] && ![self hasCategory] && self.groupActions.count == 0 && ![self newActions].count;
 }
 
-// What the table shows: search results, the selected category, or everything
 // What the table shows: search results, the selected category, or everything (this version's new
 // actions first, under New)
 - (NSArray<NSArray<NSDictionary *> *> *)displaySections {

@@ -29,6 +29,23 @@
     NSLog(@"%@", msg__); \
 } while(0)
 
+// Keep verticalSizeClass Regular so UINavigationBar preserves large titles in landscape.
+@interface RCLargeTitleNavigationController : UINavigationController
+@end
+
+@implementation RCLargeTitleNavigationController
+
+- (UITraitCollection *)traitCollection {
+    UITraitCollection *base = [super traitCollection];
+    if (base.verticalSizeClass == UIUserInterfaceSizeClassCompact) {
+        UITraitCollection *regularV = [UITraitCollection traitCollectionWithVerticalSizeClass:UIUserInterfaceSizeClassRegular];
+        return [UITraitCollection traitCollectionWithTraitsFromCollections:@[base, regularV]];
+    }
+    return base;
+}
+
+@end
+
 @implementation RCAppDelegate
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
@@ -49,7 +66,7 @@
         RCTriggersViewController *triggersVC = [[RCTriggersViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
         RCLog(@"RCTriggersViewController created");
         
-        UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:triggersVC];
+        UINavigationController *nav = [[RCLargeTitleNavigationController alloc] initWithRootViewController:triggersVC];
         RCLog(@"Nav created");
         
         self.window.rootViewController = nav;

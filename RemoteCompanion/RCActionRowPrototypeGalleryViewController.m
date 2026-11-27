@@ -769,7 +769,7 @@ static RCInlineRowItem *RCRowProtoLowPowerItem(void) {
 
 static RCInlineRowItem *RCRowProtoToastItem(void) {
     RCInlineRowItem *item = [[RCInlineRowItem alloc] init];
-    item.name = @"Show Toast";
+    item.name = @"Notification Banner";
     item.detail = @"This iPhone";
     item.symbolName = @"text.bubble.fill";
     item.kind = RCInlineRowKindText;

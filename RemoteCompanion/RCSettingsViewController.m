@@ -302,6 +302,7 @@ NSString *const RCSettingsSubpageBackup = @"backup";
 
 // Row IDs on this screen; "page:<n>" opens an RCSettingsPage
 static NSString *const RCMainRowEnableAll = @"enableAll";
+static NSString *const RCMainRowHoliday = @"holidayMode";
 static NSString *const RCMainRowExcludedApps = @"excludedApps";
 static NSString *const RCMainRowTweaks = @"tweaks";
 static NSString *const RCMainRowGestures = @"gestures";
@@ -359,7 +360,7 @@ static NSString *RCPageRow(RCSettingsPage page) { return [NSString stringWithFor
     NSMutableArray *connections = [NSMutableArray arrayWithObjects:RCMainRowWebUIPage, RCMainRowIntegrations, nil];
     if ([RCAddOnCatalog catalogAvailable]) [connections addObject:RCMainRowAddOns]; // once the tweak has written its catalog
     return @[
-        @{ @"title": @"", @"rows": @[RCMainRowEnableAll] },
+        @{ @"title": @"", @"rows": @[RCMainRowHoliday, RCMainRowEnableAll] },
         @{ @"title": @"Triggers", @"symbol": @"bolt.fill",
            @"rows": @[RCPageRow(RCSettingsPageButtons), RCPageRow(RCSettingsPageSwipeTriggers), RCPageRow(RCSettingsPageNFC), RCMainRowExcludedApps] },
         @{ @"title": @"Appearance", @"symbol": @"paintbrush.fill", @"rows": @[RCPageRow(RCSettingsPageLayout), RCPageRow(RCSettingsPageBanners)] },
@@ -383,7 +384,7 @@ static NSString *RCPageRow(RCSettingsPage page) { return [NSString stringWithFor
 
 - (NSString *)titleForRowID:(NSString *)rowID {
     if ([rowID hasPrefix:@"page:"]) return [RCSettingsPageViewController titleForPage:[[rowID substringFromIndex:5] integerValue]];
-    NSDictionary *titles = @{ RCMainRowEnableAll: @"Enable All Triggers", RCMainRowExcludedApps: @"Excluded Apps",
+    NSDictionary *titles = @{ RCMainRowHoliday: @"Holiday Mode", RCMainRowEnableAll: @"Enable All Triggers", RCMainRowExcludedApps: @"Excluded Apps",
                               RCMainRowTweaks: @"iOS Tweaks",
                               RCMainRowGestures: @"Gestures", RCMainRowWebUI: @"Web UI", RCMainRowAccess: @"Access",
                               RCMainRowOpenWebUI: @"Open in Safari", RCMainRowWebUIAddress: @"Address", RCMainRowIntegrations: @"Integrations", RCMainRowAddOns: @"Add-ons",
@@ -536,6 +537,12 @@ static NSString *RCPageRow(RCSettingsPage page) { return [NSString stringWithFor
     if ([rowID hasPrefix:@"page:"]) {
         RCSettingsPage page = [[rowID substringFromIndex:5] integerValue];
         [self setIcon:[RCSettingsPageViewController symbolForPage:page] color:[RCSettingsPageViewController colorForPage:page] onCell:cell];
+    } else if ([rowID isEqualToString:RCMainRowHoliday]) {
+        UISwitch *holidaySwitch = [[UISwitch alloc] init];
+        holidaySwitch.on = cm.holidayModeEnabled;
+        [holidaySwitch addTarget:self action:@selector(holidayModeToggleChanged:) forControlEvents:UIControlEventValueChanged];
+        cell.accessoryView = holidaySwitch;
+        [self setIcon:@"gift.fill" color:[UIColor systemRedColor] onCell:cell];
     } else if ([rowID isEqualToString:RCMainRowEnableAll]) {
         _masterSwitch = [[UISwitch alloc] init];
         _masterSwitch.on = cm.masterEnabled;
@@ -681,6 +688,10 @@ static NSString *RCPageRow(RCSettingsPage page) { return [NSString stringWithFor
 - (void)webUIToggleChanged:(UISwitch *)sender {
     [RCConfigManager sharedManager].webUIEnabled = sender.on;
     [self.tableView reloadData];
+}
+
+- (void)holidayModeToggleChanged:(UISwitch *)sender {
+    [RCConfigManager sharedManager].holidayModeEnabled = sender.on;
 }
 
 - (void)openWebUI {

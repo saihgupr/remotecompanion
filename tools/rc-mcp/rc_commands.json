@@ -244,7 +244,7 @@
   {"command": "webui token", "args": "get|set <token>|clear|generate", "description": "Show or change the Web UI API token", "category": "Integrations", "example": "webui token get", "status": ""},
 
   {"command": "notify \"Title\" \"Message\"", "args": "title message", "description": "Post an iOS notification; --tap, --button, --image-url, --wait", "category": "Notifications & Timers", "example": "notify \"Kitchen\" \"Timer done\"", "status": ""},
-  {"command": "toast \"Title\" \"Subtitle\"", "args": "title subtitle icon", "description": "Show a HUD toast on the phone", "category": "Notifications & Timers", "example": "toast \"Done\" \"Backed up\"", "status": ""},
+  {"command": "toast \"Title\" \"Subtitle\"", "args": "title subtitle icon", "description": "Show a notification banner on the phone", "category": "Notifications & Timers", "example": "toast \"Done\" \"Backed up\"", "status": ""},
   {"command": "notify clear", "args": "[--all] [--app BUNDLE]", "description": "Remove RemoteCompanion's notifications", "category": "Notifications & Timers", "example": "notify clear", "status": ""},
   {"command": "clear notification", "args": "[--all] [--app BUNDLE] [--text TEXT]", "description": "Clear notifications by app and/or matching text", "category": "Notifications & Timers", "example": "notify clear --app com.example.app", "status": ""},
   {"command": "timer <duration>", "args": "20m|1h30m|45s|20:00", "description": "Start an Apple Clock timer", "category": "Notifications & Timers", "example": "timer 20m", "status": "timer status"},

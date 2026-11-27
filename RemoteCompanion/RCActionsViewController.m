@@ -980,7 +980,7 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = _isNew ? @"New Toast" : @"Edit Toast";
+    self.title = _isNew ? @"New Notification Banner" : @"Edit Notification Banner";
 
     self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc]
         initWithBarButtonSystemItem:UIBarButtonSystemItemCancel
@@ -1269,8 +1269,8 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    if (section == 1) return @"Shows as a popup on this device.";
-    if (section == 2) return @"Optional. Adds a small picture to the popup.";
+    if (section == 1) return @"Shows as a notification banner on this device.";
+    if (section == 2) return @"Optional. Adds a small picture to the notification banner.";
     return nil;
 }
 
@@ -1517,7 +1517,7 @@ static NSArray *RCActionSnapshot(NSArray *actions) {
         baseText = @"Toggle ";
         paramText = [cmd substringFromIndex:13];
     } else if ([lower hasPrefix:@"toast "]) {
-        baseText = @"Toast ";
+        baseText = @"Notification Banner ";
         NSString *argString = [cmd substringFromIndex:6];
         NSString *firstArg = nil;
         if ([argString hasPrefix:@"\""]) {
@@ -1713,7 +1713,7 @@ static NSArray *RCActionSnapshot(NSArray *actions) {
 
     BOOL toastsOn = [self isToastsEnabledForTrigger];
     UIImage *toastImg = [UIImage systemImageNamed:@"text.bubble"] ?: [UIImage systemImageNamed:@"capsule"];
-    UIAction *toastAction = [UIAction actionWithTitle:@"Toast Notifications" image:toastImg identifier:nil handler:^(__kindof UIAction *a) {
+    UIAction *toastAction = [UIAction actionWithTitle:@"Notification Banners" image:toastImg identifier:nil handler:^(__kindof UIAction *a) {
         [weakSelf setToastsEnabledForTrigger:!toastsOn];
     }];
     toastAction.state = toastsOn ? UIMenuElementStateOn : UIMenuElementStateOff;
@@ -4686,7 +4686,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     rc_parse_toast_cmd(command, &title, &subtitle, &icon);
     RCInlineRowItem *item = [[RCInlineRowItem alloc] init];
     item.kind = RCInlineRowKindText;
-    item.name = @"Toast";
+    item.name = @"Notification Banner";
     item.caption = @"Message";
     item.textValue = title ?: @"";
     item.placeholder = @"Type a message";

@@ -34,7 +34,7 @@
 @end
 
 static NSString *const RCBannersEnabledTitle = @"Enabled";
-static NSString *const RCBannersWakeNote = @"Turns the screen on to show a banner. When off, a banner that comes while the screen is off waits until it turns on.";
+static NSString *const RCBannersWakeNote = @"Wake Screen turns the display on when a banner arrives while the screen is off. Wait Until Screen Turns On saves banners that arrive while the screen is off and shows them when it wakes.";
 static const CGFloat RCBannersWakeCardHeight = 52;
 static const CGFloat RCBannersGridSide = 16; // the grid's side space (RCActionTile)
 
@@ -42,7 +42,9 @@ static const CGFloat RCBannersGridSide = 16; // the grid's side space (RCActionT
 // section's title, as the switches sit above the list in Select Shortcut
 @interface RCBannersTopHeader : RCActionGridHeader
 @property (nonatomic, strong) UISwitch *wakeSwitch;
+@property (nonatomic, strong) UISwitch *waitSwitch;
 @property (nonatomic, strong) UIView *card;
+@property (nonatomic, strong) UIView *waitCard;
 @property (nonatomic, strong) UILabel *note;
 @end
 
@@ -78,6 +80,32 @@ static const CGFloat RCBannersGridSide = 16; // the grid's side space (RCActionT
         [_wakeSwitch addTarget:self action:@selector(wakeChanged:) forControlEvents:UIControlEventValueChanged];
         [_card addSubview:_wakeSwitch];
 
+        _waitCard = [[UIView alloc] init];
+        _waitCard.translatesAutoresizingMaskIntoConstraints = NO;
+        _waitCard.backgroundColor = [cm tweakColorForKey:@"blockBackground" defaultVal:0.12];
+        _waitCard.layer.cornerRadius = 10;
+        _waitCard.layer.borderWidth = 1.0;
+        _waitCard.layer.borderColor = [cm tweakColorForKey:@"borders" defaultVal:0.14].CGColor;
+        [self addSubview:_waitCard];
+
+        UIImageView *waitIcon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"clock.fill"]];
+        waitIcon.tintColor = [UIColor systemBlueColor];
+        waitIcon.contentMode = UIViewContentModeScaleAspectFit;
+        waitIcon.translatesAutoresizingMaskIntoConstraints = NO;
+        [_waitCard addSubview:waitIcon];
+
+        UILabel *waitLabel = [[UILabel alloc] init];
+        waitLabel.text = @"Wait Until Screen Turns On";
+        waitLabel.font = [UIFont systemFontOfSize:17];
+        waitLabel.textColor = [UIColor labelColor];
+        waitLabel.translatesAutoresizingMaskIntoConstraints = NO;
+        [_waitCard addSubview:waitLabel];
+
+        _waitSwitch = [[UISwitch alloc] init];
+        _waitSwitch.translatesAutoresizingMaskIntoConstraints = NO;
+        [_waitSwitch addTarget:self action:@selector(waitChanged:) forControlEvents:UIControlEventValueChanged];
+        [_waitCard addSubview:_waitSwitch];
+
         _note = [[UILabel alloc] init];
         _note.text = RCBannersWakeNote;
         _note.font = [UIFont systemFontOfSize:13];
@@ -102,7 +130,19 @@ static const CGFloat RCBannersGridSide = 16; // the grid's side space (RCActionT
             [label.trailingAnchor constraintLessThanOrEqualToAnchor:_wakeSwitch.leadingAnchor constant:-8],
             [_note.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:RCBannersGridSide + 4],
             [_note.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-(RCBannersGridSide + 4)],
-            [_note.topAnchor constraintEqualToAnchor:_card.bottomAnchor constant:7],
+            [_waitCard.leadingAnchor constraintEqualToAnchor:_card.leadingAnchor],
+            [_waitCard.trailingAnchor constraintEqualToAnchor:_card.trailingAnchor],
+            [_waitCard.topAnchor constraintEqualToAnchor:_card.bottomAnchor constant:8],
+            [_waitCard.heightAnchor constraintEqualToConstant:RCBannersWakeCardHeight],
+            [waitIcon.leadingAnchor constraintEqualToAnchor:_waitCard.leadingAnchor constant:16],
+            [waitIcon.centerYAnchor constraintEqualToAnchor:_waitCard.centerYAnchor],
+            [waitIcon.widthAnchor constraintEqualToConstant:24],
+            [waitLabel.leadingAnchor constraintEqualToAnchor:waitIcon.trailingAnchor constant:12],
+            [waitLabel.centerYAnchor constraintEqualToAnchor:_waitCard.centerYAnchor],
+            [_waitSwitch.trailingAnchor constraintEqualToAnchor:_waitCard.trailingAnchor constant:-16],
+            [_waitSwitch.centerYAnchor constraintEqualToAnchor:_waitCard.centerYAnchor],
+            [waitLabel.trailingAnchor constraintLessThanOrEqualToAnchor:_waitSwitch.leadingAnchor constant:-8],
+            [_note.topAnchor constraintEqualToAnchor:_waitCard.bottomAnchor constant:7],
         ]];
     }
     return self;
@@ -111,15 +151,20 @@ static const CGFloat RCBannersGridSide = 16; // the grid's side space (RCActionT
 - (void)setTitle:(NSString *)title icon:(UIImage *)icon {
     [super setTitle:title icon:icon];
     self.wakeSwitch.on = [RCConfigManager sharedManager].toastsWakeScreen;
+    self.waitSwitch.on = [RCConfigManager sharedManager].bannersWaitForScreenOn;
 }
 
 - (void)wakeChanged:(UISwitch *)sender {
     [RCConfigManager sharedManager].toastsWakeScreen = sender.on;
 }
 
-// The card, note and gap above the title
+- (void)waitChanged:(UISwitch *)sender {
+    [RCConfigManager sharedManager].bannersWaitForScreenOn = sender.on;
+}
+
+// The two cards, note and gap above the title
 + (CGFloat)extraHeightForWidth:(CGFloat)width {
-    return 8 + RCBannersWakeCardHeight + RCActionGridNoteHeight(RCBannersWakeNote, width) + 4;
+    return 8 + RCBannersWakeCardHeight + 8 + RCBannersWakeCardHeight + RCActionGridNoteHeight(RCBannersWakeNote, width) + 4;
 }
 
 @end
@@ -179,7 +224,7 @@ static NSArray<NSArray<NSDictionary *> *> *RCBannerCatalog(NSArray<NSString *> *
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"Banners";
+    self.title = @"Notification Banners";
     self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
 
     RCConfigManager *cm = [RCConfigManager sharedManager];

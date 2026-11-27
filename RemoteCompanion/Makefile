@@ -21,7 +21,7 @@ RemoteCompanion_FILES += RCConditionPickerViewController.m
 RemoteCompanion_FILES += RCGesturesViewController.m RCPlayGestureViewController.m RCGestureDetailViewController.m
 RemoteCompanion_FILES += RCMenuEditorViewController.m
 RemoteCompanion_FILES += RCScreenActions.m
-RemoteCompanion_RESOURCE_FILES = Info.plist Icon.png AppIcon60x60@2x.png AppIcon60x60@3x.png Entitlements.plist
+RemoteCompanion_RESOURCE_FILES = Info.plist Icon.png AppIcon60x60@2x.png AppIcon60x60@3x.png Entitlements.plist HolidayPresent@2x.png HolidayPresent@3x.png
 RemoteCompanion_INSTALL_PATH = /Applications
 RemoteCompanion_FILES += RCDevicePickerViewController.m
 RemoteCompanion_FILES += RCBatteryTriggerViewController.m
@@ -29,8 +29,10 @@ RemoteCompanion_FILES += RCTestKitViewController.m RCTestReportViewController.m 
 
 # Shared UI components
 RemoteCompanion_FILES += RCCategoryBar.m RCActionTile.m RCTriggersGrid.m RCTriggerIcons.m
+RemoteCompanion_FILES += RCSectionIndexBar.m
 RemoteCompanion_FILES += RCToastPill.m
 RemoteCompanion_FILES += RCSectionCardView.m
+RemoteCompanion_FILES += RCHolidayMode.m RCSnowfallView.m
 RemoteCompanion_FILES += RCActionsViewController+Selection.m
 RemoteCompanion_FILES += RCFocusPickerViewController.m
 RemoteCompanion_FILES += RCWebUIAccessViewController.m

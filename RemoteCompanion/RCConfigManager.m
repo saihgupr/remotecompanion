@@ -407,6 +407,12 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
             [self saveConfig];
         }
 
+        // Auto-add holidayModeEnabled (default to NO: snowfall is off until enabled)
+        if (_config[@"holidayModeEnabled"] == nil) {
+            _config[@"holidayModeEnabled"] = @NO;
+            [self saveConfig];
+        }
+
         // Auto-add developerMode (default to NO: developer actions hidden until enabled)
         if (_config[@"developerMode"] == nil) {
             _config[@"developerMode"] = @NO;
@@ -447,6 +453,7 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
             @"freezeListsDuringGestures": @YES,
             @"allowDirectRootHelper": @NO,
             @"onlyUnlockOutOfPocket": @NO,
+            @"holidayModeEnabled": @NO,
             @"developerMode": @NO,
             @"disableWakeOnPower": @NO,
             @"disablePowerConnectedHaptics": @NO,
@@ -641,6 +648,16 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
 
 - (void)setFreezeListsDuringGestures:(BOOL)freezeListsDuringGestures {
     _config[@"freezeListsDuringGestures"] = @(freezeListsDuringGestures);
+    [self saveConfig];
+}
+
+// Missing means off: Holiday Mode snowfall is opt-in
+- (BOOL)holidayModeEnabled {
+    return [_config[@"holidayModeEnabled"] boolValue];
+}
+
+- (void)setHolidayModeEnabled:(BOOL)holidayModeEnabled {
+    _config[@"holidayModeEnabled"] = @(holidayModeEnabled);
     [self saveConfig];
 }
 
@@ -875,6 +892,18 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
 
 - (void)setToastsWakeScreen:(BOOL)toastsWakeScreen {
     _config[@"toastsWakeScreen"] = @(toastsWakeScreen);
+    [self saveConfig];
+}
+
+- (BOOL)bannersWaitForScreenOn {
+    if (!_config[@"bannersWaitForScreenOn"]) {
+        return YES;
+    }
+    return [_config[@"bannersWaitForScreenOn"] boolValue];
+}
+
+- (void)setBannersWaitForScreenOn:(BOOL)bannersWaitForScreenOn {
+    _config[@"bannersWaitForScreenOn"] = @(bannersWaitForScreenOn);
     [self saveConfig];
 }
 
@@ -1618,6 +1647,8 @@ static NSString *RCActionCommand(id item) {
     if ([triggerKey hasPrefix:@"trigger_statusbar_"]) return YES;
     if ([triggerKey hasPrefix:@"trigger_bottombar_"]) return YES;
     if ([triggerKey hasPrefix:@"trigger_bottom_swipe_"]) return YES;
+    if ([triggerKey hasPrefix:@"trigger_bottom_two_finger_"]) return YES;
+    if ([triggerKey hasPrefix:@"trigger_two_finger_"]) return YES;
     if ([triggerKey hasPrefix:@"trigger_edge_"]) return YES;
     if ([triggerKey hasPrefix:@"trigger_island_"]) return YES;
     return NO;
@@ -2095,6 +2126,10 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         @"orientation set portrait upside down": @"Orientation: Upside Down",
         @"orientation set upside down": @"Orientation: Upside Down",
         @"orientation set auto": @"Orientation: Auto",
+        @"orientation rotate clockwise": @"Rotate Screen Clockwise",
+        @"orientation rotate cw": @"Rotate Screen Clockwise",
+        @"orientation rotate counterclockwise": @"Rotate Screen Counterclockwise",
+        @"orientation rotate ccw": @"Rotate Screen Counterclockwise",
         @"wifi on": @"WiFi On",
         @"wifi off": @"WiFi Off",
         @"wifi toggle": @"WiFi Toggle",
@@ -2445,9 +2480,9 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
             }
             firstArg = [firstArg stringByReplacingOccurrencesOfString:@"\\\"" withString:@"\""];
             if (firstArg.length > 0) {
-                result = [NSString stringWithFormat:@"Toast %@", firstArg];
+                result = [NSString stringWithFormat:@"Notification Banner %@", firstArg];
             } else {
-                result = @"Toast";
+                result = @"Notification Banner";
             }
         } else if ([cmd hasPrefix:@"snapper "] || [cmd isEqualToString:@"snapper"]) {
             NSString *sub = [cmd hasPrefix:@"snapper "] ? [cmd substringFromIndex:8] : @"";
@@ -2775,6 +2810,11 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
     if ([cmd hasPrefix:@"ringer "]) return @"bell.slash.fill";
     if ([cmd hasPrefix:@"haptics "]) return @"iphone.radiowaves.left.and.right";
     if ([cmd hasPrefix:@"brightness "]) return @"sun.max.fill";
+    if ([cmd hasPrefix:@"orientation rotate "]) {
+        BOOL ccw = [cmd containsString:@"counter"] || [cmd hasSuffix:@"ccw"] || [cmd containsString:@"anti"];
+        NSString *name = ccw ? @"rotate.left" : @"rotate.right";
+        return [UIImage systemImageNamed:name] ? name : @"rotate.right";
+    }
     if ([cmd hasPrefix:@"orientation set "]) {
         if ([cmd containsString:@"landscape"]) return ([UIImage systemImageNamed:@"rectangle.landscape.rotate"] ? @"rectangle.landscape.rotate" : @"rotate.right");
         if ([cmd containsString:@"auto"]) return ([UIImage systemImageNamed:@"gyroscope"] ? @"gyroscope" : @"rotate.right");

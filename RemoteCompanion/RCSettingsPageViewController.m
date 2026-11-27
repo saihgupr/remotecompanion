@@ -82,6 +82,7 @@ UIImage *RCSettingsIcon(NSString *symbol, UIColor *color) {
 // Triggers values
 static NSString *const RCRowBanners = @"banners";
 static NSString *const RCRowWakeScreen = @"wakeScreen";
+static NSString *const RCRowWaitScreen = @"waitScreenOn";
 static NSString *const RCRowNFCScanning = @"nfcScanning";
 static NSString *const RCRowNFCExperimental = @"nfcExperimental";
 static NSString *const RCRowNFCScreenOff = @"nfcScreenOff";
@@ -101,7 +102,7 @@ static NSString *const RCRowTestKit = @"testKit";
 + (NSString *)titleForPage:(RCSettingsPage)page {
     switch (page) {
         case RCSettingsPageLayout: return @"Layout";
-        case RCSettingsPageBanners: return @"Banners";
+        case RCSettingsPageBanners: return @"Notification Banners";
         case RCSettingsPageButtons: return @"Buttons";
         case RCSettingsPageSwipeTriggers: return @"Swipe Triggers";
         case RCSettingsPageNFC: return @"NFC";
@@ -164,7 +165,7 @@ static NSString *const RCRowTestKit = @"testKit";
             ];
         case RCSettingsPageBanners:
             // Only for search: the page opens as the Banners list, with Wake Screen above it
-            return @[ @{ @"title": @"Banners", @"rows": @[RCRowWakeScreen],
+            return @[ @{ @"title": @"Notification Banners", @"rows": @[RCRowWakeScreen, RCRowWaitScreen],
                          @"footer": @"Actions that show a banner when a trigger runs them. A banner that comes while the screen is off waits until it turns on, unless Wake Screen is on." } ];
         case RCSettingsPageButtons:
             rows = [NSMutableArray array];
@@ -238,7 +239,7 @@ static NSString *const RCRowTestKit = @"testKit";
     }
     if ([rowID hasPrefix:@"timing:"]) return [self timingRows][[self indexFromRowID:rowID prefix:@"timing:"]][@"title"];
     if ([rowID hasPrefix:@"swipe:"]) return [self swipeRowForRowID:rowID][@"title"];
-    NSDictionary *titles = @{ RCRowBanners: @"Banners", RCRowWakeScreen: @"Wake Screen", RCRowNFCScanning: @"NFC Scanning",
+    NSDictionary *titles = @{ RCRowBanners: @"Notification Banners", RCRowWakeScreen: @"Wake Screen", RCRowWaitScreen: @"Wait Until Screen Turns On", RCRowNFCScanning: @"NFC Scanning",
                               RCRowNFCExperimental: @"Experimental NFC", RCRowNFCScreenOff: @"NFC With Screen Off",
                               RCRowWrapLongNames: @"Wrap Long Names", RCRowLogging: @"Logging",
                               RCRowLockScrolling: @"Lock Scrolling During Gestures", RCRowAdjustOnScreen: @"Adjust on Screen",
@@ -493,6 +494,8 @@ static NSArray<NSString *> *RCLayoutScreenKeys(void) {
     UISwitch *toggle = nil;
     if ([rowID isEqualToString:RCRowWakeScreen]) {
         toggle = [self switchOn:cm.toastsWakeScreen action:@selector(toastsWakeScreenChanged:)];
+    } else if ([rowID isEqualToString:RCRowWaitScreen]) {
+        toggle = [self switchOn:cm.bannersWaitForScreenOn action:@selector(bannersWaitForScreenOnChanged:)];
     } else if ([rowID isEqualToString:RCRowBanners]) {
         NSUInteger count = [RCBannersViewController checkedCount];
         cell.detailTextLabel.text = count ? [NSString stringWithFormat:@"%lu", (unsigned long)count] : @"Off";
@@ -759,6 +762,10 @@ static NSArray<NSString *> *RCLayoutScreenKeys(void) {
         alert.preferredAction = save;
         [self presentViewController:alert animated:YES completion:nil];
     }); }];
+}
+
+- (void)bannersWaitForScreenOnChanged:(UISwitch *)sender {
+    [RCConfigManager sharedManager].bannersWaitForScreenOn = sender.on;
 }
 
 - (void)toastsWakeScreenChanged:(UISwitch *)sender {
