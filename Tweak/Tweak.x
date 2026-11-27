@@ -24411,7 +24411,6 @@ static BOOL should_register_edge_side(BOOL isLeft, BOOL requireActionable) {
     if (!g_triggerConfig) return NO;
     if (!RC_MasterEnabled()) return NO;
     
-    NSDictionary *triggers = g_triggerConfig[@"triggers"];
     NSArray *edgeTriggers = isLeft
         ? @[@"trigger_edge_left_swipe_up", @"trigger_edge_left_swipe_down"]
         : @[@"trigger_edge_right_swipe_up", @"trigger_edge_right_swipe_down"];
@@ -24421,7 +24420,6 @@ static BOOL should_register_edge_side(BOOL isLeft, BOOL requireActionable) {
             if (RC_TriggerIsActionable(key)) return YES;
         } else {
             if (rc_trigger_on(key)) return YES;
-        }
         }
     }
     
