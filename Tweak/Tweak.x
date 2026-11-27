@@ -10973,7 +10973,11 @@ static NSString *rc_handle_http_request(NSString *action) {
 // in front of it. The backup runs detached from a small script; the app and rc
 // start it and then look at the folder, since a full backup outlives a reply.
 
-#define kRCIAmLazyBin @"/var/jb/usr/local/bin/ial"
+// Rootless jailbreaks put IAmLazy (and RC's fix for it) under /var/jb, rootful ones at the root
+static NSString *rc_iamlazy_root(void) {
+    return access("/var/jb/usr/local/bin/ial", X_OK) == 0 ? @"/var/jb" : @"";
+}
+#define kRCIAmLazyBin [rc_iamlazy_root() stringByAppendingString:@"/usr/local/bin/ial"]
 #define kRCIAmLazyScript @"/var/mobile/Documents/rc_iamlazy.sh"
 #define kRCIAmLazyLog @"/var/mobile/Documents/rc_iamlazy.log"
 
@@ -10994,7 +10998,13 @@ static NSArray<NSDictionary *> *rc_iamlazy_backups(void) {
     NSArray *names = [fm contentsOfDirectoryAtPath:dir error:NULL] ?: @[];
     NSMutableArray *out = [NSMutableArray array];
     for (NSString *name in names) {
-        if (![name.pathExtension isEqualToString:@"gz"]) continue;
+        // A backup is a tar archive: .tar.gz from the CLI, .tar.xz from older IAmLazy versions
+        NSString *lower = name.lowercaseString;
+        BOOL archive = NO;
+        for (NSString *suffix in @[@".tar.gz", @".tgz", @".tar.xz", @".tar.zst", @".gz"]) {
+            if ([lower hasSuffix:suffix]) { archive = YES; break; }
+        }
+        if (!archive) continue;
         NSString *path = [dir stringByAppendingPathComponent:name];
         NSDictionary *attrs = [fm attributesOfItemAtPath:path error:NULL];
         if (!attrs) continue;
@@ -11032,14 +11042,15 @@ static NSString *rc_iamlazy_backup(void) {
     // each answer as it arrives and loops if EOF is reached between prompts.
     NSString *script =
         @"#!/bin/sh\n"
+         "JB=@JB@\n"
          "LOG=/var/mobile/Documents/rc_iamlazy.log\n"
          "FIFO=/tmp/rc_iamlazy_$$.fifo\n"
          "rm -f \"$FIFO\"\n"
          "mkfifo \"$FIFO\"\n"
          "echo \"start $(date)\" > \"$LOG\"\n"
-         "mkdir -p /var/jb/var/mobile/Documents/me.lightmann.iamlazy\n"
-         "chown -R mobile:mobile /var/jb/var/mobile/Documents/me.lightmann.iamlazy 2>/dev/null || true\n"
-         "DYLD_INSERT_LIBRARIES=/var/jb/Library/MobileSubstrate/DynamicLibraries/RCIAmLazyFix.dylib /var/jb/usr/local/bin/ial -b < \"$FIFO\" >> \"$LOG\" 2>&1 &\n"
+         "mkdir -p \"$JB/var/mobile/Documents/me.lightmann.iamlazy\"\n"
+         "chown -R mobile:mobile \"$JB/var/mobile/Documents/me.lightmann.iamlazy\" 2>/dev/null || true\n"
+         "DYLD_INSERT_LIBRARIES=\"$JB/Library/MobileSubstrate/DynamicLibraries/RCIAmLazyFix.dylib\" \"$JB/usr/local/bin/ial\" -b < \"$FIFO\" >> \"$LOG\" 2>&1 &\n"
          "IAL_PID=$!\n"
          "{\n"
          "    sleep 1\n"
@@ -11061,9 +11072,10 @@ static NSString *rc_iamlazy_backup(void) {
          "STATUS=$?\n"
          "kill \"$FEED_PID\" 2>/dev/null || true\n"
          "rm -f \"$FIFO\"\n"
-         "chown -R mobile:mobile /var/jb/var/mobile/Documents/me.lightmann.iamlazy 2>/dev/null || true\n"
+         "chown -R mobile:mobile \"$JB/var/mobile/Documents/me.lightmann.iamlazy\" 2>/dev/null || true\n"
          "echo \"exit=$STATUS $(date)\" >> \"$LOG\"\n"
          "exit \"$STATUS\"\n";
+    script = [script stringByReplacingOccurrencesOfString:@"@JB@" withString:rc_iamlazy_root()];
     NSError *writeError = nil;
     if (![script writeToFile:kRCIAmLazyScript atomically:YES encoding:NSUTF8StringEncoding error:&writeError]) {
         return [NSString stringWithFormat:@"Error: Could not write the backup script: %@\n",
@@ -11073,7 +11085,8 @@ static NSString *rc_iamlazy_backup(void) {
     [fm removeItemAtPath:kRCIAmLazyLog error:NULL];
 
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        const char *rootPath = "/var/jb/usr/bin/rc-root";
+        // Rootless puts the helper under /var/jb; rootful in /usr/bin
+        const char *rootPath = access("/var/jb/usr/bin/rc-root", X_OK) == 0 ? "/var/jb/usr/bin/rc-root" : "/usr/bin/rc-root";
         NSString *command = [NSString stringWithFormat:@"sh %@", kRCIAmLazyScript];
         char *args[] = {(char *)rootPath, (char *)[command UTF8String], NULL};
         extern char **environ;
@@ -13857,7 +13870,8 @@ static NSString *handle_command(NSString *cmd) {
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
             // Use rc-root setuid helper with posix_spawn
             pid_t pid;
-            const char *rcRootPath = "/var/jb/usr/bin/rc-root";
+            // Rootless puts the helper under /var/jb; rootful in /usr/bin
+            const char *rcRootPath = access("/var/jb/usr/bin/rc-root", X_OK) == 0 ? "/var/jb/usr/bin/rc-root" : "/usr/bin/rc-root";
             char *args[] = {(char *)rcRootPath, (char *)[shellCmd UTF8String], NULL};
 
             extern char **environ;
