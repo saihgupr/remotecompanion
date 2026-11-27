@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
-    <title>RemoteCompanion — Modern iOS Automation & Jailbreak Repo</title>
+    <title>RemoteCompanion — Scriptable iOS Automation</title>
     
     <!-- SEO & Metadata -->
-    <meta name="description" content="Official repository for RemoteCompanion: Scriptable system control, gesture automation, and desktop hub for modern jailbroken iOS (iOS 14–17, partial iOS 26 support).">
+    <meta name="description" content="Official website for RemoteCompanion: Scriptable system control, gesture automation, and desktop hub for modern jailbroken iOS (iOS 14–17, partial iOS 26 support).">
     <meta name="keywords" content="RemoteCompanion, iOS, Jailbreak, Sileo, Zebra, Cydia, Dopamine, Palera1n, Rootless, RootHide, Tweaks, Automation, Home Assistant, Keyboard Maestro, MQTT">
     <meta name="author" content="saihgupr">
     <meta name="theme-color" content="#0071e3" media="(prefers-color-scheme: light)">
@@ -15,15 +15,15 @@
     <!-- Open Graph (Reddit, iMessage, Discord, Facebook) -->
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://saihgupr.github.io/remotecompanion/">
-    <meta property="og:title" content="RemoteCompanion — iOS Automation & Jailbreak Repo">
+    <meta property="og:title" content="RemoteCompanion — Scriptable iOS Automation">
     <meta property="og:description" content="Scriptable system control, gesture automation, and desktop hub for modern jailbroken iOS. Supports iOS 14–17 with partial iOS 26 support (Rootless & Rootful).">
     <meta property="og:image" content="https://saihgupr.github.io/remotecompanion/Icon.png">
     <meta property="og:image:alt" content="RemoteCompanion App Icon">
-    <meta property="og:site_name" content="RemoteCompanion Repository">
+    <meta property="og:site_name" content="RemoteCompanion">
 
     <!-- Twitter / X Card (Enables app icon preview on Reddit link posts) -->
     <meta name="twitter:card" content="summary">
-    <meta name="twitter:title" content="RemoteCompanion — iOS Automation & Jailbreak Repo">
+    <meta name="twitter:title" content="RemoteCompanion — Scriptable iOS Automation">
     <meta name="twitter:description" content="Scriptable system control, gesture automation, and desktop hub for modern jailbroken iOS. Supports iOS 14–17 with partial iOS 26 support (Rootless & Rootful).">
     <meta name="twitter:image" content="https://saihgupr.github.io/remotecompanion/Icon.png">
     <meta name="twitter:image:alt" content="RemoteCompanion Icon">
@@ -50,6 +50,7 @@
                 <li><a href="#cli" class="nav-link">CLI</a></li>
                 <li><a href="#changelog" class="nav-link">Changelog</a></li>
                 <li><a href="#download" class="nav-link">Install</a></li>
+                <li><a href="https://saihgupr.github.io/" class="nav-link">All Tweaks</a></li>
             </ul>
             <div class="nav-actions">
                 <button id="themeToggleBtn" class="theme-toggle-btn" title="Toggle Theme" aria-label="Toggle Dark/Light Mode">
@@ -89,15 +90,15 @@
 
             <!-- One-Tap Package Manager Action Buttons -->
             <div class="package-actions">
-                <a href="sileo://source/https://saihgupr.github.io/remotecompanion/" class="btn-pm btn-sileo" title="Add to Sileo">
+                <a href="sileo://source/https://saihgupr.github.io/" class="btn-pm btn-sileo" title="Add to Sileo">
                     <img src="images/Icon_Sileo.png" alt="Sileo" class="pm-icon pm-icon-img">
                     <span>Add to Sileo</span>
                 </a>
-                <a href="zbra://sources/add/https://saihgupr.github.io/remotecompanion/" class="btn-pm btn-zebra" title="Add to Zebra">
+                <a href="zbra://sources/add/https://saihgupr.github.io/" class="btn-pm btn-zebra" title="Add to Zebra">
                     <img src="images/zeeb.svg" alt="Zebra" class="pm-icon">
                     <span>Add to Zebra</span>
                 </a>
-                <a href="cydia://url/https://cydia.saurik.com/api/share#?source=https://saihgupr.github.io/remotecompanion/" class="btn-pm btn-cydia" title="Add to Cydia">
+                <a href="cydia://url/https://cydia.saurik.com/api/share#?source=https://saihgupr.github.io/" class="btn-pm btn-cydia" title="Add to Cydia">
                     <img src="images/Cydia_logo.png" alt="Cydia" class="pm-icon pm-icon-img">
                     <span>Add to Cydia</span>
                 </a>
@@ -123,7 +124,7 @@
             <div class="repo-url-card">
                 <div class="repo-url-info">
                     <span class="repo-url-label">Repository URL</span>
-                    <span id="repoUrlText" class="repo-url-text">https://saihgupr.github.io/remotecompanion/</span>
+                    <span id="repoUrlText" class="repo-url-text">https://saihgupr.github.io/</span>
                 </div>
                 <button id="copyRepoBtn" class="btn-copy" onclick="copyRepoUrl()">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -471,7 +472,7 @@
                     <h3 class="feature-title">1. Via Package Manager (Recommended)</h3>
                     <div class="step-item">
                         <span class="step-num">1</span>
-                        <p class="step-text">Install directly from <a href="https://havoc.app/package/remotecompanion" target="_blank" rel="noopener">Havoc</a>, tap <strong>Add to Sileo</strong> or <strong>Add to Zebra</strong> above, or manually add <code>https://saihgupr.github.io/remotecompanion/</code> to your Sources.</p>
+                        <p class="step-text">Install directly from <a href="https://havoc.app/package/remotecompanion" target="_blank" rel="noopener">Havoc</a>, tap <strong>Add to Sileo</strong> or <strong>Add to Zebra</strong> above, or manually add <code>https://saihgupr.github.io/</code> to your Sources.</p>
                     </div>
                     <div class="step-item">
                         <span class="step-num">2</span>
@@ -517,6 +518,7 @@
                     <span>RemoteCompanion</span>
                 </div>
                 <ul class="footer-links">
+                    <li><a href="https://saihgupr.github.io/" class="footer-link">Saihgupr Repo</a></li>
                     <li><a href="https://github.com/saihgupr/remotecompanion" class="footer-link" target="_blank" rel="noopener">GitHub</a></li>
                     <li><a href="https://github.com/saihgupr/remotecompanion/issues" class="footer-link" target="_blank" rel="noopener">Issues</a></li>
                     <li><a href="https://github.com/saihgupr/remotecompanion/blob/master/CHANGELOG.md" class="footer-link" target="_blank" rel="noopener">Full Changelog</a></li>
@@ -541,7 +543,7 @@
     <script>
         // 1-Click Copy Repo URL
         function copyRepoUrl() {
-            const repoUrl = "https://saihgupr.github.io/remotecompanion/";
+            const repoUrl = "https://saihgupr.github.io/";
             navigator.clipboard.writeText(repoUrl).then(() => {
                 const btn = document.getElementById("copyRepoBtn");
                 const btnText = document.getElementById("copyBtnText");
