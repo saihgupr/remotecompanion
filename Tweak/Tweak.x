@@ -13136,6 +13136,34 @@ static NSString *rc_handle_watch_setting_command(NSString *cleanCmd) {
     return [NSString stringWithFormat:@"%s toggled\n", spec->label];
 }
 
+static BOOL rc_has_ssh_executable(NSString *name) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray<NSString *> *prefixes = @[
+        @"/var/jb/usr/local/bin",
+        @"/var/jb/usr/bin",
+        @"/var/jb/bin",
+        @"/usr/local/bin",
+        @"/usr/bin",
+        @"/bin"
+    ];
+    for (NSString *prefix in prefixes) {
+        if ([fm isExecutableFileAtPath:[prefix stringByAppendingPathComponent:name]]) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+static NSString *rc_ssh_missing_error(BOOL needSSHPass) {
+    if (!rc_has_ssh_executable(@"ssh")) {
+        return @"Error: openssh-client is not installed. Install openssh-client from Sileo or Zebra to use SSH.\n";
+    }
+    if (needSSHPass && !rc_has_ssh_executable(@"sshpass")) {
+        return @"Error: sshpass is not installed. Install sshpass for password authentication, or use key authentication.\n";
+    }
+    return nil;
+}
+
 // ssh-test <hostId>: run a quick command over the saved host's SSH settings and report whether
 // the connection and login worked. The command socket handles each command off the main thread.
 static NSString *rc_ssh_test_host(NSString *hostId) {
@@ -13174,6 +13202,9 @@ static NSString *rc_ssh_test_host(NSString *hostId) {
         fullSSHCmd = [NSString stringWithFormat:@"ssh -p %ld -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -o BatchMode=yes %@ %@",
                       (long)port, rc_sh_quote(destination), rc_sh_quote(remoteCmd)];
     }
+
+    NSString *missingErr = rc_ssh_missing_error(useSSHPass);
+    if (missingErr) return missingErr;
 
     NSString *basePath = @"/var/jb/usr/local/bin:/var/jb/usr/bin:/var/jb/bin:/var/jb/usr/sbin:/var/jb/sbin:/usr/bin:/bin:/usr/sbin:/sbin";
     extern char **environ;
@@ -16191,6 +16222,12 @@ static NSString *handle_command(NSString *cmd) {
                           (long)port,
                           rc_sh_quote(targetDestination),
                           rc_sh_quote(remoteCmd)];
+        }
+
+        NSString *missingErr = rc_ssh_missing_error(useSSHPass);
+        if (missingErr) {
+            SRLogMin(@"[RCSSH] %@", missingErr);
+            return missingErr;
         }
         
         SRLog(@"[RCSSH] Executing remote SSH command on %@: %@", host, remoteCmd);

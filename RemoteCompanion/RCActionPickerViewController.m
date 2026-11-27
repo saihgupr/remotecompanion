@@ -12,6 +12,7 @@
 #import "RCKMMacroPickerViewController.h"
 #import "RCCategoryBar.h"
 #import "RCSSHActionEditorViewController.h"
+#import "RCSSHSettingsViewController.h"
 #import "RCDevAnnotateAction.h"
 #import "RCDevAnnotateEditorViewController.h"
 #import "RCActionTile.h"
@@ -1450,6 +1451,9 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
 }
 
 - (void)handleSSHCommand {
+    if (![RCSSHSettingsViewController ensureSSHInstalledInViewController:self requireSSHPass:NO]) {
+        return;
+    }
     RCConfigManager *cm = [RCConfigManager sharedManager];
     NSArray<NSDictionary *> *hosts = cm.sshHosts;
     if (hosts.count == 0) {
@@ -1516,6 +1520,9 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
 }
 
 - (void)handleDevAnnotate {
+    if (![RCSSHSettingsViewController ensureSSHInstalledInViewController:self requireSSHPass:NO]) {
+        return;
+    }
     NSArray<NSDictionary *> *hosts = [RCConfigManager sharedManager].sshHosts;
     if (hosts.count == 0) {
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"No SSH Hosts Configured"
