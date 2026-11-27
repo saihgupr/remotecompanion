@@ -1086,6 +1086,24 @@ static NSString *rc_dev_music_resume_script(void) {
            @"rm -f \"$F\"; exit 0";
 }
 
+static BOOL rc_dev_has_executable(NSString *name) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray<NSString *> *prefixes = @[
+        @"/var/jb/usr/local/bin",
+        @"/var/jb/usr/bin",
+        @"/var/jb/bin",
+        @"/usr/local/bin",
+        @"/usr/bin",
+        @"/bin"
+    ];
+    for (NSString *prefix in prefixes) {
+        if ([fm isExecutableFileAtPath:[prefix stringByAppendingPathComponent:name]]) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
 static void rc_dev_run_ssh_quiet(NSDictionary *targetHost, NSString *remoteCmd) {
     if (![targetHost isKindOfClass:[NSDictionary class]] || remoteCmd.length == 0) return;
     NSString *host = targetHost[@"host"] ?: @"";
@@ -1118,6 +1136,11 @@ static void rc_dev_run_ssh_quiet(NSDictionary *targetHost, NSString *remoteCmd) 
             @"ssh -p %ld -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
             @"-o ConnectTimeout=8 -o BatchMode=yes %@ %@",
             (long)port, quotedDest, quotedCmd];
+    }
+
+    if (!rc_dev_has_executable(@"ssh") || (useSSHPass && !rc_dev_has_executable(@"sshpass"))) {
+        SRLogMin(@"[DevAnnotate] Skipping quiet SSH command: missing ssh or sshpass");
+        return;
     }
 
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
@@ -1269,6 +1292,15 @@ static void rc_dev_deliver_over_ssh(NSDictionary *targetHost,
                       (long)port,
                       rc_dev_sh_quote(targetDestination),
                       rc_dev_sh_quote(remoteCmd)];
+    }
+
+    if (!rc_dev_has_executable(@"ssh")) {
+        notify(@"OpenSSH Required", @"Install openssh-client to use Annotate & Send", @"xmark.circle.fill");
+        return;
+    }
+    if (useSSHPass && !rc_dev_has_executable(@"sshpass")) {
+        notify(@"sshpass Required", @"Install sshpass for password auth or use an SSH key", @"xmark.circle.fill");
+        return;
     }
 
     int inPipe[2] = { -1, -1 };
