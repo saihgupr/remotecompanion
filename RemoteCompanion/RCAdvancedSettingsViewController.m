@@ -5,6 +5,7 @@
 #import "RCExcludedAppsViewController.h"
 #import "RCConfigManager+AppExclusions.h"
 #import "RCActionTile.h"
+#import <notify.h>
 
 @interface RCAdvancedSettingsViewController ()
 @property (nonatomic, strong) UITableView *tableView;
@@ -66,6 +67,8 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
                                              selector:@selector(handleTweaksChanged:)
                                                  name:@"RCConfigTweaksChangedNotification"
                                                object:nil];
+    // Adjust on Screen saves from SpringBoard: the Swipe Triggers rows follow
+    [[NSNotificationCenter defaultCenter] addObserver:self.tableView selector:@selector(reloadData) name:RCConfigChangedNotification object:nil];
     [self applyTweaks];
 }
 
@@ -76,6 +79,7 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
 
 - (void)dealloc {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
+    [[NSNotificationCenter defaultCenter] removeObserver:self.tableView];
 }
 
 - (void)handleTweaksChanged:(NSNotification *)note {
@@ -148,7 +152,7 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
     } else if (section == RCAdvancedSettingsSectionButtons) {
         return @"How long a press waits for the next one before it counts. A shorter time responds sooner and needs quicker presses.";
     } else if (section == RCAdvancedSettingsSectionSwipes) {
-        return @"How far a swipe goes before a swipe trigger runs, and how close to the side an edge swipe starts. Longer distances and a narrower strip leave more room for the Home swipe and other gestures.";
+        return @"How far a swipe goes before a swipe trigger runs, and where a status bar, edge or bottom swipe has to start. Adjust on Screen shows them at their real size over any app. Longer distances and smaller zones leave more room for the Home swipe and other gestures.";
     } else if (section == RCAdvancedSettingsSectionSecurity) {
         return @"Lets scripts, terminals and other tools call the root helper directly. Any app on this device can then get root, so leave it off unless you need it.";
     } else if (section == RCAdvancedSettingsSectionDeveloper) {
@@ -161,7 +165,7 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
     if (section == RCAdvancedSettingsSectionBanners) return 2; // Banners, Wake Screen
     if (section == RCAdvancedSettingsSectionNFC) return 3;
     if (section == RCAdvancedSettingsSectionButtons) return (NSInteger)[self timingRows].count;
-    if (section == RCAdvancedSettingsSectionSwipes) return (NSInteger)[self swipeRows].count;
+    if (section == RCAdvancedSettingsSectionSwipes) return 1 + (NSInteger)[self swipeRows].count; // Adjust on Screen, then the rows
     if (section == RCAdvancedSettingsSectionLayout) return (NSInteger)RCLayoutScreens().count;
     if (section == RCAdvancedSettingsSectionSecurity) return 1;
     if (section == RCAdvancedSettingsSectionDeveloper) return 1;
@@ -270,10 +274,13 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
         cell.textLabel.text = row[@"title"];
         cell.detailTextLabel.text = [NSString stringWithFormat:@"%.2f s", get()];
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    } else if (indexPath.section == RCAdvancedSettingsSectionSwipes && indexPath.row == 0) {
+        cell.textLabel.text = @"Adjust on Screen";
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     } else if (indexPath.section == RCAdvancedSettingsSectionSwipes) {
-        NSDictionary *row = [self swipeRows][indexPath.row];
+        NSDictionary *row = [self swipeRows][indexPath.row - 1];
         cell.textLabel.text = row[@"title"];
-        cell.detailTextLabel.text = [NSString stringWithFormat:@"%.0f pt", [cm swipeSettingForKey:row[@"key"] defaultValue:[row[@"default"] doubleValue]]];
+        cell.detailTextLabel.text = [NSString stringWithFormat:row[@"format"] ?: @"%.0f pt", [cm swipeSettingForKey:row[@"key"] defaultValue:[row[@"default"] doubleValue]]];
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     } else if (indexPath.section == RCAdvancedSettingsSectionSecurity) {
         cell.textLabel.text = @"Allow Direct Root Helper Calls";
@@ -310,13 +317,17 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
         double (^get)(void) = row[@"get"];
         void (^set)(double) = row[@"set"];
         [self chooseTimingNamed:row[@"title"] message:row[@"message"] values:row[@"values"] defaultValue:[row[@"default"] doubleValue]
-                        current:get() from:[tableView cellForRowAtIndexPath:indexPath] apply:set];    } else if (indexPath.section == RCAdvancedSettingsSectionSwipes) {
-        NSDictionary *row = [self swipeRows][indexPath.row];
+                        current:get() from:[tableView cellForRowAtIndexPath:indexPath] apply:set];    } else if (indexPath.section == RCAdvancedSettingsSectionSwipes && indexPath.row == 0) {
+        // SpringBoard draws it over every app (RCSwipeZones.m in the tweak)
+        notify_post("com.pizzaman.rc.swipe_zones.show");
+        [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    } else if (indexPath.section == RCAdvancedSettingsSectionSwipes) {
+        NSDictionary *row = [self swipeRows][indexPath.row - 1];
         RCConfigManager *cm = [RCConfigManager sharedManager];
         NSString *key = row[@"key"];
         double defaultValue = [row[@"default"] doubleValue];
         [self chooseValueNamed:row[@"title"] message:row[@"message"] values:row[@"values"] defaultValue:defaultValue
-                       current:[cm swipeSettingForKey:key defaultValue:defaultValue] format:@"%.0f pt" from:[tableView cellForRowAtIndexPath:indexPath]
+                       current:[cm swipeSettingForKey:key defaultValue:defaultValue] format:row[@"format"] ?: @"%.0f pt" from:[tableView cellForRowAtIndexPath:indexPath]
                          apply:^(double value) { [cm setSwipeSetting:value forKey:key defaultValue:defaultValue]; }];
     }
 }
@@ -355,8 +366,8 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
     return rows;
 }
 
-// The Swipe Triggers rows: each a config key, its default (the distance the tweak always used) and
-// the values to pick from, in points
+// The Swipe Triggers rows: each a config key, its default (the size the tweak always used) and
+// the values to pick from, in points unless the row has its own format (the zone shares, in percent)
 - (NSArray<NSDictionary *> *)swipeRows {
     return @[
         @{ @"title": @"Edge Strip", @"key": @"swipeEdgeStrip", @"default": @25,
@@ -377,6 +388,24 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
         @{ @"title": @"Bottom Swipe Up", @"key": @"swipeBottomUpDistance", @"default": @45,
            @"message": @"How far a swipe up from the bottom goes before its trigger runs.",
            @"values": @[@30, @45, @60, @80, @100] },
+        @{ @"title": @"Status Bar Height", @"key": @"swipeStatusBarHeight", @"default": @25,
+           @"message": @"How close to the top a status bar tap, hold or swipe has to start. Phones with the Dynamic Island have a taller status bar, where 40 or more suits.",
+           @"values": @[@20, @25, @30, @35, @40, @45, @50] },
+        @{ @"title": @"Status Bar Left Zone", @"key": @"swipeStatusBarLeftZone", @"default": @33, @"format": @"%.0f%%",
+           @"message": @"How much of the status bar, from the left, counts as its left zone. The center zone has what the left and right zones leave.",
+           @"values": @[@15, @20, @25, @33, @40, @50] },
+        @{ @"title": @"Status Bar Right Zone", @"key": @"swipeStatusBarRightZone", @"default": @33, @"format": @"%.0f%%",
+           @"message": @"How much of the status bar, from the right, counts as its right zone. The center zone has what the left and right zones leave.",
+           @"values": @[@15, @20, @25, @33, @40, @50] },
+        @{ @"title": @"Bottom Zone Height", @"key": @"swipeBottomZoneHeight", @"default": @25,
+           @"message": @"How close to the bottom a bottom bar swipe or a bottom swipe up has to start.",
+           @"values": @[@15, @20, @25, @30, @40, @50] },
+        @{ @"title": @"Bottom Left Zone", @"key": @"swipeBottomLeftZone", @"default": @33, @"format": @"%.0f%%",
+           @"message": @"How much of the bottom edge, from the left, starts a Bottom Swipe Up (Left). The center zone has what the left and right zones leave.",
+           @"values": @[@15, @20, @25, @33, @40, @50] },
+        @{ @"title": @"Bottom Right Zone", @"key": @"swipeBottomRightZone", @"default": @33, @"format": @"%.0f%%",
+           @"message": @"How much of the bottom edge, from the right, starts a Bottom Swipe Up (Right). The center zone has what the left and right zones leave.",
+           @"values": @[@15, @20, @25, @33, @40, @50] },
     ];
 }
 
@@ -453,6 +482,10 @@ typedef NS_ENUM(NSInteger, RCAdvancedSettingsSection) {
 - (void)chooseValueNamed:(NSString *)name message:(NSString *)message values:(NSArray<NSNumber *> *)values defaultValue:(double)defaultValue
                  current:(double)current format:(NSString *)format from:(UIView *)sourceView apply:(void (^)(double value))apply {
     UIAlertController *sheet = [UIAlertController alertControllerWithTitle:name message:message preferredStyle:UIAlertControllerStyleActionSheet];
+    // a value set elsewhere (Adjust on Screen, the Web UI) is listed too
+    if (![values indexesOfObjectsPassingTest:^BOOL(NSNumber *v, NSUInteger i, BOOL *stop) { return fabs(v.doubleValue - current) < 0.005; }].count) {
+        values = [[values arrayByAddingObject:@(current)] sortedArrayUsingSelector:@selector(compare:)];
+    }
     for (NSNumber *value in values) {
         BOOL isCurrent = fabs(value.doubleValue - current) < 0.005;
         BOOL isDefault = fabs(value.doubleValue - defaultValue) < 0.005;
