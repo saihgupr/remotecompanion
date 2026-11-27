@@ -1,4 +1,5 @@
 #import "RCSSHActionEditorViewController.h"
+#import "RCSetupShortcuts.h"
 #import "RCConfigManager.h"
 
 @interface RCSSHActionEditorViewController () <UITextViewDelegate>
@@ -78,7 +79,7 @@
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == 0) {
-        return @"Pick the server this command runs on. Manage servers in Settings > Integrations > SSH Hosts.";
+        return @"Pick the server this command runs on, or add one.";
     }
     return @"Runs on the remote machine, exactly as typed. Multiple lines are allowed.";
 }
@@ -157,11 +158,9 @@
 - (void)chooseHostFromView:(UIView *)sourceView {
     NSArray<NSDictionary *> *hosts = [RCConfigManager sharedManager].sshHosts;
     if (hosts.count == 0) {
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"No SSH Hosts"
-            message:@"Add a server in Settings > Integrations > SSH Hosts first."
-            preferredStyle:UIAlertControllerStyleAlert];
-        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-        [self presentViewController:alert animated:YES completion:nil];
+        RCPresentSetupNeeded(self, RCSetupKindSSHHost, @"No Servers", @"This command runs on a server. Add one to pick it.", ^(NSDictionary *host) {
+            [self useNewHost:host];
+        });
         return;
     }
 
@@ -180,10 +179,18 @@
             [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:0] withRowAnimation:UITableViewRowAnimationNone];
         }]];
     }
+    [sheet addAction:RCSetupAddAction(self, RCSetupKindSSHHost, ^(NSDictionary *host) { [self useNewHost:host]; })];
     [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     sheet.popoverPresentationController.sourceView = sourceView;
     sheet.popoverPresentationController.sourceRect = sourceView.bounds;
     [self presentViewController:sheet animated:YES completion:nil];
+}
+
+// A server just added here is the one picked
+- (void)useNewHost:(NSDictionary *)host {
+    if ([host[@"id"] length]) self.hostId = host[@"id"];
+    [self updateSaveButton];
+    [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:0] withRowAnimation:UITableViewRowAnimationNone];
 }
 
 #pragma mark - Editing

@@ -203,7 +203,17 @@
     };
 
     [[RCConfigManager sharedManager] addOrUpdateRCClient:client];
+    void (^onSave)(NSDictionary *) = self.onSave;
+    // Closed the way it was opened: dismissed when it's the first screen of one presented on its
+    // own, popped otherwise; onSave runs once it's gone
+    if (self.navigationController.viewControllers.firstObject == self && self.navigationController.presentingViewController != nil) {
+        [self.navigationController dismissViewControllerAnimated:YES completion:^{ if (onSave) onSave(client); }];
+        return;
+    }
+    [CATransaction begin];
+    [CATransaction setCompletionBlock:^{ if (onSave) onSave(client); }];
     [self.navigationController popViewControllerAnimated:YES];
+    [CATransaction commit];
 }
 
 - (void)showErrorWithTitle:(NSString *)title message:(NSString *)message {

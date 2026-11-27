@@ -1909,13 +1909,16 @@ NSData *RCAddOnsIconData(NSString *addOnId, NSString *name, NSString **contentTy
 }
 
 NSString *RCAddOnsCatalogJSON(void) {
-    NSArray *addOns, *problems;
+    NSArray *addOns, *problems, *disabled, *absent;
     rcao_current();
     @synchronized (rcao_lock()) {
         addOns = rcao_addOns ?: @[];
         problems = rcao_problems ?: @[];
+        disabled = rcao_disabled ?: @[];
+        absent = rcao_absent ?: @[];
     }
-    NSData *data = [NSJSONSerialization dataWithJSONObject:@{@"addons": addOns, @"problems": problems} options:0 error:nil];
+    // As the app's catalog has them: on, off (installed but turned off), not installed, and problems
+    NSData *data = [NSJSONSerialization dataWithJSONObject:@{@"addons": addOns, @"disabled": disabled, @"absent": absent, @"problems": problems} options:0 error:nil];
     return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"{\"addons\":[],\"problems\":[]}";
 }
 

@@ -38,7 +38,7 @@ static const NSInteger kRCRecentRunsShown = 5;
         _runs = @[];
         _recentRuns = @[];
         _notifyToken = NOTIFY_TOKEN_INVALID;
-        self.title = @"Running";
+        self.title = @"Activity";
     }
     return self;
 }

@@ -25,6 +25,10 @@
 // how close to the side a side-edge swipe has to start) under its config key. Setting the default
 // removes the key, so the tweak keeps its own default.
 - (double)swipeSettingForKey:(NSString *)key defaultValue:(double)defaultValue;
+// Settings locked against changes by accident (the slider's lock, held): their config keys, in
+// "lockedSettings". The app, the Web UI and Adjust on Screen all leave a locked value alone.
+- (BOOL)isSettingLocked:(NSString *)key;
+- (void)setSetting:(NSString *)key locked:(BOOL)locked;
 - (void)setSwipeSetting:(double)value forKey:(NSString *)key defaultValue:(double)defaultValue;
 // Seconds after a volume press within which the other volume button completes an Up then Down
 // (or Down then Up) sequence: 0.15 to 0.8, default 0.38
@@ -45,7 +49,7 @@
 // A banner that comes while the screen is off turns it on (off: the banner waits for the screen to turn on)
 @property (nonatomic, assign) BOOL toastsWakeScreen;
 // Unlock Device and lock toggle skip unlocking while the proximity sensor is covered, such as
-// in a pocket. Off by default (Settings > Advanced Settings > Options).
+// in a pocket. Off by default (Settings > Security).
 @property (nonatomic, assign) BOOL onlyUnlockOutOfPocket;
 @property (nonatomic, assign) BOOL nfcEnabled;
 // Seconds the NFC scan keeps going after the screen turns off (0: only while the screen is on)
@@ -60,20 +64,20 @@
 // scripts, terminals and other tools call it directly. Off by default (Settings > Advanced
 // Settings > Security).
 @property (nonatomic, assign) BOOL allowDirectRootHelper;
-// Unlocks Developer Mode actions in the action picker (Settings > Advanced Settings > Developer).
+// Unlocks Developer Mode actions in the action picker (Settings > Diagnostics).
 // Off by default.
 @property (nonatomic, assign) BOOL developerMode;
 // Prevent the display from waking when external power connects or disconnects while the
-// screen is off or dimmed. Off by default (Settings > Tweaks).
+// screen is off or dimmed. Off by default (Settings > iOS Tweaks, shown as the opposite switch).
 @property (nonatomic, assign) BOOL disableWakeOnPower;
 // Stop iOS from playing the charging haptic/chime when external power connects.
-// Off by default (Settings > Tweaks).
+// Off by default (Settings > iOS Tweaks, shown as the opposite switch).
 @property (nonatomic, assign) BOOL disablePowerConnectedHaptics;
 // Turn off notification vibration while the device is unlocked (banners and sounds still work).
-// Off by default (Settings > Tweaks).
+// Off by default (Settings > iOS Tweaks, shown as the opposite switch).
 @property (nonatomic, assign) BOOL disableUnlockedNotificationVibration;
 // Forward notifications to a paired Apple Watch even while the iPhone is unlocked.
-// Off by default (Settings > Tweaks).
+// Off by default (Settings > iOS Tweaks, shown as the opposite switch).
 @property (nonatomic, assign) BOOL sendNotificationsToWatchWhenUnlocked;
 @property (nonatomic, assign) BOOL haEnabled;
 @property (nonatomic, copy) NSString *haUrl;

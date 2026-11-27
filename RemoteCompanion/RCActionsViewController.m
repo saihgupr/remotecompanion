@@ -1,4 +1,8 @@
 #import "RCActionsViewController.h"
+#import "RCSettingsPageViewController.h"
+#import "RCTriggerAppExclusions.h"
+#import "RCConfigManager+AppExclusions.h"
+#import "RCSetupShortcuts.h"
 #import "RCScreenActions.h"
 #import "RCAddOnCatalog.h"
 #import "RCAppDelegate.h"
@@ -1704,6 +1708,10 @@ static NSArray *RCActionSnapshot(NSArray *actions) {
     toastAction.state = toastsOn ? UIMenuElementStateOn : UIMenuElementStateOff;
     [menuActions addObject:toastAction];
 
+    // Settings that are about this kind of trigger, right here
+    NSArray *shortcuts = [self settingsShortcutsForTrigger];
+    if (shortcuts.count) [menuActions addObject:[UIMenu menuWithTitle:@"" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:shortcuts]];
+
     [menuActions addObject:[UIAction actionWithTitle:@"Run History" image:[UIImage systemImageNamed:@"clock.arrow.circlepath"] identifier:nil handler:^(__unused UIAction *a) {
         [weakSelf.navigationController pushViewController:[[RCRunHistoryViewController alloc] initWithTriggerKey:weakSelf.triggerKey] animated:YES];
     }]];
@@ -1719,6 +1727,14 @@ static NSArray *RCActionSnapshot(NSArray *actions) {
     }];
     clearAction.attributes = UIMenuElementAttributesDestructive;
     [menuActions addObject:clearAction];
+    // The trigger itself, once it's saved (asks first, like Clear All Actions)
+    if ([[[RCConfigManager sharedManager] triggerDataForKey:self.triggerKey] isKindOfClass:[NSDictionary class]]) {
+        UIAction *deleteTrigger = [UIAction actionWithTitle:@"Delete Trigger" image:[UIImage systemImageNamed:@"trash.fill"] identifier:nil handler:^(__kindof UIAction *a) {
+            [weakSelf confirmDeleteTrigger];
+        }];
+        deleteTrigger.attributes = UIMenuElementAttributesDestructive;
+        [menuActions addObject:deleteTrigger];
+    }
     // A name of the user's own, or back to the default (first in the menu)
     if ([RCConfigManager canRenameTrigger:self.triggerKey]) {
         [menuActions insertObject:[UIAction actionWithTitle:@"Rename" image:[UIImage systemImageNamed:@"pencil"] identifier:nil handler:^(__kindof UIAction *a) {
@@ -1726,6 +1742,71 @@ static NSArray *RCActionSnapshot(NSArray *actions) {
         }] atIndex:0];
     }
     return [UIMenu menuWithTitle:@"" children:menuActions];
+}
+
+// The More menu's settings for this trigger: its Excluded Apps, and for a swipe, button or NFC
+// trigger the settings of that kind (Adjust on Screen, Button Timing, NFC Scanning), so they don't
+// need a trip to Settings
+- (void)refreshMoreMenu {
+    self.moreButton.menu = [self moreMenu];
+}
+
+- (NSArray<UIMenuElement *> *)settingsShortcutsForTrigger {
+    __weak typeof(self) weakSelf = self;
+    NSString *key = self.triggerKey;
+    RCConfigManager *cm = [RCConfigManager sharedManager];
+    NSMutableArray *items = [NSMutableArray array];
+
+    // Excluded Apps: once the trigger is saved (a new one has nothing to keep them on yet)
+    if (RCTriggerSupportsAppExclusions(key) && [[cm triggerDataForKey:key] isKindOfClass:[NSDictionary class]]) {
+        NSUInteger count = [cm excludedAppsForTrigger:key].count;
+        UIAction *excluded = [UIAction actionWithTitle:@"Excluded Apps" image:[UIImage systemImageNamed:@"nosign"] identifier:nil handler:^(__unused UIAction *a) {
+            [weakSelf chooseExcludedApps];
+        }];
+        NSString *detail = count ? [NSString stringWithFormat:@"%lu %@", (unsigned long)count, count == 1 ? @"app" : @"apps"] : @"None";
+        if (@available(iOS 15.0, *)) excluded.subtitle = detail;
+        else excluded.title = [NSString stringWithFormat:@"Excluded Apps: %@", detail];
+        [items addObject:excluded];
+    }
+
+    BOOL swipe = [key hasPrefix:@"trigger_statusbar_"] || [key hasPrefix:@"trigger_edge_"] || [key hasPrefix:@"trigger_bottombar_"] || [key hasPrefix:@"trigger_bottom_swipe_up_"];
+    if (swipe) {
+        [items addObject:[UIAction actionWithTitle:@"Adjust Zones" image:[UIImage systemImageNamed:@"hand.point.up.left.fill"] identifier:nil handler:^(__unused UIAction *a) {
+            notify_post("com.pizzaman.rc.swipe_zones.show"); // SpringBoard draws it over every app
+        }]];
+    }
+    BOOL button = [key hasPrefix:@"volume_"] || [key hasPrefix:@"power_"] || [key hasPrefix:@"trigger_home_"];
+    if (button) {
+        [items addObject:[UIAction actionWithTitle:@"Button Timing" image:[UIImage systemImageNamed:@"timer"] identifier:nil handler:^(__unused UIAction *a) {
+            [weakSelf.navigationController pushViewController:[RCSettingsPageViewController viewControllerForPage:RCSettingsPageButtons highlightRowID:nil] animated:YES];
+        }]];
+    }
+    if ([key hasPrefix:@"nfc_"]) {
+        BOOL on = cm.nfcEnabled;
+        UIAction *nfc = [UIAction actionWithTitle:@"NFC Scanning" image:[UIImage systemImageNamed:@"wave.3.right"] identifier:nil handler:^(__unused UIAction *a) {
+            [RCConfigManager sharedManager].nfcEnabled = !on;
+            [weakSelf refreshMoreMenu];
+        }];
+        nfc.state = on ? UIMenuElementStateOn : UIMenuElementStateOff;
+        [items addObject:nfc];
+    }
+    return items;
+}
+
+- (void)chooseExcludedApps {
+    RCConfigManager *cm = [RCConfigManager sharedManager];
+    NSString *key = self.triggerKey;
+    RCAppPickerViewController *picker = [[RCAppPickerViewController alloc] init];
+    picker.title = @"Excluded Apps";
+    picker.allowsMultipleApps = YES;
+    picker.allowsEmptySelection = YES;
+    picker.selectedBundleIds = [cm excludedAppsForTrigger:key];
+    __weak typeof(self) weakSelf = self;
+    picker.onAppsSelected = ^(NSArray<NSString *> *names, NSArray<NSString *> *bundleIDs) {
+        [[RCConfigManager sharedManager] setExcludedApps:bundleIDs forTrigger:key];
+        [weakSelf refreshMoreMenu];
+    };
+    [self.navigationController pushViewController:picker animated:YES];
 }
 
 // Picks a trigger for a "stop trigger" action (current: the one it names now, or nil); done gets
@@ -2733,6 +2814,26 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
         }
     }]];
     
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+// Deletes this trigger and its actions, then goes back to Triggers
+- (void)confirmDeleteTrigger {
+    NSString *name = [[RCConfigManager sharedManager] displayNameForTrigger:self.triggerKey];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"Delete “%@”?", name]
+                                                                   message:@"Its actions are deleted too."
+                                                            preferredStyle:UIAlertControllerStyleActionSheet];
+    __weak typeof(self) weakSelf = self;
+    [alert addAction:[UIAlertAction actionWithTitle:@"Delete Trigger" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *a) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        // An open value editor saves first, so it can't put the trigger back as the screen closes
+        [strongSelf commitInlineRowEditor];
+        [[RCConfigManager sharedManager] removeTrigger:strongSelf.triggerKey];
+        [strongSelf.navigationController popViewControllerAnimated:YES];
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    alert.popoverPresentationController.barButtonItem = self.moreButton ?: self.navigationItem.rightBarButtonItems.firstObject;
     [self presentViewController:alert animated:YES completion:nil];
 }
 
@@ -5532,11 +5633,9 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 
     NSArray<NSDictionary *> *hosts = [RCConfigManager sharedManager].sshHosts;
     if (hosts.count == 0) {
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"No SSH Hosts"
-            message:@"Add a server in Settings > Integrations > SSH Hosts first."
-            preferredStyle:UIAlertControllerStyleAlert];
-        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-        [self presentViewController:alert animated:YES completion:nil];
+        RCPresentSetupNeeded(self, RCSetupKindSSHHost, @"No Servers", @"This command runs on a server. Add one to pick it.", ^(NSDictionary *host) {
+            [self promptEditSSHRunActionAtIndex:index];
+        });
         return;
     }
 
@@ -5580,11 +5679,9 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 
     NSArray<NSDictionary *> *clients = [RCConfigManager sharedManager].rcClients;
     if (clients.count == 0) {
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"No Remote RC Clients"
-            message:@"Add a device in Settings > Integrations > Remote RC Clients first."
-            preferredStyle:UIAlertControllerStyleAlert];
-        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-        [self presentViewController:alert animated:YES completion:nil];
+        RCPresentSetupNeeded(self, RCSetupKindRemoteRC, @"No Devices", @"This command runs on another device with RemoteCompanion. Add one to pick it.", ^(NSDictionary *client) {
+            [self promptEditRemoteRunActionAtIndex:index];
+        });
         return;
     }
 

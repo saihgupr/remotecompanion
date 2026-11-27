@@ -1,6 +1,13 @@
 #import "RCExcludedAppsViewController.h"
 #import "RCConfigManager+AppExclusions.h"
 #import "RCAppPickerViewController.h"
+#import "RCTriggersViewController.h"
+#import "RCTriggerIcons.h"
+#import "RCAddOnCatalog.h"
+
+@interface UIImage (RCExcludedAppIcons)
++ (UIImage *)_applicationIconImageForBundleIdentifier:(NSString *)bundleID format:(int)format scale:(CGFloat)scale;
+@end
 
 // Private API Declarations (same as the app picker)
 @interface LSApplicationProxy : NSObject
@@ -69,7 +76,7 @@ static NSString *RCFitOneLine(NSString *text, UIFont *font, CGFloat width) {
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
-    self.searchController.searchBar.placeholder = @"Search Triggers";
+    self.searchController.searchBar.placeholder = @"Search";
     self.navigationItem.searchController = self.searchController;
     self.navigationItem.hidesSearchBarWhenScrolling = NO;
     self.definesPresentationContext = YES;
@@ -310,6 +317,49 @@ static NSString *RCFitOneLine(NSString *text, UIFont *font, CGFloat width) {
     return self.sectionTitles[section];
 }
 
+// The same headers as the Triggers screen: the section's icon before its name
+- (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
+    NSString *title = self.sectionTitles[section];
+    CGFloat height = [self tableView:tableView heightForHeaderInSection:section];
+    UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, tableView.bounds.size.width, height)];
+    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(20, height - 25, tableView.bounds.size.width - 40, 20)];
+    label.text = [title uppercaseString];
+    label.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+    label.textColor = [title isEqualToString:@"Favorites"]
+        ? [UIColor colorWithRed:242/255.0 green:195/255.0 blue:80/255.0 alpha:1.0]
+        : [UIColor secondaryLabelColor];
+    UIImage *icon = RCTriggerCategoryIcon(title);
+    if (icon) {
+        UIImageView *iconView = [[UIImageView alloc] initWithImage:icon];
+        iconView.preferredSymbolConfiguration = [UIImageSymbolConfiguration configurationWithPointSize:13 weight:UIImageSymbolWeightSemibold];
+        iconView.contentMode = UIViewContentModeScaleAspectFit;
+        iconView.tintColor = label.textColor;
+        iconView.frame = CGRectMake(20, CGRectGetMinY(label.frame) + 1, 18, 18);
+        [header addSubview:iconView];
+        CGRect frame = label.frame;
+        frame.origin.x += 24;
+        frame.size.width -= 24;
+        label.frame = frame;
+    }
+    [header addSubview:label];
+    return header;
+}
+
+- (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section {
+    return section == 0 ? 44.0 : 40.0;
+}
+
+// An app's icon, small enough to sit in a line of text, or nil
+- (UIImage *)smallIconForApp:(NSString *)bundleID side:(CGFloat)side {
+    UIImage *icon = [UIImage _applicationIconImageForBundleIdentifier:bundleID format:0 scale:[UIScreen mainScreen].scale];
+    if (!icon) return nil;
+    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(side, side)];
+    return [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
+        [[UIBezierPath bezierPathWithRoundedRect:CGRectMake(0, 0, side, side) cornerRadius:side * 0.225] addClip];
+        [icon drawInRect:CGRectMake(0, 0, side, side)];
+    }];
+}
+
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     return self.sections[section].count;
 }
@@ -330,9 +380,17 @@ static NSString *RCFitOneLine(NSString *text, UIFont *font, CGFloat width) {
     UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:nil];
     BOOL wrapLongNames = [[NSUserDefaults standardUserDefaults] boolForKey:@"RCWrapLongNamesEnabled"];
     cell.backgroundColor = [cm tweakColorForKey:@"blockBackground" defaultVal:0.12];
+    UIView *selBg = [[UIView alloc] init];
+    selBg.backgroundColor = [cm tweakColorForKey:@"selectionHighlight" defaultVal:0.15];
+    cell.selectedBackgroundView = selBg;
     cell.textLabel.text = [cm displayNameForTrigger:key];
+    cell.textLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightMedium];
     cell.textLabel.textColor = [UIColor labelColor];
     cell.textLabel.numberOfLines = wrapLongNames ? 0 : 1;
+    // The trigger's icon, as on the Triggers screen
+    UIImage *addOnImage = [RCAddOnCatalog isAddOnTriggerKey:key] ? [RCAddOnCatalog imageForTriggerKey:key] : nil;
+    cell.imageView.image = addOnImage ?: [RCTriggersViewController iconImageForTrigger:key size:22];
+    cell.imageView.tintColor = addOnImage ? nil : [UIColor systemGrayColor];
 
     NSMutableArray<NSString *> *labels = [NSMutableArray array];
     for (id action in [cm actionsForTrigger:key]) {
@@ -351,18 +409,34 @@ static NSString *RCFitOneLine(NSString *text, UIFont *font, CGFloat width) {
     NSArray<NSString *> *excluded = [cm excludedAppsForTrigger:key];
     NSUInteger count = excluded.count;
     if (count > 0) {
-        NSMutableArray<NSString *> *names = [NSMutableArray array];
-        for (NSString *bundleID in excluded) {
-            NSString *name = self.appNames[[bundleID lowercaseString]];
-            [names addObject:name.length ? name : bundleID];
+        // Always its own line: a no-entry sign, then each app's icon and name
+        NSDictionary *attrs = @{NSForegroundColorAttributeName: [UIColor secondaryLabelColor]};
+        UIFont *font = cell.detailTextLabel.font;
+        CGFloat side = ceil(font.lineHeight);
+        CGFloat y = (font.capHeight - side) / 2.0;
+        [detail appendAttributedString:[[NSAttributedString alloc] initWithString:@"\n" attributes:attrs]];
+        UIImage *nosign = [[UIImage systemImageNamed:@"nosign"] imageWithTintColor:[UIColor systemRedColor] renderingMode:UIImageRenderingModeAlwaysOriginal];
+        if (nosign) {
+            NSTextAttachment *mark = [[NSTextAttachment alloc] init];
+            mark.image = nosign;
+            CGFloat markSide = side - 2;
+            mark.bounds = CGRectMake(0, (font.capHeight - markSide) / 2.0, markSide, markSide);
+            [detail appendAttributedString:[NSAttributedString attributedStringWithAttachment:mark]];
+            [detail appendAttributedString:[[NSAttributedString alloc] initWithString:@" " attributes:attrs]];
         }
-        NSString *excludedLine = [NSString stringWithFormat:@"Excluded: %@ (%lu)",
-            [names componentsJoinedByString:@", "], (unsigned long)count];
-        // Always its own line, in the normal detail color.
-        [detail appendAttributedString:[[NSAttributedString alloc] initWithString:@"\n"
-            attributes:@{NSForegroundColorAttributeName: [UIColor secondaryLabelColor]}]];
-        [detail appendAttributedString:[[NSAttributedString alloc] initWithString:excludedLine
-            attributes:@{NSForegroundColorAttributeName: [UIColor secondaryLabelColor]}]];
+        [excluded enumerateObjectsUsingBlock:^(NSString *bundleID, NSUInteger index, BOOL *stop) {
+            if (index > 0) [detail appendAttributedString:[[NSAttributedString alloc] initWithString:@",  " attributes:attrs]];
+            UIImage *icon = [self smallIconForApp:bundleID side:side];
+            if (icon) {
+                NSTextAttachment *attachment = [[NSTextAttachment alloc] init];
+                attachment.image = icon;
+                attachment.bounds = CGRectMake(0, y, side, side);
+                [detail appendAttributedString:[NSAttributedString attributedStringWithAttachment:attachment]];
+                [detail appendAttributedString:[[NSAttributedString alloc] initWithString:@" " attributes:attrs]];
+            }
+            NSString *name = self.appNames[[bundleID lowercaseString]];
+            [detail appendAttributedString:[[NSAttributedString alloc] initWithString:(name.length ? name : bundleID) attributes:attrs]];
+        }];
     }
     cell.detailTextLabel.attributedText = detail;
     cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];

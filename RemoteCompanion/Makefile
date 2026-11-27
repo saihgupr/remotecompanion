@@ -44,7 +44,7 @@ RemoteCompanion_FILES += RCFunctionsMenuPrototypeKit.m RCFunctionsMenuPrototypeG
 RemoteCompanion_FILES += RCFunctionsMenuP1.m RCFunctionsMenuP2.m RCFunctionsMenuP3.m RCFunctionsMenuP4.m RCFunctionsMenuP5.m RCFunctionsMenuP6.m
 
 # Reorganized Settings submenus
-RemoteCompanion_FILES += RCAdvancedSettingsViewController.m
+RemoteCompanion_FILES += RCSettingsPageViewController.m RCSliderCell.m RCLayoutPreview.m
 RemoteCompanion_FILES += RCTweaksViewController.m
 RemoteCompanion_FILES += RCFocusTriggerViewController.m
 RemoteCompanion_FILES += RCControlCenterTriggerViewController.m
@@ -60,5 +60,6 @@ RemoteCompanion_FILES += RCDevAnnotateAction.m RCDevAnnotateEditorViewController
 RemoteCompanion_FILES += RCClearNotificationsCommand.m RCClearNotificationsEditorViewController.m
 RemoteCompanion_FILES += RCTimerCommand.m RCTimerEditorViewController.m RCTimerEditorVariants.m
 RemoteCompanion_FILES += RCConfigManager+AppExclusions.m RCExcludedAppsViewController.m
+RemoteCompanion_FILES += RCSetupShortcuts.m
 
 include $(THEOS_MAKE_PATH)/application.mk

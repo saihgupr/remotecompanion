@@ -1,6 +1,7 @@
 #import "RCSymbolPickerViewController.h"
 #import "RCConfigManager.h"
 #import "RCCategoryBar.h"
+#import "RCActionTile.h"
 
 // Categories of symbols: title, names. Names a system doesn't have are left out when shown.
 static NSArray<NSArray *> *RCSymbolCategories(void) {
@@ -30,11 +31,29 @@ static NSArray<NSArray *> *RCSymbolCategories(void) {
 
 #pragma mark - Tile
 
-@interface RCSymbolTileCell : UICollectionViewCell
-@property (nonatomic, strong) UIImageView *iconView;
-@property (nonatomic, strong) UILabel *nameLabel;
-@property (nonatomic, assign) BOOL chosen;
+@interface RCSymbolTileCell ()
+@property (nonatomic, strong) NSArray<NSLayoutConstraint *> *namedConstraints;
+@property (nonatomic, strong) NSArray<NSLayoutConstraint *> *iconOnlyConstraints;
 @end
+
+UIImage *RCSymbolCategoryIcon(NSString *title) {
+    NSDictionary *icons = @{ @"Favorites": @"star.fill", @"Common": @"sparkles", @"Media": @"music.note", @"Devices": @"iphone",
+                             @"Connectivity": @"wifi", @"Home": @"house.fill", @"Weather & Time": @"cloud.sun.fill",
+                             @"Life": @"heart.fill", @"Symbols": @"number" };
+    NSString *name = icons[title ?: @""];
+    UIImage *image = name ? [UIImage systemImageNamed:name] : nil;
+    return [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+}
+
+CGSize RCSymbolTileSize(CGFloat gridWidth) {
+    NSInteger perRow = RCLayoutPerRow(RCLayoutIcons);
+    CGFloat width = gridWidth - 32;
+    // The narrowest a tile gets at this many per row on a phone; a wider screen fits more
+    CGFloat minimum = perRow <= 4 ? 76 : perRow == 5 ? 60 : 50;
+    NSInteger columns = MAX(perRow, (NSInteger)floor((width + 8) / (minimum + 8)));
+    CGFloat side = floor((width - 8 * (columns - 1)) / columns);
+    return CGSizeMake(side, side);
+}
 
 @implementation RCSymbolTileCell
 
@@ -61,17 +80,35 @@ static NSArray<NSArray *> *RCSymbolCategories(void) {
         self.nameLabel.translatesAutoresizingMaskIntoConstraints = NO;
         [self.contentView addSubview:self.nameLabel];
 
-        [NSLayoutConstraint activateConstraints:@[
-            [self.iconView.centerXAnchor constraintEqualToAnchor:self.contentView.centerXAnchor],
+        self.namedConstraints = @[
             [self.iconView.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor constant:-7],
             [self.iconView.widthAnchor constraintEqualToConstant:30],
             [self.iconView.heightAnchor constraintEqualToConstant:30],
+        ];
+        self.iconOnlyConstraints = @[
+            [self.iconView.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],
+            [self.iconView.widthAnchor constraintEqualToAnchor:self.contentView.widthAnchor multiplier:0.55],
+            [self.iconView.heightAnchor constraintEqualToAnchor:self.iconView.widthAnchor],
+        ];
+        [NSLayoutConstraint activateConstraints:self.namedConstraints];
+        [NSLayoutConstraint activateConstraints:@[
+            [self.iconView.centerXAnchor constraintEqualToAnchor:self.contentView.centerXAnchor],
             [self.nameLabel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:4],
             [self.nameLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-4],
             [self.nameLabel.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-6],
         ]];
     }
     return self;
+}
+
+- (void)setIconOnly:(BOOL)iconOnly {
+    if (iconOnly == _iconOnly) return;
+    _iconOnly = iconOnly;
+    [NSLayoutConstraint deactivateConstraints:iconOnly ? self.namedConstraints : self.iconOnlyConstraints];
+    [NSLayoutConstraint activateConstraints:iconOnly ? self.iconOnlyConstraints : self.namedConstraints];
+    self.nameLabel.hidden = iconOnly;
+    // Drawn for the larger size, so it stays sharp
+    self.iconView.preferredSymbolConfiguration = [UIImageSymbolConfiguration configurationWithPointSize:iconOnly ? 36 : 24 weight:UIImageSymbolWeightRegular];
 }
 
 - (void)setChosen:(BOOL)chosen {
@@ -134,6 +171,7 @@ static NSArray<NSArray *> *RCSymbolCategories(void) {
     // A small title: pushed from a screen with large titles it would inherit one, a tall gap above
     // the search field and the category bar
     self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(donePressed)];
 
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
@@ -144,10 +182,13 @@ static NSArray<NSArray *> *RCSymbolCategories(void) {
     self.navigationItem.hidesSearchBarWhenScrolling = NO;
     self.definesPresentationContext = YES;
 
-    NSMutableArray *titles = [NSMutableArray array];
-    for (NSArray *c in [self categories]) [titles addObject:c[0]];
-    self.categoryBar = [[RCCategoryBar alloc] initWithWidth:self.view.bounds.size.width];
-    [self.categoryBar setChipTitles:titles];
+    NSMutableArray *titles = [NSMutableArray array], *chipIcons = [NSMutableArray array];
+    for (NSArray *c in [self categories]) {
+        [titles addObject:c[0]];
+        [chipIcons addObject:RCSymbolCategoryIcon(c[0]) ?: (id)[NSNull null]];
+    }
+    self.categoryBar = [[RCCategoryBar alloc] initWithWidth:self.view.bounds.size.width screen:RCLayoutIcons];
+    [self.categoryBar setChipTitles:titles icons:chipIcons];
     self.categoryBar.selectedIndex = -1;
     self.categoryBar.backgroundColor = bg;
     __weak typeof(self) weakSelf = self;
@@ -176,7 +217,7 @@ static NSArray<NSArray *> *RCSymbolCategories(void) {
 
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
-    CGFloat top = self.view.safeAreaInsets.top, height = [RCCategoryBar barHeight];
+    CGFloat top = self.view.safeAreaInsets.top, height = [self.categoryBar height]; // as many lines as Layout > Icons sets
     self.categoryBar.frame = CGRectMake(0, top, self.view.bounds.size.width, height);
     CGRect frame = CGRectMake(0, top + height, self.view.bounds.size.width, self.view.bounds.size.height - top - height);
     if (!CGRectEqualToRect(self.collectionView.frame, frame)) {
@@ -234,14 +275,12 @@ static NSArray<NSArray *> *RCSymbolCategories(void) {
 }
 
 - (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout sizeForItemAtIndexPath:(NSIndexPath *)indexPath {
-    CGFloat width = collectionView.bounds.size.width - 32;
-    NSInteger columns = MAX(4, (NSInteger)floor((width + 8) / (76 + 8)));
-    CGFloat side = floor((width - 8 * (columns - 1)) / columns);
-    return CGSizeMake(side, side);
+    return RCSymbolTileSize(collectionView.bounds.size.width);
 }
 
 - (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView cellForItemAtIndexPath:(NSIndexPath *)indexPath {
     RCSymbolTileCell *cell = [collectionView dequeueReusableCellWithReuseIdentifier:@"Tile" forIndexPath:indexPath];
+    cell.iconOnly = RCLayoutNamesHidden(RCLayoutIcons);
     NSString *name = self.shown[indexPath.item];
     if (name.length) {
         cell.iconView.image = [UIImage systemImageNamed:name];
@@ -263,14 +302,14 @@ static NSArray<NSArray *> *RCSymbolCategories(void) {
         if (path) cell.chosen = [self.shown[path.item] isEqualToString:name];
     }
     [[[UISelectionFeedbackGenerator alloc] init] selectionChanged];
+    // Marked only: Done keeps it (Back leaves the icon as it was), so others can be tried first
+}
+
+- (void)donePressed {
     void (^onPick)(NSString *) = self.onPick;
-    if (onPick) onPick(name);
-    // A moment to see the choice, then back
-    __weak typeof(self) weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (weakSelf.searchController.isActive) weakSelf.searchController.active = NO;
-        [weakSelf.navigationController popViewControllerAnimated:YES];
-    });
+    if (onPick && self.selected) onPick(self.selected);
+    if (self.searchController.isActive) self.searchController.active = NO;
+    [self.navigationController popViewControllerAnimated:YES];
 }
 
 @end

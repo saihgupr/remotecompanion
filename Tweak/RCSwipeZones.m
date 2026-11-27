@@ -76,10 +76,15 @@ static NSString *RCZoneValueText(RCZoneSetting *s, double value) {
 @property (nonatomic) BOOL dragging, expanded;
 @property (nonatomic) CGPoint dragStart;
 @property (nonatomic) double dragStartValue;
+@property (nonatomic) BOOL lockWarned; // the warning tap for a locked value, once per drag
+@property (nonatomic) double lockBumpValue; // where the last bump was, dragging a locked handle
+@property (nonatomic, strong) UINotificationFeedbackGenerator *lockWarning;
+@property (nonatomic, strong) UIImpactFeedbackGenerator *lockBump;
 @property (nonatomic, strong) UISelectionFeedbackGenerator *tick;
 @property (nonatomic, strong) NSTimer *repeatTimer;
 @property (nonatomic, strong) NSTimer *saveTimer;
 - (double)value:(NSString *)key;
+- (BOOL)isLocked:(NSString *)key;
 - (CGPoint)handlePointForKey:(NSString *)key;
 - (CGPoint)anchorPointForKey:(NSString *)key;
 - (void)arrowForKey:(NSString *)key from:(CGPoint *)from direction:(CGPoint *)dir;
@@ -182,7 +187,7 @@ static void RCArrow(CGPoint from, CGPoint to, UIColor *color) {
     CGContextRestoreGState(ctx);
 }
 
-static void RCKnob(CGPoint p, UIColor *tint, BOOL active, BOOL selected) {
+static void RCKnob(CGPoint p, UIColor *tint, BOOL active, BOOL selected, BOOL locked) {
     CGFloat r = active ? 14 : 11;
     CGContextRef ctx = UIGraphicsGetCurrentContext();
     CGContextSaveGState(ctx);
@@ -191,7 +196,18 @@ static void RCKnob(CGPoint p, UIColor *tint, BOOL active, BOOL selected) {
     [[UIBezierPath bezierPathWithOvalInRect:CGRectMake(p.x - r, p.y - r, r * 2, r * 2)] fill];
     CGContextRestoreGState(ctx);
     [tint setFill];
-    [[UIBezierPath bezierPathWithOvalInRect:CGRectMake(p.x - r + 4, p.y - r + 4, (r - 4) * 2, (r - 4) * 2)] fill];
+    if (locked) {
+        // Locked in Settings: a gray knob with a white padlock on it, a little larger to fit it
+        r += 2;
+        [[UIColor systemGrayColor] setFill];
+        [[UIBezierPath bezierPathWithOvalInRect:CGRectMake(p.x - r + 3, p.y - r + 3, (r - 3) * 2, (r - 3) * 2)] fill];
+        UIImage *lock = [[UIImage systemImageNamed:@"lock.fill" withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:9 weight:UIImageSymbolWeightBold]]
+                          imageWithTintColor:[UIColor whiteColor] renderingMode:UIImageRenderingModeAlwaysOriginal];
+        [lock drawAtPoint:CGPointMake(p.x - lock.size.width / 2, p.y - lock.size.height / 2)];
+    } else {
+        [tint setFill];
+        [[UIBezierPath bezierPathWithOvalInRect:CGRectMake(p.x - r + 4, p.y - r + 4, (r - 4) * 2, (r - 4) * 2)] fill];
+    }
     if (selected) { // the handle - and + change
         UIBezierPath *ring = [UIBezierPath bezierPathWithOvalInRect:CGRectMake(p.x - r - 4, p.y - r - 4, (r + 4) * 2, (r + 4) * 2)];
         ring.lineWidth = 2;
@@ -265,13 +281,14 @@ static void RCKnob(CGPoint p, UIColor *tint, BOOL active, BOOL selected) {
         CGPoint labelAt = CGPointMake(knob.x, knob.y + 26);
         CGPoint anchor = [o anchorPointForKey:s.key];
         if (s.mode == RCZonesModeZones) RCDashedLine(anchor, knob, line); // the tab's stem to its line
+        BOOL locked = [o isLocked:s.key];
         if ([s.key hasPrefix:@"swipeBottom"] && s.mode == RCZonesModeZones) {
             labelAt = CGPointMake(knob.x, knob.y - 26);
         } else if ([s.key isEqualToString:@"swipeEdgeStrip"]) {
             labelAt = CGPointMake(knob.x + 34, knob.y);
             CGPoint mirror = CGPointMake(W - knob.x, knob.y);
             RCDashedLine(CGPointMake(W - anchor.x, anchor.y), mirror, line);
-            RCKnob(mirror, tint, active, selected);
+            RCKnob(mirror, tint, active, selected, locked); // the right side's, the same value
             RCPill(value, CGPointMake(mirror.x - 34, mirror.y), self.bounds, active);
         } else if (s.mode == RCZonesModeDistances) {
             CGPoint from = CGPointZero, dir = CGPointZero;
@@ -280,7 +297,7 @@ static void RCKnob(CGPoint p, UIColor *tint, BOOL active, BOOL selected) {
             value = [NSString stringWithFormat:@"%@ %@", s.title, value];
             labelAt = dir.x != 0 ? CGPointMake(knob.x, knob.y - 22) : CGPointMake(knob.x + (knob.x > W / 2 ? -70 : 70), knob.y);
         }
-        RCKnob(knob, tint, active, selected);
+        RCKnob(knob, tint, active, selected, locked);
         RCPill(value, labelAt, self.bounds, active);
     }
 }
@@ -332,6 +349,12 @@ static void RCKnob(CGPoint p, UIColor *tint, BOOL active, BOOL selected) {
 }
 
 - (double)value:(NSString *)key { return self.values[key].doubleValue; }
+
+// Locked in Settings (its slider's lock): shown, but left as it is
+- (BOOL)isLocked:(NSString *)key {
+    id list = RCSwipeZonesConfig()[@"lockedSettings"];
+    return key.length && [list isKindOfClass:[NSArray class]] && [list containsObject:key];
+}
 
 #pragma mark Building
 
@@ -560,6 +583,20 @@ static void RCKnob(CGPoint p, UIColor *tint, BOOL active, BOOL selected) {
     v = MIN(MAX(round(v), s.minValue), max);
     double old = [self value:key];
     if (v == old) return;
+    if ([self isLocked:key]) {
+        // It doesn't move: a warning as the drag starts pulling, then a firm bump every 5 it would
+        // have gone, like hitting a stop
+        if (!self.lockWarned) {
+            [self.lockWarning notificationOccurred:UINotificationFeedbackTypeWarning];
+            self.lockWarned = YES;
+            self.lockBumpValue = v;
+        } else if (fabs(v - self.lockBumpValue) >= 5) {
+            [self.lockBump impactOccurred];
+            [self.lockBump prepare];
+            self.lockBumpValue = v;
+        }
+        return;
+    }
     self.values[key] = @(v);
     if (floor(v / 5) != floor(old / 5) || v == s.defaultValue) [self.tick selectionChanged];
     RCSwipeZonesApply(self.values, [self defaults], NO);
@@ -587,7 +624,16 @@ static void RCKnob(CGPoint p, UIColor *tint, BOOL active, BOOL selected) {
     self.dragging = YES;
     self.dragStart = p;
     self.dragStartValue = [self value:key];
+    self.lockWarned = NO;
     [self.tick prepare];
+    if ([self isLocked:key]) {
+        if (!self.lockWarning) self.lockWarning = [[UINotificationFeedbackGenerator alloc] init];
+        if (!self.lockBump) self.lockBump = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleRigid];
+        [self.lockWarning prepare];
+        [self.lockBump prepare];
+        // a tap on it already says it's locked
+        [self.lockBump impactOccurred];
+    }
     [self updateDetail];
     [self.canvas setNeedsDisplay];
 }
@@ -624,15 +670,19 @@ static void RCKnob(CGPoint p, UIColor *tint, BOOL active, BOOL selected) {
 
 - (void)step:(double)delta {
     if (!self.selectedKey) return;
+    if (!self.repeatTimer) self.lockWarned = NO;
     [self setZoneValue:[self value:self.selectedKey] + delta forKey:self.selectedKey];
 }
 
 - (void)updateDetail {
     RCZoneSetting *s = self.selectedKey ? [self settingForKey:self.selectedKey] : nil;
     if (s && s.mode != self.mode) s = nil;
-    self.minusButton.enabled = self.plusButton.enabled = s != nil;
-    self.minusButton.alpha = self.plusButton.alpha = s ? 1 : 0.35;
-    if (s) {
+    BOOL locked = s && [self isLocked:s.key];
+    self.minusButton.enabled = self.plusButton.enabled = s != nil && !locked;
+    self.minusButton.alpha = self.plusButton.alpha = (s && !locked) ? 1 : 0.35;
+    if (locked) {
+        self.detailLabel.text = [NSString stringWithFormat:@"%@\n%@, locked in Settings", s.title, RCZoneValueText(s, [self value:s.key])];
+    } else if (s) {
         self.detailLabel.text = [NSString stringWithFormat:@"%@\n%@ (Default %@)", s.title, RCZoneValueText(s, [self value:s.key]), RCZoneValueText(s, s.defaultValue)];
     } else if (self.mode == RCZonesModeZones) {
         self.detailLabel.text = @"Drag a handle, or tap one and use - and +.";
@@ -659,8 +709,11 @@ static void RCKnob(CGPoint p, UIColor *tint, BOOL active, BOOL selected) {
     [pan setTranslation:CGPointZero inView:self.window];
 }
 
+// Revert and Reset leave locked values as they are
 - (void)applyAll:(NSDictionary *)values {
-    [self.values setDictionary:values];
+    NSMutableDictionary *merged = [values mutableCopy];
+    for (NSString *key in values) if ([self isLocked:key] && self.values[key]) merged[key] = self.values[key];
+    [self.values setDictionary:merged];
     RCSwipeZonesApply(self.values, [self defaults], NO);
     [self saveSoon];
     [[[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight] impactOccurred];

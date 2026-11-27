@@ -1,4 +1,5 @@
 #import "RCDevAnnotateEditorViewController.h"
+#import "RCSetupShortcuts.h"
 #import "RCDevAnnotateAction.h"
 #import "RCConfigManager.h"
 
@@ -157,7 +158,7 @@ typedef NS_ENUM(NSInteger, RCDevAnnotateSection) {
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == RCDevAnnotateSectionComputer) {
-        return @"Pick the Mac to send to. Manage servers in Settings > Integrations > SSH Hosts.";
+        return @"Pick the Mac to send to, or add it as a server.";
     }
     if (section == RCDevAnnotateSectionEditor) {
         NSDictionary *preset = [self selectedPreset];
@@ -266,11 +267,9 @@ typedef NS_ENUM(NSInteger, RCDevAnnotateSection) {
 - (void)chooseHostFromView:(UIView *)sourceView {
     NSArray<NSDictionary *> *hosts = [RCConfigManager sharedManager].sshHosts;
     if (hosts.count == 0) {
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"No SSH Hosts"
-            message:@"Add a server in Settings > Integrations > SSH Hosts first."
-            preferredStyle:UIAlertControllerStyleAlert];
-        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-        [self presentViewController:alert animated:YES completion:nil];
+        RCPresentSetupNeeded(self, RCSetupKindSSHHost, @"No Servers", @"Annotate & Send sends to a Mac over SSH. Add it as a server to pick it.", ^(NSDictionary *host) {
+            [self useNewHost:host];
+        });
         return;
     }
 
@@ -293,10 +292,18 @@ typedef NS_ENUM(NSInteger, RCDevAnnotateSection) {
                                 withRowAnimation:UITableViewRowAnimationNone];
         }]];
     }
+    [sheet addAction:RCSetupAddAction(self, RCSetupKindSSHHost, ^(NSDictionary *host) { [weakSelf useNewHost:host]; })];
     [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     sheet.popoverPresentationController.sourceView = sourceView;
     sheet.popoverPresentationController.sourceRect = sourceView.bounds;
     [self presentViewController:sheet animated:YES completion:nil];
+}
+
+// A server just added here is the one picked
+- (void)useNewHost:(NSDictionary *)host {
+    if ([host[@"id"] length]) self.hostId = host[@"id"];
+    [self updateSaveButton];
+    [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:RCDevAnnotateSectionComputer] withRowAnimation:UITableViewRowAnimationNone];
 }
 
 - (void)chooseEditorFromView:(UIView *)sourceView {

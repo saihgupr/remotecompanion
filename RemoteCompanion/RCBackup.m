@@ -52,7 +52,11 @@ static NSString *const kRCBackupFormat = @"rc-backup";
 }
 
 + (NSData *)fullBackupJSONDataWithError:(NSError **)error {
-    NSString *response = [self sendTweakCommand:@"backup config"];
+    return [self fullBackupJSONDataIncludingSecrets:YES error:error];
+}
+
++ (NSData *)fullBackupJSONDataIncludingSecrets:(BOOL)secrets error:(NSError **)error {
+    NSString *response = [self sendTweakCommand:secrets ? @"backup config" : @"backup config no-secrets"];
     if (response.length == 0) {
         if (error) *error = [self errorWithMessage:@"The tweak is not running. Respring and try again."];
         return nil;

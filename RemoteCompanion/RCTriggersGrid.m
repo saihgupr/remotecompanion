@@ -28,6 +28,9 @@
 @property (nonatomic, strong) NSArray<NSLayoutConstraint *> *besideConstraints;
 @property (nonatomic, strong) NSArray<NSLayoutConstraint *> *stackedConstraints;
 @property (nonatomic, strong) NSArray<NSLayoutConstraint *> *miniConstraints;
+// Compact Titles: Hide - the icon alone, centred and half the tile's width; the name is for VoiceOver
+@property (nonatomic, assign) BOOL iconOnly;
+@property (nonatomic, strong) NSArray<NSLayoutConstraint *> *iconOnlyConstraints;
 @property (nonatomic, strong) NSLayoutConstraint *iconWidth;
 @property (nonatomic, strong) NSLayoutConstraint *iconHeight;
 @end
@@ -112,6 +115,16 @@
             [_editButtons.trailingAnchor constraintEqualToAnchor:content.trailingAnchor],
             [_editButtons.topAnchor constraintEqualToAnchor:content.topAnchor constant:-4],
         ];
+        // Icon only: the icon in the middle, half the tile's width, the star and minus in the top corners
+        _iconOnlyConstraints = @[
+            [_iconView.centerXAnchor constraintEqualToAnchor:content.centerXAnchor],
+            [_iconView.centerYAnchor constraintEqualToAnchor:content.centerYAnchor],
+            [_iconView.widthAnchor constraintEqualToAnchor:content.widthAnchor multiplier:0.5],
+            [_iconView.heightAnchor constraintEqualToAnchor:_iconView.widthAnchor],
+            [_editButtons.leadingAnchor constraintEqualToAnchor:content.leadingAnchor],
+            [_editButtons.trailingAnchor constraintEqualToAnchor:content.trailingAnchor],
+            [_editButtons.topAnchor constraintEqualToAnchor:content.topAnchor constant:-4],
+        ];
         // Beside, hidden buttons still hold their place, so the name's end is switched with them
         _nameToEdge = [_textStack.trailingAnchor constraintEqualToAnchor:content.trailingAnchor constant:-10];
         _nameToButtons = [_textStack.trailingAnchor constraintEqualToAnchor:_editButtons.leadingAnchor constant:-2];
@@ -136,19 +149,37 @@
     return perRow >= 4 ? self.miniConstraints : perRow == 3 ? self.stackedConstraints : self.besideConstraints;
 }
 
+// The constraints in use: icon only, or the layout for this many per row
+- (NSArray<NSLayoutConstraint *> *)activeLayoutConstraints {
+    return self.iconOnly ? self.iconOnlyConstraints : [self constraintsForPerRow:self.perRow];
+}
+
+- (void)setIconOnly:(BOOL)iconOnly {
+    if (iconOnly == _iconOnly) return;
+    [NSLayoutConstraint deactivateConstraints:[self activeLayoutConstraints]];
+    _iconOnly = iconOnly;
+    [NSLayoutConstraint activateConstraints:[self activeLayoutConstraints]];
+    // The fixed icon size is the per-row layouts'; icon only sizes it from the tile
+    self.iconWidth.active = !iconOnly;
+    self.iconHeight.active = !iconOnly;
+    self.textStack.hidden = iconOnly;
+    self.editButtons.distribution = (iconOnly || self.perRow >= 4) ? UIStackViewDistributionEqualSpacing : UIStackViewDistributionFill;
+    [self updateNameEnd];
+}
+
 - (void)setPerRow:(NSInteger)perRow {
     perRow = MAX(2, MIN(4, perRow));
     if (perRow == _perRow) return;
-    [NSLayoutConstraint deactivateConstraints:[self constraintsForPerRow:_perRow]];
+    if (!self.iconOnly) [NSLayoutConstraint deactivateConstraints:[self constraintsForPerRow:_perRow]];
     _perRow = perRow;
-    [NSLayoutConstraint activateConstraints:[self constraintsForPerRow:perRow]];
+    if (!self.iconOnly) [NSLayoutConstraint activateConstraints:[self constraintsForPerRow:perRow]];
     BOOL mini = perRow >= 4;
     self.nameLabel.font = [UIFont systemFontOfSize:perRow == 2 ? 14 : perRow == 3 ? 12.5 : 11 weight:UIFontWeightMedium];
     self.nameLabel.textAlignment = mini ? NSTextAlignmentCenter : NSTextAlignmentNatural;
     self.detailLabel.font = [UIFont systemFontOfSize:perRow == 2 ? 11 : 10];
     // The star and minus: side by side, or one in each top corner, smaller there (with the icon)
     // so they clear the icon between them
-    self.editButtons.distribution = mini ? UIStackViewDistributionEqualSpacing : UIStackViewDistributionFill;
+    self.editButtons.distribution = (mini || self.iconOnly) ? UIStackViewDistributionEqualSpacing : UIStackViewDistributionFill;
     // Beside: the full icon; stacked and mini tiles are shorter, so a smaller one
     self.iconWidth.constant = perRow == 2 ? 34 : perRow == 3 ? 30 : 28;
     self.iconHeight.constant = perRow == 2 ? 30 : 26;
@@ -161,7 +192,7 @@
 
 // Beside: the name runs to the card's edge, or (in Edit) to the star and minus
 - (void)updateNameEnd {
-    BOOL beside = self.perRow == 2;
+    BOOL beside = self.perRow == 2 && !self.iconOnly;
     BOOL toButtons = beside && self.editShown;
     BOOL toEdge = beside && !self.editShown;
     self.nameToButtons.active = toButtons;
@@ -330,7 +361,8 @@
 
 - (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView cellForItemAtIndexPath:(NSIndexPath *)indexPath {
     RCTriggerCardCell *cell = [collectionView dequeueReusableCellWithReuseIdentifier:@"Trigger" forIndexPath:indexPath];
-    cell.perRow = RCLayoutTriggerColumnCount();
+    cell.perRow = RCLayoutPerRow(RCLayoutTriggers);
+    cell.iconOnly = RCLayoutNamesHidden(RCLayoutTriggers);
     NSString *key = [self keyAtIndexPath:indexPath];
     id<RCTriggersGridSource> source = self.source;
     [cell setName:[source gridNameForTrigger:key] detail:[source gridDetailForTrigger:key] image:[source gridImageForTrigger:key]];
@@ -370,11 +402,14 @@
 // Wide cards (2 per row on a phone), tiles (3) or small tiles (4); more on a wider screen
 - (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout sizeForItemAtIndexPath:(NSIndexPath *)indexPath {
     CGFloat usable = MAX(0, RCGridWidth(collectionView) - 32);
-    NSInteger perRow = RCLayoutTriggerColumnCount();
+    NSInteger perRow = RCLayoutPerRow(RCLayoutTriggers);
     CGFloat minimum = perRow == 2 ? 170 : perRow == 3 ? 104 : 76;
     CGFloat height = perRow == 2 ? 64 : perRow == 3 ? 92 : 84;
     NSInteger columns = MAX(perRow, (NSInteger)floor((usable + 8) / (minimum + 8)));
-    return CGSizeMake(floor((usable - 8 * (columns - 1)) / columns), height);
+    CGFloat width = floor((usable - 8 * (columns - 1)) / columns);
+    // Compact Titles: Hide - square tiles around a larger icon
+    if (RCLayoutNamesHidden(RCLayoutTriggers)) return CGSizeMake(width, width);
+    return CGSizeMake(width, height);
 }
 
 - (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout referenceSizeForHeaderInSection:(NSInteger)section {

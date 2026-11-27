@@ -2930,16 +2930,26 @@ static NSArray<NSString *> *rc_backup_addon_folders(void) {
     return @[[root_prefix() stringByAppendingString:@"/Library/RemoteCompanion/AddOns"]];
 }
 
-static NSString *rc_backup_json(void) {
+static NSDictionary *rc_config_with_secrets_hidden(NSDictionary *config);
+static NSMutableDictionary *rc_config_with_secrets_restored(NSDictionary *incoming, NSDictionary *current);
+
+// secrets NO: the passwords, tokens and typed passcodes are hidden (see rc_config_with_secrets_hidden),
+// and restoring keeps the ones the device has
+static NSString *rc_backup_json(BOOL secrets) {
     load_trigger_config();
     NSDictionary *config = nil;
     @synchronized (rc_trigger_config_lock()) { config = [g_triggerConfig copy]; }
+    if (!secrets) config = rc_config_with_secrets_hidden(config);
     if (![config isKindOfClass:[NSDictionary class]]) return @"Error: No configuration found\n";
     if (![NSJSONSerialization isValidJSONObject:config]) return @"Error: Configuration cannot be exported as JSON\n";
 
     NSMutableDictionary *files = [NSMutableDictionary dictionary];
 
     for (NSString *name in rc_backup_document_names()) {
+        // Variables can hold anything (names, codes, command output), and the Web UI asks for the
+        // token to read them, so an export without secrets leaves them out; importing it keeps the
+        // device's own (a restore writes only the files a backup has)
+        if (!secrets && [name isEqualToString:@"rc_variables.json"]) continue;
         NSDictionary *entry = rc_backup_file_entry([@"/var/mobile/Documents" stringByAppendingPathComponent:name]);
         if (entry) files[[@"documents/" stringByAppendingString:name]] = entry;
     }
@@ -2963,6 +2973,7 @@ static NSString *rc_backup_json(void) {
         @"createdAt": [[[NSISO8601DateFormatter alloc] init] stringFromDate:[NSDate date]] ?: @"",
         @"config": config,
         @"files": files,
+        @"secrets": @(secrets),
     };
     if (![NSJSONSerialization isValidJSONObject:bundle]) return @"Error: Backup cannot be written as JSON\n";
 
@@ -3024,6 +3035,12 @@ static NSString *rc_restore_backup(void) {
 
     NSDictionary *config = bundle[@"config"];
     if (![config isKindOfClass:[NSDictionary class]]) return @"Error: Backup has no configuration\n";
+    // Made without passwords and tokens: the ones saved here stay (hidden ones only; any the file
+    // does have are used)
+    load_trigger_config();
+    NSDictionary *current = nil;
+    @synchronized (rc_trigger_config_lock()) { current = [g_triggerConfig copy]; }
+    config = rc_config_with_secrets_restored(config, current ?: @{});
 
     // Keep the current state next to it in case the wrong file was picked
     NSString *stamp = rc_backup_timestamp();
@@ -5932,6 +5949,68 @@ static NSMutableDictionary *rc_restore_passcodes(NSDictionary *incoming, NSDicti
     rc_collect_passcodes(current, passcodes);
     NSString *fallback = passcodes.count == 1 ? passcodes.anyObject : nil;
     return [rc_restore_passcodes_at(incoming, current, fallback) mutableCopy];
+}
+
+// The passwords and tokens a config keeps (integrations, SSH servers, Remote RC devices, the Web
+// UI's API token) and passcodes typed into unlock actions, hidden as kRCHiddenPasscode. The Web UI
+// sees this from another device without the token, and an export made without secrets holds it.
+static NSString *const kRCSecretKeys[] = { @"webUIApiToken", @"haToken", @"mqttPassword", @"kmPassword" };
+
+static NSArray *rc_items_with_field_hidden(id list, NSString *field) {
+    if (![list isKindOfClass:[NSArray class]]) return list;
+    NSMutableArray *items = [NSMutableArray array];
+    for (id item in (NSArray *)list) {
+        if (![item isKindOfClass:[NSDictionary class]]) { [items addObject:item]; continue; }
+        NSMutableDictionary *copy = [item mutableCopy];
+        if ([copy[field] isKindOfClass:[NSString class]] && [copy[field] length] > 0) copy[field] = kRCHiddenPasscode;
+        [items addObject:copy];
+    }
+    return items;
+}
+
+static NSDictionary *rc_config_with_secrets_hidden(NSDictionary *config) {
+    if (![config isKindOfClass:[NSDictionary class]]) return config;
+    NSMutableDictionary *copy = [config mutableCopy];
+    for (size_t i = 0; i < sizeof(kRCSecretKeys) / sizeof(kRCSecretKeys[0]); i++) {
+        id value = copy[kRCSecretKeys[i]];
+        if ([value isKindOfClass:[NSString class]] && [value length] > 0) copy[kRCSecretKeys[i]] = kRCHiddenPasscode;
+    }
+    if (copy[@"sshHosts"]) copy[@"sshHosts"] = rc_items_with_field_hidden(copy[@"sshHosts"], @"password");
+    if (copy[@"rcClients"]) copy[@"rcClients"] = rc_items_with_field_hidden(copy[@"rcClients"], @"token");
+    return rc_hide_passcodes(copy);
+}
+
+static id rc_items_with_field_restored(id incoming, id current, NSString *field) {
+    if (![incoming isKindOfClass:[NSArray class]]) return incoming;
+    NSArray *old = [current isKindOfClass:[NSArray class]] ? current : @[];
+    NSMutableArray *items = [NSMutableArray array];
+    for (id item in (NSArray *)incoming) {
+        if (![item isKindOfClass:[NSDictionary class]]) { [items addObject:item]; continue; }
+        NSMutableDictionary *copy = [item mutableCopy];
+        if ([copy[field] isEqual:kRCHiddenPasscode]) {
+            NSString *saved = @"";
+            for (NSDictionary *o in old) {
+                if ([o isKindOfClass:[NSDictionary class]] && [o[@"id"] isEqual:copy[@"id"]]) { saved = o[field] ?: @""; break; }
+            }
+            copy[field] = saved;
+        }
+        [items addObject:copy];
+    }
+    return items;
+}
+
+// The other way: each hidden value is the one this device has saved (none, on a device without it)
+static NSMutableDictionary *rc_config_with_secrets_restored(NSDictionary *incoming, NSDictionary *current) {
+    NSMutableDictionary *config = rc_restore_passcodes(incoming, current);
+    for (size_t i = 0; i < sizeof(kRCSecretKeys) / sizeof(kRCSecretKeys[0]); i++) {
+        NSString *key = kRCSecretKeys[i];
+        if (![config[key] isEqual:kRCHiddenPasscode]) continue;
+        if (current[key]) config[key] = current[key];
+        else [config removeObjectForKey:key];
+    }
+    if (config[@"sshHosts"]) config[@"sshHosts"] = rc_items_with_field_restored(config[@"sshHosts"], current[@"sshHosts"], @"password");
+    if (config[@"rcClients"]) config[@"rcClients"] = rc_items_with_field_restored(config[@"rcClients"], current[@"rcClients"], @"token");
+    return config;
 }
 
 BOOL RCIsApiTokenValid(NSString *providedToken) {
@@ -13319,7 +13398,7 @@ static NSString *rc_ssh_test_host(NSString *hostId) {
     return [NSString stringWithFormat:@"Error: %@\n", detail];
 }
 
-// Settings > Advanced Settings > Tweaks holds iOS behavior tweaks that are off by default.
+// Settings > iOS Tweaks holds iOS behavior tweaks that are off by default.
 // Each is one config key, so the switches in the app, the Web UI, and here all agree.
 static NSArray<NSDictionary *> *rc_tweaks_specs(void) {
     return @[
@@ -14295,7 +14374,7 @@ static NSString *handle_command(NSString *cmd) {
             SRLog(@"[SmartUnlock] Unlock command received (wake / UI unlock)");
         }
 
-        // Only Unlock Out of Pocket (Settings > Advanced Settings > Options). A fresh near report
+        // Only Unlock Out of Pocket (Settings > Security). A fresh near report
         // is enough to skip without waking; the full check runs after the screen is awake below.
         load_trigger_config();
         BOOL onlyUnlockOutOfPocket = [g_triggerConfig[@"onlyUnlockOutOfPocket"] boolValue];
@@ -16708,8 +16787,8 @@ static NSString *handle_command(NSString *cmd) {
             rc_posix_spawn(&pid, [binPath UTF8String], NULL, NULL, (char* const*)args, NULL);
         });
         return @"Triggering userspace-reboot...\n";
-    } else if ([cleanCmd isEqualToString:@"backup config"]) {
-        return rc_backup_json();
+    } else if ([cleanCmd isEqualToString:@"backup config"] || [cleanCmd isEqualToString:@"backup config no-secrets"]) {
+        return rc_backup_json(![cleanCmd hasSuffix:@"no-secrets"]);
     } else if ([cleanCmd isEqualToString:@"restore backup"]) {
         return rc_restore_backup();
     } else if ([cleanCmd isEqualToString:@"export config"] || [cleanCmd hasPrefix:@"export config "]) {
@@ -17264,50 +17343,7 @@ static void start_web_server() {
                                 
                                 if ([method isEqualToString:@"GET"]) {
                                     NSDictionary *configToReturn = g_triggerConfig;
-                                    if (!isLocal && !isTokenValid) {
-                                        NSMutableDictionary *mConfig = [g_triggerConfig mutableCopy];
-                                        if (mConfig[@"webUIApiToken"]) {
-                                            mConfig[@"webUIApiToken"] = @"••••••••";
-                                        }
-                                        if (mConfig[@"haToken"] && [mConfig[@"haToken"] length] > 0) {
-                                            mConfig[@"haToken"] = @"••••••••";
-                                        }
-                                        if (mConfig[@"mqttPassword"] && [mConfig[@"mqttPassword"] length] > 0) {
-                                            mConfig[@"mqttPassword"] = @"••••••••";
-                                        }
-                                        if (mConfig[@"kmPassword"] && [mConfig[@"kmPassword"] length] > 0) {
-                                            mConfig[@"kmPassword"] = @"••••••••";
-                                        }
-                                        NSArray *sshHosts = mConfig[@"sshHosts"];
-                                        if ([sshHosts isKindOfClass:[NSArray class]]) {
-                                            NSMutableArray *mHosts = [NSMutableArray array];
-                                            for (NSDictionary *h in sshHosts) {
-                                                if ([h isKindOfClass:[NSDictionary class]]) {
-                                                    NSMutableDictionary *mh = [h mutableCopy];
-                                                    if (mh[@"password"] && [mh[@"password"] length] > 0) {
-                                                        mh[@"password"] = @"••••••••";
-                                                    }
-                                                    [mHosts addObject:mh];
-                                                }
-                                            }
-                                            mConfig[@"sshHosts"] = mHosts;
-                                        }
-                                        NSArray *rcClients = mConfig[@"rcClients"];
-                                        if ([rcClients isKindOfClass:[NSArray class]]) {
-                                            NSMutableArray *mClients = [NSMutableArray array];
-                                            for (NSDictionary *c in rcClients) {
-                                                if ([c isKindOfClass:[NSDictionary class]]) {
-                                                    NSMutableDictionary *mc = [c mutableCopy];
-                                                    if (mc[@"token"] && [mc[@"token"] length] > 0) {
-                                                        mc[@"token"] = @"••••••••";
-                                                    }
-                                                    [mClients addObject:mc];
-                                                }
-                                            }
-                                            mConfig[@"rcClients"] = mClients;
-                                        }
-                                        configToReturn = rc_hide_passcodes(mConfig);
-                                    }
+                                    if (!isLocal && !isTokenValid) configToReturn = rc_config_with_secrets_hidden(g_triggerConfig);
                                     NSData *jsonData = [NSJSONSerialization dataWithJSONObject:configToReturn options:0 error:nil];
                                     if (jsonData) {
                                         NSString *jsonString = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
@@ -17347,61 +17383,7 @@ static void start_web_server() {
                                             if (jsonObj && [jsonObj isKindOfClass:[NSDictionary class]]) {
                                                 // Passcodes the device saw hidden go back to the saved ones first, so
                                                 // the checks below see what is really saved
-                                                NSMutableDictionary *incoming = rc_restore_passcodes(jsonObj, g_triggerConfig);
-                                                if ([incoming[@"webUIApiToken"] isEqualToString:@"••••••••"]) {
-                                                    incoming[@"webUIApiToken"] = g_triggerConfig[@"webUIApiToken"];
-                                                }
-                                                if ([incoming[@"haToken"] isEqualToString:@"••••••••"]) {
-                                                    incoming[@"haToken"] = g_triggerConfig[@"haToken"];
-                                                }
-                                                if ([incoming[@"mqttPassword"] isEqualToString:@"••••••••"]) {
-                                                    incoming[@"mqttPassword"] = g_triggerConfig[@"mqttPassword"];
-                                                }
-                                                if ([incoming[@"kmPassword"] isEqualToString:@"••••••••"]) {
-                                                    incoming[@"kmPassword"] = g_triggerConfig[@"kmPassword"];
-                                                }
-                                                NSArray *newHosts = incoming[@"sshHosts"];
-                                                NSArray *oldHosts = g_triggerConfig[@"sshHosts"];
-                                                if ([newHosts isKindOfClass:[NSArray class]] && [oldHosts isKindOfClass:[NSArray class]]) {
-                                                    NSMutableArray *updatedHosts = [NSMutableArray array];
-                                                    for (NSDictionary *nh in newHosts) {
-                                                        if ([nh isKindOfClass:[NSDictionary class]]) {
-                                                            NSMutableDictionary *mnh = [nh mutableCopy];
-                                                            if ([mnh[@"password"] isEqualToString:@"••••••••"]) {
-                                                                NSString *hostId = mnh[@"id"];
-                                                                for (NSDictionary *oh in oldHosts) {
-                                                                    if ([oh[@"id"] isEqualToString:hostId]) {
-                                                                        mnh[@"password"] = oh[@"password"] ?: @"";
-                                                                        break;
-                                                                    }
-                                                                }
-                                                            }
-                                                            [updatedHosts addObject:mnh];
-                                                        }
-                                                    }
-                                                    incoming[@"sshHosts"] = updatedHosts;
-                                                }
-                                                NSArray *newClients = incoming[@"rcClients"];
-                                                NSArray *oldClients = g_triggerConfig[@"rcClients"];
-                                                if ([newClients isKindOfClass:[NSArray class]] && [oldClients isKindOfClass:[NSArray class]]) {
-                                                    NSMutableArray *updatedClients = [NSMutableArray array];
-                                                    for (NSDictionary *nc in newClients) {
-                                                        if ([nc isKindOfClass:[NSDictionary class]]) {
-                                                            NSMutableDictionary *mnc = [nc mutableCopy];
-                                                            if ([mnc[@"token"] isEqualToString:@"••••••••"]) {
-                                                                NSString *clientId = mnc[@"id"];
-                                                                for (NSDictionary *oc in oldClients) {
-                                                                    if ([oc[@"id"] isEqualToString:clientId]) {
-                                                                        mnc[@"token"] = oc[@"token"] ?: @"";
-                                                                        break;
-                                                                    }
-                                                                }
-                                                            }
-                                                            [updatedClients addObject:mnc];
-                                                        }
-                                                    }
-                                                    incoming[@"rcClients"] = updatedClients;
-                                                }
+                                                NSMutableDictionary *incoming = rc_config_with_secrets_restored(jsonObj, g_triggerConfig);
                                                 // From another device, protected settings and actions that need
                                                 // the token change only with it. With no token set yet, nobody can
                                                 // send one: it is set in the app or this iPhone's own Web UI, so
@@ -17473,6 +17455,30 @@ static void start_web_server() {
                                         responseString = nil;
                                     } else {
                                         responseString = [NSString stringWithFormat:@"HTTP/1.1 404 Not Found\r\n%@Content-Length: 0\r\n\r\n", cors];
+                                    }
+                                } else if ([path hasPrefix:@"/api/addons/settings"] && [method isEqualToString:@"GET"]) {
+                                    // /api/addons/settings?id=<add-on id>: its settings' current values, as JSON. They
+                                    // can hold anything, so another device needs the API token, as for variables.
+                                    load_trigger_config();
+                                    NSURLComponents *settingsQuery = [NSURLComponents componentsWithString:[@"http://x" stringByAppendingString:path]];
+                                    NSString *addOnId = nil;
+                                    for (NSURLQueryItem *item in settingsQuery.queryItems) if ([item.name isEqualToString:@"id"]) addOnId = item.value;
+                                    NSCharacterSet *idChars = [[NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyz0123456789-_"] invertedSet];
+                                    if (![g_triggerConfig[@"webUIEnabled"] boolValue]) {
+                                        responseString = [NSString stringWithFormat:@"HTTP/1.1 403 Forbidden\r\n%@Content-Length: 18\r\n\r\nWeb UI is disabled", cors];
+                                    } else if (!rc_web_client_is_local(&client_addr) && !rc_is_api_token_valid(rc_extract_token_from_headers(requestString))) {
+                                        NSString *err = @"{\"ok\":false,\"error\":\"Add-on settings require valid token\"}";
+                                        responseString = [NSString stringWithFormat:@"HTTP/1.1 403 Forbidden\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)[err lengthOfBytesUsingEncoding:NSUTF8StringEncoding], err];
+                                    } else if (!addOnId.length || [addOnId.lowercaseString rangeOfCharacterFromSet:idChars].location != NSNotFound) {
+                                        responseString = [NSString stringWithFormat:@"HTTP/1.1 400 Bad Request\r\n%@Content-Length: 0\r\n\r\n", cors];
+                                    } else {
+                                        NSString *out = RCAddOnsHandleCommand([@"addons settings " stringByAppendingString:addOnId.lowercaseString]) ?: @"";
+                                        out = [out stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+                                        if ([out hasPrefix:@"{"]) {
+                                            responseString = [NSString stringWithFormat:@"HTTP/1.1 200 OK\r\n%@Content-Type: application/json\r\nContent-Length: %lu\r\n\r\n%@", cors, (unsigned long)[out lengthOfBytesUsingEncoding:NSUTF8StringEncoding], out];
+                                        } else {
+                                            responseString = [NSString stringWithFormat:@"HTTP/1.1 404 Not Found\r\n%@Content-Length: 0\r\n\r\n", cors];
+                                        }
                                     }
                                 } else if ([path isEqualToString:@"/api/addons"] && [method isEqualToString:@"GET"]) {
                                     NSString *jsonStr = RCAddOnsCatalogJSON();
@@ -18043,7 +18049,7 @@ static void start_web_server() {
                                     @{@"command": @"accessibility shortcut", @"desc": @"System: Run the Accessibility Shortcut"},
                                     @{@"command": @"open <bundleId>", @"desc": @"System: Launch an application by bundle identifier"},
                                     @{@"command": @"nav <panel>", @"desc": @"Companion: Open app panel (triggers, settings, ha, km, mqtt, add)"},
-                                    @{@"command": @"backup config", @"desc": @"Companion: Save everything (settings, integrations, add-ons) as one backup JSON"},
+                                    @{@"command": @"backup config [no-secrets]", @"desc": @"Companion: Save everything (settings, integrations, add-ons) as one backup JSON; no-secrets hides passwords, tokens and typed passcodes"},
                                     @{@"command": @"restore backup", @"desc": @"Companion: Apply the full backup left at /var/mobile/Documents/rc_restore.json"},
                                     @{@"command": @"export config", @"desc": @"Companion: Export the configuration as JSON"},
                                     @{@"command": @"kill <bundleId>", @"desc": @"System: Force-close an application"},
@@ -21841,7 +21847,7 @@ static unsigned g_rcBeganGen = 0;
 static unsigned g_rcFreezeBeganGen = 0;
 
 static BOOL RC_GestureScrollSuppressionWanted(void) {
-    // On unless the user opts out via Advanced Settings (default on).
+    // On unless the user opts out in Settings (default on).
     if ([g_triggerConfig[@"freezeListsDuringGestures"] isEqual:@NO]) return NO;
     static NSString * const keys[] = {
         @"trigger_statusbar_swipe_left", @"trigger_statusbar_swipe_right",
@@ -22092,7 +22098,7 @@ static inline BOOL RC_InTopRegion(CGPoint loc, UIInterfaceOrientation orientatio
     return (loc.y < threshold);
 }
 
-// Swipe Triggers (Advanced Settings): how far each kind of swipe trigger needs a swipe to go before
+// Settings > Swipe Triggers: how far each kind of swipe trigger needs a swipe to go before
 // it runs, and how close to the side a side-edge swipe has to start, in points. A setting that
 // isn't there (or isn't a number in range) is the distance the triggers always used. Longer
 // distances and a narrower strip leave more room for the Home swipe and other tweaks' gestures

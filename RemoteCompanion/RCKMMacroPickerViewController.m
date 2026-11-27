@@ -1,4 +1,5 @@
 #import "RCKMMacroPickerViewController.h"
+#import "RCKMSettingsViewController.h"
 #import "RCConfigManager.h"
 #import "RCUITweaker.h"
 
@@ -30,12 +31,21 @@
 @property (nonatomic, strong) NSArray<NSDictionary *> *filteredGroups;
 @property (nonatomic, strong) UISearchController *searchController;
 @property (nonatomic, strong) UIActivityIndicatorView *spinner;
+@property (nonatomic, assign) BOOL loadOnReturn; // back from Set Up: load the list
 @end
 
 @implementation RCKMMacroPickerViewController
 
 - (instancetype)init {
     return [super initWithStyle:UITableViewStyleInsetGrouped];
+}
+
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    if (self.loadOnReturn) {
+        self.loadOnReturn = NO;
+        [self fetchMacros];
+    }
 }
 
 - (void)viewDidLoad {
@@ -172,8 +182,15 @@ static NSArray<NSDictionary *> *rc_km_parse_macro_html(NSString *html) {
     if (!cm.kmUrl.length) {
         [self.tableView.refreshControl endRefreshing];
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Keyboard Maestro Not Configured"
-                                                                       message:@"Please configure your Keyboard Maestro Web Server URL in Settings."
+                                                                       message:@"Set up your Keyboard Maestro web server's URL to pick a macro, or enter one by hand."
                                                                 preferredStyle:UIAlertControllerStyleAlert];
+        // Set Up opens its settings here; back from them, the list loads
+        UIAlertAction *setUp = [UIAlertAction actionWithTitle:@"Set Up" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+            self.loadOnReturn = YES;
+            [self.navigationController pushViewController:[[RCKMSettingsViewController alloc] init] animated:YES];
+        }];
+        [alert addAction:setUp];
+        alert.preferredAction = setUp;
         [alert addAction:[UIAlertAction actionWithTitle:@"Manual Entry" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
             [self promptManualEntry];
         }]];

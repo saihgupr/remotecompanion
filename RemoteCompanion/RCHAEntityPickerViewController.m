@@ -1,4 +1,5 @@
 #import "RCHAEntityPickerViewController.h"
+#import "RCHASettingsViewController.h"
 #import "RCConfigManager.h"
 #import "RCUITweaker.h"
 
@@ -33,6 +34,7 @@
 @property (nonatomic, copy) NSString *currentEntityId;
 @property (nonatomic, copy) NSString *currentService;
 @property (nonatomic, assign) BOOL presentedCurrentChoices;
+@property (nonatomic, assign) BOOL loadOnReturn; // back from Set Up: load the list
 @end
 
 static void rc_ha_mark_action_selected(UIAlertAction *action, BOOL selected) {
@@ -89,6 +91,14 @@ static void rc_ha_mark_action_selected(UIAlertAction *action, BOOL selected) {
     NSString *name = parts.count > 1 ? parts[1] : entityId;
     name = [name stringByReplacingOccurrencesOfString:@"_" withString:@" "];
     return [name capitalizedString];
+}
+
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    if (self.loadOnReturn) {
+        self.loadOnReturn = NO;
+        [self fetchEntities];
+    }
 }
 
 - (void)viewDidLoad {
@@ -148,8 +158,15 @@ static void rc_ha_mark_action_selected(UIAlertAction *action, BOOL selected) {
     if (!cm.haUrl.length || !cm.haToken.length) {
         [self.tableView.refreshControl endRefreshing];
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Home Assistant Not Configured"
-                                                                       message:@"Please configure your Home Assistant Server URL and Access Token in Settings."
+                                                                       message:@"Set up your Home Assistant server's URL and access token to pick an entity, or enter one by hand."
                                                                 preferredStyle:UIAlertControllerStyleAlert];
+        // Set Up opens its settings here; back from them, the list loads
+        UIAlertAction *setUp = [UIAlertAction actionWithTitle:@"Set Up" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+            self.loadOnReturn = YES;
+            [self.navigationController pushViewController:[[RCHASettingsViewController alloc] init] animated:YES];
+        }];
+        [alert addAction:setUp];
+        alert.preferredAction = setUp;
         [alert addAction:[UIAlertAction actionWithTitle:@"Manual Entry" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
             [self promptManualEntry];
         }]];

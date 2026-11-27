@@ -42,12 +42,18 @@
 }
 
 - (void)layoutSettingChanged:(NSNotification *)note {
-    if ([note.object isEqual:RCLayoutCategoryBarLines]) self.rows = RCLayoutCategoryBarLineCount();
+    if (![note.userInfo[RCLayoutOptionKey] isEqual:RCLayoutOptionBarLines]) return;
+    if ([note.object isEqual:self.layoutScreen ?: RCLayoutTriggers]) self.rows = RCLayoutBarLines(self.layoutScreen);
 }
 
 - (instancetype)initWithWidth:(CGFloat)width {
+    return [self initWithWidth:width screen:nil];
+}
+
+- (instancetype)initWithWidth:(CGFloat)width screen:(NSString *)screen {
     self = [super initWithFrame:CGRectMake(0, 0, width, [RCCategoryBar barHeight])];
-    _rows = RCLayoutCategoryBarLineCount();
+    _layoutScreen = [screen copy];
+    _rows = RCLayoutBarLines(screen);
     if (self) {
         _selectedIndex = -1;
         _chips = [NSMutableArray array];

@@ -1,28 +1,43 @@
 #import "RCTweaksViewController.h"
 #import "RCConfigManager.h"
+#import "RCSettingsPageViewController.h"
 
 @interface RCTweaksViewController ()
 @property (nonatomic, strong) UITableView *tableView;
-@property (nonatomic, strong) UISwitch *disableWakeOnPowerSwitch;
-@property (nonatomic, strong) UISwitch *disablePowerConnectedHapticsSwitch;
-@property (nonatomic, strong) UISwitch *disableUnlockedNotificationVibrationSwitch;
-@property (nonatomic, strong) UISwitch *sendNotificationsToWatchWhenUnlockedSwitch;
 @end
 
-typedef NS_ENUM(NSInteger, RCTweaksSection) {
-    RCTweaksSectionWakeOnPower,
-    RCTweaksSectionPowerHaptics,
-    RCTweaksSectionUnlockedVibration,
-    RCTweaksSectionWatchWhenUnlocked,
-    RCTweaksSectionCount,
-};
+// Each switch reads as what it turns on, so on means the iOS behaviour is kept: the config keeps
+// its "disable" settings, and the switch shows the opposite.
+// Rows: {id, title, symbol, color, get, set}; sections: {title, symbol, rows, footer}
+static NSArray<NSDictionary *> *RCTweaksSections(void) {
+    RCConfigManager *cm = [RCConfigManager sharedManager];
+    UIColor *orange = [UIColor systemOrangeColor];
+    return @[
+        @{ @"title": @"Power", @"symbol": @"bolt.fill",
+           @"footer": @"Wake Screen on Power turns the screen on when power connects or disconnects. Charging Haptics plays the vibration and chime when power connects. Charging triggers run either way.",
+           @"rows": @[
+               @{ @"id": @"wakeOnPower", @"title": @"Wake Screen on Power", @"symbol": @"sun.max.fill", @"color": [UIColor systemYellowColor],
+                  @"get": ^BOOL{ return !cm.disableWakeOnPower; }, @"set": ^(BOOL on) { cm.disableWakeOnPower = !on; } },
+               @{ @"id": @"chargingHaptics", @"title": @"Charging Haptics", @"symbol": @"bolt.circle.fill", @"color": orange,
+                  @"get": ^BOOL{ return !cm.disablePowerConnectedHaptics; }, @"set": ^(BOOL on) { cm.disablePowerConnectedHaptics = !on; } },
+           ] },
+        @{ @"title": @"Notifications", @"symbol": @"bell.fill",
+           @"footer": @"Vibrate When Unlocked lets notifications vibrate while the phone is unlocked; banners, sounds, alarms, calls and critical alerts are the same either way. Send to Watch When Unlocked forwards notifications to Apple Watch even while the iPhone is unlocked, following each app's Watch settings.",
+           @"rows": @[
+               @{ @"id": @"vibrateUnlocked", @"title": @"Vibrate When Unlocked", @"symbol": @"iphone.radiowaves.left.and.right", @"color": [UIColor systemRedColor],
+                  @"get": ^BOOL{ return !cm.disableUnlockedNotificationVibration; }, @"set": ^(BOOL on) { cm.disableUnlockedNotificationVibration = !on; } },
+               @{ @"id": @"watchUnlocked", @"title": @"Send to Watch When Unlocked", @"symbol": @"applewatch", @"color": [UIColor systemGreenColor],
+                  @"get": ^BOOL{ return cm.sendNotificationsToWatchWhenUnlocked; }, @"set": ^(BOOL on) { cm.sendNotificationsToWatchWhenUnlocked = on; } },
+           ] },
+    ];
+}
 
 @implementation RCTweaksViewController
 
 - (void)viewDidLoad {
     [super viewDidLoad];
 
-    self.title = @"Tweaks";
+    self.title = @"iOS Tweaks";
     self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
     self.navigationController.navigationBar.tintColor = [UIColor labelColor];
     self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
@@ -34,7 +49,7 @@ typedef NS_ENUM(NSInteger, RCTweaksSection) {
     self.tableView.rowHeight = 50;
 
     if (@available(iOS 15.0, *)) {
-        self.tableView.sectionHeaderTopPadding = 10;
+        self.tableView.sectionHeaderTopPadding = 0;
     }
 
     [self.view addSubview:self.tableView];
@@ -93,114 +108,104 @@ typedef NS_ENUM(NSInteger, RCTweaksSection) {
     }
 }
 
++ (NSArray<NSDictionary<NSString *, NSString *> *> *)searchEntries {
+    NSMutableArray *entries = [NSMutableArray array];
+    for (NSDictionary *section in RCTweaksSections()) {
+        for (NSDictionary *row in section[@"rows"]) [entries addObject:@{ @"title": row[@"title"], @"rowID": row[@"id"] }];
+    }
+    return entries;
+}
+
+// A search result: scroll to its row and flash it
+- (void)viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated];
+    NSString *rowID = self.highlightRowID;
+    if (!rowID) return;
+    self.highlightRowID = nil;
+    NSArray *sections = RCTweaksSections();
+    for (NSUInteger s = 0; s < sections.count; s++) {
+        NSUInteger r = [[sections[s][@"rows"] valueForKey:@"id"] indexOfObject:rowID];
+        if (r == NSNotFound) continue;
+        NSIndexPath *indexPath = [NSIndexPath indexPathForRow:r inSection:s];
+        [self.tableView scrollToRowAtIndexPath:indexPath atScrollPosition:UITableViewScrollPositionMiddle animated:NO];
+        UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
+        UIColor *background = cell.backgroundColor;
+        cell.backgroundColor = [[RCConfigManager sharedManager] tweakColorForKey:@"selectionHighlight" defaultVal:0.15];
+        [UIView animateWithDuration:0.6 delay:0.8 options:0 animations:^{ cell.backgroundColor = background; } completion:nil];
+        return;
+    }
+}
+
 #pragma mark - Table View Data Source
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    return RCTweaksSectionCount;
+    return RCTweaksSections().count;
 }
 
+// The section's symbol before its name, as on Settings
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
-    NSString *title = @"";
-    if (section == RCTweaksSectionWakeOnPower) title = @"Power";
-    else if (section == RCTweaksSectionUnlockedVibration) title = @"Notifications";
-
-    UIView *headerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, tableView.bounds.size.width, 40)];
-    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(20, 15, tableView.bounds.size.width - 40, 20)];
-    label.text = [title uppercaseString];
+    NSDictionary *info = RCTweaksSections()[section];
+    CGFloat height = [self tableView:tableView heightForHeaderInSection:section];
+    UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, tableView.bounds.size.width, height)];
+    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(42, height - 24, tableView.bounds.size.width - 62, 20)];
+    label.text = [info[@"title"] uppercaseString];
     label.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
     label.textColor = [UIColor secondaryLabelColor];
-    [headerView addSubview:label];
-    return headerView;
+    [header addSubview:label];
+    UIImage *image = [UIImage systemImageNamed:info[@"symbol"] withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:12 weight:UIImageSymbolWeightSemibold]];
+    UIImageView *icon = [[UIImageView alloc] initWithImage:image];
+    icon.tintColor = [UIColor secondaryLabelColor];
+    icon.contentMode = UIViewContentModeCenter;
+    icon.frame = CGRectMake(20, label.frame.origin.y, 16, 20);
+    [header addSubview:icon];
+    return header;
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section {
-    // The second switch in a group continues it without another header
-    return (section == RCTweaksSectionPowerHaptics || section == RCTweaksSectionWatchWhenUnlocked) ? 12.0f : 40.0f;
+    return section == 0 ? 32.0 : 38.0;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    // One description per switch, under its own row like the section footers above
-    if (section == RCTweaksSectionWakeOnPower) {
-        return @"Disable Wake Screen On Power keeps the screen off when power connects or disconnects while the display is off or dimmed.";
-    } else if (section == RCTweaksSectionPowerHaptics) {
-        return @"Disable Power Connected Haptics stops the charging vibration and chime when power connects. Battery status and charging triggers still update normally either way.";
-    } else if (section == RCTweaksSectionUnlockedVibration) {
-        return @"Disable Vibration When Unlocked turns off notification vibration while the phone is unlocked (banners, sounds, alarms, timers, calls, and critical alerts still work normally).";
-    } else if (section == RCTweaksSectionWatchWhenUnlocked) {
-        return @"Send to Watch When Unlocked forwards notifications to your Apple Watch even while the iPhone is unlocked, respecting each app's Watch notification settings.";
-    }
-    return nil;
+    return RCTweaksSections()[section][@"footer"];
+}
+
+- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
+    return RCSettingsRowHeight(tableView, [self tableView:tableView cellForRowAtIndexPath:indexPath]);
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    return 1;
+    return [RCTweaksSections()[section][@"rows"] count];
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     RCConfigManager *cm = [RCConfigManager sharedManager];
+    NSDictionary *row = RCTweaksSections()[indexPath.section][@"rows"][indexPath.row];
 
     UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
     cell.backgroundColor = [cm tweakColorForKey:@"blockBackground" defaultVal:0.12];
-
-    UIView *selBg = [[UIView alloc] init];
-    selBg.backgroundColor = [cm tweakColorForKey:@"selectionHighlight" defaultVal:0.15];
-    cell.selectedBackgroundView = selBg;
-
     cell.layer.borderColor = [cm tweakColorForKey:@"borders" defaultVal:0.14].CGColor;
     cell.layer.borderWidth = 1.0;
     cell.contentView.backgroundColor = [UIColor clearColor];
     cell.layer.masksToBounds = YES;
     cell.textLabel.textColor = [UIColor labelColor];
+    cell.textLabel.text = row[@"title"];
+    cell.textLabel.numberOfLines = 0; // a long name wraps (RCSettingsRowHeight)
+    cell.imageView.image = RCSettingsIcon(row[@"symbol"], row[@"color"]);
+    cell.selectionStyle = UITableViewCellSelectionStyleNone;
 
-    if (indexPath.section == RCTweaksSectionWakeOnPower) {
-        cell.textLabel.text = @"Disable Wake Screen On Power";
-        self.disableWakeOnPowerSwitch = [[UISwitch alloc] init];
-        self.disableWakeOnPowerSwitch.on = cm.disableWakeOnPower;
-        [self.disableWakeOnPowerSwitch addTarget:self action:@selector(disableWakeOnPowerChanged:) forControlEvents:UIControlEventValueChanged];
-        cell.accessoryView = self.disableWakeOnPowerSwitch;
-        cell.selectionStyle = UITableViewCellSelectionStyleNone;
-    } else if (indexPath.section == RCTweaksSectionPowerHaptics) {
-        cell.textLabel.text = @"Disable Power Connected Haptics";
-        self.disablePowerConnectedHapticsSwitch = [[UISwitch alloc] init];
-        self.disablePowerConnectedHapticsSwitch.on = cm.disablePowerConnectedHaptics;
-        [self.disablePowerConnectedHapticsSwitch addTarget:self action:@selector(disablePowerConnectedHapticsChanged:) forControlEvents:UIControlEventValueChanged];
-        cell.accessoryView = self.disablePowerConnectedHapticsSwitch;
-        cell.selectionStyle = UITableViewCellSelectionStyleNone;
-    } else if (indexPath.section == RCTweaksSectionUnlockedVibration) {
-        cell.textLabel.text = @"Disable Vibration When Unlocked";
-        self.disableUnlockedNotificationVibrationSwitch = [[UISwitch alloc] init];
-        self.disableUnlockedNotificationVibrationSwitch.on = cm.disableUnlockedNotificationVibration;
-        [self.disableUnlockedNotificationVibrationSwitch addTarget:self action:@selector(disableUnlockedNotificationVibrationChanged:) forControlEvents:UIControlEventValueChanged];
-        cell.accessoryView = self.disableUnlockedNotificationVibrationSwitch;
-        cell.selectionStyle = UITableViewCellSelectionStyleNone;
-    } else if (indexPath.section == RCTweaksSectionWatchWhenUnlocked) {
-        cell.textLabel.text = @"Send to Watch When Unlocked";
-        self.sendNotificationsToWatchWhenUnlockedSwitch = [[UISwitch alloc] init];
-        self.sendNotificationsToWatchWhenUnlockedSwitch.on = cm.sendNotificationsToWatchWhenUnlocked;
-        [self.sendNotificationsToWatchWhenUnlockedSwitch addTarget:self action:@selector(sendNotificationsToWatchWhenUnlockedChanged:) forControlEvents:UIControlEventValueChanged];
-        cell.accessoryView = self.sendNotificationsToWatchWhenUnlockedSwitch;
-        cell.selectionStyle = UITableViewCellSelectionStyleNone;
-    }
-
+    UISwitch *toggle = [[UISwitch alloc] init];
+    toggle.on = ((BOOL (^)(void))row[@"get"])();
+    toggle.tag = indexPath.section * 100 + indexPath.row;
+    [toggle addTarget:self action:@selector(switchChanged:) forControlEvents:UIControlEventValueChanged];
+    cell.accessoryView = toggle;
     return cell;
 }
 
 #pragma mark - Actions
 
-- (void)disableWakeOnPowerChanged:(UISwitch *)sender {
-    [RCConfigManager sharedManager].disableWakeOnPower = sender.on;
-}
-
-- (void)disablePowerConnectedHapticsChanged:(UISwitch *)sender {
-    [RCConfigManager sharedManager].disablePowerConnectedHaptics = sender.on;
-}
-
-- (void)disableUnlockedNotificationVibrationChanged:(UISwitch *)sender {
-    [RCConfigManager sharedManager].disableUnlockedNotificationVibration = sender.on;
-}
-
-- (void)sendNotificationsToWatchWhenUnlockedChanged:(UISwitch *)sender {
-    [RCConfigManager sharedManager].sendNotificationsToWatchWhenUnlocked = sender.on;
+- (void)switchChanged:(UISwitch *)sender {
+    NSDictionary *row = RCTweaksSections()[sender.tag / 100][@"rows"][sender.tag % 100];
+    ((void (^)(BOOL))row[@"set"])(sender.on);
 }
 
 @end
