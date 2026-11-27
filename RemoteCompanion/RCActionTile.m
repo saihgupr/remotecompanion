@@ -1,4 +1,5 @@
 #import "RCActionTile.h"
+#import "RCWhatsNew.h"
 #import "RCConfigManager.h"
 #import <objc/runtime.h>
 
@@ -10,6 +11,7 @@ static const CGFloat RCTileMinWidth = 80;
 @property (nonatomic, strong, readwrite) UIImageView *iconView;
 @property (nonatomic, strong, readwrite) UILabel *nameLabel;
 @property (nonatomic, strong) UIImageView *badgeView;
+@property (nonatomic, strong) UILabel *freshBadge;
 @property (nonatomic, strong) UILabel *countLabel;
 @property (nonatomic, strong) UIButton *favoriteButton;
 @property (nonatomic, strong) UIButton *deleteButton;
@@ -22,6 +24,18 @@ static const CGFloat RCTileMinWidth = 80;
 @end
 
 @implementation RCActionTileCell
+
+- (void)setShowsNew:(BOOL)showsNew {
+    _showsNew = showsNew;
+    if (showsNew && !self.freshBadge) {
+        // Tight on the tile's own top right corner
+        self.freshBadge = [RCWhatsNew newTag];
+        // (the cell's own edges: Auto Layout saw the content view as zero wide here)
+        [RCWhatsNew pinTag:self.freshBadge toCornerOf:self in:self];
+    }
+    self.freshBadge.hidden = !showsNew;
+    if (showsNew) [self bringSubviewToFront:self.freshBadge];
+}
 
 - (instancetype)initWithFrame:(CGRect)frame {
     self = [super initWithFrame:frame];
@@ -261,6 +275,7 @@ static const CGFloat RCTileMinWidth = 80;
 
 - (void)prepareForReuse {
     [super prepareForReuse];
+    self.showsNew = NO;
     _opensMore = NO;
     _checked = NO;
     _plainChecked = NO;
@@ -283,9 +298,39 @@ static const CGFloat RCTileMinWidth = 80;
 @property (nonatomic, strong, readwrite) UILabel *label;
 @property (nonatomic, strong) UIImageView *iconView;
 @property (nonatomic, strong) NSLayoutConstraint *labelLeading;
+@property (nonatomic, strong) UIButton *endButton;
+@property (nonatomic, copy) void (^endHandler)(void);
 @end
 
 @implementation RCActionGridHeader
+
+- (void)setButtonTitle:(NSString *)title handler:(void (^)(void))handler {
+    self.endHandler = handler;
+    if (!title.length) { self.endButton.hidden = YES; return; }
+    if (!self.endButton) {
+        UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+        button.translatesAutoresizingMaskIntoConstraints = NO;
+        button.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+        [button addTarget:self action:@selector(endTapped) forControlEvents:UIControlEventTouchUpInside];
+        [self addSubview:button];
+        [NSLayoutConstraint activateConstraints:@[
+            [button.trailingAnchor constraintEqualToAnchor:self.safeAreaLayoutGuide.trailingAnchor constant:-(RCGridSide + 4)],
+            [button.centerYAnchor constraintEqualToAnchor:self.label.centerYAnchor],
+        ]];
+        self.endButton = button;
+    }
+    [self.endButton setTitle:title forState:UIControlStateNormal];
+    self.endButton.hidden = NO;
+}
+
+- (void)endTapped {
+    if (self.endHandler) self.endHandler();
+}
+
+- (void)prepareForReuse {
+    [super prepareForReuse];
+    [self setButtonTitle:nil handler:nil];
+}
 
 - (instancetype)initWithFrame:(CGRect)frame {
     self = [super initWithFrame:frame];
@@ -375,9 +420,23 @@ CGFloat RCActionGridNoteHeight(NSString *note, CGFloat gridWidth) {
 @property (nonatomic, strong) UILabel *nameLabel;
 @property (nonatomic, strong) UIImageView *accessoryImage;
 @property (nonatomic, strong) UIView *separator;
+@property (nonatomic, strong) UIView *freshBadge;
+@property (nonatomic, strong) NSLayoutConstraint *iconWidth;
+@property (nonatomic, strong) NSLayoutConstraint *iconHeight;
 @end
 
 @implementation RCActionRowCell
+
+- (void)setShowsNew:(BOOL)showsNew {
+    _showsNew = showsNew;
+    if (showsNew && !self.freshBadge) {
+        // A red dot on the icon's top right corner
+        self.freshBadge = [RCWhatsNew newDot];
+        [RCWhatsNew pinTag:self.freshBadge toIcon:self.iconView in:self.contentView];
+    }
+    self.freshBadge.hidden = !showsNew;
+    if (showsNew) [self.contentView bringSubviewToFront:self.freshBadge];
+}
 
 - (instancetype)initWithFrame:(CGRect)frame {
     self = [super initWithFrame:frame];
@@ -410,8 +469,8 @@ CGFloat RCActionGridNoteHeight(NSString *note, CGFloat gridWidth) {
         [NSLayoutConstraint activateConstraints:@[
             [_iconView.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:16],
             [_iconView.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],
-            [_iconView.widthAnchor constraintEqualToConstant:28],
-            [_iconView.heightAnchor constraintEqualToConstant:28],
+            (_iconWidth = [_iconView.widthAnchor constraintEqualToConstant:28]),
+            (_iconHeight = [_iconView.heightAnchor constraintEqualToConstant:28]),
             [_nameLabel.leadingAnchor constraintEqualToAnchor:_iconView.trailingAnchor constant:14],
             [_nameLabel.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],
             [_nameLabel.trailingAnchor constraintLessThanOrEqualToAnchor:_accessoryImage.leadingAnchor constant:-8],
@@ -456,6 +515,15 @@ CGFloat RCActionGridNoteHeight(NSString *note, CGFloat gridWidth) {
     self.separator.hidden = last;
 }
 
+- (void)setLargeIcon:(BOOL)largeIcon {
+    if (largeIcon == _largeIcon) return;
+    _largeIcon = largeIcon;
+    self.iconView.preferredSymbolConfiguration = [UIImageSymbolConfiguration configurationWithPointSize:largeIcon ? 22 : 18 weight:UIImageSymbolWeightRegular];
+    self.iconView.tintColor = largeIcon ? [UIColor labelColor] : [UIColor secondaryLabelColor];
+    self.iconWidth.constant = largeIcon ? 34 : 28;
+    self.iconHeight.constant = largeIcon ? 34 : 28;
+}
+
 - (void)applyLook {
     RCConfigManager *cm = [RCConfigManager sharedManager];
     self.contentView.backgroundColor = [cm tweakColorForKey:@"blockBackground" defaultVal:0.12];
@@ -482,6 +550,7 @@ CGFloat RCActionGridNoteHeight(NSString *note, CGFloat gridWidth) {
 
 - (void)prepareForReuse {
     [super prepareForReuse];
+    self.showsNew = NO;
     _opensMore = NO;
     _checked = NO;
     [self applyLook];

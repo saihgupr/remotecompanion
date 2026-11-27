@@ -1166,7 +1166,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
         RCConfigManager *config = [RCConfigManager sharedManager];
         NSString *title = [config defaultNameForTrigger:key];
         NSMutableDictionary *item = [@{ @"title": title,
-                                        @"key": key,
+                                        @"key": key, // What's New finds it by this
                                         @"icon": [RCTriggersViewController iconNameForTrigger:key],
                                         @"section": section,
                                         @"handler": ^{
