@@ -196,6 +196,11 @@
 // Vibration settings, the way this iOS version's Settings shows them: one Haptics menu from
 // iOS 17 (over the same two on/off values), the two switches by their names before that
 + (BOOL)hasHomeButton;
+// Whether a trigger can be a step of a Chained Trigger: quick, deliberate ones (buttons, screen
+// gestures, NFC tags...), never states or times. The tweak has the same rule (RCChainStepAllowed).
++ (BOOL)canBeChainStep:(NSString *)triggerKey;
+// A step of a Chained Trigger with no actions of its own (not listed on the Triggers screen)
+- (BOOL)isChainStepOnly:(NSString *)triggerKey;
 + (NSArray<NSString *> *)bottomBarTriggerKeys;
 // Whether the Apple Watch app is installed, so Watch features make sense on this device
 + (BOOL)watchFeaturesAvailable;

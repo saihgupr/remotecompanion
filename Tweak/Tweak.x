@@ -2219,6 +2219,48 @@ static BOOL rc_screen_is_off_or_dim(void) {
     return screenDim;
 }
 
+// Chained Triggers' steps (see RCExecuteTrigger): only quick, deliberate triggers (buttons, screen
+// gestures, NFC tags...), never states or times, which would be swallowed
+static BOOL rc_chain_step_kind_allowed(NSString *key) {
+    if (![key isKindOfClass:[NSString class]] || [key hasPrefix:@"chain_"]) return NO;
+    for (NSString *prefix in @[@"volume_", @"power_", @"trigger_statusbar_", @"trigger_edge_", @"trigger_bottombar_",
+                               @"trigger_bottom_swipe_", @"trigger_bottom_two_finger_", @"trigger_home_", @"touchid_",
+                               @"trigger_ringer_", @"trigger_two_finger_", @"trigger_island_", @"nfc_", @"trigger_cc_button_"]) {
+        if ([key hasPrefix:prefix]) return YES;
+    }
+    return [@[@"shake", @"trigger_watch_ping", @"trigger_watch_ping_hold"] containsObject:key];
+}
+
+// The triggers that are steps of an enabled Chained Trigger (with actions) in this config
+static NSSet<NSString *> *rc_chain_steps_in_config(NSDictionary *config) {
+    NSMutableSet *steps = [NSMutableSet set];
+    NSDictionary *triggers = [config[@"triggers"] isKindOfClass:[NSDictionary class]] ? config[@"triggers"] : nil;
+    for (NSString *key in triggers) {
+        if (![key hasPrefix:@"chain_"]) continue;
+        NSDictionary *trigger = triggers[key];
+        if (![trigger isKindOfClass:[NSDictionary class]] || ![trigger[@"enabled"] boolValue]) continue;
+        if (![trigger[@"actions"] isKindOfClass:[NSArray class]] || [trigger[@"actions"] count] == 0) continue;
+        NSDictionary *chain = [trigger[@"chain"] isKindOfClass:[NSDictionary class]] ? trigger[@"chain"] : nil;
+        for (id step in [chain[@"steps"] isKindOfClass:[NSArray class]] ? chain[@"steps"] : @[]) {
+            if (rc_chain_step_kind_allowed(step)) [steps addObject:step];
+        }
+    }
+    return steps;
+}
+
+// Worked out once per config (rc_set_trigger_config), as the touch handlers ask on every touch
+static NSSet<NSString *> *g_chainStepKeys = nil;
+
+// A trigger is on: switched on in its own settings, or a step of a chain (which needs no entry of
+// its own: a step that isn't in the Triggers list is still caught)
+static BOOL rc_trigger_on(NSString *key) {
+    if (!key) return NO;
+    if ([g_chainStepKeys containsObject:key]) return YES;
+    NSDictionary *triggers = g_triggerConfig[@"triggers"];
+    id trigger = [triggers isKindOfClass:[NSDictionary class]] ? triggers[key] : nil;
+    return [trigger isKindOfClass:[NSDictionary class]] && [trigger[@"enabled"] boolValue];
+}
+
 static uint32_t rc_two_finger_mask_for_config(NSDictionary *config) {
     if (![config isKindOfClass:[NSDictionary class]] || ![config[@"masterEnabled"] boolValue]) return 0;
     NSDictionary *triggers = [config[@"triggers"] isKindOfClass:[NSDictionary class]] ? config[@"triggers"] : nil;
@@ -2235,7 +2277,9 @@ static uint32_t rc_two_finger_mask_for_config(NSDictionary *config) {
         { @"trigger_bottom_two_finger_swipe_up",      RCTFMaskBarBottom },
     };
     uint32_t mask = 0;
+    NSSet *chainSteps = rc_chain_steps_in_config(config);
     for (size_t i = 0; i < sizeof(items) / sizeof(items[0]); i++) {
+        if ([chainSteps containsObject:items[i].key]) { mask |= items[i].bit; continue; }
         NSDictionary *t = triggers[items[i].key];
         if (![t isKindOfClass:[NSDictionary class]] || ![t[@"enabled"] boolValue]) continue;
         NSArray *actions = t[@"actions"];
@@ -2264,6 +2308,7 @@ static void rc_set_trigger_config(NSDictionary *config) {
     @synchronized (rc_trigger_config_lock()) {
         old = g_triggerConfig;
         g_triggerConfig = config;
+        g_chainStepKeys = rc_chain_steps_in_config(config);
         g_twoFingerConfiguredMask = rc_two_finger_mask_for_config(config);
         g_rcDisableWakeOnPower = [config isKindOfClass:[NSDictionary class]] && [config[@"disableWakeOnPower"] boolValue];
         g_rcDisablePowerConnectedHaptics = [config isKindOfClass:[NSDictionary class]] && [config[@"disablePowerConnectedHaptics"] boolValue];
@@ -6927,6 +6972,140 @@ BOOL RCEvaluateIfCondition(NSDictionary *ifAction) {
     return rc_evaluate_if_condition(ifAction);
 }
 
+// ---------------------------------------------------------------------------
+// Chained triggers (chain_<id>): { chain: { steps: [trigger keys], within: seconds } } runs its own
+// actions once its steps happen one after another, in order, each within `within` seconds of the
+// last (2 when missing). A trigger that's a step of an enabled chain doesn't run its own actions:
+// it only moves its chains along. Only quick, deliberate triggers can be steps (buttons, screen
+// gestures, NFC tags...), never states or times, which would be swallowed.
+// ---------------------------------------------------------------------------
+BOOL RCChainStepAllowed(NSString *key) {
+    return rc_chain_step_kind_allowed(key);
+}
+
+// The enabled chains (with actions) and their steps: chain key -> steps
+static NSDictionary<NSString *, NSArray<NSString *> *> *rc_chains(void) {
+    NSMutableDictionary *chains = [NSMutableDictionary dictionary];
+    id triggers = g_triggerConfig[@"triggers"];
+    if (![triggers isKindOfClass:[NSDictionary class]]) return chains;
+    for (NSString *key in (NSDictionary *)triggers) {
+        if (![key hasPrefix:@"chain_"]) continue;
+        NSDictionary *trigger = ((NSDictionary *)triggers)[key];
+        if (![trigger isKindOfClass:[NSDictionary class]] || ![trigger[@"enabled"] boolValue]) continue;
+        NSArray *actions = trigger[@"actions"];
+        if (![actions isKindOfClass:[NSArray class]] || actions.count == 0) continue;
+        NSDictionary *chain = [trigger[@"chain"] isKindOfClass:[NSDictionary class]] ? trigger[@"chain"] : nil;
+        NSMutableArray *steps = [NSMutableArray array];
+        for (id step in [chain[@"steps"] isKindOfClass:[NSArray class]] ? chain[@"steps"] : @[]) {
+            if (RCChainStepAllowed(step)) [steps addObject:step];
+        }
+        if (steps.count) chains[key] = steps;
+    }
+    return chains;
+}
+
+BOOL RCChainTriggerIsStep(NSString *key) {
+    return key.length && RC_MasterEnabled() && [g_chainStepKeys containsObject:key];
+}
+
+static double rc_chain_within(NSString *chainKey) {
+    id within = g_triggerConfig[@"triggers"][chainKey][@"chain"][@"within"];
+    double seconds = [within respondsToSelector:@selector(doubleValue)] ? [within doubleValue] : 2.0;
+    return seconds > 0 ? MIN(MAX(seconds, 0.3), 10.0) : 2.0;
+}
+
+// A step's own actions (the chain editor, per step): "always" runs them as usual, alongside the
+// chain; otherwise (the default, "wait") they wait while the chain is under way, and run if it
+// doesn't complete. stepActions is a list, one per step; a single "always" is all of them.
+static BOOL rc_chain_step_always_runs(NSString *chainKey, NSUInteger index) {
+    id stepActions = g_triggerConfig[@"triggers"][chainKey][@"chain"][@"stepActions"];
+    id value = [stepActions isKindOfClass:[NSArray class]] ? (index < [stepActions count] ? stepActions[index] : nil) : stepActions;
+    return [[value description] isEqualToString:@"always"];
+}
+
+// Chains under way (main queue only): chain key -> { next, at, gen, held: [step keys whose own actions wait] }
+static NSMutableDictionary<NSString *, NSMutableDictionary *> *g_chainProgress;
+static NSString *g_chainBypassKey; // RCExecuteTrigger runs this key's own actions (a held step let go)
+
+static void rc_chain_run_own(NSString *key) {
+    g_chainBypassKey = key;
+    SRLog(@"[Chain] %@: the chain didn't complete, its own actions run", key);
+    RCExecuteTrigger(key);
+    g_chainBypassKey = nil;
+}
+
+// Held by another chain still under way: that chain decides
+static BOOL rc_chain_key_held_elsewhere(NSString *key, NSString *exceptChain) {
+    for (NSString *chainKey in g_chainProgress) {
+        if (![chainKey isEqualToString:exceptChain] && [g_chainProgress[chainKey][@"held"] containsObject:key]) return YES;
+    }
+    return NO;
+}
+
+// The chain broke off (too slow, or out of order): its held steps run their own actions, in order
+static void rc_chain_give_up(NSString *chainKey) {
+    NSArray *held = [g_chainProgress[chainKey][@"held"] copy];
+    [g_chainProgress removeObjectForKey:chainKey];
+    for (NSString *key in held) {
+        if (!rc_chain_key_held_elsewhere(key, chainKey)) rc_chain_run_own(key);
+    }
+}
+
+// The chain completed: the steps it held are its own, and no chain runs them on their own
+static void rc_chain_consume(NSString *chainKey) {
+    NSArray *held = [g_chainProgress[chainKey][@"held"] copy];
+    [g_chainProgress removeObjectForKey:chainKey];
+    for (NSMutableDictionary *state in g_chainProgress.allValues) [state[@"held"] removeObjectsInArray:held];
+}
+
+// A trigger fired: moves along every chain it's a step of, runs a chain that's complete. Returns
+// whether the trigger's own actions are held back or taken by a chain (they then don't run now).
+static BOOL rc_chain_advance(NSString *key) {
+    if (!g_chainProgress) g_chainProgress = [NSMutableDictionary dictionary];
+    NSDictionary *chains = rc_chains();
+    BOOL swallow = NO;
+    double now = CFAbsoluteTimeGetCurrent();
+    for (NSString *chainKey in chains) {
+        NSArray *steps = chains[chainKey];
+        if (![steps containsObject:key]) continue; // something else in between leaves it as it is
+        double within = rc_chain_within(chainKey);
+        NSMutableDictionary *state = g_chainProgress[chainKey];
+        if (state && now - [state[@"at"] doubleValue] > within) { rc_chain_give_up(chainKey); state = nil; }
+        NSUInteger next = state ? [state[@"next"] unsignedIntegerValue] : 0;
+        if (next < steps.count && [steps[next] isEqualToString:key]) {
+            next++;
+        } else {
+            // Out of order: it starts over, from this trigger if it's the first step
+            if (state) { rc_chain_give_up(chainKey); state = nil; }
+            next = [steps.firstObject isEqualToString:key] ? 1 : 0;
+        }
+        if (next == 0) continue;
+        BOOL always = rc_chain_step_always_runs(chainKey, next - 1);
+        if (next >= steps.count) {
+            rc_chain_consume(chainKey);
+            SRLogMin(@"[Chain] %@ complete", chainKey);
+            dispatch_async(dispatch_get_main_queue(), ^{ RCExecuteTrigger(chainKey); });
+            if (!always) swallow = YES;
+            continue;
+        }
+        if (!state) {
+            state = [@{ @"held": [NSMutableArray array] } mutableCopy];
+            g_chainProgress[chainKey] = state;
+        }
+        NSUInteger gen = [state[@"gen"] unsignedIntegerValue] + 1;
+        state[@"next"] = @(next);
+        state[@"at"] = @(now);
+        state[@"gen"] = @(gen);
+        if (!always) { [state[@"held"] addObject:key]; swallow = YES; }
+        SRLog(@"[Chain] %@: step %lu of %lu", chainKey, (unsigned long)next, (unsigned long)steps.count);
+        // Too slow: the chain gives up, and what it held runs
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(within * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if ([g_chainProgress[chainKey][@"gen"] unsignedIntegerValue] == gen) rc_chain_give_up(chainKey);
+        });
+    }
+    return swallow;
+}
+
 void RCExecuteTrigger(NSString *triggerKey) {
     RCTKEvent(@"trigger", @{ @"key": triggerKey ?: @"" });
     if (RCTKCaptureTrigger(triggerKey)) return;
@@ -6960,6 +7139,16 @@ void RCExecuteTrigger(NSString *triggerKey) {
     if (!triggers || ![triggers isKindOfClass:[NSDictionary class]]) {
         SRLogMin(@"ERROR: Triggers dictionary is missing or invalid");
         return;
+    }
+
+    // A step of a chained trigger moves the chain along; its own actions wait for the chain, or run
+    // as usual when the chain's Step Actions say so
+    if (RCChainStepAllowed(triggerKey) && !RC_IsTriggerExcludedForForegroundApp(triggerKey)) {
+        __block BOOL held = NO;
+        RCOnMainThreadSync(^{
+            if (![triggerKey isEqualToString:g_chainBypassKey]) held = rc_chain_advance(triggerKey);
+        });
+        if (held) return;
     }
     
     id trigger = ((NSDictionary *)triggers)[triggerKey];
@@ -18764,6 +18953,8 @@ static CFAbsoluteTime g_powerSequenceWokeAt = 0; // when that wake happened: an 
 static BOOL RC_TriggerIsActionable(NSString *key) {
     load_trigger_config();
     if (!RC_MasterEnabled()) return NO;
+    // A chain's step counts as having actions: the gesture has to be caught for the chain
+    if (RCChainTriggerIsStep(key) && !RC_IsTriggerExcludedForForegroundApp(key)) return YES;
     id trigger = g_triggerConfig[@"triggers"][key];
     if (![trigger isKindOfClass:[NSDictionary class]]) return NO;
     if (![trigger[@"enabled"] boolValue]) return NO;
@@ -18778,9 +18969,9 @@ static BOOL RC_PowerMultiClickEnabled(void) {
     load_trigger_config();
     if (!RC_MasterEnabled()) return NO;
     NSDictionary *t = g_triggerConfig[@"triggers"];
-    return [t[@"power_double_tap"][@"enabled"] boolValue] ||
-           [t[@"power_triple_click"][@"enabled"] boolValue] ||
-           [t[@"power_quadruple_click"][@"enabled"] boolValue];
+    return rc_trigger_on(@"power_double_tap") ||
+           rc_trigger_on(@"power_triple_click") ||
+           rc_trigger_on(@"power_quadruple_click");
 }
 
 // Is a trigger armed that needs MORE than 2 clicks to resolve? Only then is a
@@ -18791,8 +18982,8 @@ static BOOL RC_HigherPowerMultiClickArmed(void) {
     load_trigger_config();
     if (!RC_MasterEnabled()) return NO;
     NSDictionary *t = g_triggerConfig[@"triggers"];
-    return [t[@"power_triple_click"][@"enabled"] boolValue] ||
-           [t[@"power_quadruple_click"][@"enabled"] boolValue];
+    return rc_trigger_on(@"power_triple_click") ||
+           rc_trigger_on(@"power_quadruple_click");
 }
 
 // Only defer while the screen is already ON. Deferring a press made against a
@@ -19971,7 +20162,7 @@ static void RC_CheckAndFire() {
     // 2. Load Config
     load_trigger_config();
     BOOL masterEnabled = RC_MasterEnabled();
-    BOOL quadEnabled = masterEnabled && [g_triggerConfig[@"triggers"][@"trigger_home_quadruple_click"][@"enabled"] boolValue];
+    BOOL quadEnabled = masterEnabled && rc_trigger_on(@"trigger_home_quadruple_click");
 
     // 3. IMMEDIATE FIRE CHECK (Quadruple)
     if (quadEnabled && g_homeClickCount >= 4) {
@@ -20001,7 +20192,7 @@ static void RC_CheckAndFire() {
         
         BOOL fired = NO;
         if (triggerKey && masterEnabled) {
-            BOOL enabled = [g_triggerConfig[@"triggers"][triggerKey][@"enabled"] boolValue];
+            BOOL enabled = rc_trigger_on(triggerKey);
             if (enabled) {
                 SRLog(@"✅ FIRING TRIGGER: %@", triggerKey);
                 RCTriggerHapticFor(triggerKey);
@@ -20043,7 +20234,7 @@ static void RC_CheckAndFirePower() {
     
     load_trigger_config();
     BOOL masterEnabled = RC_MasterEnabled();
-    BOOL quadEnabled = masterEnabled && [g_triggerConfig[@"triggers"][@"power_quadruple_click"][@"enabled"] boolValue];
+    BOOL quadEnabled = masterEnabled && rc_trigger_on(@"power_quadruple_click");
     
     // 3. IMMEDIATE FIRE CHECK (Quadruple)
     if (quadEnabled && g_powerClickCount >= 4) {
@@ -20102,7 +20293,7 @@ static void RC_CheckAndFirePower() {
         BOOL claimed = NO;
         BOOL higherClaimed = NO; // triple/quad specifically claimed this sequence
         if (triggerKey && masterEnabled) {
-            BOOL enabled = [g_triggerConfig[@"triggers"][triggerKey][@"enabled"] boolValue];
+            BOOL enabled = rc_trigger_on(triggerKey);
             if (enabled) {
                 SRLog(@"✅ FIRING POWER TRIGGER: %@", triggerKey);
                 RCTriggerHapticFor(triggerKey);
@@ -20253,8 +20444,8 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
         dispatch_async(dispatch_get_main_queue(), ^{
             load_trigger_config();
             BOOL enabled = RC_MasterEnabled() && 
-                ([g_triggerConfig[@"triggers"][@"touchid_hold"][@"enabled"] boolValue] || 
-                 [g_triggerConfig[@"triggers"][@"touchid_tap"][@"enabled"] boolValue]);
+                (rc_trigger_on(@"touchid_hold") || 
+                 rc_trigger_on(@"touchid_tap"));
             if (!enabled) return;
 
             // The sensor belongs to a system prompt (purchase, Apple ID, Apple Pay, an app's
@@ -20351,7 +20542,7 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
                             return;
                         }
 
-                        if ([g_triggerConfig[@"triggers"][@"touchid_tap"][@"enabled"] boolValue]) {
+                        if (rc_trigger_on(@"touchid_tap")) {
                             RCTriggerHapticFor(@"touchid_tap");
                             RCExecuteTrigger(@"touchid_tap");
                         }
@@ -20425,7 +20616,7 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
                         // Check if trigger is enabled and has actions BEFORE firing haptics
                         if (g_triggerConfig) {
                             NSDictionary *holdTrigger = g_triggerConfig[@"triggers"][@"touchid_hold"];
-                            if ([holdTrigger[@"enabled"] boolValue] && [holdTrigger[@"actions"] count] > 0) {
+                            if (rc_trigger_on(@"touchid_hold") && ([holdTrigger[@"actions"] count] > 0 || RCChainTriggerIsStep(@"touchid_hold"))) {
                                 RCTriggerHapticFor(@"touchid_hold");
                                 RCExecuteTrigger(@"touchid_hold");
                             }
@@ -20735,8 +20926,8 @@ static void RC_UpdateBioFingerDetectionWanted(void) {
         @try {
             load_trigger_config();
             BOOL want = [g_triggerConfig[@"masterEnabled"] boolValue] &&
-                ([g_triggerConfig[@"triggers"][@"touchid_hold"][@"enabled"] boolValue] ||
-                 [g_triggerConfig[@"triggers"][@"touchid_tap"][@"enabled"] boolValue]);
+                (rc_trigger_on(@"touchid_hold") ||
+                 rc_trigger_on(@"touchid_tap"));
             Class cls = objc_getClass("SBUIBiometricResource");
             id res = (cls && [cls respondsToSelector:@selector(sharedInstance)]) ? [cls sharedInstance] : nil;
             if (want) {
@@ -21189,7 +21380,7 @@ static BOOL rc_device_unlocked_for_notification_vibration(void) {
     // With Keep Default Action the press is left to iOS; the trigger runs when iOS starts Siri
     // (performLongPressActions)
     BOOL longPressEnabled = masterEnabled && 
-                   [g_triggerConfig[@"triggers"][@"power_long_press"][@"enabled"] boolValue] &&
+                   rc_trigger_on(@"power_long_press") &&
                    !RC_TriggerKeepsDefault(@"power_long_press");
 
     SRLog(@"Power Button DOWN (Actions) - enabled=%d", longPressEnabled);
@@ -21449,7 +21640,7 @@ static BOOL rc_device_unlocked_for_notification_vibration(void) {
     load_trigger_config();
     BOOL masterEnabled = RC_MasterEnabled();
     BOOL longPressEnabled = masterEnabled && 
-                   [g_triggerConfig[@"triggers"][@"power_long_press"][@"enabled"] boolValue];
+                   rc_trigger_on(@"power_long_press");
 
     // Keep Default Action: the actions run and iOS goes on to Siri
     if (longPressEnabled && RC_TriggerKeepsDefault(@"power_long_press") && !g_lockButtonTriggered) {
@@ -21700,7 +21891,7 @@ static BOOL RC_HomeSinglePressIsPartOfHeldClicks(void) {
     SRLog(@"SBLockHardwareButton doublePress: called");
     load_trigger_config();
     BOOL enabled = RC_MasterEnabled() &&
-                   [g_triggerConfig[@"triggers"][@"power_double_tap"][@"enabled"] boolValue];
+                   rc_trigger_on(@"power_double_tap");
     if (enabled) {
         // We already handled it in Actions (hopefully), or we handle it here if Actions wasn't called
         // But to be safe, let's see if this one fires.
@@ -21797,7 +21988,7 @@ static NSString *rc_status_bar_zone_for_progress(CGFloat progress) {
 }
 
 static BOOL rc_status_bar_trigger_enabled(NSString *key) {
-    return key && RC_MasterEnabled() && [g_triggerConfig[@"triggers"][key][@"enabled"] boolValue] && !RC_IsTriggerExcludedForForegroundApp(key);
+    return key && RC_MasterEnabled() && rc_trigger_on(key) && !RC_IsTriggerExcludedForForegroundApp(key);
 }
 
 // The zone's own trigger for a gesture ("tap", "double_tap", "swipe_left", "swipe_right") if it's
@@ -22426,10 +22617,10 @@ static BOOL has_any_bottom_swipe_trigger_enabled() {
         return NO;
     }
     NSDictionary *triggers = g_triggerConfig[@"triggers"];
-    return ([triggers[@"trigger_bottom_swipe_up_left"][@"enabled"] boolValue] ||
-            [triggers[@"trigger_bottom_swipe_up_center"][@"enabled"] boolValue] ||
-            [triggers[@"trigger_bottom_swipe_up_right"][@"enabled"] boolValue] ||
-            [triggers[@"trigger_bottom_two_finger_swipe_up"][@"enabled"] boolValue]);
+    return (rc_trigger_on(@"trigger_bottom_swipe_up_left") ||
+            rc_trigger_on(@"trigger_bottom_swipe_up_center") ||
+            rc_trigger_on(@"trigger_bottom_swipe_up_right") ||
+            rc_trigger_on(@"trigger_bottom_two_finger_swipe_up"));
 }
 
 static BOOL rc_recognizer_is_top_edge(UIGestureRecognizer *recognizer) {
@@ -22468,7 +22659,7 @@ static BOOL rc_is_top_swipe_down_zone_enabled(NSString *triggerKey) {
     }
     NSDictionary *triggers = g_triggerConfig[@"triggers"];
     NSDictionary *trigger = [triggers isKindOfClass:[NSDictionary class]] ? triggers[triggerKey] : nil;
-    if (![trigger isKindOfClass:[NSDictionary class]] || ![trigger[@"enabled"] boolValue]) {
+    if (!rc_trigger_on(triggerKey)) {
         return NO;
     }
     return !RC_IsTriggerExcludedForForegroundApp(triggerKey);
@@ -22569,8 +22760,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
     }
     
     NSDictionary *triggers = g_triggerConfig[@"triggers"];
-    NSDictionary *trigger = triggers[triggerKey];
-    return (trigger && [trigger[@"enabled"] boolValue]);
+    return rc_trigger_on(triggerKey);
 }
 
 %hook UIApplication
@@ -22762,7 +22952,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                         if (g_pendingStatusBarTrigger) {
                             load_trigger_config();
                             BOOL enabled = RC_MasterEnabled() && 
-                                           [g_triggerConfig[@"triggers"][g_pendingStatusBarTrigger][@"enabled"] boolValue] &&
+                                           rc_trigger_on(g_pendingStatusBarTrigger) &&
                                            !RC_IsTriggerExcludedForForegroundApp(g_pendingStatusBarTrigger);
                             
                             if (enabled) {
@@ -22842,7 +23032,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                     if ((user_dy >= 28 && isVertDown) || (isEnded && user_dy >= 20 && isVertDown)) {
                         load_trigger_config();
                         BOOL enabled = RC_MasterEnabled() && 
-                                       [g_triggerConfig[@"triggers"][@"trigger_statusbar_two_finger_swipe_down"][@"enabled"] boolValue];
+                                       rc_trigger_on(@"trigger_statusbar_two_finger_swipe_down");
                         if (enabled) {
                             g_twoFingerTopTriggered = YES;
                             g_lastTwoFingerTopSwipeTriggerTime = [[NSDate date] timeIntervalSince1970];
@@ -22863,7 +23053,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                     if ((user_dy <= -28 && isVertUp) || (isEnded && user_dy <= -20 && isVertUp)) {
                         load_trigger_config();
                         BOOL enabled = RC_MasterEnabled() && 
-                                       [g_triggerConfig[@"triggers"][@"trigger_bottom_two_finger_swipe_up"][@"enabled"] boolValue];
+                                       rc_trigger_on(@"trigger_bottom_two_finger_swipe_up");
                         if (enabled) {
                             g_twoFingerBottomTriggered = YES;
                             g_lastTwoFingerBottomSwipeTriggerTime = [[NSDate date] timeIntervalSince1970];
@@ -22925,7 +23115,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                     if (isHoz && abs_udx > 15 && !g_statusBarSwipeHapticFired && !g_topSwipeDownTriggered) {
                         NSString *trigger = rc_status_bar_trigger(user_dx > 0 ? @"swipe_right" : @"swipe_left");
                         load_trigger_config();
-                        if (RC_MasterEnabled() && [g_triggerConfig[@"triggers"][trigger][@"enabled"] boolValue] &&
+                        if (RC_MasterEnabled() && rc_trigger_on(trigger) &&
                             !RC_IsTriggerExcludedForForegroundApp(trigger)) {
                             RCTriggerHapticFor(trigger);
                         }
@@ -22962,7 +23152,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                     if (isHoz && abs_udx > 15) {
                         NSString *trigger = (user_dx > 0) ? @"trigger_bottombar_swipe_right" : @"trigger_bottombar_swipe_left";
                         load_trigger_config();
-                        if (RC_MasterEnabled() && [g_triggerConfig[@"triggers"][trigger][@"enabled"] boolValue]) {
+                        if (RC_MasterEnabled() && rc_trigger_on(trigger)) {
                             RCTriggerHapticFor(trigger);
                         }
                         if (RC_TriggerIsActionable(trigger)) RC_FreezeGestureScrolling();
@@ -22983,7 +23173,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                     if (g_pendingBottomBarSwipeUpTrigger) {
                         load_trigger_config();
                         BOOL enabled = RC_MasterEnabled() && 
-                                       [g_triggerConfig[@"triggers"][g_pendingBottomBarSwipeUpTrigger][@"enabled"] boolValue];
+                                       rc_trigger_on(g_pendingBottomBarSwipeUpTrigger);
                         if (enabled) {
                             g_bottomBarSwipeUpTriggered = YES;
                             g_lastBottomSwipeTriggerTime = [[NSDate date] timeIntervalSince1970];
@@ -23032,7 +23222,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
                         if (g_pendingBottomBarSwipeUpTrigger) {
                             load_trigger_config();
                             BOOL enabled = RC_MasterEnabled() && 
-                                           [g_triggerConfig[@"triggers"][g_pendingBottomBarSwipeUpTrigger][@"enabled"] boolValue];
+                                           rc_trigger_on(g_pendingBottomBarSwipeUpTrigger);
                             if (enabled) {
                                 g_bottomBarSwipeUpTriggered = YES;
                                 g_lastBottomSwipeTriggerTime = [[NSDate date] timeIntervalSince1970];
@@ -23415,7 +23605,7 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
             if (triggerKey) {
                 load_trigger_config();
                 BOOL enabled = RC_MasterEnabled() && 
-                               [g_triggerConfig[@"triggers"][triggerKey][@"enabled"] boolValue];
+                               rc_trigger_on(triggerKey);
                 
                 if (enabled) {
                     // Haptic feedback ONLY if enabled
@@ -23480,8 +23670,7 @@ static BOOL should_register_edge_gestures() {
                                @"trigger_edge_right_swipe_down"];
     
     for (NSString *key in edgeTriggers) {
-        NSDictionary *trigger = triggers[key];
-        if (trigger && [trigger[@"enabled"] boolValue]) {
+        if (rc_trigger_on(key)) {
             return YES; // At least one edge gesture is enabled
         }
     }

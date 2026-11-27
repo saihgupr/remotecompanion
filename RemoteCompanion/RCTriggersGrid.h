@@ -25,6 +25,11 @@
 - (void)gridDeleteTrigger:(NSString *)key fromView:(UIView *)view;
 - (void)gridMoveFavoriteFrom:(NSInteger)from to:(NSInteger)to;
 - (void)gridDidScroll:(UIScrollView *)scrollView;
+@optional
+// A Chained Trigger's steps' icons, shown scrolling across its tile (nil for any other trigger), and
+// its letter tag's badge (nil for none)
+- (NSArray<UIImage *> *)gridStepImagesForTrigger:(NSString *)key;
+- (UIImage *)gridStepsLetterForTrigger:(NSString *)key;
 @end
 
 @interface RCTriggersGrid : NSObject <UICollectionViewDataSource, UICollectionViewDelegateFlowLayout>

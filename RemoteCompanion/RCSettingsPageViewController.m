@@ -5,6 +5,7 @@
 #import "RCActionTile.h"
 #import "RCSliderCell.h"
 #import "RCLayoutPreview.h"
+#import "RCCategoryBar.h"
 #import "RCRunningViewController.h"
 #import "RCTestKitViewController.h"
 
@@ -67,34 +68,13 @@ UIImage *RCSettingsIcon(NSString *symbol, UIColor *color) {
 - (BOOL)touchesShouldCancelInContentView:(UIView *)view { return ![view isKindOfClass:[UISlider class]]; }
 @end
 
-// Layout's screen control: four names don't fit one line across a phone, so each can take two
-@interface RCTwoLineSegmentedControl : UISegmentedControl
-@end
-
-@implementation RCTwoLineSegmentedControl
-- (void)layoutSubviews {
-    [super layoutSubviews];
-    NSMutableArray<UIView *> *views = [self.subviews mutableCopy];
-    while (views.count) {
-        UIView *view = views.lastObject;
-        [views removeLastObject];
-        if ([view isKindOfClass:[UILabel class]]) {
-            UILabel *label = (UILabel *)view;
-            label.numberOfLines = 2;
-            label.lineBreakMode = NSLineBreakByWordWrapping;
-            label.textAlignment = NSTextAlignmentCenter;
-        }
-        [views addObjectsFromArray:view.subviews];
-    }
-}
-@end
-
 @interface RCSettingsPageViewController ()
 @property (nonatomic) RCSettingsPage page;
 @property (nonatomic, strong) UITableView *tableView;
-// Layout: the screen being set up (its control sits above the settings and picks the preview's screen)
+// Layout: the screen being set up (its bar of chips sits above the settings and picks the preview's screen)
 @property (nonatomic, copy) NSString *layoutScreen;
-@property (nonatomic, strong) UISegmentedControl *layoutScreenControl;
+@property (nonatomic, strong) RCCategoryBar *layoutScreenBar;
+@property (nonatomic, assign) BOOL layoutScreenBarShown;
 @end
 
 // Row IDs: a fixed name for each row, "layout:<option>" for the Layout rows of the screen being set
@@ -398,7 +378,7 @@ static NSString *const RCRowTestKit = @"testKit";
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section {
-    if (self.page == RCSettingsPageLayout && section == 0) return 70.0f;
+    if (self.page == RCSettingsPageLayout && section == 0) return 8.0f + [RCCategoryBar barHeight];
     return 40.0f;
 }
 
@@ -419,26 +399,41 @@ static NSArray<NSString *> *RCLayoutScreenKeys(void) {
     return self.layoutScreen;
 }
 
-// Triggers / New Trigger / Select Action / Banners, just above that screen's settings
+// The screens, as a row of chips just above that screen's settings: it scrolls sideways when
+// there are more than fit, so more screens can be added
 - (UIView *)layoutScreenHeaderWithWidth:(CGFloat)width {
-    if (!self.layoutScreenControl) {
+    RCCategoryBar *bar = self.layoutScreenBar;
+    if (!bar) {
+        bar = [[RCCategoryBar alloc] initWithWidth:width];
+        bar.picker = YES;
+        bar.accessibilityLabel = @"Screen";
         NSMutableArray *titles = [NSMutableArray array];
         for (NSArray *screen in RCLayoutScreens()) [titles addObject:screen[0]];
-        UISegmentedControl *control = [[RCTwoLineSegmentedControl alloc] initWithItems:titles];
-        control.accessibilityLabel = @"Screen";
-        [control addTarget:self action:@selector(layoutScreenPicked:) forControlEvents:UIControlEventValueChanged];
-        self.layoutScreenControl = control;
+        [bar setChipTitles:titles];
+        __weak typeof(self) weakSelf = self;
+        bar.onSelect = ^(NSInteger index) { [weakSelf layoutScreenPicked:index]; };
+        self.layoutScreenBar = bar;
     }
-    self.layoutScreenControl.selectedSegmentIndex = (NSInteger)[RCLayoutScreenKeys() indexOfObject:[self currentLayoutScreen]];
-    UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, 70)];
-    self.layoutScreenControl.frame = CGRectMake(16, 14, width - 32, 46); // room for two lines
-    self.layoutScreenControl.autoresizingMask = UIViewAutoresizingFlexibleWidth;
-    [header addSubview:self.layoutScreenControl];
+    bar.selectedIndex = (NSInteger)[RCLayoutScreenKeys() indexOfObject:[self currentLayoutScreen]];
+    UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, 8.0 + [RCCategoryBar barHeight])];
+    bar.frame = CGRectMake(0, 4, width, [RCCategoryBar barHeight]);
+    [header addSubview:bar];
+    // The screen set up last time, in view
+    if (!self.layoutScreenBarShown) {
+        self.layoutScreenBarShown = YES;
+        NSInteger index = bar.selectedIndex;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            UIView *chip = nil;
+            for (UIView *view in bar.subviews) if ([view isKindOfClass:[UIButton class]] && view.tag == index) chip = view;
+            if (chip) [bar scrollRectToVisible:CGRectInset(chip.frame, -24, 0) animated:NO];
+        });
+    }
     return header;
 }
 
-- (void)layoutScreenPicked:(UISegmentedControl *)control {
-    self.layoutScreen = RCLayoutScreens()[control.selectedSegmentIndex][1];
+- (void)layoutScreenPicked:(NSInteger)index {
+    if (index < 0 || index >= (NSInteger)RCLayoutScreens().count) return;
+    self.layoutScreen = RCLayoutScreens()[index][1];
     [[NSUserDefaults standardUserDefaults] setObject:self.layoutScreen forKey:@"RCLayoutPageScreen"];
     [[[UISelectionFeedbackGenerator alloc] init] selectionChanged];
     RCLayoutPreview *preview = (RCLayoutPreview *)self.tableView.tableHeaderView;

@@ -13,6 +13,9 @@
 // Whose Category Bar Lines it follows: a Layout screen's key, or nil (Settings, the symbol picker),
 // which follows Triggers'
 @property (nonatomic, copy) NSString *layoutScreen;
+// A picker rather than a filter: no All chip, one chip always chosen, and one line whatever the
+// Category Bar Lines setting (Settings > Layout's screens). Set before setChipTitles:.
+@property (nonatomic, assign) BOOL picker;
 - (instancetype)initWithWidth:(CGFloat)width screen:(NSString *)screen;
 // The bar's height for its number of lines
 - (CGFloat)height;

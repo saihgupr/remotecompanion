@@ -36,6 +36,14 @@ static NSArray<NSDictionary *> *RCPreviewTriggerSections(void) {
 
 // Samples for the other screens: {title, items: [{name, icon}]}
 static NSArray<NSDictionary *> *RCPreviewCatalog(NSString *screen) {
+    if ([screen isEqualToString:RCLayoutChainSteps]) {
+        return @[ @{ @"title": @"Volume Buttons", @"items": @[
+                        @{ @"name": @"Volume Up Hold", @"icon": @"speaker.wave.3.fill" }, @{ @"name": @"Volume Down Hold", @"icon": @"speaker.wave.1.fill" },
+                        @{ @"name": @"Volume Up + Down", @"icon": @"plusminus" } ] },
+                  @{ @"title": @"Status Bar", @"items": @[
+                        @{ @"name": @"Status Bar Double Tap", @"icon": @"hand.tap" }, @{ @"name": @"Status Bar Swipe Left", @"icon": @"arrow.left" },
+                        @{ @"name": @"Status Bar Swipe Right", @"icon": @"arrow.right" }, @{ @"name": @"Status Bar Center Hold", @"icon": @"hand.point.up.left" } ] } ];
+    }
     if ([screen isEqualToString:RCLayoutNewTrigger]) {
         return @[ @{ @"title": @"Buttons", @"items": @[
                         @{ @"name": @"Volume Buttons", @"icon": @"speaker.wave.2.fill" }, @{ @"name": @"Power Button", @"icon": @"power" },
@@ -377,6 +385,7 @@ static CGFloat RCPreviewScale(CGFloat width) {
     RCCategoryBar *bar = [[RCCategoryBar alloc] initWithWidth:width screen:self.screen];
     NSArray *chipTitles = triggers ? @[@"Favorites", @"Volume Buttons", @"Power Button", @"Status Bar", @"Edge Gestures", @"Apple Watch", @"Device State"]
                                    : [self.screen isEqualToString:RCLayoutNewTrigger] ? @[@"Buttons", @"Screen", @"Device State", @"Apple Watch", @"Connections", @"Apps"]
+                                   : [self.screen isEqualToString:RCLayoutChainSteps] ? @[@"Volume Buttons", @"Power Button", @"Status Bar", @"Edge Gestures", @"Bottom Bar Gestures", @"Motion Gestures"]
                                    : icons ? @[@"Common", @"Media", @"Devices", @"Connectivity", @"Home", @"Weather & Time", @"Life", @"Symbols"]
                                    : @[@"Media", @"Sound", @"Capture", @"Device Controls", @"Connectivity", @"System"];
     NSMutableArray *chipIcons = [NSMutableArray array];

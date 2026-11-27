@@ -504,6 +504,7 @@ NSString *const RCLayoutActionPicker = @"actionPicker";
 NSString *const RCLayoutBanners = @"banners";
 NSString *const RCLayoutNewTrigger = @"newTrigger";
 NSString *const RCLayoutIcons = @"icons";
+NSString *const RCLayoutChainSteps = @"chainSteps";
 NSString *const RCLayoutOptionCompact = @"compact";
 NSString *const RCLayoutOptionPerRow = @"perRow";
 NSString *const RCLayoutOptionSections = @"sections";
@@ -514,7 +515,7 @@ NSString *const RCLayoutChangedNotification = @"RCLayoutChangedNotification";
 
 NSArray<NSArray<NSString *> *> *RCLayoutScreens(void) {
     return @[@[@"Triggers", RCLayoutTriggers], @[@"New Trigger", RCLayoutNewTrigger],
-             @[@"Select Action", RCLayoutActionPicker], @[@"Banners", RCLayoutBanners], @[@"Icons", RCLayoutIcons]];
+             @[@"Select Action", RCLayoutActionPicker], @[@"Banners", RCLayoutBanners], @[@"Icons", RCLayoutIcons], @[@"Chain Trigger", RCLayoutChainSteps]];
 }
 
 static BOOL RCLayoutIsTriggers(NSString *screen) { return !screen || [screen isEqualToString:RCLayoutTriggers]; }

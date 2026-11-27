@@ -485,6 +485,8 @@ UIImage *RCTriggerCategoryIcon(NSString *sectionTitle) {
             // A held icon: the hand that does the holding
             @"App Long Press Triggers": @[@"hand.tap.fill", @"hand.tap"],
             @"Scheduled Triggers": @[@"clock.fill"],
+            @"Chained Triggers": @[@"link"],
+            @"Combinations": @[@"link"],
             @"MQTT Subscription Triggers": @[@"antenna.radiowaves.left.and.right"],
             @"Configuration": @[@"square.and.pencil", @"pencil"],
             @"Add-on Triggers": @[@"puzzlepiece.extension.fill", @"puzzlepiece.fill"],
@@ -531,4 +533,33 @@ UIImage *RCActionCategoryIcon(NSString *sectionTitle) {
         if (image) return [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
     }
     return nil;
+}
+
+void RCTriggerDrawLetterBadge(CGContextRef context, CGRect square, NSString *letter) {
+    if (!letter.length) return;
+    CGFloat k = square.size.width / 40.0;
+    CGRect (^R)(CGFloat, CGFloat, CGFloat, CGFloat) = ^CGRect(CGFloat x, CGFloat y, CGFloat w, CGFloat h) {
+        return CGRectMake(square.origin.x + x * k, square.origin.y + y * k, w * k, h * k);
+    };
+    [[UIColor blackColor] setFill];
+    CGContextSetBlendMode(context, kCGBlendModeClear);
+    CGContextFillEllipseInRect(context, R(23, 23, 17, 17));
+    CGContextSetBlendMode(context, kCGBlendModeNormal);
+    CGContextFillEllipseInRect(context, R(24.5, 24.5, 14, 14));
+    CGContextSetBlendMode(context, kCGBlendModeClear);
+    RCDrawText(letter, R(24.5, 24.5, 14, 14), 9.5 * k);
+    CGContextSetBlendMode(context, kCGBlendModeNormal);
+}
+
+UIImage *RCTriggerImageAddingLetter(UIImage *base, NSString *letter) {
+    if (!base || !letter.length) return base;
+    UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat preferredFormat];
+    format.scale = base.scale;
+    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:base.size format:format];
+    UIImage *tagged = [renderer imageWithActions:^(UIGraphicsImageRendererContext *rendererContext) {
+        [base drawInRect:CGRectMake(0, 0, base.size.width, base.size.height)];
+        CGFloat side = MIN(base.size.width, base.size.height);
+        RCTriggerDrawLetterBadge(rendererContext.CGContext, CGRectMake(base.size.width - side, base.size.height - side, side, side), letter);
+    }];
+    return [tagged imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
 }
