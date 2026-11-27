@@ -1,4 +1,5 @@
 #import "RCAppDelegate.h"
+#import "RCWhatsNew.h"
 #import "RCServerClient.h"
 #import "RCTriggersViewController.h"
 #import "RCSettingsViewController.h"
@@ -54,6 +55,10 @@
         self.window.rootViewController = nav;
         [self.window makeKeyAndVisible];
         RCLog(@"makeKeyAndVisible done");
+        // What's New (or the welcome, on a first install), once the Triggers screen is up
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [RCWhatsNew showIfNeededFrom:nav];
+        });
     } @catch (NSException *exception) {
         RCLog(@"CRASH: %@ - %@", exception.name, exception.reason);
     }

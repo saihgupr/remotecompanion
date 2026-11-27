@@ -1,4 +1,5 @@
 #import "RCSettingsViewController.h"
+#import "RCWhatsNew.h"
 #import "RCConfigManager.h"
 #import "RCUITweaker.h"
 #import "RCIntegrationsViewController.h"
@@ -70,6 +71,7 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     // Footer lives at the bottom of the table content (tableFooterView) so it
     // only appears once you scroll to the bottom, instead of floating over content.
     [self setupFooterView];
+    [self setupWhatsNewHeader];
 
     // Constraints - table fills the view, footer scrolls with content
     [NSLayoutConstraint activateConstraints:@[
@@ -85,6 +87,53 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
                                                  name:@"RCConfigTweaksChangedNotification"
                                                object:nil];
     [self applyTweaks];
+}
+
+// At the top: this version's What's New, as a row like the others (opens the card again)
+- (void)setupWhatsNewHeader {
+    if (![RCWhatsNew hasWhatsNew]) return;
+    RCConfigManager *cm = [RCConfigManager sharedManager];
+    CGFloat width = self.view.bounds.size.width;
+    UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, 72)];
+    header.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    UIControl *row = [[UIControl alloc] init];
+    row.translatesAutoresizingMaskIntoConstraints = NO;
+    row.backgroundColor = [cm tweakColorForKey:@"blockBackground" defaultVal:0.12];
+    row.layer.cornerRadius = 10;
+    row.layer.borderColor = [cm tweakColorForKey:@"borders" defaultVal:0.14].CGColor;
+    row.layer.borderWidth = 1.0;
+    row.isAccessibilityElement = YES;
+    row.accessibilityTraits = UIAccessibilityTraitButton;
+    row.accessibilityLabel = [RCWhatsNew whatsNewTitle];
+    [row addTarget:self action:@selector(openWhatsNew) forControlEvents:UIControlEventTouchUpInside];
+    [header addSubview:row];
+    UIImageView *icon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"sparkles"]];
+    icon.tintColor = [UIColor systemYellowColor];
+    icon.contentMode = UIViewContentModeScaleAspectFit;
+    icon.translatesAutoresizingMaskIntoConstraints = NO;
+    UILabel *label = [[UILabel alloc] init];
+    label.text = [RCWhatsNew whatsNewTitle];
+    label.textColor = [UIColor labelColor];
+    label.translatesAutoresizingMaskIntoConstraints = NO;
+    UIImageView *chevron = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"chevron.right"]];
+    chevron.tintColor = [UIColor tertiaryLabelColor];
+    chevron.preferredSymbolConfiguration = [UIImageSymbolConfiguration configurationWithPointSize:13 weight:UIImageSymbolWeightSemibold];
+    chevron.translatesAutoresizingMaskIntoConstraints = NO;
+    for (UIView *view in @[icon, label, chevron]) { view.userInteractionEnabled = NO; [row addSubview:view]; }
+    [NSLayoutConstraint activateConstraints:@[
+        [row.leadingAnchor constraintEqualToAnchor:header.safeAreaLayoutGuide.leadingAnchor constant:20],
+        [row.trailingAnchor constraintEqualToAnchor:header.safeAreaLayoutGuide.trailingAnchor constant:-20],
+        [row.topAnchor constraintEqualToAnchor:header.topAnchor constant:16],
+        [row.heightAnchor constraintEqualToConstant:48],
+        [icon.leadingAnchor constraintEqualToAnchor:row.leadingAnchor constant:16],
+        [icon.centerYAnchor constraintEqualToAnchor:row.centerYAnchor],
+        [icon.widthAnchor constraintEqualToConstant:24],
+        [label.leadingAnchor constraintEqualToAnchor:icon.trailingAnchor constant:14],
+        [label.centerYAnchor constraintEqualToAnchor:row.centerYAnchor],
+        [chevron.trailingAnchor constraintEqualToAnchor:row.trailingAnchor constant:-16],
+        [chevron.centerYAnchor constraintEqualToAnchor:row.centerYAnchor],
+    ]];
+    self.tableView.tableHeaderView = header;
 }
 
 - (void)setupFooterView {
@@ -422,6 +471,10 @@ typedef NS_ENUM(NSInteger, RCSettingsSection) {
     if (url) {
         [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
     }
+}
+
+- (void)openWhatsNew {
+    [RCWhatsNew showWhatsNewFrom:self];
 }
 
 - (void)openGitHub {
