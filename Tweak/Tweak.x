@@ -11305,6 +11305,34 @@ static NSString *rc_handle_unlock_passcode_command(NSString *cmd) {
     return @"Error: usage: unlock-passcode [set CODE | forget]\n";
 }
 
+static BOOL rc_has_ssh_executable(NSString *name) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray<NSString *> *prefixes = @[
+        @"/var/jb/usr/local/bin",
+        @"/var/jb/usr/bin",
+        @"/var/jb/bin",
+        @"/usr/local/bin",
+        @"/usr/bin",
+        @"/bin"
+    ];
+    for (NSString *prefix in prefixes) {
+        if ([fm isExecutableFileAtPath:[prefix stringByAppendingPathComponent:name]]) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+static NSString *rc_ssh_missing_error(BOOL needSSHPass) {
+    if (!rc_has_ssh_executable(@"ssh")) {
+        return @"Error: openssh-client is not installed. Install openssh-client from Sileo or Zebra to use SSH.\n";
+    }
+    if (needSSHPass && !rc_has_ssh_executable(@"sshpass")) {
+        return @"Error: sshpass is not installed. Install sshpass for password authentication, or use key authentication.\n";
+    }
+    return nil;
+}
+
 static NSString *handle_command(NSString *cmd) {
     if (!cmd || ![cmd isKindOfClass:[NSString class]]) {
         SRLogMin(@"ERROR: handle_command received nil or invalid command string");
@@ -14063,6 +14091,12 @@ static NSString *handle_command(NSString *cmd) {
                           (long)port,
                           rc_sh_quote(targetDestination),
                           rc_sh_quote(remoteCmd)];
+        }
+
+        NSString *missingErr = rc_ssh_missing_error(useSSHPass);
+        if (missingErr) {
+            SRLogMin(@"[RCSSH] %@", missingErr);
+            return missingErr;
         }
         
         SRLog(@"[RCSSH] Executing remote SSH command on %@: %@", host, remoteCmd);

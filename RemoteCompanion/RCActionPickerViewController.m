@@ -12,6 +12,7 @@
 #import "RCKMMacroPickerViewController.h"
 #import "RCCategoryBar.h"
 #import "RCSSHActionEditorViewController.h"
+#import "RCSSHSettingsViewController.h"
 #import "RCActionTile.h"
 #import "RCVariableIcon.h"
 
@@ -1394,6 +1395,9 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
 }
 
 - (void)handleSSHCommand {
+    if (![RCSSHSettingsViewController ensureSSHInstalledInViewController:self requireSSHPass:NO]) {
+        return;
+    }
     RCConfigManager *cm = [RCConfigManager sharedManager];
     NSArray<NSDictionary *> *hosts = cm.sshHosts;
     if (hosts.count == 0) {

@@ -1,4 +1,5 @@
 #import "RCSSHHostEditorViewController.h"
+#import "RCSSHSettingsViewController.h"
 #import "RCConfigManager.h"
 
 @interface RCSSHHostEditorViewController () <UITableViewDelegate, UITableViewDataSource, UITextFieldDelegate>
@@ -249,6 +250,10 @@
         @"keyPath": keyPath
     };
 
+    BOOL needsPass = ![hostDict[@"authType"] isEqualToString:@"key"] && [hostDict[@"password"] length] > 0;
+    if (![RCSSHSettingsViewController ensureSSHInstalledInViewController:self requireSSHPass:needsPass]) {
+        return;
+    }
     [[RCConfigManager sharedManager] addOrUpdateSSHHost:hostDict];
     [self.navigationController popViewControllerAnimated:YES];
 }
