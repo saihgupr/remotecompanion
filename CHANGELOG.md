@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Rotate Screen Clockwise / Counterclockwise**: `rc orientation rotate clockwise|counterclockwise` turns the screen a quarter turn from where it is now, in the direction you pick. It is a one-tap action in the app and the web UI, and holds the way Set Orientation does.
 - **Holiday Mode**: a red present sits at the left of the Triggers screen's title; tap it to start a slow snowfall over the app, and tap again to stop it. Settings > Advanced Settings > Options has a Holiday Mode switch, on by default, which removes the present and stops the snow. The Web UI has the same switch, with the present beside its large title. Snow starts off on each launch.
 - **Dance Party**: `rc dance party [on|off]` runs the torch with the music playing in the room, following the bass. Bare `rc dance party` toggles it. It stops after about 15 seconds of quiet or a 15 minute timeout, and headphones or Bluetooth mean the microphone hears nothing to follow. It is also under Device Controls in the action picker as a toggle, like Flashlight.
 - **Flashlight brightness options**: `rc flashlight low|medium|high|max` sets one of the four levels iOS's own slider uses, `rc flashlight up|down [N]` steps from the current level (25 by default), and `rc flashlight status` now prints the level, e.g. `Flashlight ON (75%)`. `on` takes the same names or a percentage, and `torch` and `flash` accept everything `flashlight` does.

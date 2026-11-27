@@ -2037,6 +2037,10 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         @"orientation set portrait upside down": @"Orientation: Upside Down",
         @"orientation set upside down": @"Orientation: Upside Down",
         @"orientation set auto": @"Orientation: Auto",
+        @"orientation rotate clockwise": @"Rotate Screen Clockwise",
+        @"orientation rotate cw": @"Rotate Screen Clockwise",
+        @"orientation rotate counterclockwise": @"Rotate Screen Counterclockwise",
+        @"orientation rotate ccw": @"Rotate Screen Counterclockwise",
         @"wifi on": @"WiFi On",
         @"wifi off": @"WiFi Off",
         @"wifi toggle": @"WiFi Toggle",
@@ -2710,6 +2714,11 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
     if ([cmd hasPrefix:@"ringer "]) return @"bell.slash.fill";
     if ([cmd hasPrefix:@"haptics "]) return @"iphone.radiowaves.left.and.right";
     if ([cmd hasPrefix:@"brightness "]) return @"sun.max.fill";
+    if ([cmd hasPrefix:@"orientation rotate "]) {
+        BOOL ccw = [cmd containsString:@"counter"] || [cmd hasSuffix:@"ccw"] || [cmd containsString:@"anti"];
+        NSString *name = ccw ? @"rotate.left" : @"rotate.right";
+        return [UIImage systemImageNamed:name] ? name : @"rotate.right";
+    }
     if ([cmd hasPrefix:@"orientation set "]) {
         if ([cmd containsString:@"landscape"]) return ([UIImage systemImageNamed:@"rectangle.landscape.rotate"] ? @"rectangle.landscape.rotate" : @"rotate.right");
         if ([cmd containsString:@"auto"]) return ([UIImage systemImageNamed:@"gyroscope"] ? @"gyroscope" : @"rotate.right");

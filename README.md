@@ -116,6 +116,7 @@ Access the desktop-class automation hub at `http://[DEVICE_IP]:8080` from any co
 - `rc flashlight [on|off|toggle|status] [level]` - Control the torch. A level is 0-100, a fraction like 0.5, or `low`, `medium`, `high`, `max`; `up [N]` and `down [N]` step it from the current level (25 by default). `torch` and `flash` take the same options.
 - `rc dance party [on|off|status]` - Run the torch in time with the music playing in the room. Bare `rc dance party` toggles it, `on` starts it and `off` stops it. It follows the bass through the microphone, so headphones or Bluetooth mean nothing to follow, and it stops after about 15 seconds of quiet or a 15 minute timeout.
 - `rc rotate [lock|unlock|toggle]` - Orientation lock control.
+- `rc orientation rotate <clockwise|counterclockwise>` - Turn the screen a quarter turn from where it is now, in the direction you choose. It holds the same way `orientation set` does.
 - `rc orientation set <portrait|landscape left|landscape right|portrait upside down|auto>` - Turn the screen to that orientation; it holds while rotation lock is on, otherwise the phone takes over when moved.
 - `rc appearance [dark|light|toggle]` - Set light/dark appearance.
 - `rc dnd [on|off|toggle]` - Toggle Do Not Disturb.

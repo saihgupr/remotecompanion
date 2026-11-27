@@ -4215,7 +4215,7 @@ const CMD_NAMES = {
   'button triggers pause 15':'Button Triggers Pause 15 Minutes','button triggers pause 60':'Button Triggers Pause 1 Hour','button triggers pause':'Button Triggers Pause Until Resumed','button triggers resume':'Button Triggers Resume',
   'appearance dark':'Appearance Dark','appearance light':'Appearance Light','appearance toggle':'Appearance Toggle',
   'rotate lock':'Rotate Lock','rotate unlock':'Rotate Unlock','rotate toggle':'Rotate Toggle',
-  'orientation set portrait':'Orientation: Portrait','orientation set portrait up':'Orientation: Portrait','orientation set landscape left':'Orientation: Landscape Left','orientation set landscape':'Orientation: Landscape Left','orientation set landscape right':'Orientation: Landscape Right','orientation set portrait upside down':'Orientation: Upside Down','orientation set upside down':'Orientation: Upside Down','orientation set auto':'Orientation: Auto',
+  'orientation set portrait':'Orientation: Portrait','orientation set portrait up':'Orientation: Portrait','orientation set landscape left':'Orientation: Landscape Left','orientation set landscape':'Orientation: Landscape Left','orientation set landscape right':'Orientation: Landscape Right','orientation set portrait upside down':'Orientation: Upside Down','orientation set upside down':'Orientation: Upside Down','orientation set auto':'Orientation: Auto','orientation rotate clockwise':'Rotate Screen Clockwise','orientation rotate cw':'Rotate Screen Clockwise','orientation rotate counterclockwise':'Rotate Screen Counterclockwise','orientation rotate ccw':'Rotate Screen Counterclockwise',
   'location on':'Location Services On','location off':'Location Services Off','location toggle':'Location Services Toggle',
   'wifi on':'WiFi On','wifi off':'WiFi Off','wifi toggle':'WiFi Toggle',
   'bluetooth on':'Bluetooth On','bluetooth off':'Bluetooth Off','bluetooth toggle':'Bluetooth Toggle',
@@ -4893,7 +4893,7 @@ function iconForCmd(cmd) {
   if (lowCmd.startsWith('set-vol '))      return { icon:'slider_horizontal_3',  cls:'icon-blue' };
   if (lowCmd.startsWith('ringer volume ')) return { icon:'bell_fill',       cls:'icon-blue' };
   if (lowCmd.startsWith('brightness '))   return { icon:'sun_max_fill',    cls:'icon-yellow' };
-  if (lowCmd.startsWith('orientation set ')) return { icon:'rotate_right', cls:'icon-blue' };
+  if (lowCmd.startsWith('orientation set ') || lowCmd.startsWith('orientation rotate ')) return { icon:'rotate_right', cls:'icon-blue' };
   if (lowCmd.startsWith('shortcut:'))     return { icon:'wand_stars',         cls:'icon-indigo' };
   if (lowCmd.startsWith('uiopen '))       return { icon:'app_badge_fill',  cls:'icon-pink' };
   if (lowCmd.startsWith('kill '))         return { icon:'xmark_circle_fill', cls:'icon-red' };
@@ -4968,6 +4968,8 @@ const ACTION_SECTIONS = [
     { name:'Dance Party',      cmd:'dance party toggle', icon:'bolt_fill', is_toggle:true, keywords:'flashlight torch party music light dance' },
     { name:'Rotation Lock',     cmd:'rotate toggle',     icon:'lock_rotation', is_toggle:true },
     { name:'Set Orientation…',  cmd:'__SET_ORIENTATION__',icon:'rotate_right', needs_input:true, keywords:'rotate rotation landscape portrait orientation upside down screen sideways' },
+    { name:'Rotate Screen Clockwise',        cmd:'orientation rotate clockwise',        icon:'rotate_right', keywords:'rotate turn orientation screen quarter 90 degrees cw right landscape portrait' },
+    { name:'Rotate Screen Counterclockwise', cmd:'orientation rotate counterclockwise', icon:'rotate_right', keywords:'rotate turn orientation screen quarter 90 degrees ccw anticlockwise left landscape portrait' },
     { name:'Button Triggers',   cmd:'button triggers pause 15', icon:'pause_circle', is_toggle:true },
     { name:'Lock Device',       cmd:'lock',          icon:'lock_fill' },
     { name:'Unlock Device',     cmd:'unlock',        icon:'lock_open_fill' },

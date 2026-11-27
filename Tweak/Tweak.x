@@ -12438,6 +12438,7 @@ static NSArray *RCCommandHelpSections(void) {
             @[@"control center status", @"Print OPEN or CLOSED"],
             @[@"notification center status", @"Print OPEN or CLOSED"],
             @[@"orientation set <mode>", @"Rotate screen (portrait, landscape left/right, upside down, auto)"],
+            @[@"orientation rotate <direction>", @"Turn the screen a quarter turn (clockwise, counterclockwise)"],
             @[@"appearance [dark|light|toggle]", @"Light or dark appearance"],
             @[@"dnd [on|off|toggle|status]", @"Do Not Disturb"],
             @[@"assistive touch [on|off|toggle|status]", @"AssistiveTouch on-screen button"],
@@ -14855,6 +14856,39 @@ static NSString *handle_command(NSString *cmd) {
         if ([NSThread isMainThread]) orientationBlock();
         else dispatch_sync(dispatch_get_main_queue(), orientationBlock);
         return result;
+    } else if ([[cleanCmd lowercaseString] isEqualToString:@"orientation rotate"] || [[cleanCmd lowercaseString] hasPrefix:@"orientation rotate "]) {
+        // A quarter turn from where the screen is now, in the direction asked. Clockwise goes
+        // portrait, landscape right, upside down, landscape left, and counterclockwise the reverse.
+        NSString *dir = [[[cleanCmd lowercaseString] substringFromIndex:[@"orientation rotate" length]] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        BOOL clockwise;
+        if ([dir isEqualToString:@"clockwise"] || [dir isEqualToString:@"cw"]) {
+            clockwise = YES;
+        } else if ([dir isEqualToString:@"counterclockwise"] || [dir isEqualToString:@"counter-clockwise"] || [dir isEqualToString:@"anticlockwise"] || [dir isEqualToString:@"ccw"]) {
+            clockwise = NO;
+        } else {
+            return @"Usage: rc orientation rotate <clockwise|counterclockwise>\n";
+        }
+
+        __block UIInterfaceOrientation current = UIInterfaceOrientationPortrait;
+        void (^currentBlock)(void) = ^{
+            SpringBoard *sb = (SpringBoard *)[UIApplication sharedApplication];
+            if ([sb respondsToSelector:@selector(activeInterfaceOrientation)]) {
+                UIInterfaceOrientation active = [sb activeInterfaceOrientation];
+                if (active >= UIInterfaceOrientationPortrait && active <= UIInterfaceOrientationLandscapeRight) current = active;
+            }
+        };
+        if ([NSThread isMainThread]) currentBlock();
+        else dispatch_sync(dispatch_get_main_queue(), currentBlock);
+
+        NSString *next;
+        switch (current) {
+            case UIInterfaceOrientationLandscapeRight:    next = clockwise ? @"portrait upside down" : @"portrait"; break;
+            case UIInterfaceOrientationPortraitUpsideDown: next = clockwise ? @"landscape left" : @"landscape right"; break;
+            case UIInterfaceOrientationLandscapeLeft:     next = clockwise ? @"portrait" : @"portrait upside down"; break;
+            default:                                      next = clockwise ? @"landscape right" : @"landscape left"; break;
+        }
+        SRLogMin(@"📱 [RCSystem] Orientation rotate %@: %@", clockwise ? @"clockwise" : @"counterclockwise", next);
+        return handle_command([@"orientation set " stringByAppendingString:next]);
     } else if ([[cleanCmd lowercaseString] isEqualToString:@"orientation set"] || [[cleanCmd lowercaseString] hasPrefix:@"orientation set "]) {
         NSString *lower = [cleanCmd lowercaseString];
         if ([lower isEqualToString:@"orientation set"]) {
