@@ -1688,7 +1688,7 @@ static NSArray *RCActionSnapshot(NSArray *actions) {
     // Accessibility Shortcut, a screenshot, Wallet and Reachability
     NSArray *keepsDefault = [RCConfigManager hasHomeButton]
         ? @[@"trigger_device_findmy_sound", @"trigger_watch_ping", @"trigger_watch_ping_hold", @"trigger_home_triple_click", @"trigger_home_double_click", @"trigger_home_hold", @"trigger_home_power"]
-        : @[@"trigger_device_findmy_sound", @"trigger_watch_ping", @"trigger_watch_ping_hold", @"power_long_press", @"power_triple_click", @"power_volume_up", @"power_double_tap", @"trigger_bottom_swipe_down_left", @"trigger_bottom_swipe_down_center", @"trigger_bottom_swipe_down_right"];
+        : @[@"trigger_device_findmy_sound", @"trigger_watch_ping", @"trigger_watch_ping_hold", @"power_long_press", @"power_triple_click", @"power_volume_up", @"power_double_tap", @"trigger_bottom_swipe_down_left", @"trigger_bottom_swipe_down_center", @"trigger_bottom_swipe_down_right", @"trigger_island_tap", @"trigger_island_hold"];
     if ([keepsDefault containsObject:_triggerKey]) {
         id stored = [[RCConfigManager sharedManager] triggerDataForKey:_triggerKey][@"keepDefault"];
         BOOL keep = stored ? [stored boolValue] : [_triggerKey isEqualToString:@"trigger_device_findmy_sound"];
@@ -3649,6 +3649,18 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             ]
         },
         @{
+            @"key": @"island",
+            @"title": @"Dynamic Island",
+            @"icon": @"capsule.fill",
+            @"section": @"Device",
+            @"values": @[
+                @{ @"value": @"ACTIVE", @"title": @"Live Activity Running" },
+                @{ @"value": @"NONE", @"title": @"No Live Activity" },
+                @{ @"value": @"EXPANDED", @"title": @"Expanded" },
+                @{ @"value": @"NOT_EXPANDED", @"title": @"Not Expanded" }
+            ]
+        },
+        @{
             @"key": @"notification_center",
             @"title": @"Notification Center",
             @"icon": @"bell.badge",
@@ -3783,6 +3795,10 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             [kept addObject:definition];
         }
         definitions = kept;
+    }
+    // The Dynamic Island condition only where there's an island
+    if (![RCConfigManager hasDynamicIsland]) {
+        definitions = [definitions filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"key != %@", @"island"]];
     }
     return RCAdaptVibrationConditions(definitions);
 }

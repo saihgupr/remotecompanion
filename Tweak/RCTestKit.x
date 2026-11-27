@@ -599,6 +599,9 @@ static void RCTKSuiteConditions(NSMutableDictionary *run) {
         // phone, so nothing should cover it
         @[@"proximity", @[@"NEAR", @"FAR"], g_tkProximity == 1 ? @"NEAR" : @"FAR"],
         @[@"screen", @[@"ON", @"OFF"], RCTKOnOff(p[@"screenOn"]) ?: none],
+        // The Dynamic Island's two pairs (a phone without one has no Live Activity, never expanded)
+        @[@"island", @[@"ACTIVE", @"NONE"], none],
+        @[@"island", @[@"EXPANDED", @"NOT_EXPANDED"], none],
     ];
 
     for (NSArray *spec in specs) {

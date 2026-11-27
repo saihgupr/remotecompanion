@@ -201,6 +201,9 @@
 + (BOOL)canBeChainStep:(NSString *)triggerKey;
 // A step of a Chained Trigger with no actions of its own (not listed on the Triggers screen)
 - (BOOL)isChainStepOnly:(NSString *)triggerKey;
+// The Dynamic Island's triggers, and whether this phone has one
++ (NSArray<NSString *> *)dynamicIslandTriggerKeys;
++ (BOOL)hasDynamicIsland;
 + (NSArray<NSString *> *)bottomBarTriggerKeys;
 // Whether the Apple Watch app is installed, so Watch features make sense on this device
 + (BOOL)watchFeaturesAvailable;

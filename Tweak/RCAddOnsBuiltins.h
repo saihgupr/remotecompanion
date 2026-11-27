@@ -185,6 +185,7 @@ static NSString *const kRCAOBuiltinCommands[] = {
     @"flashlight toggle",
     @"ialazy backup",
     @"ialazy list",
+    @"island status",
     @"kill current",
     @"kill current app",
     @"kill foreground",

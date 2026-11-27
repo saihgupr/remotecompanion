@@ -532,6 +532,7 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
             @"trigger_sequence_edited"
         ] mutableCopy];
         [list addObjectsFromArray:[self multiFingerTriggerKeys]];
+        if ([self hasDynamicIsland]) [list addObjectsFromArray:[self dynamicIslandTriggerKeys]];
         keys = [list copy];
     });
     return keys;
@@ -1432,6 +1433,8 @@ static NSString *RCActionCommand(id item) {
         @"power_volume_down": @"Power + Volume Down",
         @"trigger_statusbar_left_hold": @"Status Bar Left Hold",
         @"trigger_statusbar_center_hold": @"Status Bar Center Hold",
+        @"trigger_island_tap": @"Dynamic Island Tap",
+        @"trigger_island_hold": @"Dynamic Island Hold",
         @"trigger_statusbar_right_hold": @"Status Bar Right Hold",
         @"trigger_statusbar_swipe_left": @"Status Bar Swipe Left",
         @"trigger_statusbar_swipe_right": @"Status Bar Swipe Right",
@@ -1597,6 +1600,7 @@ static NSString *RCActionCommand(id item) {
     if ([triggerKey hasPrefix:@"trigger_bottombar_"]) return YES;
     if ([triggerKey hasPrefix:@"trigger_bottom_swipe_"]) return YES;
     if ([triggerKey hasPrefix:@"trigger_edge_"]) return YES;
+    if ([triggerKey hasPrefix:@"trigger_island_"]) return YES;
     return NO;
 }
 
@@ -2956,6 +2960,26 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
     NSMutableArray *keys = [@[@"trigger_bottombar_swipe_left", @"trigger_bottombar_swipe_right", @"trigger_bottom_swipe_up_left", @"trigger_bottom_swipe_up_center", @"trigger_bottom_swipe_up_right"] mutableCopy];
     if (![self hasHomeButton]) [keys addObjectsFromArray:@[@"trigger_bottom_swipe_down_left", @"trigger_bottom_swipe_down_center", @"trigger_bottom_swipe_down_right"]];
     return keys;
+}
+
++ (NSArray<NSString *> *)dynamicIslandTriggerKeys {
+    return @[@"trigger_island_tap", @"trigger_island_hold"];
+}
+
+// Phones with the Dynamic Island, by model: the 14 Pro on, except the 16e (iPhone17,5), which
+// has a notch
++ (BOOL)hasDynamicIsland {
+    static BOOL has;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        char model[32] = {0};
+        size_t size = sizeof(model) - 1;
+        if (sysctlbyname("hw.machine", model, &size, NULL, 0) != 0 || strncmp(model, "iPhone", 6) != 0) return;
+        int major = 0, minor = 0;
+        if (sscanf(model + 6, "%d,%d", &major, &minor) != 2) return;
+        has = (major == 15 && minor >= 2) || major == 16 || (major == 17 && minor != 5) || major >= 18;
+    });
+    return has;
 }
 
 + (BOOL)hasHomeButton {
