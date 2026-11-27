@@ -1015,22 +1015,11 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
     [self.navigationController pushViewController:actionsVC animated:YES];
 }
 
-- (void)addNewItem {
+// The New Trigger menu's entries: {title, icon, section, handler, and "key" for a built-in trigger or
+// "kind" (its keys' prefix) for one that's created, such as an NFC tag}. push opens a screen over
+// the menu; replace opens one in its place.
+- (NSMutableArray<NSDictionary *> *)newTriggerItemsPushing:(void (^)(UIViewController *))push replacing:(void (^)(UIViewController *))replaceMenuWith {
     __weak typeof(self) weakSelf = self;
-    void (^push)(UIViewController *) = ^(UIViewController *vc) {
-        [weakSelf.navigationController pushViewController:vc animated:YES];
-    };
-
-    // Opens a trigger's action list in place of the New Trigger menu, in a single transition (letting
-    // the menu be removed after the push left the bar buttons half-faded)
-    void (^replaceMenuWith)(UIViewController *) = ^(UIViewController *vc) {
-        UINavigationController *nav = weakSelf.navigationController;
-        NSMutableArray *vcs = [nav.viewControllers mutableCopy];
-        if ([vcs.lastObject isKindOfClass:[RCNewTriggerViewController class]]) [vcs removeLastObject];
-        [vcs addObject:vc];
-        [nav setViewControllers:vcs animated:YES];
-    };
-
     NSMutableArray *items = [@[
         @{ @"title": @"NFC Tag", @"icon": @"wave.3.right", @"section": @"Nearby", @"handler": ^{ push([[RCNFCTriggerViewController alloc] init]); } },
         @{ @"title": @"Wi-Fi Network", @"icon": @"wifi", @"section": @"Nearby", @"handler": ^{ push([[RCWiFiTriggerViewController alloc] init]); } },
@@ -1159,6 +1148,7 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
         RCConfigManager *config = [RCConfigManager sharedManager];
         NSString *title = [config defaultNameForTrigger:key];
         NSMutableDictionary *item = [@{ @"title": title,
+                                        @"key": key,
                                         @"icon": [RCTriggersViewController iconNameForTrigger:key],
                                         @"section": section,
                                         @"handler": ^{
@@ -1262,6 +1252,46 @@ static UIFont *RCEmptyScaledFont(UIFont *font) {
         withImage[@"compactImage"] = compactImage;
         items[i] = withImage;
     }
+    // Each created kind's prefix, for Test Kit > Coverage
+    for (NSUInteger i = 0; i < items.count; i++) {
+        NSString *kind = sampleKeys[items[i][@"title"]];
+        if (!kind || items[i][@"key"]) continue;
+        NSMutableDictionary *withKind = [items[i] mutableCopy];
+        withKind[@"kind"] = kind;
+        items[i] = withKind;
+    }
+    return items;
+}
+
++ (NSArray<NSDictionary *> *)newTriggerCatalog {
+    RCTriggersViewController *list = [[RCTriggersViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
+    void (^none)(UIViewController *) = ^(UIViewController *vc) {};
+    NSMutableArray *catalog = [NSMutableArray array];
+    for (NSDictionary *item in [list newTriggerItemsPushing:none replacing:none]) {
+        NSMutableDictionary *entry = [NSMutableDictionary dictionary];
+        for (NSString *field in @[@"title", @"section", @"key", @"kind", @"icon"]) if (item[field]) entry[field] = item[field];
+        [catalog addObject:entry];
+    }
+    return catalog;
+}
+
+- (void)addNewItem {
+    __weak typeof(self) weakSelf = self;
+    void (^push)(UIViewController *) = ^(UIViewController *vc) {
+        [weakSelf.navigationController pushViewController:vc animated:YES];
+    };
+
+    // Opens a trigger's action list in place of the New Trigger menu, in a single transition (letting
+    // the menu be removed after the push left the bar buttons half-faded)
+    void (^replaceMenuWith)(UIViewController *) = ^(UIViewController *vc) {
+        UINavigationController *nav = weakSelf.navigationController;
+        NSMutableArray *vcs = [nav.viewControllers mutableCopy];
+        if ([vcs.lastObject isKindOfClass:[RCNewTriggerViewController class]]) [vcs removeLastObject];
+        [vcs addObject:vc];
+        [nav setViewControllers:vcs animated:YES];
+    };
+
+    NSMutableArray *items = [self newTriggerItemsPushing:push replacing:replaceMenuWith];
     [self.navigationController pushViewController:[[RCNewTriggerViewController alloc] initWithItems:items] animated:YES];
 }
 

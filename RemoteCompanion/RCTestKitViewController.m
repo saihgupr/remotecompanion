@@ -1,4 +1,5 @@
 #import "RCTestKitViewController.h"
+#import "RCTestKitCoverageViewController.h"
 #import "RCTestReportViewController.h"
 #import "RCTestKitSetupViewController.h"
 #import "RCServerClient.h"
@@ -112,6 +113,9 @@ static NSString *RCSuiteIcon(NSString *suite) {
     [super viewDidLoad];
     self.title = @"Test Kit";
     self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
+    // What the suites test, and what they don't
+    UIBarButtonItem *coverage = [[UIBarButtonItem alloc] initWithTitle:@"Coverage" style:UIBarButtonItemStylePlain target:self action:@selector(openCoverage)];
+    self.navigationItem.rightBarButtonItem = coverage;
 
     RCConfigManager *cm = [RCConfigManager sharedManager];
     UIColor *bg = [cm tweakColorForKey:@"settingsBackground" defaultVal:[cm tweakValueForKey:@"mainBackground" defaultVal:0.09]];
@@ -124,6 +128,10 @@ static NSString *RCSuiteIcon(NSString *suite) {
     self.reports = @[];
     [self loadSuites];
     [self loadReports];
+}
+
+- (void)openCoverage {
+    [self.navigationController pushViewController:[[RCTestKitCoverageViewController alloc] init] animated:YES];
 }
 
 - (void)viewWillAppear:(BOOL)animated {

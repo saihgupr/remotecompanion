@@ -8,6 +8,9 @@
 - (void)openSettings;
 - (void)addNewItem;
 - (void)openTriggerWithKey:(NSString *)triggerKey;
+// What the New Trigger menu offers: {title, section, icon, and "key" for a built-in trigger or "kind"
+// (the prefix of its keys) for one that's created}, for Test Kit > Coverage
++ (NSArray<NSDictionary *> *)newTriggerCatalog;
 @end
 
 @interface RCTriggersViewController (Icons)
