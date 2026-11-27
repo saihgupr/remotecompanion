@@ -153,7 +153,7 @@ The switches in Settings > iOS Tweaks, also on the Web UI's Tweaks screen. Every
 
 ### Connectivity
 - `rc wifi [on|off|toggle]` / `rc cellular [on|off|toggle]` / `rc bluetooth [on|off|toggle]` / `rc location [on|off|toggle]`
-- `rc bluetooth [connect|disconnect] <name>` - Manage paired classic Bluetooth devices. Low-energy devices (the Apple Watch, an AssistiveTouch mouse or pointer) can't be disconnected from the CLI: forget one in Settings > Bluetooth, or use `rc bluetooth off` and `on`.
+- `rc bluetooth [connect|disconnect] <name>` - Connect or disconnect a paired Bluetooth device, classic or low-energy. Low-energy accessories are paired in Settings > Bluetooth, or Settings > Accessibility > Touch > AssistiveTouch > Devices; pair a new one once there, because iOS does not let an app pair an accessory. Disconnecting a low-energy one turns off Allow New Connections until the next `bt connect`, which is how iOS keeps the link down.
 - `rc bluetooth list` - List the names of paired Bluetooth devices, classic and low-energy.
 - `rc airplay list` - See speakers and their UIDs.
 - `rc airplay connect <name|UID>` - Stream audio to an AirPlay receiver.

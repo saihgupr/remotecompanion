@@ -8937,7 +8937,7 @@ function selectPickerAction(act) {
       if (bid) addActionToCurrent(`kill ${bid}`);
     });
   } else if (c === '__BT_CONNECT__') {
-    showDialog('Connect Bluetooth', 'Device name or MAC address:', '', 'Add', val => {
+    showDialog('Connect Bluetooth', 'Device name:', '', 'Add', val => {
       if (val) addActionToCurrent(`bt connect ${val}`);
     });
   } else if (c === '__PLAY_GESTURE__') {
@@ -8953,7 +8953,7 @@ function selectPickerAction(act) {
       ]);
     });
   } else if (c === '__BT_DISCONNECT__') {
-    showDialog('Disconnect Bluetooth', 'Device name or MAC address:', '', 'Add', val => {
+    showDialog('Disconnect Bluetooth', 'Device name:', '', 'Add', val => {
       if (val) addActionToCurrent(`bt disconnect ${val}`);
     });
   } else if (c === '__AIRPLAY_CONNECT__') {
@@ -14716,20 +14716,59 @@ function dialogOk() {
   if (cb) cb(val);
 }
 
+// Bluetooth devices reported by /api/devices, fetched once and cached for dialog autocomplete
+let cachedBluetoothDevices = null;
+let bluetoothDevicesRequest = null;
+
+function loadBluetoothDevices() {
+  if (cachedBluetoothDevices !== null) return Promise.resolve(cachedBluetoothDevices);
+  if (bluetoothDevicesRequest) return bluetoothDevicesRequest;
+  bluetoothDevicesRequest = (async () => {
+    try {
+      const token = localStorage.getItem('rc_api_token');
+      const headers = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const res = await fetch('/api/devices', { headers });
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      cachedBluetoothDevices = Array.isArray(data.bluetooth)
+        ? data.bluetooth.filter(n => typeof n === 'string' && n.trim())
+        : [];
+    } catch (e) {
+      cachedBluetoothDevices = [];
+    }
+    bluetoothDevicesRequest = null;
+    return cachedBluetoothDevices;
+  })();
+  return bluetoothDevicesRequest;
+}
+
 function setupDialogAutocomplete(title, input, autoEl) {
   const lowTitle = title.toLowerCase();
+  const isBluetooth = lowTitle.includes('bluetooth');
   let listSource = [];
 
-  if (lowTitle.includes('app')) {
+  // Drop handlers left over from the previous dialog so they cannot fire here
+  input.oninput = null;
+  input.onfocus = null;
+
+  if (isBluetooth) {
+    listSource = (cachedBluetoothDevices || []).map(d => ({ name: d, sub: '', val: d }));
+  } else if (lowTitle.includes('app')) {
     listSource = cachedApps.map(a => ({ name: a.name, sub: a.bundleId, val: a.bundleId }));
   }
 
-  if (listSource.length === 0) return;
+  if (!isBluetooth && listSource.length === 0) return;
+
+  // Bluetooth shows every known device while the field is empty; apps only filter while typing
+  const maxItems = isBluetooth ? 8 : 5;
 
   const renderAuto = (query) => {
-    const q = query.toLowerCase().trim();
-    if (!q) { autoEl.style.display = 'none'; return; }
-    const matches = listSource.filter(i => i.name.toLowerCase().includes(q) || i.sub.toLowerCase().includes(q)).slice(0, 5);
+    const q = (query || '').toLowerCase().trim();
+    if (!q && !isBluetooth) { autoEl.style.display = 'none'; return; }
+    const matches = listSource.filter(i =>
+      !q || i.name.toLowerCase().includes(q) || (i.sub || '').toLowerCase().includes(q)
+    ).slice(0, maxItems);
     if (matches.length === 0) { autoEl.style.display = 'none'; return; }
 
     autoEl.innerHTML = '';
@@ -14749,7 +14788,23 @@ function setupDialogAutocomplete(title, input, autoEl) {
     autoEl.style.display = 'block';
   };
 
-  input.oninput = () => renderAuto(input.value);
+  const onInput = () => renderAuto(input.value);
+  input.oninput = onInput;
+
+  if (!isBluetooth) return;
+
+  input.onfocus = () => renderAuto(input.value);
+  if (document.activeElement === input) renderAuto(input.value);
+
+  if (cachedBluetoothDevices === null) {
+    loadBluetoothDevices().then(names => {
+      listSource = (names || []).map(d => ({ name: d, sub: '', val: d }));
+      const open = document.getElementById('dialog-backdrop').classList.contains('visible');
+      if (open && document.activeElement === input && input.oninput === onInput) {
+        renderAuto(input.value);
+      }
+    });
+  }
 }
 
 // ── Toast System ─────────────────────────────────────────────────────────────

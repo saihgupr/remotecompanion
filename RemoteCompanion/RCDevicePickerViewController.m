@@ -308,7 +308,7 @@ static NSString *RCDeviceIconName(NSString *name, RCDevicePickerKind kind) {
 - (void)promptForName {
     BOOL isWatchFace = self.kind == RCDevicePickerKindWatchFace;
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:isWatchFace ? @"Watch Face Name" : @"Device Name"
-                                                                   message:isWatchFace ? @"Matches any face on the paired Apple Watch whose name contains this text." : @"Matches any paired device whose name contains this text."
+                                                                   message:isWatchFace ? @"Matches any face on the paired Apple Watch whose name contains this text." : @"Matches any paired or connected device whose name contains this text."
                                                             preferredStyle:UIAlertControllerStyleAlert];
     [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
         field.placeholder = isWatchFace ? @"Infograph" : @"My Device";
