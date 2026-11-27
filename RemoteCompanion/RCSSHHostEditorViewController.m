@@ -1,4 +1,5 @@
 #import "RCSSHHostEditorViewController.h"
+#import "RCSSHSettingsViewController.h"
 #import "RCConfigManager.h"
 #import "RCServerClient.h"
 
@@ -197,6 +198,10 @@
     [self.view endEditing:YES];
     NSDictionary *hostDict = [self hostDictionaryFromFields];
     if (!hostDict) return;
+    BOOL needsPass = ![hostDict[@"authType"] isEqualToString:@"key"] && [hostDict[@"password"] length] > 0;
+    if (![RCSSHSettingsViewController ensureSSHInstalledInViewController:self requireSSHPass:needsPass]) {
+        return;
+    }
     [[RCConfigManager sharedManager] addOrUpdateSSHHost:hostDict];
     [self.navigationController popViewControllerAnimated:YES];
 }
@@ -266,6 +271,10 @@
     [self.view endEditing:YES];
     NSDictionary *hostDict = [self hostDictionaryFromFields];
     if (!hostDict) return;
+    BOOL needsPass = ![hostDict[@"authType"] isEqualToString:@"key"] && [hostDict[@"password"] length] > 0;
+    if (![RCSSHSettingsViewController ensureSSHInstalledInViewController:self requireSSHPass:needsPass]) {
+        return;
+    }
     // The test runs on the phone, which reads the saved host by id
     [[RCConfigManager sharedManager] addOrUpdateSSHHost:hostDict];
     self.existingHost = hostDict;

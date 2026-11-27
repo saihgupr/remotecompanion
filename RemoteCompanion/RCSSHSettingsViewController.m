@@ -9,6 +9,74 @@
 
 @implementation RCSSHSettingsViewController
 
++ (BOOL)hasExecutableNamed:(NSString *)name {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray<NSString *> *prefixes = @[
+        @"/var/jb/usr/local/bin",
+        @"/var/jb/usr/bin",
+        @"/var/jb/bin",
+        @"/usr/local/bin",
+        @"/usr/bin",
+        @"/bin"
+    ];
+    for (NSString *prefix in prefixes) {
+        if ([fm isExecutableFileAtPath:[prefix stringByAppendingPathComponent:name]]) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
++ (BOOL)isSSHInstalled {
+    return [self hasExecutableNamed:@"ssh"];
+}
+
++ (BOOL)isSSHPassInstalled {
+    return [self hasExecutableNamed:@"sshpass"];
+}
+
++ (void)presentMissingPackageAlertInViewController:(UIViewController *)viewController
+                                             title:(NSString *)title
+                                           message:(NSString *)message
+                                       packageName:(NSString *)packageName {
+    if (!viewController) return;
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
+                                                                   message:message
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    UIApplication *app = [UIApplication sharedApplication];
+    NSURL *sileoURL = [NSURL URLWithString:[NSString stringWithFormat:@"sileo://package/%@", packageName]];
+    NSURL *zebraURL = [NSURL URLWithString:[NSString stringWithFormat:@"zbra://packages/%@", packageName]];
+    if (sileoURL && [app canOpenURL:sileoURL]) {
+        [alert addAction:[UIAlertAction actionWithTitle:@"Open in Sileo" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+            [app openURL:sileoURL options:@{} completionHandler:nil];
+        }]];
+    } else if (zebraURL && [app canOpenURL:zebraURL]) {
+        [alert addAction:[UIAlertAction actionWithTitle:@"Open in Zebra" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+            [app openURL:zebraURL options:@{} completionHandler:nil];
+        }]];
+    }
+    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+    [viewController presentViewController:alert animated:YES completion:nil];
+}
+
++ (BOOL)ensureSSHInstalledInViewController:(UIViewController *)viewController requireSSHPass:(BOOL)requireSSHPass {
+    if (![self isSSHInstalled]) {
+        [self presentMissingPackageAlertInViewController:viewController
+                                                   title:@"OpenSSH Required"
+                                                 message:@"SSH features require the openssh-client package. Install openssh-client from Sileo or Zebra to use SSH."
+                                             packageName:@"openssh-client"];
+        return NO;
+    }
+    if (requireSSHPass && ![self isSSHPassInstalled]) {
+        [self presentMissingPackageAlertInViewController:viewController
+                                                   title:@"sshpass Required"
+                                                 message:@"Password-based SSH authentication requires the sshpass package. Install sshpass from Sileo or Zebra, or switch to Key authentication."
+                                             packageName:@"sshpass"];
+        return NO;
+    }
+    return YES;
+}
+
 - (void)viewDidLoad {
     [super viewDidLoad];
     
@@ -82,6 +150,9 @@
 }
 
 - (void)addNewHost {
+    if (![RCSSHSettingsViewController ensureSSHInstalledInViewController:self requireSSHPass:NO]) {
+        return;
+    }
     [self presentHostEditorForHost:nil];
 }
 
