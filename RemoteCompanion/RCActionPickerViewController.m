@@ -306,6 +306,8 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
             @{ @"name": @"Wait for Text...", @"command": @"__SCREEN_WAIT__", @"icon": [RCScreenActions iconForVerb:@"wait"] },
             @{ @"name": @"Copy Text on Screen", @"command": @"screen copy rect", @"icon": [RCScreenActions iconForVerb:@"copy_rect"], @"keywords": @"ocr vision clipboard select text copy rect" },
             @{ @"name": @"Copy All Text on Screen", @"command": @"screen copy", @"icon": [RCScreenActions iconForVerb:@"copy"], @"keywords": @"ocr vision clipboard all text copy" },
+            @{ @"name": @"Safari: Close All Tabs", @"command": @"safari close-tabs", @"icon": @"safari.fill", @"keywords": @"safari close all tabs browser" },
+            @{ @"name": @"Safari: Clear History...", @"command": @"__SAFARI_CLEAR_HISTORY__", @"icon": @"clock.arrow.circlepath", @"keywords": @"safari clear history browsing data last hour today yesterday all time" },
             @{ @"name": @"Accessibility Shortcut", @"command": @"accessibility shortcut", @"icon": ([UIImage systemImageNamed:@"accessibility"] ? @"accessibility" : @"figure.stand") }
         ],
         // Device Controls
@@ -547,7 +549,7 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
                 @"__UNLOCK_DEVICE__", @"__LOCK_TOGGLE__", @"__TAP__", @"__HOLD__", @"__SWIPE__",
                 @"__PLAY_GESTURE__", @"__RECORD_GESTURE__", @"__AIRPLAY_CONNECT__",
                 @"__BT_CONNECT__", @"__BT_DISCONNECT__", @"__WATCH_FACE__", @"__FOCUS__", @"__HA_PICKER__",
-                @"__KM_TRIGGER__", @"__MQTT_PUBLISH__", @"__CAMERA_PICKER__", @"__CAMERA_VIDEO_PICKER__", @"__SET_ORIENTATION__",
+                @"__KM_TRIGGER__", @"__MQTT_PUBLISH__", @"__CAMERA_PICKER__", @"__CAMERA_VIDEO_PICKER__", @"__SET_ORIENTATION__", @"__SAFARI_CLEAR_HISTORY__",
                 @"__CHOOSE_MENU__"
             ]];
         });
@@ -883,6 +885,11 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
 
     if ([command isEqualToString:@"__SET_ORIENTATION__"]) {
         [self handleSetOrientation];
+        return;
+    }
+
+    if ([command isEqualToString:@"__SAFARI_CLEAR_HISTORY__"]) {
+        [self handleSafariClearHistory];
         return;
     }
 
@@ -1395,6 +1402,32 @@ static BOOL RCPickerActionOpensMore(NSDictionary *action) {
             __strong typeof(weakSelf) strongSelf = weakSelf;
             if (!strongSelf) return;
             [strongSelf finishWithFocusCommand:[NSString stringWithFormat:@"orientation set %@", choice[1]]];
+        }]];
+    }
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(__unused UIAlertAction * _Nonnull action) {
+        [weakSelf deselectTiles];
+    }]];
+    sheet.popoverPresentationController.sourceView = self.view;
+    sheet.popoverPresentationController.sourceRect = CGRectMake(self.view.bounds.size.width / 2, self.view.bounds.size.height / 2, 1, 1);
+    [self presentViewController:sheet animated:YES completion:nil];
+}
+
+- (void)handleSafariClearHistory {
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Clear Safari History"
+                                                                   message:@"Choose how far back to clear browsing history and website data."
+                                                            preferredStyle:UIAlertControllerStyleActionSheet];
+    NSArray<NSArray<NSString *> *> *choices = @[
+        @[ @"Last Hour", @"last-hour" ],
+        @[ @"Today", @"today" ],
+        @[ @"Today and Yesterday", @"today-and-yesterday" ],
+        @[ @"All Time", @"all-time" ]
+    ];
+    __weak typeof(self) weakSelf = self;
+    for (NSArray<NSString *> *choice in choices) {
+        [sheet addAction:[UIAlertAction actionWithTitle:choice[0] style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction * _Nonnull action) {
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) return;
+            [strongSelf finishWithFocusCommand:[NSString stringWithFormat:@"safari clear-history %@", choice[1]]];
         }]];
     }
     [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(__unused UIAlertAction * _Nonnull action) {

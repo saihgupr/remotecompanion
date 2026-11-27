@@ -2130,6 +2130,14 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         @"orientation rotate cw": @"Rotate Screen Clockwise",
         @"orientation rotate counterclockwise": @"Rotate Screen Counterclockwise",
         @"orientation rotate ccw": @"Rotate Screen Counterclockwise",
+        @"safari close-tabs": @"Safari: Close All Tabs",
+        @"safari close tabs": @"Safari: Close All Tabs",
+        @"safari close all tabs": @"Safari: Close All Tabs",
+        @"safari close-all-tabs": @"Safari: Close All Tabs",
+        @"safari clear-history last-hour": @"Safari: Clear History (Last Hour)",
+        @"safari clear-history today": @"Safari: Clear History (Today)",
+        @"safari clear-history today-and-yesterday": @"Safari: Clear History (Today and Yesterday)",
+        @"safari clear-history all-time": @"Safari: Clear History (All Time)",
         @"wifi on": @"WiFi On",
         @"wifi off": @"WiFi Off",
         @"wifi toggle": @"WiFi Toggle",
@@ -2820,6 +2828,8 @@ static NSString *RCVariableConditionText(NSDictionary *dict) {
         if ([cmd containsString:@"auto"]) return ([UIImage systemImageNamed:@"gyroscope"] ? @"gyroscope" : @"rotate.right");
         return ([UIImage systemImageNamed:@"rectangle.portrait.rotate"] ? @"rectangle.portrait.rotate" : @"rotate.right");
     }
+    if ([cmd hasPrefix:@"safari clear-history"] || [cmd hasPrefix:@"safari clear history"]) return @"clock.arrow.circlepath";
+    if ([cmd hasPrefix:@"safari "]) return @"safari.fill";
     if ([cmd isEqualToString:@"dance party off"]) return @"flashlight.off.fill";
     if ([cmd hasPrefix:@"dance party"]) return @"flashlight.on.fill";
     if ([cmd hasPrefix:@"flashlight "] || [cmd hasPrefix:@"flash "]) return @"flashlight.on.fill";
