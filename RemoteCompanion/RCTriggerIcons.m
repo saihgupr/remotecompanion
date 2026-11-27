@@ -420,6 +420,36 @@ UIImage *RCTriggerIconImage(NSString *triggerKey, CGFloat pointSize) {
     return icon;
 }
 
+UIImage *RCTriggerIconImageWithLetter(NSString *triggerKey, NSString *letter, CGFloat pointSize) {
+    UIImage *base = RCTriggerIconImage(triggerKey, pointSize);
+    if (!base || !letter.length) return base;
+    NSString *cacheKey = [NSString stringWithFormat:@"tag:%@:%@@%.1f", triggerKey, letter, pointSize];
+    UIImage *cached = [RCIconCache() objectForKey:cacheKey];
+    if (cached) return cached;
+    CGFloat side = base.size.width;
+    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:base.size];
+    UIImage *tagged = [renderer imageWithActions:^(UIGraphicsImageRendererContext *rendererContext) {
+        CGContextRef context = rendererContext.CGContext;
+        CGFloat k = side / 40.0;
+        CGRect (^R)(CGFloat, CGFloat, CGFloat, CGFloat) = ^CGRect(CGFloat x, CGFloat y, CGFloat w, CGFloat h) {
+            return CGRectMake(x * k, y * k, w * k, h * k);
+        };
+        [base drawInRect:CGRectMake(0, 0, base.size.width, base.size.height)];
+        [[UIColor blackColor] setFill];
+        // As a created trigger's letter: a gap around a filled circle with the letter cut out of it
+        CGContextSetBlendMode(context, kCGBlendModeClear);
+        CGContextFillEllipseInRect(context, R(23, 23, 17, 17));
+        CGContextSetBlendMode(context, kCGBlendModeNormal);
+        CGContextFillEllipseInRect(context, R(24.5, 24.5, 14, 14));
+        CGContextSetBlendMode(context, kCGBlendModeClear);
+        RCDrawText(letter, R(24.5, 24.5, 14, 14), 9.5 * k);
+        CGContextSetBlendMode(context, kCGBlendModeNormal);
+    }];
+    tagged = [tagged imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+    [RCIconCache() setObject:tagged forKey:cacheKey];
+    return tagged;
+}
+
 UIImage *RCTriggerLetterImage(NSString *symbolName, NSString *letter, CGFloat pointSize) {
     if (!letter.length) return RCTriggerSymbolImage(symbolName, pointSize);
     if (!symbolName.length) return nil;

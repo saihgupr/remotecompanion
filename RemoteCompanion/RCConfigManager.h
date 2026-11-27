@@ -120,6 +120,10 @@
 // A name the user gave a trigger, or nil; setting nil or "" goes back to its default
 - (NSString *)customNameForTrigger:(NSString *)triggerKey;
 - (void)setCustomName:(NSString *)name forTrigger:(NSString *)triggerKey;
+// A letter tag of the user's own (one letter or digit, shown on the trigger's icon), or nil
+- (NSString *)letterTagForTrigger:(NSString *)triggerKey;
+// Saves one (uppercased; only its first letter or digit is kept), or takes it off when empty
+- (void)setLetterTag:(NSString *)tag forTrigger:(NSString *)triggerKey;
 - (NSString *)defaultNameForTrigger:(NSString *)triggerKey;
 - (BOOL)isTriggerEnabled:(NSString *)triggerKey;
 - (void)setTriggerEnabled:(BOOL)enabled forTrigger:(NSString *)triggerKey;

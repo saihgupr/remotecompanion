@@ -1741,6 +1741,13 @@ static NSArray *RCActionSnapshot(NSArray *actions) {
         deleteTrigger.attributes = UIMenuElementAttributesDestructive;
         [menuActions addObject:deleteTrigger];
     }
+    // A letter on its icon, as NFC tags and other created triggers have one (first in the menu, after Rename)
+    NSString *tag = [[RCConfigManager sharedManager] letterTagForTrigger:self.triggerKey];
+    UIAction *tagAction = [UIAction actionWithTitle:@"Letter Tag" image:[UIImage systemImageNamed:@"tag"] identifier:nil handler:^(__kindof UIAction *a) {
+        [weakSelf editLetterTag];
+    }];
+    if (@available(iOS 15.0, *)) tagAction.subtitle = tag ?: @"None";
+    [menuActions insertObject:tagAction atIndex:0];
     // A name of the user's own, or back to the default (first in the menu)
     if ([RCConfigManager canRenameTrigger:self.triggerKey]) {
         [menuActions insertObject:[UIAction actionWithTitle:@"Rename" image:[UIImage systemImageNamed:@"pencil"] identifier:nil handler:^(__kindof UIAction *a) {
@@ -2698,6 +2705,35 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
 }
 
 // Any trigger can have a name of its own; left empty, it goes back to its default
+// One letter or digit on the trigger's icon; empty goes back to none (or, on a created trigger, the
+// letter its name gives)
+- (void)editLetterTag {
+    RCConfigManager *config = [RCConfigManager sharedManager];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Letter Tag"
+                                                                   message:@"One letter or digit, shown on the trigger's icon. Leave empty for none."
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
+        textField.placeholder = @"A";
+        textField.text = [config letterTagForTrigger:self.triggerKey];
+        textField.autocapitalizationType = UITextAutocapitalizationTypeAllCharacters;
+        textField.autocorrectionType = UITextAutocorrectionTypeNo;
+        textField.clearButtonMode = UITextFieldViewModeWhileEditing;
+        textField.returnKeyType = UIReturnKeyDone;
+        textField.textAlignment = NSTextAlignmentCenter;
+    }];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    __weak typeof(self) weakSelf = self;
+    UIAlertAction *save = [UIAlertAction actionWithTitle:@"Save" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        [config setLetterTag:alert.textFields.firstObject.text forTrigger:strongSelf.triggerKey];
+        strongSelf.moreButton.menu = [strongSelf moreMenu];
+    }];
+    [alert addAction:save];
+    alert.preferredAction = save;
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
 - (void)renameTrigger {
     RCConfigManager *config = [RCConfigManager sharedManager];
     NSString *defaultName = [config defaultNameForTrigger:self.triggerKey];

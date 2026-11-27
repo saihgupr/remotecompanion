@@ -1394,6 +1394,25 @@ static NSString *RCActionCommand(id item) {
     [self saveConfig];
 }
 
+- (NSString *)letterTagForTrigger:(NSString *)triggerKey {
+    NSDictionary *trigger = _config[@"triggers"][triggerKey ?: @""];
+    id tag = [trigger isKindOfClass:[NSDictionary class]] ? trigger[@"letterTag"] : nil;
+    return [tag isKindOfClass:[NSString class]] && [tag length] ? tag : nil;
+}
+
+- (void)setLetterTag:(NSString *)tag forTrigger:(NSString *)triggerKey {
+    NSString *letter = nil;
+    for (NSUInteger i = 0; i < tag.length; i++) {
+        if ([[NSCharacterSet alphanumericCharacterSet] characterIsMember:[tag characterAtIndex:i]]) {
+            letter = [[tag substringWithRange:NSMakeRange(i, 1)] uppercaseString];
+            break;
+        }
+    }
+    NSMutableDictionary *trigger = [self triggerDict:triggerKey];
+    if (letter) trigger[@"letterTag"] = letter; else [trigger removeObjectForKey:@"letterTag"];
+    [self saveConfig];
+}
+
 // The name a trigger has without one of the user's own
 - (NSString *)defaultNameForTrigger:(NSString *)triggerKey {
     NSDictionary *names = @{
