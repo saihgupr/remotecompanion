@@ -218,7 +218,7 @@
         for (NSInteger i = 0; i < (NSInteger)saved.count; i++) {
             id item = saved[i];
             NSString *type = [self typeOfItem:item] ?: @"";
-            BOOL end = [@[@"end_if", @"end", @"end_repeat"] containsObject:type];
+            BOOL end = [@[@"end_if", @"end", @"end_repeat", @"end_menu"] containsObject:type];
             BOOL middle = [@[@"else", @"else_if"] containsObject:type];
             if (end) depth = MAX(0, depth - 1);
             RCRunStep *step = [RCRunStep new];

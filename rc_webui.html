@@ -1739,6 +1739,8 @@
       padding: 5px 11px; font-size: 13px; font-family: inherit; cursor: pointer;
     }
     .var-ed-chip:active { background: rgba(var(--rc-blue-rgb), 0.32); }
+    .menu-ed-foot { color: var(--rc-label-2); font-size: 13px; margin: 8px 16px 0; }
+    .menu-ed-number { font-family: inherit; font-size: 15px; font-weight: 700; color: #fff; }
     .var-ed-seg { display: flex; background: rgba(118,118,128,0.24); border-radius: 9px; padding: 2px; margin-top: 6px; }
     .var-ed-seg button {
       flex: 1; background: none; border: none; color: var(--rc-label); font-family: inherit; font-size: 14px; font-weight: 500;
@@ -2159,7 +2161,7 @@
     <div class="panel-large-title-row">
       <h1 class="panel-large-title" id="actions-large-title"></h1>
       <div class="panel-large-title-actions">
-        <button class="panel-action white" onclick="showActionPickerPanel()" title="Add Action">
+        <button class="panel-action white" onclick="g_insertActionAt = null; showActionPickerPanel()" title="Add Action">
           <i class="f7-icons">plus</i>
         </button>
         <button class="panel-action white" onclick="showEllipsisMenu(event)" title="More Options">
@@ -2240,6 +2242,37 @@
 </div>
 
 <!-- ══ SETTINGS PANEL ════════════════════════════════════════════════════ -->
+<!-- ══ CHOOSE FROM MENU EDITOR (a trigger's menu) ═══════════════════ -->
+<div class="rc-panel" id="menu-editor-panel">
+  <div class="panel-navbar">
+    <button class="panel-back" onclick="closeMenuEditor()">Cancel</button>
+    <div class="panel-title">Choose from Menu</div>
+    <button class="panel-action" onclick="saveMenuEditor()" style="color:var(--rc-blue);font-weight:600">Save</button>
+  </div>
+  <div class="panel-content">
+    <div class="action-list-header" style="margin-top:20px">Title</div>
+    <div class="action-list-card">
+      <div class="action-list-row">
+        <input class="toast-row-input" id="menu-ed-title" type="text" placeholder="Title (optional)" autocomplete="off" style="font-size:16px">
+      </div>
+    </div>
+    <div class="menu-ed-foot">Shown at the top of the menu.</div>
+    <div class="action-list-header" style="margin-top:24px">Options</div>
+    <div class="action-list-card" id="menu-ed-options"></div>
+    <div class="menu-ed-foot">Tap an option to rename it, change its icon, move it or delete it. Its actions move with it. To give an option actions, tap it in the trigger's list and choose Add Action to This Option.</div>
+    <div class="action-list-header" style="margin-top:24px">Time Limit</div>
+    <div class="action-list-card" style="padding:8px">
+      <div class="var-ed-seg" id="menu-ed-time" style="margin-top:0"></div>
+    </div>
+    <div class="menu-ed-foot" id="menu-ed-time-foot"></div>
+    <div id="menu-ed-timeout-section">
+      <div class="action-list-header" style="margin-top:24px">When Time Runs Out</div>
+      <div class="action-list-card" id="menu-ed-timeout"></div>
+      <div class="menu-ed-foot">Cancel stops the trigger there; an option runs as if it had been picked.</div>
+    </div>
+  </div>
+</div>
+
 <div class="rc-panel" id="settings-panel">
   <div class="panel-navbar">
     <div style="width:80px"></div>
@@ -4686,6 +4719,12 @@ function nameForCmd(cmd) {
     if (t === 'repeat') { const n = String(cmd.count ?? 0); return n === '1' ? 'Repeat 1 Time' : `Repeat ${n} Times`; } // a number or "{times}"
     if (t === 'repeat_while') return (cmd.conditionKey === 'time_between') ? `Repeat While Time is Between ${cmd.expectedTitle||cmd.expectedValue||''}` : `Repeat While ${cmd.conditionTitle||'Condition'} is ${cmd.expectedTitle||'Value'}`;
     if (t === 'end_repeat') return 'End Repeat';
+    if (t === 'menu') {
+      const wait = Number(cmd.timeout ?? 10) > 0 ? ` (${Number(cmd.timeout ?? 10)} s)` : '';
+      return (cmd.title ? `Choose from Menu: ${cmd.title}` : 'Choose from Menu') + wait;
+    }
+    if (t === 'menu_option') return cmd.name || 'Option';
+    if (t === 'end_menu') return 'End Menu';
     if (t === 'exit_repeat') return 'Exit Repeat';
     if (t === 'wait_until') {
       const lim = parseInt(cmd.timeout, 10) > 0 ? parseInt(cmd.timeout, 10) : 60;
@@ -4960,6 +4999,9 @@ function iconForCmd(cmd) {
     if (t === 'if' || t === 'else_if' || t === 'else') return { icon:'arrow_branch', cls:'icon-purple' };
     if (t === 'end_if' || t === 'end') return { icon:'arrow_turn_up_left', cls:'icon-purple' };
     if (t === 'end_repeat') return { icon:'arrow_turn_up_left', cls:'icon-green' };
+    if (t === 'menu') return { icon:'list_bullet', cls:'icon-blue' };
+    if (t === 'menu_option') return { icon:'circle_fill', cls:'icon-blue' };
+    if (t === 'end_menu') return { icon:'arrow_turn_up_left', cls:'icon-blue' };
     if (t === 'exit_repeat') return { icon:'arrow_right_to_line', cls:'icon-green' };
     if (t === 'wait_until') return { icon:'hourglass', cls:'icon-orange' };
     if (t === 'set_variable') return { icon:'function', cls:'icon-orange' };
@@ -5168,6 +5210,7 @@ const ACTION_SECTIONS = [
   { title:'Scripting & Logic', actions:[
     { name:'If Condition…',     cmd:'__IF_CONDITION__',icon:'arrow_branch', needs_input:true },
     { name:'Repeat…',           cmd:'__REPEAT__',      icon:'repeat', needs_input:true },
+    { name:'Choose from Menu…', cmd:'__CHOOSE_MENU__', icon:'list_bullet', needs_input:true, keywords:'menu pick choose options list prompt ask' },
     { name:'Repeat While…',     cmd:'__REPEAT_WHILE__',icon:'repeat', needs_input:true },
     { name:'Exit Repeat',       cmd:'__EXIT_REPEAT__', icon:'arrow_right_to_line', needs_input:true },
     { name:'Wait Until…',       cmd:'__WAIT_UNTIL__',  icon:'hourglass', needs_input:true },
@@ -6243,14 +6286,18 @@ function renderActionList() {
   }
 
   let indent = 0;
+  const optionOpen = []; // per open block: whether one of its (menu) options is open
   actions.forEach((action, idx) => {
     const isCtrl = typeof action === 'object';
     const type   = isCtrl ? (action.type||'').toLowerCase() : null;
-    const isEnd  = type === 'end_if' || type === 'end' || type === 'end_repeat';
+    const isEnd  = type === 'end_if' || type === 'end' || type === 'end_repeat' || type === 'end_menu';
     const isElse = type === 'else';
     const isElseIf = type === 'else_if';
     const isIf   = type === 'if';
-    const rowIndent = (isEnd || isElse || isElseIf) ? Math.max(0, indent - 1) : indent;
+    // A menu's options sit one level inside it, and their actions one further
+    let rowIndent = (isEnd || isElse || isElseIf) ? Math.max(0, indent - 1) : indent;
+    if (type === 'menu_option') rowIndent = optionOpen[optionOpen.length - 1] ? indent - 1 : indent;
+    if (type === 'end_menu') rowIndent = Math.max(0, (optionOpen[optionOpen.length - 1] ? indent - 1 : indent) - 1);
     const { icon, cls } = iconForCmd(action);
 
     // Build indent guide elements if rowIndent > 0
@@ -6412,8 +6459,15 @@ function renderActionList() {
     card.appendChild(row);
 
     // Update indent level for subsequent rows
-    if (isIf || type === 'repeat' || type === 'repeat_while') indent++;
-    else if (isEnd) indent = Math.max(0, indent - 1);
+    if (type === 'menu_option') {
+      if (optionOpen[optionOpen.length - 1]) indent--;
+      optionOpen[optionOpen.length - 1] = true;
+      indent++;
+    } else if (isIf || type === 'repeat' || type === 'repeat_while' || type === 'menu') { indent++; optionOpen.push(false); }
+    else if (isEnd) {
+      if (optionOpen.pop()) indent--;
+      indent = Math.max(0, indent - 1);
+    }
   });
 
   // Re-init drag reorder
@@ -6643,6 +6697,21 @@ function removeAction(idx) {
   if (idx < 0 || idx >= actions.length) return;
   const action = actions[idx];
   const startType = typeof action === 'object' && action !== null ? (action.type || '').toLowerCase() : '';
+  // A Choose from Menu takes its End Menu and its own Option rows with it (their actions stay)
+  if (startType === 'menu') {
+    const remove = [idx];
+    let depth = 0;
+    for (let i = idx + 1; i < actions.length; i++) {
+      const t = (actions[i] && typeof actions[i] === 'object') ? (actions[i].type || '').toLowerCase() : '';
+      if (['if', 'repeat', 'repeat_while', 'menu'].includes(t)) depth++;
+      else if (['end_if', 'end', 'end_repeat', 'end_menu'].includes(t)) { if (depth === 0) { remove.push(i); break; } depth--; }
+      else if (depth === 0 && t === 'menu_option') remove.push(i);
+    }
+    remove.sort((a, b) => b - a).forEach(i => actions.splice(i, 1));
+    saveConfig();
+    renderActionList();
+    return;
+  }
   // An If or Repeat takes its End marker with it
   const isIf = startType === 'if' || startType === 'repeat' || startType === 'repeat_while';
 
@@ -6696,12 +6765,12 @@ function duplicateAction(idx) {
 
   let start = idx;
   const type = actionType(actions[idx]);
-  if (type === 'else' || type === 'else_if' || type === 'end_if' || type === 'end' || type === 'end_repeat') {
+  if (['else', 'else_if', 'menu_option', 'end_if', 'end', 'end_repeat', 'end_menu'].includes(type)) {
     let depth = 0;
     for (let i = idx - 1; i >= 0; i--) {
       const t = actionType(actions[i]);
-      if (t === 'end_if' || t === 'end' || t === 'end_repeat') depth++;
-      else if (t === 'if' || t === 'repeat' || t === 'repeat_while') {
+      if (t === 'end_if' || t === 'end' || t === 'end_repeat' || t === 'end_menu') depth++;
+      else if (t === 'if' || t === 'repeat' || t === 'repeat_while' || t === 'menu') {
         if (depth === 0) { start = i; break; }
         depth--;
       }
@@ -6710,12 +6779,12 @@ function duplicateAction(idx) {
 
   let end = start;
   const startType = actionType(actions[start]);
-  if (startType === 'if' || startType === 'repeat' || startType === 'repeat_while') {
+  if (startType === 'if' || startType === 'repeat' || startType === 'repeat_while' || startType === 'menu') {
     let depth = 1;
     for (let i = start + 1; i < actions.length; i++) {
       const t = actionType(actions[i]);
-      if (t === 'if' || t === 'repeat' || t === 'repeat_while') depth++;
-      else if (t === 'end_if' || t === 'end' || t === 'end_repeat') {
+      if (t === 'if' || t === 'repeat' || t === 'repeat_while' || t === 'menu') depth++;
+      else if (t === 'end_if' || t === 'end' || t === 'end_repeat' || t === 'end_menu') {
         depth--;
         if (depth === 0) { end = i; break; }
       }
@@ -7555,8 +7624,11 @@ const SYMBOL_CATEGORIES = [
   ['Symbols', 'plus.circle.fill minus.circle.fill multiply.circle.fill number textformat checkmark xmark exclamationmark arrow.right arrow.left arrow.up arrow.down arrow.clockwise arrow.counterclockwise chevron.right circle.fill square.fill triangle.fill hexagon.fill power slider.horizontal.3'],
 ].map(([title, names]) => [title, names.split(' ')]);
 let symbolPickerCategory = -1;
+// Who the pick goes to: { current, onPick } from the menu editor, or null for the banner's Icon field
+let symbolPickerTarget = null;
 
-function openSymbolPicker() {
+function openSymbolPicker(target) {
+  symbolPickerTarget = target && typeof target.onPick === 'function' ? target : null;
   symbolPickerCategory = -1;
   document.getElementById('symbol-picker-search').value = '';
   const cats = document.getElementById('symbol-picker-cats');
@@ -7582,11 +7654,12 @@ function openSymbolPicker() {
 
 function closeSymbolPicker() {
   document.getElementById('symbol-picker-backdrop').classList.remove('visible');
+  symbolPickerTarget = null;
 }
 
 function renderSymbolPicker() {
   const q = document.getElementById('symbol-picker-search').value.trim().toLowerCase();
-  const current = document.getElementById('toast-icon-input').value.trim();
+  const current = symbolPickerTarget ? (symbolPickerTarget.current || '') : document.getElementById('toast-icon-input').value.trim();
   const terms = q.split(/[ .]+/).filter(Boolean);
   const names = [];
   SYMBOL_CATEGORIES.forEach(([, list], i) => {
@@ -7606,6 +7679,12 @@ function renderSymbolPicker() {
     tile.title = n || 'None';
     tile.innerHTML = `<i class="f7-icons">${n ? symbolGlyph(n) : 'nosign'}</i><span>${escapeHtml(n || 'None')}</span>`;
     tile.onclick = () => {
+      if (symbolPickerTarget) {
+        const target = symbolPickerTarget;
+        closeSymbolPicker();
+        target.onPick(n);
+        return;
+      }
       document.getElementById('toast-icon-input').value = n;
       updateToastPreview();
       closeSymbolPicker();
@@ -8081,6 +8160,199 @@ function updateLogStats(total, exec, err, http) {
   if (elHttp) elHttp.textContent = http;
 }
 
+// Choose from Menu: { type:'menu', title, timeout (s; 0 until a pick), timeoutOption (the option a
+// timeout picks; Cancel when missing) } ... { type:'menu_option', name, icon } ... { type:'end_menu' }.
+// The menu always shows on the phone, in the middle of the screen.
+const menuActType = a => (a && typeof a === 'object') ? (a.type || '').toLowerCase() : '';
+const menuIsBlockStart = t => ['if', 'repeat', 'repeat_while', 'menu'].includes(t);
+const menuIsBlockEnd = t => ['end_if', 'end', 'end_repeat', 'end_menu'].includes(t);
+const MENU_TIME_LIMITS = [0, 5, 10, 15, 30, 60];
+
+// The menu starting at idx: its End Menu row (-1 when missing), anything before its first option,
+// and each of its own options (not a nested menu's) with the rows under it
+function menuBlock(actions, idx) {
+  const options = [], pre = [];
+  let depth = 0, end = -1, current = null;
+  for (let i = idx + 1; i < actions.length; i++) {
+    const t = menuActType(actions[i]);
+    if (depth === 0 && t === 'end_menu') { end = i; break; }
+    if (depth === 0 && t === 'menu_option') { current = { row: i, option: actions[i], actions: [] }; options.push(current); continue; }
+    if (menuIsBlockStart(t)) depth++; else if (menuIsBlockEnd(t)) depth--;
+    (current ? current.actions : pre).push(actions[i]);
+  }
+  return { end, pre, options };
+}
+
+// The rows of a menu's own options
+function menuOptionRows(actions, menuIdx) {
+  return menuBlock(actions, menuIdx).options.map(o => o.row);
+}
+
+// The menu an option or End Menu row belongs to, or -1
+function menuStartFor(actions, row) {
+  let depth = 0;
+  for (let i = row - 1; i >= 0; i--) {
+    const t = menuActType(actions[i]);
+    if (menuIsBlockEnd(t)) depth++;
+    else if (menuIsBlockStart(t)) { if (depth === 0) return t === 'menu' ? i : -1; depth--; }
+  }
+  return -1;
+}
+
+// Tapping an option in the trigger's list: give it actions, or edit its menu
+function menuOptionSheet(row) {
+  const actions = triggerData(currentKey).actions || [];
+  const menuIdx = menuStartFor(actions, row);
+  if (menuIdx < 0) return;
+  const option = menuBlock(actions, menuIdx).options.find(o => o.row === row);
+  showSheet(actions[row].name || 'Option', [
+    { label: 'Add Action to This Option', action() {
+      g_insertActionAt = row + 1 + (option ? option.actions.length : 0);
+      setTimeout(showActionPickerPanel, 250);
+    } },
+    { label: 'Edit Menu', action() { setTimeout(() => openMenuEditor(menuIdx), 250); } },
+  ]);
+}
+
+// The editor works on a copy; Save writes the whole menu back, each option with its actions
+let menuEd = null;
+
+function openMenuEditor(idx) {
+  const actions = triggerData(currentKey).actions || [];
+  if (idx === null) {
+    menuEd = { idx: null, menu: { type: 'menu' }, timeout: 10, timeoutOption: null, pre: [], end: null,
+      options: [{ name: 'Option 1', icon: '', actions: [] }, { name: 'Option 2', icon: '', actions: [] }] };
+  } else {
+    const menu = actions[idx];
+    const block = menuBlock(actions, idx);
+    const options = block.options.map(o => ({ name: o.option.name || '', icon: o.option.icon || '', row: o.option, actions: o.actions }));
+    menuEd = { idx, menu, end: block.end, pre: block.pre, options,
+      // No timeout saved is the 10 seconds a menu always has (as the phone and the app read it)
+      timeout: menu.timeout === undefined || menu.timeout === null ? 10 : Math.max(0, parseInt(menu.timeout, 10) || 0),
+      timeoutOption: Number.isInteger(menu.timeoutOption) ? options[menu.timeoutOption] || null : null };
+  }
+  document.getElementById('menu-ed-title').value = (menuEd.menu.title || '');
+  renderMenuEditor();
+  document.getElementById('menu-editor-panel').classList.add('active');
+}
+
+function closeMenuEditor() {
+  document.getElementById('menu-editor-panel').classList.remove('active');
+  menuEd = null;
+}
+
+function menuOptionIconHTML(option, i) {
+  return option.icon
+    ? `<div class="action-row-icon icon-blue"><i class="f7-icons">${escapeHtml(symbolGlyph(option.icon))}</i></div>`
+    : `<div class="action-row-icon icon-blue"><span class="menu-ed-number">${i + 1}</span></div>`;
+}
+
+function renderMenuEditor() {
+  if (!menuEd) return;
+  const list = document.getElementById('menu-ed-options');
+  list.innerHTML = '';
+  menuEd.options.forEach((option, i) => {
+    const count = option.actions.length;
+    list.appendChild(rcMenuRow(menuOptionIconHTML(option, i), option.name || 'Option',
+      count ? `${count} action${count === 1 ? '' : 's'}` : 'No actions yet', () => menuEditorOptionSheet(i)));
+  });
+  const add = rcMenuRow('<div class="action-row-icon icon-green"><i class="f7-icons">plus</i></div>', 'Add Option', '', () => {
+    menuEd.options.push({ name: `Option ${menuEd.options.length + 1}`, icon: '', actions: [] });
+    renderMenuEditor();
+  });
+  add.querySelector('.action-row-text').style.color = 'var(--rc-blue)';
+  list.appendChild(add);
+
+  const seg = document.getElementById('menu-ed-time');
+  seg.innerHTML = '';
+  const limits = MENU_TIME_LIMITS.includes(menuEd.timeout) ? MENU_TIME_LIMITS : MENU_TIME_LIMITS.concat(menuEd.timeout);
+  limits.forEach(limit => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = limit ? `${limit} s` : 'Off';
+    b.className = limit === menuEd.timeout ? 'selected' : '';
+    b.onclick = () => { menuEd.timeout = limit; renderMenuEditor(); };
+    seg.appendChild(b);
+  });
+  document.getElementById('menu-ed-time-foot').textContent = menuEd.timeout > 0
+    ? 'The menu closes after this long if nothing is picked.'
+    : 'The menu stays until an option or Cancel is tapped.';
+
+  document.getElementById('menu-ed-timeout-section').style.display = menuEd.timeout > 0 ? '' : 'none';
+  const out = document.getElementById('menu-ed-timeout');
+  out.innerHTML = '';
+  if (menuEd.options.indexOf(menuEd.timeoutOption) < 0) menuEd.timeoutOption = null;
+  const choice = (label, option) => {
+    const row = rcMenuRow('', label, '', () => { menuEd.timeoutOption = option; renderMenuEditor(); }, true);
+    if (menuEd.timeoutOption === option) row.insertAdjacentHTML('beforeend', '<i class="f7-icons" style="color:var(--rc-blue);font-size:17px">checkmark_alt</i>');
+    out.appendChild(row);
+  };
+  choice('Cancel the Trigger', null);
+  menuEd.options.forEach(option => choice(`Pick “${option.name || 'Option'}”`, option));
+}
+
+// A row: icon (HTML), title, subtitle, and what a tap does (no arrow for a choice)
+function rcMenuRow(iconHTML, title, subtitle, onTap, choice) {
+  const row = document.createElement('div');
+  row.className = 'action-list-row';
+  row.innerHTML = `${iconHTML}<div class="action-row-text" style="flex:1;min-width:0">${escapeHtml(title)}${subtitle ? `<br><span style="font-size:13px;color:var(--rc-label-2);font-weight:400">${escapeHtml(subtitle)}</span>` : ''}</div>`;
+  row.onclick = onTap;
+  if (!choice) row.insertAdjacentHTML('beforeend', '<i class="f7-icons row-chevron" style="color:var(--rc-label-2); font-size:14px;">chevron_right</i>');
+  return row;
+}
+
+function menuEditorOptionSheet(i) {
+  const option = menuEd.options[i];
+  const later = fn => () => setTimeout(fn, 250);
+  const buttons = [
+    { label: 'Rename', action: later(() => {
+      showDialog('Option Name', 'Shown on the menu. {menu} holds it after it’s picked.', option.name, 'Save', value => {
+        const name = String(value || '').trim();
+        if (name) { option.name = name; renderMenuEditor(); }
+      });
+    }) },
+    { label: 'Icon', action: later(() => openSymbolPicker({ current: option.icon, onPick(name) { option.icon = name; renderMenuEditor(); } })) },
+  ];
+  if (i > 0) buttons.push({ label: 'Move Up', action() { menuEd.options.splice(i - 1, 0, menuEd.options.splice(i, 1)[0]); renderMenuEditor(); } });
+  if (i < menuEd.options.length - 1) buttons.push({ label: 'Move Down', action() { menuEd.options.splice(i + 1, 0, menuEd.options.splice(i, 1)[0]); renderMenuEditor(); } });
+  if (menuEd.options.length > 1) buttons.push({ label: 'Delete Option', destructive: true, action: later(() => {
+    const remove = () => { menuEd.options.splice(menuEd.options.indexOf(option), 1); renderMenuEditor(); };
+    const count = option.actions.length;
+    if (!count) { remove(); return; }
+    showConfirm('Delete Option?', `Its ${count} action${count === 1 ? ' is' : 's are'} deleted too.`, remove, 'Delete');
+  }) });
+  showSheet(option.name || 'Option', buttons);
+}
+
+function saveMenuEditor() {
+  if (!menuEd) return;
+  const actions = triggerData(currentKey).actions || [];
+  const menuRow = { ...menuEd.menu, type: 'menu' };
+  const title = document.getElementById('menu-ed-title').value.trim();
+  if (title) menuRow.title = title; else delete menuRow.title;
+  menuRow.timeout = menuEd.timeout;
+  const pick = menuEd.options.indexOf(menuEd.timeoutOption);
+  if (menuEd.timeout > 0 && pick >= 0) menuRow.timeoutOption = pick; else delete menuRow.timeoutOption;
+  const rows = [menuRow, ...menuEd.pre];
+  menuEd.options.forEach(option => {
+    const row = { ...(option.row || {}), type: 'menu_option', name: option.name || 'Option' };
+    if (option.icon) row.icon = option.icon; else delete row.icon;
+    rows.push(row, ...option.actions);
+  });
+  if (menuEd.idx === null) {
+    rows.push({ type: 'end_menu' });
+    appendNewActions(actions, ...rows);
+  } else {
+    const end = menuEd.end >= 0 ? menuEd.end : actions.length - 1;
+    rows.push(menuEd.end >= 0 ? actions[menuEd.end] : { type: 'end_menu' });
+    actions.splice(menuEd.idx, end - menuEd.idx + 1, ...rows);
+  }
+  triggerData(currentKey).actions = actions;
+  closeMenuEditor();
+  saveConfig();
+  renderActionList();
+}
+
 function editAction(idx) {
   const actions = triggerData(currentKey).actions || [];
   const act = actions[idx];
@@ -8109,6 +8381,16 @@ function editAction(idx) {
     }
     else if (type === 'set_variable') {
       promptSetVariable(idx);
+    }
+    else if (type === 'menu') {
+      openMenuEditor(idx);
+    }
+    else if (type === 'menu_option') {
+      menuOptionSheet(idx);
+    }
+    else if (type === 'end_menu') {
+      const menuIdx = menuStartFor(actions, idx);
+      if (menuIdx >= 0) openMenuEditor(menuIdx);
     }
     else if (type === 'repeat') {
       promptRepeatCount(String(act.count || 1), 'Save', n => {
@@ -8487,9 +8769,18 @@ function renderPickerSections() {
   });
 }
 
+// Where the next new action goes (Add Action to This Option sets it); null adds at the end. Used once.
+let g_insertActionAt = null;
+function appendNewActions(actions, ...items) {
+  const at = g_insertActionAt;
+  g_insertActionAt = null;
+  if (at !== null && at >= 0 && at <= actions.length) actions.splice(at, 0, ...items);
+  else actions.push(...items);
+}
+
 function addActionToCurrent(cmd) {
   const actions = triggerData(currentKey).actions || [];
-  actions.push(cmd);
+  appendNewActions(actions, cmd);
   triggerData(currentKey).actions = actions;
   saveConfig();
   renderActionList();
@@ -8563,7 +8854,7 @@ function selectPickerAction(act) {
     openCondPicker(null);
   } else if (c === '__EXIT_REPEAT__') {
     const actions = triggerData(currentKey).actions || [];
-    actions.push({ type: 'exit_repeat' });
+    appendNewActions(actions, { type: 'exit_repeat' });
     triggerData(currentKey).actions = actions;
     saveConfig();
     renderActionList();
@@ -8572,11 +8863,12 @@ function selectPickerAction(act) {
     openCondPicker(null);
   } else if (c === '__SET_VARIABLE__') {
     promptSetVariable(null);
+  } else if (c === '__CHOOSE_MENU__') {
+    openMenuEditor(null);
   } else if (c === '__REPEAT__') {
     promptRepeatCount('', 'Add', n => {
       const actions = triggerData(currentKey).actions || [];
-      actions.push({ type: 'repeat', count: n });
-      actions.push({ type: 'end_repeat' });
+      appendNewActions(actions, { type: 'repeat', count: n }, { type: 'end_repeat' });
       triggerData(currentKey).actions = actions;
       saveConfig();
       renderActionList();
@@ -9414,7 +9706,7 @@ function varEditorSave() {
   if (st.ex && st.ex.disabled) item.disabled = st.ex.disabled;
   closeVarEditor();
   const actions = triggerData(currentKey).actions || [];
-  if (st.ex) actions[st.idx] = item; else actions.push(item);
+  if (st.ex) actions[st.idx] = item; else appendNewActions(actions, item);
   triggerData(currentKey).actions = actions;
   saveConfig();
   renderActionList();
@@ -9842,7 +10134,7 @@ function finishIfCondition(def, value, valueTitle, editIdx, extra) {
     }
     setTimeout(() => promptTimeLimit('60', 'Add', n => {
       item.timeout = n;
-      actions.push(item);
+      appendNewActions(actions, item);
       triggerData(currentKey).actions = actions;
       saveConfig();
       renderActionList();
@@ -9852,8 +10144,7 @@ function finishIfCondition(def, value, valueTitle, editIdx, extra) {
   if (editIdx !== null) {
     actions[editIdx] = item;
   } else {
-    actions.push(item);
-    actions.push({ type: existingType === 'repeat_while' ? 'end_repeat' : 'end_if' });
+    appendNewActions(actions, item, { type: existingType === 'repeat_while' ? 'end_repeat' : 'end_if' });
   }
   condPickerNewType = 'if';
   triggerData(currentKey).actions = actions;
@@ -11521,7 +11812,7 @@ function editHAAction(idx) {
 // toggle, match, exclude }. "match"/"exclude" patterns ending in " ", ":" or "-"
 // are prefixes; anything else must equal the (lowercased) command.
 // Not offered: entries that don't run an action of their own, and Set Flashlight (covered by Flashlight)
-const BANNER_SKIP = new Set(['__IF_CONDITION__', '__REPEAT__', '__REPEAT_WHILE__', '__EXIT_REPEAT__', '__WAIT_UNTIL__', '__SET_VARIABLE__', '__DELAY__', '__TOAST__', '__SET_FLASHLIGHT__', '__DEV_ANNOTATE__']);
+const BANNER_SKIP = new Set(['__IF_CONDITION__', '__CHOOSE_MENU__', '__REPEAT__', '__REPEAT_WHILE__', '__EXIT_REPEAT__', '__WAIT_UNTIL__', '__SET_VARIABLE__', '__DELAY__', '__TOAST__', '__SET_FLASHLIGHT__', '__DEV_ANNOTATE__']);
 // The app's names for the same actions, so both UIs share one setting
 const BANNER_ID_ALIASES = { '__SHORTCUT__': '__SHORTCUT_PICKER__', 'queuealbum': 'queue album', 'queueartist': 'queue artist',
   'shuffleall': 'shuffle all songs', 'deletesong': 'delete current song' };

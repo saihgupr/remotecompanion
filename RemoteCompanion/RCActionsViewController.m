@@ -3,6 +3,7 @@
 #import "RCTriggerAppExclusions.h"
 #import "RCConfigManager+AppExclusions.h"
 #import "RCSetupShortcuts.h"
+#import "RCMenuEditorViewController.h"
 #import "RCScreenActions.h"
 #import "RCAddOnCatalog.h"
 #import "RCAppDelegate.h"
@@ -881,6 +882,10 @@ static void rc_setCellSeparatorHidden(UITableViewCell *cell, BOOL hidden) {
 // opened for, its panel (kept here so scrolling away and back doesn't lose what was typed), and
 // the height of the row above the panel
 @property (nonatomic, assign) NSInteger inlineEditorIndex;
+// Add Action Here: where the next action added goes (NSNotFound: the end), and how many rows there
+// were when the picker opened (what's added past them is moved there when it's saved)
+@property (nonatomic, assign) NSInteger pendingInsertIndex;
+@property (nonatomic, assign) NSUInteger pendingInsertBase;
 @property (nonatomic, copy) NSString *inlineEditorCommand;
 @property (nonatomic, assign) CGFloat inlineEditorRowHeight;
 // Each row's height as last shown, by row: with Wrap Long Names the rows size themselves, and the
@@ -1851,6 +1856,7 @@ static NSArray *RCActionSnapshot(NSArray *actions) {
         _triggerKey = triggerKey;
         _runningIndex = NSNotFound;
         _inlineEditorIndex = NSNotFound;
+        _pendingInsertIndex = NSNotFound;
     }
     return self;
 }
@@ -2932,8 +2938,30 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
     return defaults[action];
 }
 
+// The picker, with what it adds going to index rather than the end (under a menu's option, say)
+- (void)addActionAtIndex:(NSInteger)index {
+    [self addAction];
+    if (index >= 0 && index <= (NSInteger)self.actions.count) {
+        self.pendingInsertIndex = index;
+        self.pendingInsertBase = self.actions.count;
+    }
+}
+
+// Where the next action added to the option at row goes: after its last action
+- (NSInteger)endOfMenuOptionAtRow:(NSInteger)row {
+    NSInteger depth = 0;
+    for (NSInteger i = row + 1; i < (NSInteger)self.actions.count; i++) {
+        id item = self.actions[i];
+        if (depth == 0 && ([self isMenuOptionActionItem:item] || [self isEndMenuActionItem:item])) return i;
+        if ([self isBlockStartItem:item]) depth++;
+        else if ([self isBlockEndItem:item]) depth--;
+    }
+    return self.actions.count;
+}
+
 - (void)addAction {
     if (self.inlineEditorIndex != NSNotFound) [self commitInlineRowEditor];
+    self.pendingInsertIndex = NSNotFound; // the end, unless Add Action Here set it
 
     RCActionPickerViewController *picker = [[RCActionPickerViewController alloc] init];
     __weak typeof(self) weakSelf = self;
@@ -3139,6 +3167,10 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
             dispatch_async(dispatch_get_main_queue(), ^{
                 [self presentRepeatCountForIndex:NSNotFound];
             });
+        } else if ([action isEqualToString:@"__CHOOSE_MENU__"]) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self presentMenuSettingsForIndex:NSNotFound];
+            });
         } else if ([action isEqualToString:@"__EXIT_REPEAT__"]) {
             [self.actions addObject:@{ @"type": @"exit_repeat" }];
             [self saveActions];
@@ -3259,6 +3291,14 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
 }
 
 - (void)saveActions {
+    // Add Action Here: what was just added at the end goes where it was asked for
+    if (self.pendingInsertIndex != NSNotFound && self.actions.count > self.pendingInsertBase && self.pendingInsertIndex <= (NSInteger)self.pendingInsertBase) {
+        NSRange added = NSMakeRange(self.pendingInsertBase, self.actions.count - self.pendingInsertBase);
+        NSArray *items = [self.actions subarrayWithRange:added];
+        [self.actions removeObjectsInRange:added];
+        [self.actions insertObjects:items atIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(self.pendingInsertIndex, items.count)]];
+        self.pendingInsertIndex = NSNotFound;
+    }
     // A Remote RC action edited as its inner command gets its client wrapper back
     [self finishPendingRemoteEdit];
     [self finishAdding]; // closes the picker once this save is done
@@ -3273,6 +3313,53 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
         return nil;
     }
     return [[((NSDictionary *)item)[@"type"] description] lowercaseString];
+}
+
+#pragma mark - Choose from Menu
+
+// Choose from Menu's page (RCMenuEditorViewController): index is the menu's row, or NSNotFound
+// for a new one, added at the end of the list
+- (void)presentMenuSettingsForIndex:(NSInteger)index {
+    BOOL isNew = index == NSNotFound || index < 0 || index >= (NSInteger)self.actions.count;
+    NSRange range = NSMakeRange(self.actions.count, 0);
+    if (!isNew) {
+        NSInteger end = [self matchingEndIndexForIfAtIndex:index];
+        if (end == NSNotFound) return;
+        range = NSMakeRange(index, end - index + 1);
+    }
+    RCMenuEditorViewController *editor = [[RCMenuEditorViewController alloc] initWithBlock:isNew ? nil : [self.actions subarrayWithRange:range]];
+    __weak typeof(self) weakSelf = self;
+    editor.onSave = ^(NSArray *block) {
+        __strong typeof(weakSelf) self = weakSelf;
+        if (!self || NSMaxRange(range) > self.actions.count) return;
+        [self.actions replaceObjectsInRange:range withObjectsFromArray:block];
+        [self saveActions];
+        [self.tableView reloadData];
+    };
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:editor];
+    [self presentViewController:nav animated:YES completion:nil];
+}
+
+// The menu a row of one belongs to (the menu row itself, an option or End Menu), or NSNotFound
+- (NSInteger)menuIndexForRow:(NSInteger)row {
+    id item = self.actions[row];
+    if ([self isMenuActionItem:item]) return row;
+    if ([self isEndMenuActionItem:item]) return [self matchingIfIndexForEndAtIndex:row];
+    if ([self isMenuOptionActionItem:item]) return [self blockStartForBranchRow:row];
+    return NSNotFound;
+}
+
+// The rows of a menu's own options (not a nested menu's), in order
+- (NSArray<NSNumber *> *)optionRowsForMenuAtIndex:(NSInteger)index {
+    NSMutableArray *rows = [NSMutableArray array];
+    NSInteger depth = 0;
+    for (NSInteger i = index + 1; i < (NSInteger)self.actions.count; i++) {
+        id item = self.actions[i];
+        if ([self isBlockStartItem:item]) depth++;
+        else if ([self isBlockEndItem:item]) { if (depth == 0) break; depth--; }
+        else if (depth == 0 && [self isMenuOptionActionItem:item]) [rows addObject:@(i)];
+    }
+    return rows;
 }
 
 - (BOOL)isIfActionItem:(id)item {
@@ -3306,13 +3393,47 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
     return [[self actionTypeForItem:item] isEqualToString:@"end_repeat"];
 }
 
-// A block's first and last rows, If or Repeat: for nesting, moving and deleting whole blocks
+// Choose from Menu blocks: Choose from Menu ... an Option row per choice, each followed by its
+// actions ... End Menu. An Option row is a branch of its block, as Else is of an If.
+- (BOOL)isMenuActionItem:(id)item {
+    return [[self actionTypeForItem:item] isEqualToString:@"menu"];
+}
+
+- (BOOL)isMenuOptionActionItem:(id)item {
+    return [[self actionTypeForItem:item] isEqualToString:@"menu_option"];
+}
+
+- (BOOL)isEndMenuActionItem:(id)item {
+    return [[self actionTypeForItem:item] isEqualToString:@"end_menu"];
+}
+
+// Else, Else If or a menu's Option: a row that starts another branch of the block it's in
+- (BOOL)isBranchActionItem:(id)item {
+    return [self isElseActionItem:item] || [self isElseIfActionItem:item] || [self isMenuOptionActionItem:item];
+}
+
+// A block's first and last rows, If, Repeat or Choose from Menu: for nesting, moving and deleting
+// whole blocks
 - (BOOL)isBlockStartItem:(id)item {
-    return [self isIfActionItem:item] || [self isRepeatActionItem:item];
+    return [self isIfActionItem:item] || [self isRepeatActionItem:item] || [self isMenuActionItem:item];
 }
 
 - (BOOL)isBlockEndItem:(id)item {
-    return [self isEndIfActionItem:item] || [self isEndRepeatActionItem:item];
+    return [self isEndIfActionItem:item] || [self isEndRepeatActionItem:item] || [self isEndMenuActionItem:item];
+}
+
+// The start of the block a branch row (Else, Else If, Option) belongs to, or NSNotFound
+- (NSInteger)blockStartForBranchRow:(NSInteger)row {
+    NSInteger depth = 0;
+    for (NSInteger i = row - 1; i >= 0; i--) {
+        id check = self.actions[i];
+        if ([self isBlockEndItem:check]) depth++;
+        else if ([self isBlockStartItem:check]) {
+            if (depth == 0) return i;
+            depth--;
+        }
+    }
+    return NSNotFound;
 }
 
 - (NSInteger)matchingElseIndexForIfAtIndex:(NSInteger)startIndex {
@@ -3405,22 +3526,45 @@ static const NSTimeInterval RCRunStripMinimum = 1.0;
     return NSMakeRange(index, 1);
 }
 
+// A row's nesting. A menu's Option rows sit one level inside it, and each option's actions one
+// further, so the options read as a list under the menu (an If's Else rows stay level with it).
 - (NSInteger)indentationLevelForRow:(NSInteger)row {
-    NSInteger depth = 0;
+    NSMutableArray<NSString *> *open = [NSMutableArray array]; // "block" or "option", innermost last
     for (NSInteger idx = 0; idx < row; idx++) {
         id item = self.actions[idx];
-        if ([self isBlockStartItem:item]) {
-            depth++;
+        if ([self isMenuOptionActionItem:item]) {
+            if ([open.lastObject isEqualToString:@"option"]) [open removeLastObject];
+            [open addObject:@"option"];
+        } else if ([self isBlockStartItem:item]) {
+            [open addObject:@"block"];
         } else if ([self isBlockEndItem:item]) {
-            depth = MAX(depth - 1, 0);
+            if ([self isEndMenuActionItem:item] && [open.lastObject isEqualToString:@"option"]) [open removeLastObject];
+            if (open.count) [open removeLastObject];
         }
     }
-    
+    NSInteger depth = open.count;
     id current = self.actions[row];
-    if ([self isBlockEndItem:current] || [self isElseActionItem:current] || [self isElseIfActionItem:current]) {
+    if ([self isMenuOptionActionItem:current]) {
+        return [open.lastObject isEqualToString:@"option"] ? depth - 1 : depth;
+    }
+    if ([self isEndMenuActionItem:current]) {
+        NSInteger d = [open.lastObject isEqualToString:@"option"] ? depth - 1 : depth;
+        return MAX(d - 1, 0);
+    }
+    if ([self isBlockEndItem:current] || [self isBranchActionItem:current]) {
         return MAX(depth - 1, 0);
     }
     return depth;
+}
+
+// An option's icon: its own, or its number in a circle (1 for the menu's first option)
+- (NSString *)iconForMenuOptionAtRow:(NSInteger)row {
+    NSString *icon = [self.actions[row][@"icon"] description];
+    if (icon.length && [UIImage systemImageNamed:icon]) return icon;
+    NSInteger menu = [self blockStartForBranchRow:row];
+    NSUInteger position = menu == NSNotFound ? NSNotFound : [[self optionRowsForMenuAtIndex:menu] indexOfObject:@(row)];
+    NSString *numbered = position != NSNotFound && position < 50 ? [NSString stringWithFormat:@"%lu.circle.fill", (unsigned long)position + 1] : nil;
+    return numbered && [UIImage systemImageNamed:numbered] ? numbered : @"circle.fill";
 }
 
 // The vibration conditions as this iOS version's Settings shows them: iOS 17's one Haptics
@@ -4292,7 +4436,12 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 - (void)appendInlineActionWithCommand:(NSString *)command {
     if (!command.length) return;
     NSInteger index = (NSInteger)self.actions.count;
-    [self.actions addObject:command];
+    // Add Action Here: at its place, so the inline editor opens on the right row
+    if (self.pendingInsertIndex != NSNotFound && self.pendingInsertIndex <= index) {
+        index = self.pendingInsertIndex;
+        self.pendingInsertIndex = NSNotFound;
+    }
+    [self.actions insertObject:command atIndex:index];
     [self saveActions];
 
     RCInlineRowItem *item = [self inlineRowItemForCommand:command];
@@ -4979,6 +5128,25 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
             }
         }
         
+        // Choose from Menu: its page, for any of its rows
+        if ([self isMenuActionItem:item] || [self isMenuOptionActionItem:item] || [self isEndMenuActionItem:item]) {
+            if ([self isMenuOptionActionItem:item]) {
+                [alert addAction:[UIAlertAction actionWithTitle:@"Add Action to This Option" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+                    [self addActionAtIndex:[self endOfMenuOptionAtRow:indexPath.row]];
+                }]];
+            }
+            NSInteger menuIndex = [self menuIndexForRow:indexPath.row];
+            if (menuIndex != NSNotFound) {
+                [alert addAction:[UIAlertAction actionWithTitle:@"Edit Menu" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+                    [self presentMenuSettingsForIndex:menuIndex];
+                }]];
+            }
+            [alert addAction:[UIAlertAction actionWithTitle:@"Add Nested If" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+                NSInteger insertIndex = [self isEndMenuActionItem:item] ? indexPath.row : indexPath.row + 1;
+                [self presentIfConditionPickerForIndex:NSNotFound insertIndex:insertIndex type:@"if"];
+            }]];
+        }
+
         // Wait Until: its condition and time limit
         if ([[self actionTypeForItem:item] isEqualToString:@"wait_until"]) {
             [alert addAction:[UIAlertAction actionWithTitle:@"Edit Condition" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
@@ -5006,7 +5174,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
 
         // Add Nested If option for regular items inside if blocks
         NSInteger currentIndent = [self indentationLevelForRow:indexPath.row];
-        if (currentIndent > 0 && ![self isBlockStartItem:item] && ![self isElseIfActionItem:item] && ![self isElseActionItem:item] && ![self isBlockEndItem:item]) {
+        if (currentIndent > 0 && ![self isBlockStartItem:item] && ![self isBranchActionItem:item] && ![self isBlockEndItem:item]) {
             [alert addAction:[UIAlertAction actionWithTitle:@"Add Nested If" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
                 [self presentIfConditionPickerForIndex:NSNotFound insertIndex:indexPath.row type:@"if"];
             }]];
@@ -5035,16 +5203,9 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     id item = self.actions[index];
 
     NSInteger start = index;
-    if ([self isElseIfActionItem:item] || [self isElseActionItem:item]) {
-        NSInteger depth = 0;
-        for (NSInteger i = index - 1; i >= 0; i--) {
-            id check = self.actions[i];
-            if ([self isEndIfActionItem:check]) depth++;
-            else if ([self isIfActionItem:check]) {
-                if (depth == 0) { start = i; break; }
-                depth--;
-            }
-        }
+    if ([self isBranchActionItem:item]) {
+        NSInteger blockStart = [self blockStartForBranchRow:index];
+        if (blockStart != NSNotFound) start = blockStart;
     }
 
     NSRange range = [self ifBlockRangeForIndex:start];
@@ -5069,16 +5230,9 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     if (row < 0 || row >= (NSInteger)self.actions.count) return NSMakeRange(NSNotFound, 0);
     id item = self.actions[row];
     NSInteger start = row;
-    if ([self isElseIfActionItem:item] || [self isElseActionItem:item]) {
-        NSInteger depth = 0;
-        for (NSInteger i = row - 1; i >= 0; i--) {
-            id check = self.actions[i];
-            if ([self isEndIfActionItem:check]) depth++;
-            else if ([self isIfActionItem:check]) {
-                if (depth == 0) { start = i; break; }
-                depth--;
-            }
-        }
+    if ([self isBranchActionItem:item]) {
+        NSInteger blockStart = [self blockStartForBranchRow:row];
+        if (blockStart != NSNotFound) start = blockStart;
     }
     NSRange range = [self ifBlockRangeForIndex:start];
     if (range.location == NSNotFound || range.length == 0 || NSMaxRange(range) > self.actions.count) {
@@ -5292,6 +5446,26 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
                 [self presentRepeatCountForIndex:indexPath.row];
             } else if ([[self actionTypeForItem:actionData] isEqualToString:@"set_variable"]) {
                 [self presentSetVariable:actionData existingIndex:indexPath.row];
+            } else if ([self isMenuOptionActionItem:actionData]) {
+                // An option: what runs when it's picked goes under it
+                NSInteger row = indexPath.row;
+                NSString *name = [actionData[@"name"] description] ?: @"Option";
+                UIAlertController *sheet = [UIAlertController alertControllerWithTitle:name message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+                [sheet addAction:[UIAlertAction actionWithTitle:@"Add Action to This Option" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
+                    [self addActionAtIndex:[self endOfMenuOptionAtRow:row]];
+                }]];
+                [sheet addAction:[UIAlertAction actionWithTitle:@"Edit Menu" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
+                    NSInteger menu = [self menuIndexForRow:row];
+                    if (menu != NSNotFound) [self presentMenuSettingsForIndex:menu];
+                }]];
+                [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+                UIView *source = [tableView cellForRowAtIndexPath:indexPath];
+                sheet.popoverPresentationController.sourceView = source;
+                sheet.popoverPresentationController.sourceRect = source.bounds;
+                [self presentViewController:sheet animated:YES completion:nil];
+            } else if ([self isMenuActionItem:actionData] || [self isEndMenuActionItem:actionData]) {
+                NSInteger menu = [self menuIndexForRow:indexPath.row];
+                if (menu != NSNotFound) [self presentMenuSettingsForIndex:menu];
             }
             return;
         }
@@ -6403,7 +6577,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         cell.textLabel.textColor = isControl ? [UIColor secondaryLabelColor] : [UIColor labelColor];
         cell.detailTextLabel.text = nil;
         
-        NSString *stepIcon = [self iconForCommand:actionItem];
+        NSString *stepIcon = [self isMenuOptionActionItem:actionItem] ? [self iconForMenuOptionAtRow:indexPath.row] : [self iconForCommand:actionItem];
         if ([stepIcon isEqualToString:@"x.squareroot"]) {
             cell.imageView.image = RCVariableMenuIconActionSized(22);
         } else {
@@ -6897,7 +7071,13 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     for (id item in actions) {
         if ([self isIfActionItem:item]) [open addObject:@"if"];
         else if ([self isRepeatActionItem:item]) [open addObject:@"repeat"];
-        else if ([self isElseActionItem:item] || [self isElseIfActionItem:item]) {
+        else if ([self isMenuActionItem:item]) [open addObject:@"menu"];
+        else if ([self isMenuOptionActionItem:item]) {
+            if (![open.lastObject isEqualToString:@"menu"]) return NO;
+        } else if ([self isEndMenuActionItem:item]) {
+            if (![open.lastObject isEqualToString:@"menu"]) return NO;
+            [open removeLastObject];
+        } else if ([self isElseActionItem:item] || [self isElseIfActionItem:item]) {
             if (![open.lastObject isEqualToString:@"if"]) return NO;
         } else if ([self isEndIfActionItem:item]) {
             if (![open.lastObject isEqualToString:@"if"]) return NO;
@@ -7130,7 +7310,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
     NSInteger count = 0;
     for (NSUInteger i = range.location + 1; i + 1 < NSMaxRange(range); i++) {
         id item = self.actions[i];
-        if ([self isElseActionItem:item] || [self isElseIfActionItem:item] || [self isBlockEndItem:item]) continue;
+        if ([self isBranchActionItem:item] || [self isBlockEndItem:item]) continue;
         count++;
     }
     return count;
@@ -7176,7 +7356,7 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         id item = self.actions[i];
         if ([self isBlockStartItem:item]) depth++;
         else if ([self isBlockEndItem:item]) depth--;
-        else if (depth == 0 && ([self isElseActionItem:item] || [self isElseIfActionItem:item])) [remove addIndex:i];
+        else if (depth == 0 && [self isBranchActionItem:item]) [remove addIndex:i];
     }
     [self.actions removeObjectsAtIndexes:remove];
     [self adjustInlineEditorForRemovedIndexes:remove];

@@ -463,6 +463,7 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
             @{ @"name": @"If Condition...", @"command": @"__IF_CONDITION__", @"icon": @"arrow.triangle.branch" },
             @{ @"name": @"Repeat...", @"command": @"__REPEAT__", @"icon": @"repeat" },
             @{ @"name": @"Repeat While...", @"command": @"__REPEAT_WHILE__", @"icon": @"repeat" },
+            @{ @"name": @"Choose from Menu...", @"command": @"__CHOOSE_MENU__", @"icon": @"list.bullet.rectangle", @"keywords": @"menu pick choose options list prompt ask" },
             @{ @"name": @"Exit Repeat", @"command": @"__EXIT_REPEAT__", @"icon": @"arrow.right.to.line" },
             @{ @"name": @"Wait Until...", @"command": @"__WAIT_UNTIL__", @"icon": @"hourglass" },
             @{ @"name": @"Set Variable...", @"command": @"__SET_VARIABLE__", @"icon": @"x.squareroot" },
@@ -542,7 +543,8 @@ static NSArray<NSArray<NSDictionary *> *> *RCPickerGroupedSections(NSArray<NSArr
                 @"__UNLOCK_DEVICE__", @"__LOCK_TOGGLE__", @"__TAP__", @"__HOLD__", @"__SWIPE__",
                 @"__PLAY_GESTURE__", @"__RECORD_GESTURE__", @"__AIRPLAY_CONNECT__",
                 @"__BT_CONNECT__", @"__BT_DISCONNECT__", @"__WATCH_FACE__", @"__FOCUS__", @"__HA_PICKER__",
-                @"__KM_TRIGGER__", @"__MQTT_PUBLISH__", @"__CAMERA_PICKER__", @"__CAMERA_VIDEO_PICKER__", @"__SET_ORIENTATION__"
+                @"__KM_TRIGGER__", @"__MQTT_PUBLISH__", @"__CAMERA_PICKER__", @"__CAMERA_VIDEO_PICKER__", @"__SET_ORIENTATION__",
+                @"__CHOOSE_MENU__"
             ]];
         });
         NSMutableArray *remoteSections = [NSMutableArray array];
