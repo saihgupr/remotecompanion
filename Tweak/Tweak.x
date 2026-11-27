@@ -339,7 +339,15 @@ extern Boolean MRMediaRemoteSendCommandToApp(MRMediaRemoteCommand command, NSDic
 + (id)sharedInstance;
 - (UIGestureRecognizer *)reachabilityGestureRecognizer;
 - (void)toggleReachability;
+- (void)deactivateReachability;
+- (BOOL)reachabilityEnabled;
+- (BOOL)reachabilityModeActive;
 @end
+
+// Spotlight over an app is a transient overlay; SpringBoard hears when it shows and goes, which
+// is how "spotlight open" and "spotlight close" know it's up there (the home screen's own
+// Spotlight answers isAnySearchVisibleOrTransitioning).
+static BOOL g_rcSpotlightOverlayShown = NO;
 
 
 // BluetoothManager APIs
@@ -12837,6 +12845,8 @@ static NSArray *RCCommandHelpSections(void) {
             @[@"home", @"Press Home"],
             @[@"switcher", @"Open the App Switcher"],
             @[@"island", @"Show what's in the Dynamic Island"],
+            @[@"spotlight [toggle|open|close]", @"Open or close Spotlight"],
+            @[@"reachability [toggle|on|off|status]", @"Slide the screen down within reach"],
             @[@"previous app", @"Switch to the previous app"],
             @[@"control-center", @"Open Control Center"],
             @[@"notification-center", @"Open Notification Center"],
@@ -14526,6 +14536,54 @@ static NSString *handle_command(NSString *cmd) {
                 BOOL expanding = [element respondsToSelector:expandingSel] && ((BOOL (*)(id, SEL))objc_msgSend)(element, expandingSel);
                 [result appendFormat:@"  %@ layoutMode=%ld expanding=%d\n", identifier ?: NSStringFromClass([element class]), rc_island_element_layout_mode(element), expanding];
             }
+        });
+        return result;
+    } else if ([cleanCmd isEqualToString:@"spotlight"] || [cleanCmd hasPrefix:@"spotlight "]) {
+        // Spotlight, as a keyboard's Command-Space opens it: over the home screen or an app.
+        // "spotlight" opens it, or closes it if it's open; open and close only ever do the one.
+        // SpringBoard's own call, on its main thread.
+        NSString *mode = [[cleanCmd substringFromIndex:9] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]].lowercaseString;
+        if (!mode.length) mode = @"toggle";
+        if (![@[@"toggle", @"open", @"close"] containsObject:mode]) return @"Usage: spotlight [toggle|open|close]\n";
+        __block NSString *result = nil;
+        RCOnMainThreadSync(^{
+            id sb = [UIApplication sharedApplication];
+            SEL toggle = NSSelectorFromString(@"_toggleSearch");
+            if (![sb respondsToSelector:toggle]) { result = @"Error: Spotlight can't be opened on this iOS version\n"; return; }
+            // Whether it's showing: over an app, or on the home screen
+            id icons = [objc_getClass("SBIconController") respondsToSelector:@selector(sharedInstance)] ? [objc_getClass("SBIconController") performSelector:@selector(sharedInstance)] : nil;
+            SEL visibleSel = NSSelectorFromString(@"isAnySearchVisibleOrTransitioning");
+            BOOL visible = g_rcSpotlightOverlayShown || ([icons respondsToSelector:visibleSel] && ((BOOL (*)(id, SEL))objc_msgSend)(icons, visibleSel));
+            if (([mode isEqualToString:@"open"] && visible) || ([mode isEqualToString:@"close"] && !visible)) {
+                result = visible ? @"Spotlight is already open\n" : @"Spotlight isn't open\n";
+                return;
+            }
+            ((void (*)(id, SEL))objc_msgSend)(sb, toggle);
+            result = visible ? @"Spotlight closed\n" : @"Spotlight opened\n";
+        });
+        return result;
+    } else if ([cleanCmd isEqualToString:@"reachability"] || [cleanCmd hasPrefix:@"reachability "]) {
+        // Reachability: the screen's top half slides down within reach, as a swipe down on the bottom
+        // edge does. Needs Settings > Accessibility > Touch > Reachability. SpringBoard's own calls,
+        // on its main thread (its checks assert they're there).
+        NSString *mode = [[cleanCmd substringFromIndex:12] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]].lowercaseString;
+        if (!mode.length) mode = @"toggle";
+        if (![@[@"toggle", @"on", @"off", @"status"] containsObject:mode]) return @"Usage: reachability [toggle|on|off|status]\n";
+        __block NSString *result = nil;
+        RCOnMainThreadSync(^{
+            SBReachabilityManager *manager = [objc_getClass("SBReachabilityManager") respondsToSelector:@selector(sharedInstance)] ? [objc_getClass("SBReachabilityManager") sharedInstance] : nil;
+            if (!manager || ![manager respondsToSelector:@selector(toggleReachability)]) { result = @"Error: Reachability isn't available\n"; return; }
+            BOOL active = [manager respondsToSelector:@selector(reachabilityModeActive)] && [manager reachabilityModeActive];
+            if ([mode isEqualToString:@"status"]) { result = active ? @"Reachability ON\n" : @"Reachability OFF\n"; return; }
+            if ([manager respondsToSelector:@selector(reachabilityEnabled)] && ![manager reachabilityEnabled]) {
+                result = @"Error: Reachability is off in Settings > Accessibility > Touch\n";
+                return;
+            }
+            if ([mode isEqualToString:@"on"] && active) { result = @"Reachability is already on\n"; return; }
+            if ([mode isEqualToString:@"off"] && !active) { result = @"Reachability is already off\n"; return; }
+            if (active && [manager respondsToSelector:@selector(deactivateReachability)]) [manager deactivateReachability];
+            else [manager toggleReachability];
+            result = active ? @"Reachability off\n" : @"Reachability on\n";
         });
         return result;
     } else if ([cleanCmd isEqualToString:@"switcher"] || [cleanCmd isEqualToString:@"app switcher"]) {
@@ -18346,6 +18404,8 @@ static void start_web_server() {
                                     @{@"command": @"camera video [zoom] [flash]", @"desc": @"Camera: Open Camera in Video mode (e.g. 2x, 2x flash)"},
                                     @{@"command": @"open control center", @"desc": @"System: Open Control Center"},
                                     @{@"command": @"island", @"desc": @"System: Show what's in the Dynamic Island"},
+                                    @{@"command": @"spotlight", @"desc": @"System: Open Spotlight (spotlight toggle|open|close)"},
+                                    @{@"command": @"reachability", @"desc": @"System: Toggle Reachability (reachability on|off|status)"},
                                     @{@"command": @"open notification center", @"desc": @"System: Open Notification Center"},
                                     @{@"command": @"app switcher", @"desc": @"System: Open App Switcher"},
                                     @{@"command": @"accessibility shortcut", @"desc": @"System: Run the Accessibility Shortcut"},
@@ -24232,6 +24292,16 @@ static void rc_camera_launched_notification_callback(CFNotificationCenterRef cen
 }
 
 %hook SpringBoard
+
+- (void)spotlightTransientOverlayViewControllerDidPresent:(id)controller {
+    %orig;
+    g_rcSpotlightOverlayShown = YES;
+}
+
+- (void)spotlightTransientOverlayViewControllerWillDismiss:(id)controller {
+    %orig;
+    g_rcSpotlightOverlayShown = NO;
+}
 
 - (void)noteActiveInterfaceOrientationDidChangeToOrientation:(long)orientation willAnimateWithSettings:(id)settings fromOrientation:(long)fromOrientation {
     %orig;
