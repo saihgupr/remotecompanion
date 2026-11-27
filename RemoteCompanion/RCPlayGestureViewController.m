@@ -14,6 +14,8 @@ typedef NS_ENUM(NSInteger, RCPlayGestureSection) {
 @property (nonatomic, copy) NSString *errorText;
 @property (nonatomic, copy) NSString *chosen; // @"" is Latest Recording, nil is none yet
 @property (nonatomic, assign) double speed;
+// Record New Gesture: the name being recorded while the app has stepped aside (nil: none)
+@property (nonatomic, copy) NSString *recordingName;
 @end
 
 @implementation RCPlayGestureViewController
@@ -28,8 +30,13 @@ typedef NS_ENUM(NSInteger, RCPlayGestureSection) {
     return self;
 }
 
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+
 - (void)viewDidLoad {
     [super viewDidLoad];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(appBecameActive) name:UIApplicationDidBecomeActiveNotification object:nil];
     self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
     self.tableView.rowHeight = 56;
     RCConfigManager *cm = [RCConfigManager sharedManager];
@@ -95,7 +102,7 @@ typedef NS_ENUM(NSInteger, RCPlayGestureSection) {
 }
 
 - (NSArray<NSDictionary *> *)gestureRows {
-    NSMutableArray *rows = [NSMutableArray arrayWithObject:@{ @"name": @"", @"latest": @YES }];
+    NSMutableArray *rows = [NSMutableArray arrayWithObjects:@{ @"record": @YES }, @{ @"name": @"", @"latest": @YES }, nil];
     if ([self chosenIsMissing]) [rows addObject:@{ @"name": self.chosen, @"missing": @YES }];
     if (self.loading || self.errorText || self.gestures.count == 0) [rows addObject:@{ @"status": @YES }];
     else [rows addObjectsFromArray:self.gestures];
@@ -115,7 +122,7 @@ typedef NS_ENUM(NSInteger, RCPlayGestureSection) {
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    if (section == RCPlayGestureSectionGesture) return @"Record and manage gestures in Settings > Gestures.";
+    if (section == RCPlayGestureSectionGesture) return @"Record New Gesture steps aside so you can do it on the screen, then tap Stop; it's picked here once saved. Swipe a gesture left, or touch and hold it, to delete it. Manage gestures in Settings > Gestures.";
     return @"Faster or slower playback can change flicks and long presses.";
 }
 
@@ -159,6 +166,14 @@ typedef NS_ENUM(NSInteger, RCPlayGestureSection) {
         }
         return cell;
     }
+    if ([g[@"record"] boolValue]) {
+        cell.textLabel.text = @"Record New Gesture";
+        cell.textLabel.textColor = [UIColor systemBlueColor];
+        cell.detailTextLabel.text = @"Do it on the screen, then tap Stop";
+        cell.imageView.image = [UIImage systemImageNamed:@"record.circle"];
+        cell.imageView.tintColor = [UIColor systemRedColor];
+        return cell;
+    }
     BOOL ticked = self.chosen && [g[@"name"] caseInsensitiveCompare:self.chosen] == NSOrderedSame;
     cell.accessoryType = ticked ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
     if ([g[@"latest"] boolValue]) {
@@ -185,9 +200,188 @@ typedef NS_ENUM(NSInteger, RCPlayGestureSection) {
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     if (![self tableView:tableView shouldHighlightRowAtIndexPath:indexPath]) return;
+    if ([[self gestureRows][indexPath.row][@"record"] boolValue]) {
+        [self askNameAndRecord];
+        return;
+    }
     self.chosen = [self gestureRows][indexPath.row][@"name"];
     [self updateSaveButton];
     [tableView reloadSections:[NSIndexSet indexSetWithIndex:RCPlayGestureSectionGesture] withRowAnimation:UITableViewRowAnimationNone];
+}
+
+#pragma mark - Deleting
+
+// A gesture in the library (not Record New Gesture, Latest Recording, a missing one or a status row)
+- (NSString *)savedGestureAt:(NSIndexPath *)indexPath {
+    if (indexPath.section != RCPlayGestureSectionGesture) return nil;
+    NSArray *rows = [self gestureRows];
+    if (indexPath.row >= (NSInteger)rows.count) return nil;
+    NSDictionary *g = rows[indexPath.row];
+    if ([g[@"record"] boolValue] || [g[@"latest"] boolValue] || [g[@"missing"] boolValue] || [g[@"status"] boolValue]) return nil;
+    return g[@"name"];
+}
+
+// Swipe left on a gesture, as in Settings > Gestures
+- (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
+    NSString *name = [self savedGestureAt:indexPath];
+    if (!name) return nil;
+    __weak typeof(self) weakSelf = self;
+    UIContextualAction *delete = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleDestructive title:@"Delete"
+        handler:^(UIContextualAction *action, UIView *view, void (^done)(BOOL)) {
+        [weakSelf confirmDelete:name];
+        done(YES);
+    }];
+    delete.image = [UIImage systemImageNamed:@"trash"];
+    return [UISwipeActionsConfiguration configurationWithActions:@[delete]];
+}
+
+// Or touch and hold it
+- (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoint)point {
+    NSString *name = [self savedGestureAt:indexPath];
+    if (!name) return nil;
+    __weak typeof(self) weakSelf = self;
+    return [UIContextMenuConfiguration configurationWithIdentifier:nil previewProvider:nil actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggested) {
+        UIAction *delete = [UIAction actionWithTitle:@"Delete" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(UIAction *a) {
+            [weakSelf confirmDelete:name];
+        }];
+        delete.attributes = UIMenuElementAttributesDestructive;
+        return [UIMenu menuWithTitle:name children:@[delete]];
+    }];
+}
+
+- (void)confirmDelete:(NSString *)name {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Delete Gesture?"
+        message:[NSString stringWithFormat:@"“%@” is deleted from the library. Actions that play it stop working.", name] preferredStyle:UIAlertControllerStyleAlert];
+    __weak typeof(self) weakSelf = self;
+    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Delete" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
+        NSString *command = [NSString stringWithFormat:@"gesture delete \"%@\"", name];
+        [[RCServerClient sharedClient] executeCommand:command completion:^(NSString *output, NSError *error) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                if (!strongSelf) return;
+                if (error || [output hasPrefix:@"Error"]) {
+                    [strongSelf showMessage:@"Couldn't Delete" detail:error.localizedDescription ?: [output stringByReplacingOccurrencesOfString:@"Error: " withString:@""]];
+                    return;
+                }
+                // The gesture this action was going to play is gone: pick another
+                if (strongSelf.chosen.length && [strongSelf.chosen caseInsensitiveCompare:name] == NSOrderedSame) {
+                    strongSelf.chosen = nil;
+                    [strongSelf updateSaveButton];
+                }
+                [strongSelf reload];
+            });
+        }];
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+#pragma mark - Recording
+
+- (BOOL)hasGestureNamed:(NSString *)name {
+    for (NSDictionary *g in self.gestures) if ([g[@"name"] caseInsensitiveCompare:name] == NSOrderedSame) return YES;
+    return NO;
+}
+
+- (NSString *)suggestedName {
+    for (NSInteger n = 1; ; n++) {
+        NSString *name = [NSString stringWithFormat:@"Gesture %ld", (long)n];
+        if (![self hasGestureNamed:name]) return name;
+    }
+}
+
+// The same names Settings > Gestures allows: quotes would break the command
+- (NSString *)cleanName:(NSString *)name {
+    NSString *clean = [[name ?: @"" stringByReplacingOccurrencesOfString:@"\"" withString:@""] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    return clean;
+}
+
+- (void)askNameAndRecord {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"New Gesture"
+        message:@"The app steps aside and counts down. Do the gesture, then tap Stop." preferredStyle:UIAlertControllerStyleAlert];
+    NSString *suggested = [self suggestedName];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
+        field.placeholder = suggested;
+        field.autocapitalizationType = UITextAutocapitalizationTypeWords;
+        field.clearButtonMode = UITextFieldViewModeWhileEditing;
+    }];
+    __weak typeof(self) weakSelf = self;
+    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    UIAlertAction *record = [UIAlertAction actionWithTitle:@"Record" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        NSString *name = [strongSelf cleanName:alert.textFields.firstObject.text];
+        if (name.length == 0) name = suggested;
+        if ([strongSelf hasGestureNamed:name]) [strongSelf confirmReplace:name];
+        else [strongSelf record:name];
+    }];
+    [alert addAction:record];
+    alert.preferredAction = record;
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)confirmReplace:(NSString *)name {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Replace Gesture?"
+        message:[NSString stringWithFormat:@"A gesture named “%@” already exists. A new recording replaces it, for every action that plays it.", name]
+        preferredStyle:UIAlertControllerStyleAlert];
+    __weak typeof(self) weakSelf = self;
+    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Replace" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) { [weakSelf record:name]; }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+// As in Settings > Gestures: the app steps aside, the tweak counts down, records until Stop and
+// opens the app again, here
+- (void)record:(NSString *)name {
+    NSString *command = [NSString stringWithFormat:@"gesture record \"%@\" return", name];
+    __weak typeof(self) weakSelf = self;
+    [[RCServerClient sharedClient] executeCommand:command completion:^(NSString *output, NSError *error) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) return;
+            if (error || [output hasPrefix:@"Error"]) {
+                [strongSelf showMessage:@"Couldn't Record" detail:error.localizedDescription ?: [output stringByReplacingOccurrencesOfString:@"Error: " withString:@""]];
+                return;
+            }
+            strongSelf.recordingName = name;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wundeclared-selector"
+            if ([[UIApplication sharedApplication] respondsToSelector:@selector(suspend)]) {
+                [[UIApplication sharedApplication] performSelector:@selector(suspend)];
+            }
+#pragma clang diagnostic pop
+        });
+    }];
+}
+
+// Back from recording: the new gesture is picked (Save keeps it), or what went wrong is said
+- (void)appBecameActive {
+    if (!self.recordingName) return;
+    __weak typeof(self) weakSelf = self;
+    [[RCServerClient sharedClient] executeCommand:@"gesture record-status" completion:^(NSString *output, NSError *error) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) return;
+            NSString *status = [output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] ?: @"";
+            if ([status isEqualToString:@"recording"] || [status isEqualToString:@"naming"]) return; // opened again before Stop
+            NSString *name = strongSelf.recordingName;
+            strongSelf.recordingName = nil;
+            if ([status hasPrefix:@"saved\t"]) {
+                strongSelf.chosen = [status substringFromIndex:6].length ? [status substringFromIndex:6] : name;
+                [strongSelf updateSaveButton];
+            } else if ([status isEqualToString:@"empty"]) {
+                [strongSelf showMessage:@"Nothing Recorded" detail:@"No touches were recorded before Stop."];
+            } else if ([status isEqualToString:@"failed"]) {
+                [strongSelf showMessage:@"Couldn't Save" detail:@"The recording couldn't be saved."];
+            }
+            [strongSelf reload];
+        });
+    }];
+}
+
+- (void)showMessage:(NSString *)title detail:(NSString *)detail {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:title message:detail preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 
 #pragma mark - Speed
