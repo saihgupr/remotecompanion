@@ -3590,13 +3590,13 @@ const TRIGGER_NAMES = {
   trigger_statusbar_right_hold:'Status Bar Right Hold', trigger_statusbar_swipe_left:'Status Bar Swipe Left',
   trigger_statusbar_swipe_right:'Status Bar Swipe Right', trigger_statusbar_double_tap:'Status Bar Double Tap',
   trigger_statusbar_swipe_down_left:'Top Swipe Down (Left)', trigger_statusbar_swipe_down_center:'Top Swipe Down (Center)', trigger_statusbar_swipe_down_right:'Top Swipe Down (Right)',
-  trigger_home_double_click:'Home (Double Click)', trigger_home_triple_click:'Home (Triple Click)',
-  trigger_home_hold:'Home (Hold)', trigger_home_power:'Home + Power',
-  trigger_home_quadruple_click:'Home (Quadruple Click)',
-  touchid_tap:'Touch ID Tap', touchid_hold:'Touch ID Hold (Rest Finger)',
+  trigger_home_double_click:'Home Button (Double Click)', trigger_home_triple_click:'Home Button (Triple Click)',
+  trigger_home_hold:'Home Button (Hold)', trigger_home_power:'Home + Power',
+  trigger_home_quadruple_click:'Home Button (Quadruple Click)',
+  touchid_tap:'Touch ID Single Tap', touchid_hold:'Touch ID Hold (Rest Finger)',
   trigger_edge_left_swipe_up:'Left Edge Swipe Up', trigger_edge_left_swipe_down:'Left Edge Swipe Down',
   trigger_edge_right_swipe_up:'Right Edge Swipe Up', trigger_edge_right_swipe_down:'Right Edge Swipe Down',
-  trigger_ringer_mute:'Ringer Muted', trigger_ringer_unmute:'Ringer Unmuted', trigger_ringer_toggle:'Ringer Toggled',
+  trigger_ringer_mute:'Ringer Muted (Silent Mode On)', trigger_ringer_unmute:'Ringer Unmuted (Silent Mode Off)', trigger_ringer_toggle:'Ringer Toggled (Any Change)',
   trigger_watch_ping:'Ping iPhone', trigger_watch_ping_hold:'Ping iPhone (Hold)',
   trigger_bottombar_swipe_left:'Bottom Bar Swipe Left', trigger_bottombar_swipe_right:'Bottom Bar Swipe Right',
   trigger_bottom_swipe_up_left:'Bottom Swipe Up (Left)', trigger_bottom_swipe_up_center:'Bottom Swipe Up (Center)', trigger_bottom_swipe_up_right:'Bottom Swipe Up (Right)',
@@ -4291,6 +4291,29 @@ function nameForCmd(cmd) {
     return `${toggleInfo.name} ${toggleInfo.currentDisplaySuffix}`;
   }
   const lowCmd = cmd.toLowerCase().trim();
+  // SSH and Remote actions show the computer or client name, like the app's rows
+  if (lowCmd.startsWith('ssh-run ')) {
+    const rest = cmd.slice(8);
+    const sp = rest.indexOf(' ');
+    if (sp > 0) {
+      const hosts = (config && Array.isArray(config.sshHosts)) ? config.sshHosts : [];
+      const host = hosts.find(h => h && h.id === rest.slice(0, sp));
+      const hostName = (host && (host.name || host.host)) || 'SSH';
+      return `SSH ${hostName}: ${rest.slice(sp + 1)}`;
+    }
+    return `SSH: ${rest}`;
+  }
+  if (lowCmd.startsWith('rc-run ')) {
+    const rest = cmd.slice(7);
+    const sp = rest.indexOf(' ');
+    if (sp > 0) {
+      const clients = (config && Array.isArray(config.rcClients)) ? config.rcClients : [];
+      const client = clients.find(c => c && c.id === rest.slice(0, sp));
+      const clientName = (client && (client.name || client.host)) || 'Missing Client';
+      return `Remote ${clientName}: ${nameForCmd(rest.slice(sp + 1))}`;
+    }
+    return `Remote: ${rest}`;
+  }
   if (CMD_NAMES[lowCmd]) return CMD_NAMES[lowCmd];
   if (lowCmd.startsWith('camera') || lowCmd.startsWith('open camera')) {
     let modeName = 'Photo';
@@ -4576,6 +4599,7 @@ function iconForCmd(cmd) {
   if (lowCmd.startsWith('uiopen '))       return { icon:'app_badge_fill',  cls:'icon-pink' };
   if (lowCmd.startsWith('kill '))         return { icon:'xmark_circle_fill', cls:'icon-red' };
   if (lowCmd.startsWith('exec ') || lowCmd.startsWith('root ')) return { icon:'chevron_right_square_fill', cls:'icon-dark' };
+  if (lowCmd.startsWith('ssh-run ') || lowCmd.startsWith('rc-run ')) return { icon:'chevron_right_square_fill', cls:'icon-dark' };
   if (lowCmd.startsWith('trigger_statusbar_swipe_down')) return { icon:'arrow_down_to_line', cls:'icon-indigo' };
   if (lowCmd.startsWith('trigger_bottom_swipe_up')) return { icon:'arrow_up_to_line', cls:'icon-indigo' };
   if (lowCmd.startsWith('trigger_bottombar')) return { icon:'square_stack_3d_up_fill', cls:'icon-gray' };
