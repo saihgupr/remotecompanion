@@ -23482,7 +23482,122 @@ static BOOL should_suppress_bottom_edge_gesture(CGPoint loc, UIInterfaceOrientat
     return RC_TriggerIsActionable(triggerKey);
 }
 
-// ============ DYNAMIC ISLAND TAP + HOLD =====}
+// ============ DYNAMIC ISLAND TAP + HOLD ============
+// A touch that starts on the island (in portrait, with the island not expanded) runs Dynamic Island
+// Tap when it's let go quickly, or Dynamic Island Hold after half a second, and the status bar's
+// zones don't see it. SpringBoard gets each touch twice: through the system gesture window, and on
+// the island's own window. Unless the triggers set keep the default action, the island's copy is
+// held back, so iOS doesn't open or expand the Live Activity as well.
+typedef NS_ENUM(NSInteger, RCIslandTouch) { RCIslandTouchNotOurs, RCIslandTouchOurs, RCIslandTouchHeldBack };
+static BOOL g_islandTouchActive = NO;
+static BOOL g_islandHoldFired = NO;
+static BOOL g_islandMovedAway = NO;
+static BOOL g_islandHoldBack = NO;
+static BOOL g_islandSawGestureCopy = NO; // the system gesture window's copy, which ends when the finger lifts
+static NSTimeInterval g_islandTouchBeganTime = 0;
+static CGPoint g_islandTouchStart;
+static NSTimer *g_islandHoldTimer = nil;
+static NSHashTable<UITouch *> *g_islandHeldBackTouches = nil;
+
+static BOOL rc_island_expanded(void) {
+    for (id element in rc_island_elements()) {
+        if (rc_island_element_layout_mode(element) >= 3) return YES;
+    }
+    return NO;
+}
+
+static void rc_island_end_touch(void) {
+    g_islandTouchActive = NO;
+    [g_islandHoldTimer invalidate];
+    g_islandHoldTimer = nil;
+}
+
+static RCIslandTouch rc_island_handle_touch(UITouch *touch, UIInterfaceOrientation orientation) {
+    BOOL onIslandWindow = [touch.window isKindOfClass:objc_getClass("SBSystemApertureWindow")];
+    if (!g_islandHeldBackTouches) g_islandHeldBackTouches = [NSHashTable weakObjectsHashTable];
+    BOOL heldBack = onIslandWindow && [g_islandHeldBackTouches containsObject:touch];
+    CGPoint loc = [touch locationInView:nil];
+
+    if (touch.phase == UITouchPhaseBegan) {
+        // The second copy of a touch already being followed
+        BOOL sameTouch = g_islandTouchActive && fabs(touch.timestamp - g_islandTouchBeganTime) < 0.05 &&
+                         hypot(loc.x - g_islandTouchStart.x, loc.y - g_islandTouchStart.y) < 3;
+        if (!sameTouch) {
+            rc_island_end_touch();
+            if (orientation != UIInterfaceOrientationPortrait || loc.y > 90) return RCIslandTouchNotOurs;
+            load_trigger_config();
+            BOOL tapOn = rc_status_bar_trigger_enabled(@"trigger_island_tap");
+            BOOL holdOn = rc_status_bar_trigger_enabled(@"trigger_island_hold");
+            if (!tapOn && !holdOn) return RCIslandTouchNotOurs;
+            CGRect island = rc_island_frame();
+            if (CGRectIsNull(island)) return RCIslandTouchNotOurs;
+            // A little room around it, and up to the top edge
+            CGRect hit = CGRectMake(CGRectGetMinX(island) - 10, 0, CGRectGetWidth(island) + 20, CGRectGetMaxY(island) + 8);
+            if (!CGRectContainsPoint(hit, loc) || rc_island_expanded()) return RCIslandTouchNotOurs;
+
+            g_islandTouchActive = YES;
+            g_islandHoldFired = NO;
+            g_islandMovedAway = NO;
+            g_islandTouchBeganTime = touch.timestamp;
+            g_islandTouchStart = loc;
+            g_islandSawGestureCopy = NO;
+            g_islandHoldBack = (tapOn && ![g_triggerConfig[@"triggers"][@"trigger_island_tap"][@"keepDefault"] boolValue]) ||
+                               (holdOn && ![g_triggerConfig[@"triggers"][@"trigger_island_hold"][@"keepDefault"] boolValue]);
+            SRLogMin(@"[RCIsland] Touch began at (%.0f, %.0f), tap=%d hold=%d holdBack=%d", loc.x, loc.y, tapOn, holdOn, g_islandHoldBack);
+            if (holdOn) {
+                g_islandHoldTimer = [NSTimer scheduledTimerWithTimeInterval:0.5 repeats:NO block:^(NSTimer *timer) {
+                    g_islandHoldTimer = nil;
+                    if (!g_islandTouchActive || g_islandMovedAway) return;
+                    g_islandHoldFired = YES;
+                    SRLogMin(@"[RCIsland] Hold");
+                    RCTriggerHapticFor(@"trigger_island_hold");
+                    RCExecuteTrigger(@"trigger_island_hold");
+                    SRLog(@"trigger_island_hold FIRED!");
+                }];
+            }
+        }
+        if (!g_islandTouchActive) return RCIslandTouchNotOurs;
+        if (!onIslandWindow) g_islandSawGestureCopy = YES;
+        if (onIslandWindow && g_islandHoldBack) {
+            [g_islandHeldBackTouches addObject:touch];
+            return RCIslandTouchHeldBack;
+        }
+        return RCIslandTouchOurs;
+    }
+
+    if (touch.phase == UITouchPhaseEnded || touch.phase == UITouchPhaseCancelled) {
+        if (heldBack) [g_islandHeldBackTouches removeObject:touch];
+        if (g_islandTouchActive) {
+            SRLogMin(@"[RCIsland] Touch %@ on %@ after %.2f s", touch.phase == UITouchPhaseEnded ? @"ended" : @"cancelled",
+                     NSStringFromClass([touch.window class]), touch.timestamp - g_islandTouchBeganTime);
+            // The island's own copy ends early when iOS takes the touch for its long press; the finger
+            // is still down until the system gesture window's copy ends
+            if (onIslandWindow && g_islandSawGestureCopy) return heldBack ? RCIslandTouchHeldBack : RCIslandTouchOurs;
+        }
+        if (g_islandTouchActive) {
+            if (touch.phase == UITouchPhaseEnded && !g_islandHoldFired && !g_islandMovedAway &&
+                rc_status_bar_trigger_enabled(@"trigger_island_tap")) {
+                RCTriggerHapticFor(@"trigger_island_tap");
+                RCExecuteTrigger(@"trigger_island_tap");
+                SRLog(@"trigger_island_tap FIRED!");
+            }
+            rc_island_end_touch();
+            return heldBack ? RCIslandTouchHeldBack : RCIslandTouchOurs;
+        }
+        return heldBack ? RCIslandTouchHeldBack : RCIslandTouchNotOurs;
+    }
+
+    // Moved or still: a touch that slides off isn't a tap or a hold
+    if (g_islandTouchActive && !g_islandMovedAway &&
+        hypot(loc.x - g_islandTouchStart.x, loc.y - g_islandTouchStart.y) > 15) {
+        g_islandMovedAway = YES;
+        [g_islandHoldTimer invalidate];
+        g_islandHoldTimer = nil;
+    }
+    if (heldBack) return RCIslandTouchHeldBack;
+    return g_islandTouchActive ? RCIslandTouchOurs : RCIslandTouchNotOurs;
+}
+
 
 %hook UIApplication
 
