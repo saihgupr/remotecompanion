@@ -4012,7 +4012,7 @@ const TRIGGER_ICONS = {
   trigger_bottom_swipe_down_right:  { icon:'arrow_down_to_line', cls:'icon-indigo' },
   trigger_ringer_mute:   { icon:'bell_slash_fill', cls:'icon-red' },
   trigger_ringer_unmute: { icon:'bell_fill',       cls:'icon-green' },
-  trigger_ringer_toggle: { icon:'bell_badge_fill', cls:'icon-orange' },
+  trigger_ringer_toggle: { icon:'bell_circle_fill', cls:'icon-orange' },
   trigger_watch_ping:      { icon:'dot_radiowaves_left_right', cls:'icon-blue' },
   trigger_watch_ping_hold: { icon:'dot_radiowaves_left_right', cls:'icon-blue' },
   trigger_watch_connect:   { icon:'dot_radiowaves_left_right', cls:'icon-green' },
@@ -4260,7 +4260,7 @@ function offIntegrationForCmd(action) {
 
 function iconForKey(key) {
   if (TRIGGER_ICONS[key]) return TRIGGER_ICONS[key];
-  if (key.startsWith('trigger_cc_button_')) return { icon:'switch_2', cls:'icon-blue' };
+  if (key.startsWith('trigger_cc_button_')) return { icon:'slider_horizontal_3', cls:'icon-blue' };
   if (key.startsWith('trigger_watch_face_')) return { icon:'timer', cls:'icon-blue' };
   if (key.startsWith('trigger_watch_battery_above_')) return { icon:'battery_100', cls:'icon-green' };
   if (key.startsWith('trigger_watch_battery_below_')) return { icon:'battery_25', cls:'icon-orange' };
@@ -4272,8 +4272,8 @@ function iconForKey(key) {
   if (key.startsWith('wifi_'))       return { icon:'wifi',                          cls:'icon-blue' };
   if (key.startsWith('trigger_device_battery_above_')) return { icon:'battery_100', cls:'icon-green' };
   if (key.startsWith('trigger_device_battery_below_')) return { icon:'battery_25', cls:'icon-orange' };
-  if (key.startsWith('output_set_')) return { icon:'airplayaudio', cls:'icon-green' };
-  if (key.startsWith('output_')) return { icon:'airplayaudio', cls:'icon-indigo' };
+  if (key.startsWith('output_set_')) return { icon:'speaker_2_fill', cls:'icon-green' };
+  if (key.startsWith('output_')) return { icon:'speaker_2_fill', cls:'icon-indigo' };
   if (key.startsWith('bt_connect_')) return { icon:'bolt_horizontal_fill', cls:'icon-green' };
   if (key.startsWith('bt_disconnect_')) return { icon:'bolt_horizontal', cls:'icon-orange' };
   if (key.startsWith('bt_'))         return { icon:'bolt_horizontal_fill',          cls:'icon-indigo' };
@@ -4287,7 +4287,7 @@ function iconForKey(key) {
   if (key.startsWith('mqtt_sub_') || key.startsWith('mqtt_')) return { icon:'antenna_radiowaves_left_right', cls:'icon-blue' };
   if (key.startsWith('trigger_two_finger_rotate_')) return { icon:'rotate_right', cls:'icon-gray' };
   if (key.startsWith('trigger_two_finger_swipe_')) return { icon:'hand_draw', cls:'icon-gray' };
-  return { icon:'hand_tap', cls:'icon-gray' };
+  return { icon:'hand_point_left', cls:'icon-gray' };
 }
 
 // Created triggers (a tag, a network, a device, an app, a notification, a time, a topic) can
@@ -4949,7 +4949,7 @@ function formatHACommandName(cmd) {
 }
 
 function iconForCmd(cmd) {
-  if (!cmd) return { icon:'questionmark', cls:'icon-gray' };
+  if (!cmd) return { icon:'question', cls:'icon-gray' };
   const addOn = addOnMatch(cmd);
   if (addOn) return { icon: addOnIcon(addOn.addOn), cls: 'icon-purple' };
   if (typeof cmd === 'object') {
@@ -4957,7 +4957,7 @@ function iconForCmd(cmd) {
       return iconForCmd(cmd.command);
     }
     const t = (cmd.type||'').toLowerCase();
-    if (t === 'if' || t === 'else_if' || t === 'else') return { icon:'arrow_triangle_branch', cls:'icon-purple' };
+    if (t === 'if' || t === 'else_if' || t === 'else') return { icon:'arrow_branch', cls:'icon-purple' };
     if (t === 'end_if' || t === 'end') return { icon:'arrow_turn_up_left', cls:'icon-purple' };
     if (t === 'end_repeat') return { icon:'arrow_turn_up_left', cls:'icon-green' };
     if (t === 'exit_repeat') return { icon:'arrow_right_to_line', cls:'icon-green' };
@@ -4980,7 +4980,7 @@ function iconForCmd(cmd) {
     'airplane on':'airplane','airplane off':'airplane','airplane toggle':'airplane',
     'lock':'lock_fill','unlock':'lock_open_fill','lock-toggle':'lock_fill','lock toggle':'lock_fill','unlock-passcode forget':'lock_fill',
     'dnd on':'moon_fill','dnd off':'moon','dnd toggle':'moon_circle_fill',
-    'audiomix on':'equalizer','audiomix off':'equalizer','audiomix toggle':'equalizer',
+    'audiomix on':'slider_horizontal_3','audiomix off':'slider_horizontal_3','audiomix toggle':'slider_horizontal_3',
     'audiohandoff enabled on':'headphones','audiohandoff enabled off':'headphones','audiohandoff enabled toggle':'headphones','audiohandoff auto on':'headphones','audiohandoff auto off':'headphones','audiohandoff auto toggle':'headphones',
     'respring':'arrow_2_circlepath','safemode':'shield_slash_fill','safe-mode':'shield_slash_fill','siri':'mic_fill','accessibility shortcut':'person_crop_circle','home':'house_fill',
     'open control center':'gear',
@@ -4991,13 +4991,13 @@ function iconForCmd(cmd) {
     'watch theater':'eye_slash_fill','watch theater on':'eye_slash_fill','watch theater off':'eye_slash_fill','watch theater toggle':'eye_slash_fill',
     'autolock toggle':'timer','autolock 30s':'timer','autolock 1m':'timer','autolock 2m':'timer','autolock 3m':'timer','autolock 4m':'timer','autolock 5m':'timer','autolock never':'timer',
     'screenshot':'camera_viewfinder','haptic':'hand_raised_fill',
-    'screenrecord':'record_circle_fill','screenrecord toggle':'record_circle_fill','screenrecord start':'record_circle_fill','screenrecord stop':'stop_circle_fill',
-    'snapper':'crop','snapper open':'crop','snapper freeze':'snowflake','snapper instant':'bolt_circle_fill','snapper close':'xmark_rectangle_fill',
+    'screenrecord':'smallcircle_fill_circle_fill','screenrecord toggle':'smallcircle_fill_circle_fill','screenrecord start':'smallcircle_fill_circle_fill','screenrecord stop':'stop_circle_fill',
+    'snapper':'crop','snapper open':'crop','snapper freeze':'snow','snapper instant':'bolt_circle_fill','snapper close':'xmark_rectangle_fill',
     'sneakycam photo':'camera_filters','sneakycam video':'eye_slash_fill',
     'mute':'speaker_slash_fill','mute on':'speaker_slash_fill','mute off':'speaker_3_fill','mute toggle':'speaker_slash_fill',
   };
   const lowCmd = cmd.toLowerCase().trim();
-  if (lowCmd.startsWith('snapper freeze')) return { icon:'snowflake', cls:'icon-blue' };
+  if (lowCmd.startsWith('snapper freeze')) return { icon:'snow', cls:'icon-blue' };
   if (lowCmd.startsWith('snapper instant')) return { icon:'bolt_circle_fill', cls:'icon-orange' };
   if (lowCmd.startsWith('snapper close')) return { icon:'xmark_rectangle_fill', cls:'icon-red' };
   if (lowCmd.startsWith('snapper')) return { icon:'crop', cls:'icon-purple' };
@@ -5007,7 +5007,7 @@ function iconForCmd(cmd) {
     if (lowCmd.includes('flash') || lowCmd.includes('torch')) return { icon:'bolt_fill', cls:'icon-orange' };
     if (lowCmd.includes('front') || lowCmd.includes('selfie')) return { icon:'person_fill', cls:'icon-blue' };
     if (lowCmd.includes('portrait')) return { icon:'person_crop_square', cls:'icon-purple' };
-    if (lowCmd.includes('video') || lowCmd.includes('slomo') || lowCmd.includes('timelapse') || lowCmd.includes('cinematic') || lowCmd.includes('2x')) return { icon:'video_fill', cls:'icon-indigo' };
+    if (lowCmd.includes('video') || lowCmd.includes('slomo') || lowCmd.includes('timelapse') || lowCmd.includes('cinematic') || lowCmd.includes('2x')) return { icon:'videocam_fill', cls:'icon-indigo' };
     return { icon:'camera_fill', cls:'icon-indigo' };
   }
   if (lowCmd.startsWith('sneakycam photo') || lowCmd === 'sneakycam takephoto') return { icon:'camera_filters', cls:'icon-purple' };
@@ -5027,10 +5027,10 @@ function iconForCmd(cmd) {
   if (lowCmd.startsWith('delay '))        return { icon:'hourglass',           cls:'icon-orange' };
   if (lowCmd.startsWith('bt connect '))   return { icon:'link',            cls:'icon-indigo' };
   if (lowCmd.startsWith('focus '))        return { icon:'moon_circle_fill', cls:'icon-indigo' };
-  if (lowCmd.startsWith('airplay connect ')) return { icon:'airplayvideo',     cls:'icon-blue' };
+  if (lowCmd.startsWith('airplay connect ')) return { icon:'tv',     cls:'icon-blue' };
   if (lowCmd === 'watch theater' || lowCmd.startsWith('watch theater ')) return { icon:'eye_slash_fill', cls:'icon-purple' };
   if (lowCmd === 'watch silent' || lowCmd.startsWith('watch silent ')) return { icon:'bell_slash_fill', cls:'icon-red' };
-  if (lowCmd === 'watch wake' || lowCmd.startsWith('watch wake ')) return { icon:'hand_tap', cls:'icon-blue' };
+  if (lowCmd === 'watch wake' || lowCmd.startsWith('watch wake ')) return { icon:'hand_point_left', cls:'icon-blue' };
   if (lowCmd === 'watch water' || lowCmd.startsWith('watch water ')) return { icon:'lock_fill', cls:'icon-blue' };
   if (lowCmd === 'watch alwayson' || lowCmd.startsWith('watch alwayson ')) return { icon:'sun_max_fill', cls:'icon-yellow' };
   if (lowCmd.startsWith('watch face')) return { icon:'timer', cls:'icon-blue' };
@@ -5050,11 +5050,11 @@ function iconForCmd(cmd) {
   if (lowCmd.startsWith('trigger_bottom_swipe_down')) return { icon:'arrow_down_to_line', cls:'icon-indigo' };
   if (lowCmd.startsWith('trigger_bottombar')) return { icon:'square_stack_3d_up_fill', cls:'icon-gray' };
   // Recorded gestures
-  if (lowCmd.startsWith('gesture record-toggle')) return { icon:'record_circle_fill', cls:'icon-red' };
+  if (lowCmd.startsWith('gesture record-toggle')) return { icon:'smallcircle_fill_circle_fill', cls:'icon-red' };
   if (lowCmd.startsWith('gesture play')) return { icon:'hand_draw', cls:'icon-teal' };
   // Touch gestures
-  if (lowCmd.startsWith('tap '))   return { icon:'hand_tap',         cls:'icon-teal' };
-  if (lowCmd.startsWith('hold '))  return { icon:'hand_tap_fill',    cls:'icon-teal' };
+  if (lowCmd.startsWith('tap '))   return { icon:'hand_point_left',         cls:'icon-teal' };
+  if (lowCmd.startsWith('hold '))  return { icon:'hand_point_left_fill',    cls:'icon-teal' };
   if (lowCmd.startsWith('swipe')) return { icon:'hand_draw',         cls:'icon-teal' };
   return { icon:'bolt_fill', cls:'icon-dark' };
 }
@@ -5086,9 +5086,9 @@ const ACTION_SECTIONS = [
   ]},
   { title:'Capture', actions:[
     { name:'Screenshot',        cmd:'screenshot',    icon:'camera_viewfinder' },
-    { name:'Screen Recording',  cmd:'screenrecord toggle', icon:'record_circle_fill', is_toggle:true },
+    { name:'Screen Recording',  cmd:'screenrecord toggle', icon:'smallcircle_fill_circle_fill', is_toggle:true },
     { name:'Open Camera…',       cmd:'__CAMERA_PICKER__', icon:'camera_fill', needs_input:true },
-    { name:'Open Video Camera…', cmd:'__CAMERA_VIDEO_PICKER__', icon:'video_fill', needs_input:true },
+    { name:'Open Video Camera…', cmd:'__CAMERA_VIDEO_PICKER__', icon:'videocam_fill', needs_input:true },
     { name:'Camera Shutter / Snap', cmd:'camera shutter', icon:'camera_circle_fill' },
     { name:'Camera Record Toggle', cmd:'camera record', icon:'videocam_circle_fill' },
   ]},
@@ -5098,14 +5098,14 @@ const ACTION_SECTIONS = [
     { name:'Kill Current App',  cmd:'kill current',  icon:'xmark_circle_fill' },
     { name:'Home Button',       cmd:'home',          icon:'house_fill' },
     { name:'App Switcher',      cmd:'switcher',      icon:'square_stack_3d_up_fill' },
-    { name:'Previous App',      cmd:'previous app',  icon:'arrow_uturn_backward' },
+    { name:'Previous App',      cmd:'previous app',  icon:'arrow_uturn_left' },
     { name:'Control Center',    cmd:'open control center',icon:'gear' },
     { name:'Spotlight',         cmd:'spotlight',          icon:'search' },
     { name:'Reachability',      cmd:'reachability',       icon:'arrow_down_to_line' },
     { name:'Notification Center', cmd:'open notification center',icon:'bell_fill' },
     { name:'Activate Siri',     cmd:'siri',          icon:'mic_fill' },
     { name:'Play Gesture…',     cmd:'__PLAY_GESTURE__', icon:'hand_draw', needs_input:true },
-    { name:'Record Gesture',    cmd:'gesture record-toggle', icon:'record_circle_fill' },
+    { name:'Record Gesture',    cmd:'gesture record-toggle', icon:'smallcircle_fill_circle_fill' },
     { name:'Accessibility Shortcut', cmd:'accessibility shortcut', icon:'person_crop_circle' },
   ]},
   { title:'Device Controls', actions:[
@@ -5130,7 +5130,7 @@ const ACTION_SECTIONS = [
   { title:'Apple Watch', actions:[
     { name:'Theater Mode',       cmd:'watch theater toggle', icon:'eye_slash_fill', is_toggle:true, keywords:'watch theater theatre cinema mode silent display toggle' },
     { name:'Silent Mode',        cmd:'watch silent toggle', icon:'bell_slash_fill', is_toggle:true, keywords:'watch silent mute sound vibrate toggle' },
-    { name:'Wake on Wrist Raise',cmd:'watch wake toggle', icon:'hand_tap', is_toggle:true, keywords:'watch wake wrist raise screen display toggle' },
+    { name:'Wake on Wrist Raise',cmd:'watch wake toggle', icon:'hand_point_left', is_toggle:true, keywords:'watch wake wrist raise screen display toggle' },
     { name:'Water Lock',         cmd:'watch water toggle', icon:'lock_fill', is_toggle:true, keywords:'watch water lock swim eject toggle' },
     { name:'Always On Display',  cmd:'watch alwayson toggle', icon:'sun_max_fill', is_toggle:true, keywords:'watch always on display screen toggle' },
     { name:'Switch Watch Face…', cmd:'__WATCH_FACE__', icon:'timer', needs_input:true, keywords:'watch face switch change cycle next prev' },
@@ -5142,8 +5142,8 @@ const ACTION_SECTIONS = [
     { name:'Airplane Mode',     cmd:'airplane toggle',icon:'airplane', is_toggle:true },
     { name:'Connect Bluetooth…',cmd:'__BT_CONNECT__',icon:'link', needs_input:true },
     { name:'Disconnect Bluetooth…',cmd:'__BT_DISCONNECT__',icon:'xmark_circle', needs_input:true },
-    { name:'Connect AirPlay…',   cmd:'__AIRPLAY_CONNECT__',icon:'airplayaudio', needs_input:true },
-    { name:'Disconnect AirPlay',cmd:'airplay disconnect',icon:'airplayaudio' },
+    { name:'Connect AirPlay…',   cmd:'__AIRPLAY_CONNECT__',icon:'speaker_2_fill', needs_input:true },
+    { name:'Disconnect AirPlay',cmd:'airplay disconnect',icon:'speaker_2_fill' },
   ]},
   { title:'System', actions:[
     { name:'Respring',          cmd:'respring',      icon:'arrow_2_circlepath' },
@@ -5154,19 +5154,19 @@ const ACTION_SECTIONS = [
     { name:'Home Assistant: Control Entity…',  cmd:'__HA_PICKER__', icon:'house_fill', needs_input:true },
     { name:'Keyboard Maestro: Trigger Macro…',cmd:'__KM_TRIGGER__', icon:'command', needs_input:true },
     { name:'MQTT: Publish Topic…',            cmd:'__MQTT_PUBLISH__', icon:'dot_radiowaves_left_right', needs_input:true },
-    { name:'REST API Call…',                  cmd:'__HTTP_REQUEST__', icon:'network', needs_input:true, keywords:'http rest api request url webhook curl' },
+    { name:'REST API Call…',                  cmd:'__HTTP_REQUEST__', icon:'globe', needs_input:true, keywords:'http rest api request url webhook curl' },
     { name:'Shortcuts: Run Shortcut…',        cmd:'__SHORTCUT__',  icon:'wand_stars', needs_input:true },
     { name:'Snapper: Open Area',              cmd:'snapper open',  icon:'crop', group:'Snapper', groupIcon:'crop' },
-    { name:'Snapper: Freeze Screen',          cmd:'snapper freeze', icon:'snowflake', group:'Snapper', groupIcon:'crop' },
+    { name:'Snapper: Freeze Screen',          cmd:'snapper freeze', icon:'snow', group:'Snapper', groupIcon:'crop' },
     { name:'Snapper: Instant Snap',           cmd:'snapper instant', icon:'bolt_circle_fill', group:'Snapper', groupIcon:'crop' },
     { name:'Snapper: Close All',              cmd:'snapper close', icon:'xmark_rectangle_fill', group:'Snapper', groupIcon:'crop' },
     { name:'SneakyCam: Take Photo',           cmd:'sneakycam photo', icon:'camera_filters', group:'SneakyCam', groupIcon:'camera_filters' },
     { name:'SneakyCam: Toggle Video',         cmd:'sneakycam video', icon:'eye_slash_fill', group:'SneakyCam', groupIcon:'camera_filters' },
-    { name:'AudioMix: Toggle',                cmd:'audiomix toggle',icon:'equalizer', is_toggle:true },
+    { name:'AudioMix: Toggle',                cmd:'audiomix toggle',icon:'slider_horizontal_3', is_toggle:true },
     { name:'Automatic Switching', cmd:'audiohandoff enabled toggle', icon:'headphones', is_toggle:true },
   ]},
   { title:'Scripting & Logic', actions:[
-    { name:'If Condition…',     cmd:'__IF_CONDITION__',icon:'arrow_triangle_branch', needs_input:true },
+    { name:'If Condition…',     cmd:'__IF_CONDITION__',icon:'arrow_branch', needs_input:true },
     { name:'Repeat…',           cmd:'__REPEAT__',      icon:'repeat', needs_input:true },
     { name:'Repeat While…',     cmd:'__REPEAT_WHILE__',icon:'repeat', needs_input:true },
     { name:'Exit Repeat',       cmd:'__EXIT_REPEAT__', icon:'arrow_right_to_line', needs_input:true },
@@ -5197,11 +5197,11 @@ const CONDITION_DEFS = [
   { key:'island', title:'Dynamic Island', icon:'capsule_fill', section:'Device', values:[{value:'ACTIVE',title:'Live Activity Running'},{value:'NONE',title:'No Live Activity'},{value:'EXPANDED',title:'Expanded'},{value:'NOT_EXPANDED',title:'Not Expanded'}] },
   { key:'notification_center', title:'Notification Center', icon:'bell_fill', section:'Device', values:[{value:'OPEN',title:'Open'},{value:'CLOSED',title:'Closed'}] },
   { key:'appearance', title:'Appearance', icon:'circle_lefthalf_fill', section:'Device', values:[{value:'DARK',title:'Dark'},{value:'LIGHT',title:'Light'}] },
-  { key:'flashlight', title:'Flashlight', icon:'flashlight_on_fill', section:'Device', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
-  { key:'screenrecord', title:'Screen Recording', icon:'record_circle_fill', section:'Device', values:[{value:'ACTIVE',title:'Recording'},{value:'INACTIVE',title:'Not Recording'}] },
+  { key:'flashlight', title:'Flashlight', icon:'lightbulb_fill', section:'Device', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
+  { key:'screenrecord', title:'Screen Recording', icon:'smallcircle_fill_circle_fill', section:'Device', values:[{value:'ACTIVE',title:'Recording'},{value:'INACTIVE',title:'Not Recording'}] },
   { key:'front_app',   title:'Front Application', icon:'square_grid_2x2_fill', section:'Device' },
   { key:'proximity', title:'Proximity Sensor', icon:'ear', section:'Device', values:[{value:'NEAR',title:'Near'},{value:'FAR',title:'Far'}] },
-  { key:'screen',     title:'Screen', icon:'iphone', section:'Device', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
+  { key:'screen',     title:'Screen', icon:'device_phone_portrait', section:'Device', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
   { key:'lpm',        title:'Low Power Mode', icon:'battery_25', section:'Power', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
   { key:'charging',   title:'Charging', icon:'bolt_fill', section:'Power', values:[{value:'CHARGING',title:'Charging'},{value:'NOT_CHARGING',title:'Not Charging'}] },
   { key:'battery',    title:'Battery Level', icon:'battery_100', section:'Power', threshold:true },
@@ -5214,7 +5214,7 @@ const CONDITION_DEFS = [
   { key:'silent_vibration', title:'Silent Vibration', icon:'bell_slash', section:'Sound', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
   { key:'ring_vibration',   title:'Ring Vibration',   icon:'bell', section:'Sound', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
   { key:'haptics',    title:'Haptics', icon:'waveform_path_ecg', section:'Sound', values:[{value:'ALWAYS',title:'Always Play'},{value:'SILENT_ONLY',title:'Play in Silent Mode'},{value:'RING_ONLY',title:"Don't Play in Silent Mode"},{value:'NEVER',title:'Never Play'}] },
-  { key:'volume',     title:'Volume Level', icon:'speaker_wave_2_fill', section:'Sound', threshold:true },
+  { key:'volume',     title:'Volume Level', icon:'speaker_2_fill', section:'Sound', threshold:true },
   { key:'wifi',       title:'Wi-Fi',        icon:'wifi', section:'Connectivity', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
   { key:'wifi_network', title:'Wi-Fi Network', icon:'wifi', section:'Connectivity', freeText:true, hint:'Network name:' },
   { key:'bluetooth',  title:'Bluetooth',    icon:'bolt_horizontal_fill', section:'Connectivity', values:[{value:'ON',title:'On'},{value:'OFF',title:'Off'}] },
@@ -5693,7 +5693,7 @@ function renderAll() {
     empty.style.cssText = 'text-align:center;padding:56px 24px 40px';
     empty.innerHTML = `
       <div style="width:68px;height:68px;border-radius:34px;background:rgba(0,122,255,.12);display:flex;align-items:center;justify-content:center;margin:0 auto 18px">
-        <i class="f7-icons" style="font-size:34px;color:var(--rc-blue)">hand_tap_fill</i>
+        <i class="f7-icons" style="font-size:34px;color:var(--rc-blue)">hand_point_left_fill</i>
       </div>
       <div style="font-size:24px;font-weight:700;margin-bottom:8px">Add your first trigger</div>
       <div style="color:var(--rc-label-2);font-size:15px;line-height:1.4;max-width:300px;margin:0 auto 22px">Pick a button, gesture, app, or schedule, then choose the action it runs.</div>
@@ -5740,11 +5740,11 @@ const TRIGGER_CATEGORY_ICONS = {
   'NFC Tags': 'dot_radiowaves_right',
   'WiFi Network Triggers': 'wifi',
   'Bluetooth Device Triggers': 'dot_radiowaves_left_right',
-  'Audio Output Triggers': 'airplayaudio',
+  'Audio Output Triggers': 'speaker_2_fill',
   'Notification Triggers': 'bell_circle_fill',
   'App Launch Triggers': 'arrow_up_right_square_fill',
   'App Exit Triggers': 'xmark_square_fill',
-  'App Long Press Triggers': 'hand_tap',
+  'App Long Press Triggers': 'hand_point_left',
   'Scheduled Triggers': 'clock_fill',
   'MQTT Subscription Triggers': 'antenna_radiowaves_left_right',
 };
@@ -6466,7 +6466,7 @@ function parseToggleCmd(cmd) {
     { key:'dnd', name:'Do Not Disturb', icon:'moon_circle_fill', prefixes:['dnd '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'] },
     { key:'watch_theater', name:'Watch Theater Mode', icon:'eye_slash_fill', prefixes:['watch theater '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'], exactMatches: { 'watch theater':'toggle' } },
     { key:'watch_silent', name:'Watch Silent Mode', icon:'bell_slash_fill', prefixes:['watch silent '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'], exactMatches: { 'watch silent':'toggle' } },
-    { key:'watch_wake', name:'Watch Wake on Wrist Raise', icon:'hand_tap', prefixes:['watch wake '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'], exactMatches: { 'watch wake':'toggle' } },
+    { key:'watch_wake', name:'Watch Wake on Wrist Raise', icon:'hand_point_left', prefixes:['watch wake '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'], exactMatches: { 'watch wake':'toggle' } },
     { key:'watch_water', name:'Watch Water Lock', icon:'lock_fill', prefixes:['watch water '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'], exactMatches: { 'watch water':'toggle' } },
     { key:'watch_alwayson', name:'Watch Always On', icon:'sun_max_fill', prefixes:['watch alwayson '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'], exactMatches: { 'watch alwayson':'toggle' } },
     { key:'wifi', name:'Wi-Fi', icon:'wifi', prefixes:['wifi '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'] },
@@ -6477,7 +6477,7 @@ function parseToggleCmd(cmd) {
     { key:'dance_party', name:'Dance Party', icon:'bolt_fill', prefixes:['dance party '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'], exactMatches: { 'dance party':'toggle' } },
     { key:'buttontriggers', name:'Button Triggers', icon:'pause_circle', prefixes:['button triggers '], suffixes:['pause 15','pause 60','pause','resume'], displaySuffixes:['Pause 15 Minutes','Pause 1 Hour','Pause Until Resumed','Resume'] },
     { key:'appearance', name:'Appearance', icon:'circle_lefthalf_fill', prefixes:['appearance '], suffixes:['dark','light','toggle'], displaySuffixes:['Dark','Light','Toggle'] },
-    { key:'audiomix', name:'AudioMix', icon:'equalizer', prefixes:['audiomix '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'], exactMatches: { 'audiomix':'toggle' } },
+    { key:'audiomix', name:'AudioMix', icon:'slider_horizontal_3', prefixes:['audiomix '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'], exactMatches: { 'audiomix':'toggle' } },
     { key:'audiohandoff_enabled', name:'Automatic Switching', icon:'headphones', prefixes:['audiohandoff enabled ','audiohandoff auto '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'], exactMatches: { 'audiohandoff enabled':'toggle','audiohandoff auto':'toggle' } },
     { key:'rotate', name:'Rotation Lock', icon:'lock_rotation', prefixes:['rotate '], suffixes:['lock','unlock','toggle'], displaySuffixes:['Lock','Unlock','Toggle'] },
     { key:'orientation', name:'Orientation', icon:'rotate_right', prefixes:['orientation set '], suffixes:['portrait','landscape left','landscape right','portrait upside down','auto'], displaySuffixes:['Portrait','Landscape Left','Landscape Right','Portrait Upside Down','Auto'] },
@@ -6489,7 +6489,7 @@ function parseToggleCmd(cmd) {
     {
       key: 'camera_video',
       name: 'Open Video Camera',
-      icon: 'video_fill',
+      icon: 'videocam_fill',
       prefixes: ['camera video '],
       suffixes: ['2x', '2x flash', '1x', '1x flash', '0.5x', 'front'],
       displaySuffixes: ['Video (2x)', 'Video (2x, Flash)', 'Video (1x)', 'Video (1x, Flash)', 'Video (0.5x)', 'Video (Front)'],
@@ -7427,6 +7427,12 @@ function saveClearNotifDialog() {
   closeClearNotifDialog();
   saveConfig();
   renderActionList();
+}
+
+// An action's command: actions are stored as the command itself, or as an object carrying one
+function actionCommand(action) {
+  if (typeof action === 'string') return action;
+  return action && typeof action.command === 'string' ? action.command : '';
 }
 
 // Puts a command at idx, keeping any settings around it
@@ -8682,7 +8688,7 @@ function promptCameraPicker(isVideo) {
   if (!toggleInfo) return;
   const items = toggleInfo.suffixes.map((s, i) => ({
     label: toggleInfo.displaySuffixes[i],
-    icon: isVideo ? 'video_fill' : 'camera_fill',
+    icon: isVideo ? 'videocam_fill' : 'camera_fill',
     action: () => addActionToCurrent(`${toggleInfo.prefixes[0]}${s}`)
   }));
   showContextMenu({ clientX: Math.max(10, window.innerWidth / 2 - 110), clientY: Math.max(10, window.innerHeight / 3), preventDefault: () => {} }, items);
@@ -9543,12 +9549,12 @@ const VALUE_COMMANDS = [
     ['Cellular Data', 'cell status', 'antenna_radiowaves_left_right'], ['Airplane Mode', 'airplane status', 'airplane'],
     ['Location Services', 'location status', 'location_fill'], ['CarPlay', 'carplay status', 'car_fill'],
     ['Apple Watch', 'watch status', 'timer'], ['Apple Watch Charging', 'watch charging', 'bolt_fill']]],
-  ['Sound', [['Ringer', 'ringer status', 'bell_fill'], ['Silent Vibrate', 'vibration silent-status', 'iphone'],
+  ['Sound', [['Ringer', 'ringer status', 'bell_fill'], ['Silent Vibrate', 'vibration silent-status', 'device_phone_portrait'],
     ['Haptics', 'haptics status', 'hand_draw'], ['Media Playing', 'is-playing', 'play_fill']]],
   ['Device', [['Lock State', 'lock status', 'lock_fill'], ['Low Power Mode', 'low power status', 'battery_25'],
     ['Flashlight', 'flashlight status', 'lightbulb_fill'], ['Do Not Disturb', 'dnd status', 'moon_fill'],
     ['AssistiveTouch', 'assistive touch status', 'hand_raised_fill'],
-    ['Focus', 'focus status', 'moon_circle_fill'], ['Screen Recording', 'screenrecord status', 'record_circle_fill'],
+    ['Focus', 'focus status', 'moon_circle_fill'], ['Screen Recording', 'screenrecord status', 'smallcircle_fill_circle_fill'],
     ['Timer', 'timer status', 'timer'], ['Proximity', 'proximity status', 'hand_raised_fill']]],
   ['Display', [['Orientation', 'orientation status', 'rotate_right_fill'], ['Appearance', 'appearance status', 'circle_lefthalf_fill'],
     ['Auto-Lock', 'autolock status', 'timer']]],
@@ -9894,7 +9900,7 @@ function showEllipsisMenu(e) {
   const items = [
     {
       label: hapticsEnabled ? 'Disable Haptics' : 'Enable Haptics',
-      icon: hapticsEnabled ? 'waveform_slash' : 'waveform_path_ecg',
+      icon: hapticsEnabled ? 'waveform_path_badge_minus' : 'waveform_path_ecg',
       action: () => toggleCurrentTriggerHaptics()
     },
     {
@@ -10550,7 +10556,6 @@ function openAdvancedPanel() {
   updateNFCScreenOffLabel();
   updateNFCFooter();
   updateBannersCount();
-  updateTweaksCount();
   populateTimingSelects();
   document.getElementById('advanced-panel').classList.add('active');
 }
