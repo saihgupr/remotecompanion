@@ -647,6 +647,12 @@ static NSArray<NSString *> *RCLayoutScreenKeys(void) {
     [rows addObject:@{ @"title": @"Power Hold", @"key": @"powerHoldTime",
         @"message": @"How long a Power press is held before it counts as a long press.", @"default": @0.50, @"min": @0.30, @"max": @0.75,
         @"get": ^double{ return cm.powerHoldTime; }, @"set": ^(double v) { cm.powerHoldTime = v; } }];
+    // Touch ID only, which is what a Home button means here
+    if ([RCConfigManager hasHomeButton]) {
+        [rows addObject:@{ @"title": @"Touch ID Hold", @"key": @"touchIdHoldTime",
+            @"message": @"How long a finger rests on the Touch ID sensor before it counts as a Hold rather than a Single Tap.", @"default": @0.35, @"min": @0.20, @"max": @0.80,
+            @"get": ^double{ return cm.touchIdHoldTime; }, @"set": ^(double v) { cm.touchIdHoldTime = v; } }];
+    }
     return rows;
 }
 

@@ -7,6 +7,10 @@
   {"command": "prev", "args": "", "description": "Skip to the previous track", "category": "Playback", "example": "prev", "status": ""},
   {"command": "is-playing", "args": "", "description": "YES or NO: whether media is playing", "category": "Playback", "example": "is-playing", "status": "is-playing"},
   {"command": "player status", "args": "", "description": "The player's state as text", "category": "Playback", "example": "player status", "status": ""},
+  {"command": "player queue album", "args": "[--player music|zefy|audiostream]", "description": "Queue the playing app's album (its add-on does it)", "category": "Playback", "example": "player queue album", "status": ""},
+  {"command": "player queue artist", "args": "[--player music|zefy|audiostream]", "description": "Queue the playing app's artist (its add-on does it)", "category": "Playback", "example": "player queue artist", "status": ""},
+  {"command": "player like", "args": "[--player music|zefy]", "description": "Like or love the playing song (its add-on does it)", "category": "Playback", "example": "player like", "status": ""},
+  {"command": "player love", "args": "[--player music|zefy]", "description": "Alias for player like", "category": "Playback", "example": "player love", "status": ""},
 
   {"command": "volume up", "args": "", "description": "One step louder", "category": "Volume & Audio", "example": "volume up", "status": "volume"},
   {"command": "volume down", "args": "", "description": "One step quieter", "category": "Volume & Audio", "example": "volume down", "status": "volume"},

@@ -2356,6 +2356,8 @@ static NSTimeInterval RC_PowerClickWindow(void) { return RC_ConfigTiming(@"power
 static NSTimeInterval RC_HomeClickWindow(void)  { return RC_ConfigTiming(@"homeClickWindow", 0.35, 0.25, 0.8); }
 static NSTimeInterval RC_VolumeHoldTime(void)   { return RC_ConfigTiming(@"volumeHoldTime", 0.35, 0.2, 0.8); }
 static NSTimeInterval RC_PowerHoldTime(void)    { return RC_ConfigTiming(@"powerHoldTime", 0.5, 0.3, 0.75); }
+// How long a finger rests on the Touch ID sensor before it counts as a Hold rather than a Tap
+static NSTimeInterval RC_TouchIDHoldTime(void)  { return RC_ConfigTiming(@"touchIdHoldTime", 0.35, 0.2, 0.8); }
 
 // Find config file - check shared path first, then search app containers
 static NSString *find_config_path() {
@@ -5737,7 +5739,8 @@ static BOOL rc_action_shows_own_banner(NSString *cmd) {
     }
     if ([cmd isEqualToString:@"screen copy rect"] || [cmd hasPrefix:@"screen copy rect "]) return YES;
     NSSet *exact = [NSSet setWithArray:@[@"queuealbum", @"queue album", @"queueartist", @"queue artist", @"shuffleall", @"shuffle all songs",
-                                         @"suffle all songs", @"deletesong", @"delete song", @"delete current song"]];
+                                         @"suffle all songs", @"deletesong", @"delete song", @"delete current song",
+                                         @"player queue album", @"player queue artist", @"player like", @"player love"]];
     return [exact containsObject:cmd];
 }
 
@@ -12902,6 +12905,9 @@ static NSArray *RCCommandHelpSections(void) {
             @[@"spotify <type> <id>", @"type: playlist, album, or artist"],
             @[@"playlist <id>", @"Play a Spotify playlist"],
             @[@"shuffle playlist <id>", @"Shuffle a Spotify playlist"],
+            @[@"player queue album [--player <addon>]", @"Queue the playing app's album (music, zefy or audiostream)"],
+            @[@"player queue artist [--player <addon>]", @"Queue the playing app's artist (music, zefy or audiostream)"],
+            @[@"player like|love [--player <addon>]", @"Like or love the playing song (music or zefy)"],
         ]},
         @{@"title": @"Device", @"rows": @[
             @[@"lock", @"Lock the screen"],
@@ -12957,6 +12963,8 @@ static NSArray *RCCommandHelpSections(void) {
             @[@"control-center", @"Open Control Center"],
             @[@"notification-center", @"Open Notification Center"],
             @[@"url <url>", @"Open a link"],
+            @[@"safari close-tabs", @"Close all Safari tabs"],
+            @[@"safari clear-history <range>", @"last-hour, today, today-and-yesterday, all-time"],
             @[@"nav <panel>", @"triggers, settings, ha, km, mqtt, add"],
             @[@"type \"Text\"", @"Type text"],
             @[@"paste \"Text\"", @"Paste text"],
@@ -14372,6 +14380,174 @@ static NSString *rc_mbt_disconnect(NSString *deviceName) {
     return [NSString stringWithFormat:@"Disconnecting %@\n", name];
 }
 
+// The music players with an add-on that queues the current album or artist, by bundle ID and
+// by the add-on id --player takes. AudioStream's add-on (com.saihgupr.audiostream) queues in its
+// own app, MusicRemote's (music, com.apple.Music) in Music, and Zefy's (zefy, com.spotify.client)
+// in Spotify.
+static NSString *rc_player_addon_for(NSString *selection) {
+    NSString *s = selection.lowercaseString;
+    if ([s isEqualToString:@"com.apple.music"] || [s isEqualToString:@"music"]) return @"music";
+    if ([s isEqualToString:@"com.spotify.client"] || [s isEqualToString:@"zefy"]) return @"zefy";
+    if ([s isEqualToString:@"com.saihgupr.audiostream"] || [s isEqualToString:@"audiostream"]) return @"audiostream";
+    return nil;
+}
+
+static NSString *rc_player_name_for(NSString *addOnId) {
+    if ([addOnId isEqualToString:@"music"]) return @"Music";
+    if ([addOnId isEqualToString:@"zefy"]) return @"Spotify";
+    if ([addOnId isEqualToString:@"audiostream"]) return @"AudioStream";
+    return addOnId;
+}
+
+// Each add-on's command for "queue album" / "queue artist" (Zefy words its own the other way)
+static NSString *rc_player_queue_addon_command(NSString *addOnId, BOOL album) {
+    if ([addOnId isEqualToString:@"music"]) return album ? @"music queue album" : @"music queue artist";
+    if ([addOnId isEqualToString:@"zefy"]) return album ? @"zefy album queue" : @"zefy artist queue";
+    if ([addOnId isEqualToString:@"audiostream"]) return album ? @"audiostream queue album" : @"audiostream queue artist";
+    return nil;
+}
+
+// The add-on of the now-playing app, or nil with the error to show. Called off the main
+// thread: the now-playing client comes back on the main queue, waited on for at most a
+// second, like "player status". A paused app still names its player.
+static NSString *rc_player_playing_addon(NSString **error) {
+    __block NSString *bundleID = nil;
+    dispatch_semaphore_t sema = dispatch_semaphore_create(0);
+    MRMediaRemoteGetNowPlayingClient(dispatch_get_main_queue(), ^(void *clientObj) {
+        if (clientObj) {
+            CFStringRef bundleIDRef = MRNowPlayingClientGetBundleIdentifier(clientObj);
+            if (bundleIDRef) bundleID = [(__bridge NSString *)bundleIDRef copy];
+        }
+        dispatch_semaphore_signal(sema);
+    });
+    dispatch_semaphore_wait(sema, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)));
+    if (bundleID.length == 0) {
+        if (error) *error = @"Error: Nothing is playing (use --player music|zefy|audiostream)\n";
+        return nil;
+    }
+    NSString *addOnId = rc_player_addon_for(bundleID);
+    if (!addOnId && error) {
+        *error = [NSString stringWithFormat:@"Error: %@ is not a supported player (music, zefy, audiostream)\n", bundleID];
+    }
+    return addOnId;
+}
+
+// Queues on the add-on --player named (addOnId), or on the now-playing app when it is nil.
+static NSString *rc_player_queue_run(NSString *addOnId, BOOL album) {
+    if (!addOnId) {
+        NSString *error = nil;
+        addOnId = rc_player_playing_addon(&error);
+        if (!addOnId) return error;
+    }
+    NSString *shown = rc_player_name_for(addOnId);
+
+    NSString *mapped = rc_player_queue_addon_command(addOnId, album);
+    NSString *reply = RCAddOnsHandleCommand(mapped);
+    if (reply.length == 0) {
+        return [NSString stringWithFormat:@"Error: The %@ add-on is not installed or is disabled\n", shown];
+    }
+    // Zefy's own action shows "Spotify / Album Queued" itself; only banner the ones that don't
+    if (!RCAddOnsCommandShowsOwnBanner(mapped) &&
+        rc_own_banner_enabled(album ? @"player queue album" : @"player queue artist")) {
+        rc_show_hud_toast(album ? @"Album Queued" : @"Artist Queued", shown,
+                          album ? @"music.note.list" : @"music.mic");
+    }
+    return reply;
+}
+
+// Each add-on's command for the heart, where it has one. AudioStream keeps no liked state.
+static NSString *rc_player_like_addon_command(NSString *addOnId) {
+    if ([addOnId isEqualToString:@"music"]) return @"music love";
+    if ([addOnId isEqualToString:@"zefy"]) return @"zefy like";
+    return nil;
+}
+
+// Likes or loves the now-playing song through the app's own add-on. MusicRemote toggles
+// the Music loved flag, Zefy toggles the Spotify heart.
+static NSString *rc_player_like_run(NSString *addOnId) {
+    if (!addOnId) {
+        NSString *error = nil;
+        addOnId = rc_player_playing_addon(&error);
+        if (!addOnId) return error;
+    }
+    NSString *shown = rc_player_name_for(addOnId);
+    NSString *mapped = rc_player_like_addon_command(addOnId);
+    if (!mapped) {
+        return [NSString stringWithFormat:@"Error: %@ has no like command (music and zefy only)\n", shown];
+    }
+    NSString *reply = RCAddOnsHandleCommand(mapped);
+    if (reply.length == 0) {
+        return [NSString stringWithFormat:@"Error: The %@ add-on is not installed or is disabled\n", shown];
+    }
+    // Both add-ons define a banner; keep a toast for a future one that does not
+    if (!RCAddOnsCommandShowsOwnBanner(mapped) && rc_own_banner_enabled(@"player like")) {
+        rc_show_hud_toast(@"Liked", shown, @"heart.fill");
+    }
+    return reply;
+}
+
+// "player queue album|artist" and "player like|love", each with an optional
+// --player <music|zefy|audiostream>, act on whatever app is playing through its add-on.
+// Other "player ..." shapes get the usage line rather than falling through to add-ons, so
+// a typo doesn't run something unrelated.
+static NSString *rc_handle_player_command(NSString *cmd) {
+    static NSString *const usage = @"Usage: player queue album|artist | player like|love [--player music|zefy|audiostream]\n";
+    NSMutableArray<NSString *> *words = [NSMutableArray array];
+    for (NSString *word in [cmd.lowercaseString componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]) {
+        if (word.length > 0) [words addObject:word];
+    }
+    if (words.count < 2 || ![words[0] isEqualToString:@"player"]) return usage;
+    BOOL like = [words[1] isEqualToString:@"like"] || [words[1] isEqualToString:@"love"];
+    BOOL queue = [words[1] isEqualToString:@"queue"];
+    if (!like && !queue) return usage;
+
+    BOOL album = NO;
+    NSUInteger flagStart = 2;
+    if (queue) {
+        if (words.count < 3) return usage;
+        if ([words[2] isEqualToString:@"album"]) album = YES;
+        else if ([words[2] isEqualToString:@"artist"]) album = NO;
+        else return usage;
+        flagStart = 3;
+    }
+
+    NSString *requested = nil;
+    for (NSUInteger i = flagStart; i < words.count; i++) {
+        NSString *word = words[i];
+        if ([word isEqualToString:@"--player"]) {
+            if (i + 1 >= words.count) return usage;
+            requested = words[++i];
+        } else if ([word hasPrefix:@"--player="]) {
+            requested = [word substringFromIndex:9];
+        } else {
+            return usage;
+        }
+    }
+
+    NSString *addOnId = nil;
+    if (requested) {
+        addOnId = rc_player_addon_for(requested);
+        if (!addOnId) return [NSString stringWithFormat:@"Error: Unknown player '%@' (use music, zefy or audiostream)\n", requested];
+    }
+
+    // The Web UI's /api/command runs handle_command on the main thread and ignores the reply:
+    // run in the background there and acknowledge now, so MediaRemote and the add-on's work
+    // can't hold or deadlock SpringBoard's main queue.
+    if ([NSThread isMainThread]) {
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            if (like) rc_player_like_run(addOnId);
+            else rc_player_queue_run(addOnId, album);
+        });
+        if (like) {
+            return [NSString stringWithFormat:@"Liking on %@\n",
+                    addOnId ? rc_player_name_for(addOnId) : @"the playing app"];
+        }
+        return [NSString stringWithFormat:@"Queueing %@ on %@\n", album ? @"album" : @"artist",
+                addOnId ? rc_player_name_for(addOnId) : @"the playing app"];
+    }
+    return like ? rc_player_like_run(addOnId) : rc_player_queue_run(addOnId, album);
+}
+
 static NSString *handle_command(NSString *cmd) {
     if (!cmd || ![cmd isKindOfClass:[NSString class]]) {
         SRLogMin(@"ERROR: handle_command received nil or invalid command string");
@@ -14697,6 +14873,11 @@ static NSString *handle_command(NSString *cmd) {
             return [status isEqualToString:@"Playing"] ? @"YES\n" : @"NO\n";
         }
         return [NSString stringWithFormat:@"%@\n", status];
+    } else if ([cleanCmd isEqualToString:@"player"] || [cleanCmd hasPrefix:@"player "]) {
+        // player queue album|artist and player like|love: act on whichever music player is
+        // playing (its add-on's own action). "player status" is the playback state above; other
+        // player subcommands get the usage line instead of falling through to add-ons.
+        return rc_handle_player_command(cleanCmd);
     } else if ([cleanCmd isEqualToString:@"next"]) {
         MRMediaRemoteSendCommand(kMRNextTrack, nil);
         return @"Next track\n";
@@ -14717,7 +14898,89 @@ static NSString *handle_command(NSString *cmd) {
     } else if ([cleanCmd isEqualToString:@"dance party"] || [cleanCmd hasPrefix:@"dance party "]) {
         NSString *arg = [cleanCmd isEqualToString:@"dance party"] ? @"" : [cleanCmd substringFromIndex:12];
         return rc_dance_party_command(arg);
-    } else if ([cleanCmd isEqualToString:@"flashlight"] || [cleanCmd isEqualToString:@"flashlight toggle"] ||
+    } else if ([cleanCmd isEqualToString:@"safari"] || [cleanCmd hasPrefix:@"safari "]) {
+        NSString *sub = [cleanCmd isEqualToString:@"safari"] ? @"" : [[cleanCmd substringFromIndex:7] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        NSString *lowSub = [sub lowercaseString];
+        NSString *action = nil;
+        NSString *range = nil;
+        NSString *replyDesc = nil;
+
+        const char *notifyName = NULL;
+        if ([lowSub isEqualToString:@"close-tabs"] ||
+            [lowSub isEqualToString:@"close tabs"] ||
+            [lowSub isEqualToString:@"close all tabs"] ||
+            [lowSub isEqualToString:@"close-all-tabs"]) {
+            action = @"close-tabs";
+            notifyName = "com.saihgupr.remotecompanion.safari.close_tabs";
+            replyDesc = @"Safari: Closed all tabs\n";
+        } else if ([lowSub hasPrefix:@"clear-history"] || [lowSub hasPrefix:@"clear history"]) {
+            NSString *rawRange = [[lowSub substringFromIndex:13] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            if ([rawRange isEqualToString:@"last-hour"] || [rawRange isEqualToString:@"last hour"] || [rawRange isEqualToString:@"hour"] || [rawRange isEqualToString:@"1h"]) {
+                range = @"last-hour";
+                notifyName = "com.saihgupr.remotecompanion.safari.clear_history.last_hour";
+                replyDesc = @"Safari: Cleared history (last hour)\n";
+            } else if ([rawRange isEqualToString:@"today"]) {
+                range = @"today";
+                notifyName = "com.saihgupr.remotecompanion.safari.clear_history.today";
+                replyDesc = @"Safari: Cleared history (today)\n";
+            } else if ([rawRange isEqualToString:@"today-and-yesterday"] || [rawRange isEqualToString:@"today and yesterday"] || [rawRange isEqualToString:@"yesterday"]) {
+                range = @"today-and-yesterday";
+                notifyName = "com.saihgupr.remotecompanion.safari.clear_history.today_and_yesterday";
+                replyDesc = @"Safari: Cleared history (today and yesterday)\n";
+            } else if ([rawRange isEqualToString:@"all-time"] || [rawRange isEqualToString:@"all time"] || [rawRange isEqualToString:@"all"]) {
+                range = @"all-time";
+                notifyName = "com.saihgupr.remotecompanion.safari.clear_history.all_time";
+                replyDesc = @"Safari: Cleared history (all time)\n";
+            } else {
+                return @"Error: Usage: safari clear-history <last-hour|today|today-and-yesterday|all-time>\n";
+            }
+            action = @"clear-history";
+        } else {
+            return @"Error: Usage: safari <close-tabs | clear-history <last-hour|today|today-and-yesterday|all-time>>\n";
+        }
+
+        // Write into com.apple.mobilesafari's own preferences domain (readable inside Safari's sandbox)
+        // in case Safari isn't running yet and needs to pick it up after launch, and also post the
+        // sandbox-safe Darwin notification directly.
+        CFPreferencesSetAppValue(CFSTR("RCSafariPendingAction"), (__bridge CFPropertyListRef)@{
+            @"uuid": [[NSUUID UUID] UUIDString],
+            @"action": action,
+            @"range": range ?: @"",
+            @"timestamp": @([[NSDate date] timeIntervalSince1970])
+        }, CFSTR("com.apple.mobilesafari"));
+        CFPreferencesAppSynchronize(CFSTR("com.apple.mobilesafari"));
+        notify_post(notifyName);
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NSString *frontBundle = nil;
+            @try {
+                id frontApp = [(SpringBoard *)[UIApplication sharedApplication] _accessibilityFrontMostApplication];
+                if (frontApp && [frontApp respondsToSelector:@selector(bundleIdentifier)]) {
+                    frontBundle = [frontApp bundleIdentifier];
+                }
+            } @catch (__unused NSException *e) {}
+
+            if (![frontBundle isEqualToString:@"com.apple.mobilesafari"]) {
+                Class fbsOptionsClass = objc_getClass("FBSOpenApplicationOptions");
+                Class fbsServiceClass = objc_getClass("FBSOpenApplicationService");
+                if (fbsServiceClass) {
+                    id options = nil;
+                    if (fbsOptionsClass && [fbsOptionsClass respondsToSelector:@selector(optionsWithDictionary:)]) {
+                        options = [fbsOptionsClass optionsWithDictionary:@{ @"__ActivateSuspended": @YES }];
+                    }
+                    FBSOpenApplicationService *service = [fbsServiceClass serviceWithDefaultShellEndpoint];
+                    [service openApplication:@"com.apple.mobilesafari" withOptions:options completion:^(id response, NSError *error) {
+                        if (error) {
+                            SRLog(@"[Safari] FBS openApplication (suspended) error: %@", error);
+                        } else if (notifyName) {
+                            notify_post(notifyName);
+                        }
+                    }];
+                }
+            }
+        });
+        return replyDesc;
+    } else if ([cleanCmd isEqualToString:@"flashlight"] || [cleanCmd hasPrefix:@"flashlight toggle"] ||
                [cleanCmd isEqualToString:@"flashlight off"] || [cleanCmd isEqualToString:@"flashlight status"] ||
                [cleanCmd isEqualToString:@"torch"] || [cleanCmd isEqualToString:@"torch on"] ||
                [cleanCmd isEqualToString:@"torch off"] || [cleanCmd isEqualToString:@"torch status"] ||
@@ -21312,7 +21575,7 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
 
                 
                 if (g_bioWatchdogTimer) [g_bioWatchdogTimer invalidate];
-                g_bioWatchdogTimer = [NSTimer scheduledTimerWithTimeInterval:0.5 repeats:NO block:^(NSTimer *timer) {
+                g_bioWatchdogTimer = [NSTimer scheduledTimerWithTimeInterval:RC_TouchIDHoldTime() repeats:NO block:^(NSTimer *timer) {
 
                     g_bioWatchdogTimer = nil; // Timer is done.
                     
@@ -26093,6 +26356,164 @@ static NSTimeInterval s_last_camera_launch_notify = 0;
 
 %end
 
+// ==========================================
+// Safari App Hooks (com.apple.mobilesafari)
+// ==========================================
+
+%group SafariHook
+
+static NSString *s_last_safari_intent_uuid = nil;
+
+static void rc_safari_perform_close_tabs(NSInteger attempt) {
+    UIApplication *app = [UIApplication sharedApplication];
+    NSArray *controllers = nil;
+    if ([app respondsToSelector:@selector(browserControllers)]) {
+        controllers = ((id (*)(id, SEL))objc_msgSend)(app, @selector(browserControllers));
+    }
+    if (controllers.count == 0 && [app respondsToSelector:@selector(primaryBrowserController)]) {
+        id primary = ((id (*)(id, SEL))objc_msgSend)(app, @selector(primaryBrowserController));
+        if (primary) controllers = @[primary];
+    }
+    if (controllers.count == 0) {
+        if (attempt < 5) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                rc_safari_perform_close_tabs(attempt + 1);
+            });
+        } else {
+            SRLog(@"[SafariHook] No BrowserController available to close tabs");
+        }
+        return;
+    }
+    for (id bc in controllers) {
+        if (![bc respondsToSelector:@selector(tabController)]) continue;
+        id tabController = ((id (*)(id, SEL))objc_msgSend)(bc, @selector(tabController));
+        if (!tabController) continue;
+        if ([tabController respondsToSelector:@selector(closeAllOpenTabsAnimated:)]) {
+            ((void (*)(id, SEL, BOOL))objc_msgSend)(tabController, @selector(closeAllOpenTabsAnimated:), YES);
+        }
+        // Close private tabs and any remaining tabs across modes explicitly.
+        for (NSString *selName in @[@"privateTabDocuments", @"allTabDocuments", @"tabDocuments"]) {
+            SEL listSel = NSSelectorFromString(selName);
+            if (![tabController respondsToSelector:listSel]) continue;
+            NSArray *docs = [((id (*)(id, SEL))objc_msgSend)(tabController, listSel) copy];
+            if (docs.count == 0) continue;
+            if ([tabController respondsToSelector:@selector(closeTabDocuments:animated:allowAddingToRecentlyClosedTabs:showAutoCloseTabsAlert:)]) {
+                ((void (*)(id, SEL, id, BOOL, BOOL, BOOL))objc_msgSend)(tabController, @selector(closeTabDocuments:animated:allowAddingToRecentlyClosedTabs:showAutoCloseTabsAlert:), docs, YES, YES, NO);
+            } else if ([tabController respondsToSelector:@selector(closeTabDocuments:animated:)]) {
+                ((void (*)(id, SEL, id, BOOL))objc_msgSend)(tabController, @selector(closeTabDocuments:animated:), docs, YES);
+            }
+        }
+        NSLog(@"[RemoteCompanion][SafariHook] Closed tabs on %@", tabController);
+    }
+}
+
+static void rc_safari_perform_clear_history(NSString *range) {
+    NSDate *now = [NSDate date];
+    NSDate *afterDate = nil;
+    BOOL isAllTime = NO;
+
+    if ([range isEqualToString:@"last-hour"]) {
+        afterDate = [now dateByAddingTimeInterval:-3600.0];
+    } else if ([range isEqualToString:@"today"]) {
+        afterDate = [[NSCalendar currentCalendar] startOfDayForDate:now];
+    } else if ([range isEqualToString:@"today-and-yesterday"]) {
+        NSDate *todayStart = [[NSCalendar currentCalendar] startOfDayForDate:now];
+        afterDate = [[NSCalendar currentCalendar] dateByAddingUnit:NSCalendarUnitDay value:-1 toDate:todayStart options:0];
+    } else {
+        isAllTime = YES;
+        afterDate = [NSDate distantPast];
+    }
+
+    Class historyClass = NSClassFromString(@"History");
+    id history = nil;
+    if (historyClass && [historyClass respondsToSelector:@selector(sharedHistory)]) {
+        history = ((id (*)(id, SEL))objc_msgSend)(historyClass, @selector(sharedHistory));
+    }
+    if (history) {
+        if (isAllTime && [history respondsToSelector:@selector(clearHistoryWithCompletionHandler:)]) {
+            ((void (*)(id, SEL, id))objc_msgSend)(history, @selector(clearHistoryWithCompletionHandler:), ^{
+                NSLog(@"[RemoteCompanion][SafariHook] Cleared all Safari history");
+            });
+        } else if (isAllTime && [history respondsToSelector:@selector(clearHistory)]) {
+            ((void (*)(id, SEL))objc_msgSend)(history, @selector(clearHistory));
+            NSLog(@"[RemoteCompanion][SafariHook] Cleared all Safari history (sync)");
+        } else if ([history respondsToSelector:@selector(clearHistoryVisitsAddedAfterDate:beforeDate:completionHandler:)]) {
+            ((void (*)(id, SEL, id, id, id))objc_msgSend)(history, @selector(clearHistoryVisitsAddedAfterDate:beforeDate:completionHandler:), afterDate, now, ^{
+                NSLog(@"[RemoteCompanion][SafariHook] Cleared Safari history (%@)", range);
+            });
+        } else if ([history respondsToSelector:@selector(clearHistoryWithCompletionHandler:)]) {
+            ((void (*)(id, SEL, id))objc_msgSend)(history, @selector(clearHistoryWithCompletionHandler:), ^{
+                NSLog(@"[RemoteCompanion][SafariHook] Cleared Safari history (fallback)");
+            });
+        }
+    } else {
+        NSLog(@"[RemoteCompanion][SafariHook] History.sharedHistory unavailable");
+    }
+
+    Class wkStoreClass = NSClassFromString(@"WKWebsiteDataStore");
+    if (wkStoreClass &&
+        [wkStoreClass respondsToSelector:@selector(defaultDataStore)] &&
+        [wkStoreClass respondsToSelector:@selector(allWebsiteDataTypes)]) {
+        id store = ((id (*)(id, SEL))objc_msgSend)(wkStoreClass, @selector(defaultDataStore));
+        NSSet *types = ((id (*)(id, SEL))objc_msgSend)(wkStoreClass, @selector(allWebsiteDataTypes));
+        if (store && types && [store respondsToSelector:@selector(removeDataOfTypes:modifiedSince:completionHandler:)]) {
+            ((void (*)(id, SEL, id, id, id))objc_msgSend)(store, @selector(removeDataOfTypes:modifiedSince:completionHandler:), types, afterDate, ^{
+                NSLog(@"[RemoteCompanion][SafariHook] Cleared WKWebsiteDataStore since %@", afterDate);
+            });
+        }
+    }
+}
+
+static void rc_safari_execute_action(NSString *action, NSString *range) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if ([action isEqualToString:@"close-tabs"]) {
+            rc_safari_perform_close_tabs(0);
+        } else if ([action isEqualToString:@"clear-history"]) {
+            rc_safari_perform_clear_history(range);
+        }
+    });
+}
+
+static void rc_safari_process_intent(void) {
+    CFPreferencesAppSynchronize(CFSTR("com.apple.mobilesafari"));
+    NSDictionary *intent = (__bridge_transfer NSDictionary *)CFPreferencesCopyAppValue(CFSTR("RCSafariPendingAction"), CFSTR("com.apple.mobilesafari"));
+    if (![intent isKindOfClass:[NSDictionary class]]) return;
+
+    NSString *uuid = intent[@"uuid"];
+    NSTimeInterval ts = [intent[@"timestamp"] doubleValue];
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    if (!uuid.length || (now - ts) > 15.0) return;
+    if (s_last_safari_intent_uuid && [s_last_safari_intent_uuid isEqualToString:uuid]) return;
+
+    s_last_safari_intent_uuid = [uuid copy];
+    CFPreferencesSetAppValue(CFSTR("RCSafariPendingAction"), NULL, CFSTR("com.apple.mobilesafari"));
+    CFPreferencesAppSynchronize(CFSTR("com.apple.mobilesafari"));
+
+    rc_safari_execute_action(intent[@"action"], intent[@"range"]);
+}
+
+static void rc_safari_intent_callback(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
+    NSString *notif = (__bridge NSString *)name;
+    // Clear any matching pending preference so it won't fire twice on next activate.
+    CFPreferencesSetAppValue(CFSTR("RCSafariPendingAction"), NULL, CFSTR("com.apple.mobilesafari"));
+    CFPreferencesAppSynchronize(CFSTR("com.apple.mobilesafari"));
+    if ([notif isEqualToString:@"com.saihgupr.remotecompanion.safari.close_tabs"]) {
+        rc_safari_execute_action(@"close-tabs", @"");
+    } else if ([notif isEqualToString:@"com.saihgupr.remotecompanion.safari.clear_history.last_hour"]) {
+        rc_safari_execute_action(@"clear-history", @"last-hour");
+    } else if ([notif isEqualToString:@"com.saihgupr.remotecompanion.safari.clear_history.today"]) {
+        rc_safari_execute_action(@"clear-history", @"today");
+    } else if ([notif isEqualToString:@"com.saihgupr.remotecompanion.safari.clear_history.today_and_yesterday"]) {
+        rc_safari_execute_action(@"clear-history", @"today-and-yesterday");
+    } else if ([notif isEqualToString:@"com.saihgupr.remotecompanion.safari.clear_history.all_time"]) {
+        rc_safari_execute_action(@"clear-history", @"all-time");
+    } else {
+        rc_safari_process_intent();
+    }
+}
+
+%end
+
 %ctor {
     NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
     if ([bundleID isEqualToString:@"com.apple.springboard"]) {
@@ -26243,6 +26664,37 @@ static NSTimeInterval s_last_camera_launch_notify = 0;
                 CFNotificationSuspensionBehaviorDeliverImmediately
             );
         }
-        SRLog(@"Tweak Loaded in %@ - Scroll guard only (Choicy Visibility Only)", bundleID);
+        if ([bundleID isEqualToString:@"com.apple.mobilesafari"]) {
+            %init(SafariHook);
+            CFStringRef safariNotifs[] = {
+                CFSTR("com.saihgupr.remotecompanion.safari.close_tabs"),
+                CFSTR("com.saihgupr.remotecompanion.safari.clear_history.last_hour"),
+                CFSTR("com.saihgupr.remotecompanion.safari.clear_history.today"),
+                CFSTR("com.saihgupr.remotecompanion.safari.clear_history.today_and_yesterday"),
+                CFSTR("com.saihgupr.remotecompanion.safari.clear_history.all_time")
+            };
+            for (size_t i = 0; i < sizeof(safariNotifs) / sizeof(safariNotifs[0]); i++) {
+                CFNotificationCenterAddObserver(
+                    CFNotificationCenterGetDarwinNotifyCenter(),
+                    NULL,
+                    rc_safari_intent_callback,
+                    safariNotifs[i],
+                    NULL,
+                    CFNotificationSuspensionBehaviorDeliverImmediately
+                );
+            }
+            [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidFinishLaunchingNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(__unused NSNotification *note) {
+                rc_safari_process_intent();
+            }];
+            [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(__unused NSNotification *note) {
+                rc_safari_process_intent();
+            }];
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                rc_safari_process_intent();
+            });
+            SRLog(@"[RemoteCompanion] Loaded inside com.apple.mobilesafari");
+        } else {
+            SRLog(@"Tweak Loaded in %@ - Scroll guard only (Choicy Visibility Only)", bundleID);
+        }
     }
 }

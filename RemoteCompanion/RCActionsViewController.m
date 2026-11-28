@@ -1549,6 +1549,18 @@ static NSArray *RCActionSnapshot(NSArray *actions) {
             baseText = [NSString stringWithFormat:@"%@ ", timerCmd.actionTitle];
             paramText = accent;
         }
+    } else if ([lower hasPrefix:@"safari clear-history "] || [lower hasPrefix:@"safari clear history "]) {
+        NSString *range = [[lower substringFromIndex:21] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        baseText = @"Safari: Clear History ";
+        if ([range isEqualToString:@"last-hour"] || [range isEqualToString:@"last hour"] || [range isEqualToString:@"hour"] || [range isEqualToString:@"1h"]) {
+            paramText = @"(Last Hour)";
+        } else if ([range isEqualToString:@"today"]) {
+            paramText = @"(Today)";
+        } else if ([range isEqualToString:@"today-and-yesterday"] || [range isEqualToString:@"today and yesterday"] || [range isEqualToString:@"yesterday"]) {
+            paramText = @"(Today and Yesterday)";
+        } else {
+            paramText = @"(All Time)";
+        }
     } else if ([lower hasPrefix:@"notify "]) {
         baseText = @"Notification ";
         paramText = [RCNotifyCommand commandWithString:cmd].title;
@@ -5664,6 +5676,39 @@ static NSArray<NSDictionary *> *RCAdaptVibrationConditions(NSArray<NSDictionary 
         [self editBluetoothConnectAtIndex:indexPath.row isDisconnect:YES];
     } else if ([currentAction hasPrefix:@"focus on "] || [currentAction hasPrefix:@"focus toggle "] || [currentAction isEqualToString:@"focus off"]) {
         [self editFocusAtIndex:indexPath.row];
+    } else if ([[currentAction lowercaseString] hasPrefix:@"safari clear-history "] || [[currentAction lowercaseString] hasPrefix:@"safari clear history "]) {
+        NSArray<NSArray<NSString *> *> *choices = @[
+            @[ @"Last Hour", @"last-hour" ],
+            @[ @"Today", @"today" ],
+            @[ @"Today and Yesterday", @"today-and-yesterday" ],
+            @[ @"All Time", @"all-time" ]
+        ];
+        UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Clear Safari History"
+                                                                       message:@"Choose how far back to clear browsing history and website data."
+                                                                preferredStyle:UIAlertControllerStyleActionSheet];
+        __weak typeof(self) weakSelf = self;
+        NSInteger row = indexPath.row;
+        for (NSArray<NSString *> *choice in choices) {
+            [sheet addAction:[UIAlertAction actionWithTitle:choice[0] style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *action) {
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                if (!strongSelf) return;
+                NSString *newCmd = [NSString stringWithFormat:@"safari clear-history %@", choice[1]];
+                if ([strongSelf.actions[row] isKindOfClass:[NSDictionary class]]) {
+                    NSMutableDictionary *d = [strongSelf.actions[row] mutableCopy];
+                    d[@"command"] = newCmd;
+                    strongSelf.actions[row] = d;
+                } else {
+                    strongSelf.actions[row] = newCmd;
+                }
+                [strongSelf saveActions];
+                [strongSelf.tableView reloadData];
+            }]];
+        }
+        [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+        UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
+        sheet.popoverPresentationController.sourceView = cell ?: self.view;
+        sheet.popoverPresentationController.sourceRect = cell ? cell.bounds : CGRectMake(self.view.bounds.size.width / 2, self.view.bounds.size.height / 2, 1, 1);
+        [self presentViewController:sheet animated:YES completion:nil];
     } else if ([currentAction hasPrefix:@"km "] || [currentAction isEqualToString:@"km"]) {
         NSString *macroName = @"";
         NSString *paramVal = @"";
