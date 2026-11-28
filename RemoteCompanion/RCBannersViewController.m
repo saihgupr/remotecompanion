@@ -177,7 +177,9 @@ static NSSet<NSString *> *RCOwnBannerIds(void) {
         ids = [NSSet setWithArray:@[@"__CAMERA_PICKER__", @"__CAMERA_VIDEO_PICKER__", @"camera record",
                                     @"__HA_PICKER__", @"__KM_TRIGGER__", @"__MQTT_PUBLISH__", @"audiomix toggle",
                                     @"sneakycam photo", @"sneakycam video",
-                                    @"queue album", @"queue artist", @"shuffle all songs", @"delete current song"]];
+                                    @"queue album", @"queue artist", @"shuffle all songs", @"delete current song",
+                                    @"player queue album", @"player queue artist",
+                                    @"player like", @"player love"]];
     });
     return ids;
 }
