@@ -23276,6 +23276,13 @@ static inline void RC_UserDeltaForOrientation(CGFloat dx_phys, CGFloat dy_phys, 
     if (outDY) *outDY = user_dy;
 }
 
+// An iPad's camera and Home button edges have wide bezels, and those are the left and right edges when
+// it is held sideways, so widen the side edge strip slightly in landscape.
+static CGFloat RC_EdgeStripBonus(UIInterfaceOrientation orientation) {
+    if ([[UIDevice currentDevice] userInterfaceIdiom] != UIUserInterfaceIdiomPad) return 0;
+    return UIInterfaceOrientationIsLandscape(orientation) ? 5 : 0;
+}
+
 // Logical left/right edges follow the interface as the user sees it. In
 // landscape these are the short side edges: UI-left/UI-right = device
 // bottom/device top (or vice versa). y spans L here, x spans S.
@@ -24155,7 +24162,7 @@ static RCIslandTouch rc_island_handle_touch(UITouch *touch, UIInterfaceOrientati
     // Logical left/right edges follow the interface (orientation central).
     // In landscape the logical left/right zones are strips along y (the short
     // axis) bounded on x (the long axis); see RC_EdgeZonesForLoc.
-    CGFloat edgeThreshold = RC_EDGE_STRIP();
+    CGFloat edgeThreshold = RC_EDGE_STRIP() + RC_EdgeStripBonus(orientation);
     CGFloat margin = 100.0;
 
     BOOL nearLogicalLeft = NO, nearLogicalRight = NO, withinBounds = NO;

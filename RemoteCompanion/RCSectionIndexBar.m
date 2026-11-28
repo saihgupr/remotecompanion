@@ -7,6 +7,7 @@
 // bubble only appears under that finger, which may slide right off the rail and
 // down its rows to pick one of the categories filed under the letter.
 static const CGFloat RCSectionRailWidth = 20.0;
+static const CGFloat RCSectionRailPadLandscapeInset = 32.0;
 static const CGFloat RCSectionRailMinRow = 10.0;
 static const CGFloat RCSectionRailMaxRow = 30.0;
 static const CGFloat RCSectionRailTopInset = 10.0;
@@ -390,7 +391,11 @@ static NSString *RCSectionIndexLetterForTitle(NSString *title) {
     } else {
         top = MIN(MAX(top, chromeTop), maxTop);
     }
-    CGFloat left = safe.left;
+    // An iPad held sideways has wide bezels on the camera and Home button edges: a finger can't
+    // land closer than about 45 pt from the glass, so the rail sits that much further in
+    BOOL sidewaysPad = ([UIDevice currentDevice].userInterfaceIdiom == UIUserInterfaceIdiomPad)
+        && host.bounds.size.width > host.bounds.size.height;
+    CGFloat left = safe.left + (sidewaysPad ? RCSectionRailPadLandscapeInset : 0.0);
 
     self.rowHeight = row;
     self.stackTop = top;
