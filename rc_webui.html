@@ -4504,6 +4504,8 @@ const CMD_NAMES = {
   'appearance dark':'Appearance Dark','appearance light':'Appearance Light','appearance toggle':'Appearance Toggle',
   'rotate lock':'Rotate Lock','rotate unlock':'Rotate Unlock','rotate toggle':'Rotate Toggle',
   'orientation set portrait':'Orientation: Portrait','orientation set portrait up':'Orientation: Portrait','orientation set landscape left':'Orientation: Landscape Left','orientation set landscape':'Orientation: Landscape Left','orientation set landscape right':'Orientation: Landscape Right','orientation set portrait upside down':'Orientation: Upside Down','orientation set upside down':'Orientation: Upside Down','orientation set auto':'Orientation: Auto','orientation rotate clockwise':'Rotate Screen Clockwise','orientation rotate cw':'Rotate Screen Clockwise','orientation rotate counterclockwise':'Rotate Screen Counterclockwise','orientation rotate ccw':'Rotate Screen Counterclockwise',
+  'safari close-tabs':'Safari: Close All Tabs','safari close tabs':'Safari: Close All Tabs','safari close all tabs':'Safari: Close All Tabs','safari close-all-tabs':'Safari: Close All Tabs',
+  'safari clear-history last-hour':'Safari: Clear History (Last Hour)','safari clear-history today':'Safari: Clear History (Today)','safari clear-history today-and-yesterday':'Safari: Clear History (Today and Yesterday)','safari clear-history all-time':'Safari: Clear History (All Time)',
   'location on':'Location Services On','location off':'Location Services Off','location toggle':'Location Services Toggle',
   'wifi on':'WiFi On','wifi off':'WiFi Off','wifi toggle':'WiFi Toggle',
   'bluetooth on':'Bluetooth On','bluetooth off':'Bluetooth Off','bluetooth toggle':'Bluetooth Toggle',
@@ -5195,6 +5197,8 @@ function iconForCmd(cmd) {
   if (lowCmd.startsWith('ringer volume ')) return { icon:'bell_fill',       cls:'icon-blue' };
   if (lowCmd.startsWith('brightness '))   return { icon:'sun_max_fill',    cls:'icon-yellow' };
   if (lowCmd.startsWith('orientation set ') || lowCmd.startsWith('orientation rotate ')) return { icon:'rotate_right', cls:'icon-blue' };
+  if (lowCmd.startsWith('safari clear-history') || lowCmd.startsWith('safari clear history')) return { icon:'clock_fill', cls:'icon-orange' };
+  if (lowCmd.startsWith('safari ')) return { icon:'globe', cls:'icon-blue' };
   if (lowCmd.startsWith('shortcut:'))     return { icon:'wand_stars',         cls:'icon-indigo' };
   if (lowCmd.startsWith('uiopen '))       return { icon:'app_badge_fill',  cls:'icon-pink' };
   if (lowCmd.startsWith('kill '))         return { icon:'xmark_circle_fill', cls:'icon-red' };
@@ -5264,6 +5268,8 @@ const ACTION_SECTIONS = [
     { name:'Activate Siri',     cmd:'siri',          icon:'mic_fill' },
     { name:'Play Gesture…',     cmd:'__PLAY_GESTURE__', icon:'hand_draw', needs_input:true },
     { name:'Record Gesture',    cmd:'gesture record-toggle', icon:'smallcircle_fill_circle_fill' },
+    { name:'Safari: Close All Tabs', cmd:'safari close-tabs', icon:'globe', keywords:'safari close all tabs browser' },
+    { name:'Safari: Clear History…', cmd:'__SAFARI_CLEAR_HISTORY__', icon:'clock_fill', needs_input:true, keywords:'safari clear history browsing data last hour today yesterday all time' },
     { name:'Accessibility Shortcut', cmd:'accessibility shortcut', icon:'person_crop_circle' },
   ]},
   { title:'Device Controls', actions:[
@@ -6654,6 +6660,7 @@ function parseToggleCmd(cmd) {
     { key:'audiohandoff_enabled', name:'Automatic Switching', icon:'headphones', prefixes:['audiohandoff enabled ','audiohandoff auto '], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'], exactMatches: { 'audiohandoff enabled':'toggle','audiohandoff auto':'toggle' } },
     { key:'rotate', name:'Rotation Lock', icon:'lock_rotation', prefixes:['rotate '], suffixes:['lock','unlock','toggle'], displaySuffixes:['Lock','Unlock','Toggle'] },
     { key:'orientation', name:'Orientation', icon:'rotate_right', prefixes:['orientation set '], suffixes:['portrait','landscape left','landscape right','portrait upside down','auto'], displaySuffixes:['Portrait','Landscape Left','Landscape Right','Portrait Upside Down','Auto'] },
+    { key:'safari_clear_history', name:'Safari: Clear History', icon:'clock_fill', prefixes:['safari clear-history ','safari clear history '], suffixes:['last-hour','today','today-and-yesterday','all-time'], displaySuffixes:['Last Hour','Today','Today and Yesterday','All Time'] },
     { key:'vibration_silent', name:'Silent Vibration', icon:'bell_slash', prefixes:['vibration silent-'], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'] },
     { key:'vibration_ring', name:'Ring Vibration', icon:'bell', prefixes:['vibration ring-'], suffixes:['on','off','toggle'], displaySuffixes:['On','Off','Toggle'] },
     { key:'haptics', name:'Haptics', icon:'waveform_path_ecg', prefixes:['haptics '], suffixes:['always','silent-only','ring-only','never'], displaySuffixes:['Always Play','Play in Silent Mode',"Don't Play in Silent Mode",'Never Play'] },
@@ -9002,6 +9009,8 @@ function selectPickerAction(act) {
     promptLevelAction('brightness ', null);
   } else if (c === '__SET_ORIENTATION__') {
     promptOrientationPicker();
+  } else if (c === '__SAFARI_CLEAR_HISTORY__') {
+    promptSafariClearHistoryPicker();
   } else if (c === '__HA_PICKER__') {
     promptHAActionPicker();
   } else if (c === '__HA_TOGGLE__') {
@@ -9111,6 +9120,17 @@ function promptOrientationPicker() {
   const items = toggleInfo.suffixes.map((s, i) => ({
     label: toggleInfo.displaySuffixes[i],
     icon: 'rotate_right',
+    action: () => addActionToCurrent(`${toggleInfo.prefixes[0]}${s}`)
+  }));
+  showContextMenu({ clientX: Math.max(10, window.innerWidth / 2 - 110), clientY: Math.max(10, window.innerHeight / 3), preventDefault: () => {} }, items);
+}
+
+function promptSafariClearHistoryPicker() {
+  const toggleInfo = parseToggleCmd('safari clear-history last-hour');
+  if (!toggleInfo) return;
+  const items = toggleInfo.suffixes.map((s, i) => ({
+    label: toggleInfo.displaySuffixes[i],
+    icon: 'clock_fill',
     action: () => addActionToCurrent(`${toggleInfo.prefixes[0]}${s}`)
   }));
   showContextMenu({ clientX: Math.max(10, window.innerWidth / 2 - 110), clientY: Math.max(10, window.innerHeight / 3), preventDefault: () => {} }, items);
@@ -10410,62 +10430,6 @@ function importDialogOk() {
   const raw = document.getElementById('import-dialog-textarea').value.trim();
   if (!raw) { closeImportDialog(); return; }
 
-  let imported = [];
-  try {
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) imported = parsed;
-    else if (typeof parsed === 'string') imported = [parsed];
-  } catch(e) {
-    // Fall back to line-separated commands
-    imported = raw.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
-  }
-
-  if (imported.length === 0) {
-    showToast('⚠ No valid actions found');
-    closeImportDialog();
-    return;
-  }
-
-  const actions = triggerData(currentKey).actions || [];
-  actions.push(...imported);
-  triggerData(currentKey).actions = actions;
-  saveConfig();
-  renderActionList();
-  closeImportDialog();
-  showToast(`✓ Imported ${imported.length} actions`);
-}
-
-function escapeHtml(str) {
-  if (str == null) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-function onApiTokenChange(val) {
-  const trimmed = (val || '').trim();
-  if (trimmed) {
-    localStorage.setItem('rc_api_token', trimmed);
-    config.webUIApiToken = trimmed;
-  } else {
-    localStorage.removeItem('rc_api_token');
-    delete config.webUIApiToken;
-  }
-  saveConfig();
-  loadData();
-}
-
-// Swipe Triggers: each a config key, its default (the size the tweak always used) and its range
-// (the same as Adjust on Screen's), in points unless unit says percent (the zones' shares). The
-// default removes the key, so the tweak keeps its own default.
-const SWIPE_SETTINGS = [
-  { key: 'swipeEdgeStrip', title: 'Edge Strip', def: 25, min: 10, max: 60 },
-  { key: 'swipeEdgeDistance', title: 'Edge Swipe', def: 30, min: 10, max: 250 },
-  { key: 'swipeStatusBarDistance', title: 'Status Bar Swipe', def: 50, min: 10, max: 250 },
-  { key: 'swipeTopDownDistance', title: 'Top Swipe Down', def: 45, min: 10, max: 250 },
   { key: 'swipeBottomBarDistance', title: 'Bottom Bar Swipe', def: 60, min: 10, max: 250 },
   { key: 'swipeBottomUpDistance', title: 'Bottom Swipe Up', def: 45, min: 10, max: 250 },
   { key: 'swipeStatusBarHeight', title: 'Status Bar Height', def: 25, min: 10, max: 100 },
@@ -12384,6 +12348,7 @@ const BANNER_PLACEHOLDERS = {
   '__SET_VOLUME__': ['set-vol '],
   '__SET_BRIGHTNESS__': ['brightness '],
   '__SET_ORIENTATION__': ['orientation set '],
+  '__SAFARI_CLEAR_HISTORY__': ['safari clear-history ', 'safari clear history '],
   '__CAMERA_PICKER__': ['camera ', 'open camera ', 'camera', 'open camera'],
   '__CAMERA_VIDEO_PICKER__': ['camera video ', 'open camera video ', 'camera video', 'open camera video', 'camera 2x'],
   '__BT_CONNECT__': ['bt connect ', 'bluetooth connect '],
