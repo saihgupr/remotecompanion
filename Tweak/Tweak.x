@@ -2356,6 +2356,8 @@ static NSTimeInterval RC_PowerClickWindow(void) { return RC_ConfigTiming(@"power
 static NSTimeInterval RC_HomeClickWindow(void)  { return RC_ConfigTiming(@"homeClickWindow", 0.35, 0.25, 0.8); }
 static NSTimeInterval RC_VolumeHoldTime(void)   { return RC_ConfigTiming(@"volumeHoldTime", 0.35, 0.2, 0.8); }
 static NSTimeInterval RC_PowerHoldTime(void)    { return RC_ConfigTiming(@"powerHoldTime", 0.5, 0.3, 0.75); }
+// How long a finger rests on the Touch ID sensor before it counts as a Hold rather than a Tap
+static NSTimeInterval RC_TouchIDHoldTime(void)  { return RC_ConfigTiming(@"touchIdHoldTime", 0.35, 0.2, 0.8); }
 
 // Find config file - check shared path first, then search app containers
 static NSString *find_config_path() {
@@ -21396,7 +21398,7 @@ static void handle_hid_event(void* target, void* refcon, IOHIDEventSystemClientR
 
                 
                 if (g_bioWatchdogTimer) [g_bioWatchdogTimer invalidate];
-                g_bioWatchdogTimer = [NSTimer scheduledTimerWithTimeInterval:0.5 repeats:NO block:^(NSTimer *timer) {
+                g_bioWatchdogTimer = [NSTimer scheduledTimerWithTimeInterval:RC_TouchIDHoldTime() repeats:NO block:^(NSTimer *timer) {
 
                     g_bioWatchdogTimer = nil; // Timer is done.
                     
