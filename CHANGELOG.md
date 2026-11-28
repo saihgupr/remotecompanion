@@ -23,6 +23,7 @@ All notable changes to this project will be documented in this file.
 - **Like or love the playing song**: `rc player like` (or `rc player love`) toggles the heart on whichever music player is playing, through that app's add-on: MusicRemote's loved flag in Music, Zefy's like in Spotify. `--player music|zefy` picks one by hand. AudioStream keeps no liked state. It is in the action picker and the Web UI under Media.
 
 ### Changed
+- **Touch ID Hold is quicker**: a finger resting on the Touch ID sensor counts as a Hold after 0.35 s instead of 0.5 s, so it answers as fast as Volume Hold. Settings > Triggers > Buttons > Button Timing has Touch ID Hold to change it (0.20 to 0.80 s), in the Web UI too. On the lock screen the extra 0.3 s wait for the unlock to win is unchanged.
 - **Picker list icons**: in List layout, New Trigger and Select Action show the icons their Compact tiles have, larger and in the text's color, instead of small grey symbols.
 - **Letter index appears under a finger**: the section index on the Triggers screen stays out of sight until a finger lands in the left margin, then fades away when the finger lifts, instead of sitting on the edge of the list all the time. Sliding into the floating capsule still picks any category under the letter.
 - **Triggers in alphabetical order**: the trigger sections are sorted by name, with Favorites kept at the top, so the list, the category chips and the letter index all agree on where a category is. The triggers inside a section keep their order.

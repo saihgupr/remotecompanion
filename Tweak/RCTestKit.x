@@ -897,7 +897,7 @@ static NSArray<NSDictionary *> *RCTKGuidedSteps(BOOL hasHome) {
         @{ @"id": @"bottom_swipe_up_right", @"name": @"Bottom Swipe Up (Right)", @"gesture": @[@"swipe", @0.85, @0.985, @0.85, @0.8, @300, @"system"], @"prompt": @"Swipe up from the bottom-right corner", @"expect": @[@"trigger_bottom_swipe_up_right"], @"enable": @[@"trigger_bottom_swipe_up_right"] },
         @{ @"id": @"shake", @"name": @"Shake Device", @"prompt": @"Shake the phone", @"expect": @[@"shake"] },
         @{ @"id": @"touchid_tap", @"name": @"Touch ID Single Tap", @"prompt": @"Touch the Home button lightly, without pressing it", @"expect": @[@"touchid_tap"], @"home": @YES },
-        @{ @"id": @"touchid_hold", @"name": @"Touch ID Hold", @"prompt": @"Rest a finger on the Home button for a second, without pressing it", @"expect": @[@"touchid_hold"], @"home": @YES },
+        @{ @"id": @"touchid_hold", @"name": @"Touch ID Hold", @"prompt": @"Rest a finger on the Home button without pressing it", @"expect": @[@"touchid_hold"], @"home": @YES },
         // Last: they leave the phone locked or need a cable
         @{ @"id": @"device_lock", @"name": @"Device Locked", @"auto": @"lock", @"prompt": @"Lock the phone with the Power button", @"expect": @[@"trigger_device_lock"] },
         @{ @"id": @"device_unlock", @"name": @"Device Unlocked", @"auto": @"unlock", @"prompt": @"Unlock the phone", @"expect": @[@"trigger_device_unlock"], @"keepScreen": @YES },
@@ -926,7 +926,7 @@ static NSArray<NSString *> *RCTKCapturedSince(unsigned long long since) {
 // a double press 220 ms apart read as two single presses. The run's report keeps the phone's own
 // values under "ranWithDefaults", so a result there can be told apart from one at the defaults.
 static NSArray<NSString *> *RCTKTuningKeys(void) {
-    return @[@"powerClickWindow", @"homeClickWindow", @"volumeSequenceWindow", @"volumeHoldTime", @"powerHoldTime",
+    return @[@"powerClickWindow", @"homeClickWindow", @"volumeSequenceWindow", @"volumeHoldTime", @"powerHoldTime", @"touchIdHoldTime",
              @"swipeEdgeStrip", @"swipeEdgeDistance", @"swipeStatusBarDistance", @"swipeTopDownDistance", @"swipeBottomBarDistance",
              @"swipeBottomUpDistance", @"swipeStatusBarHeight", @"swipeStatusBarLeftZone", @"swipeStatusBarRightZone",
              @"swipeBottomZoneHeight", @"swipeBottomLeftZone", @"swipeBottomRightZone"];
@@ -948,7 +948,7 @@ static NSDictionary *RCTKWithDefaultTuning(NSDictionary *config, NSMutableDictio
 static double RCTKButtonQuietMs(void) {
     NSDictionary *config = RCCopyTriggerConfig(); // the test config in place, so the defaults
     double longest = 0.5; // the defaults' longest, Power Hold
-    for (NSString *key in @[@"powerClickWindow", @"homeClickWindow", @"volumeSequenceWindow", @"volumeHoldTime", @"powerHoldTime"]) {
+    for (NSString *key in @[@"powerClickWindow", @"homeClickWindow", @"volumeSequenceWindow", @"volumeHoldTime", @"powerHoldTime", @"touchIdHoldTime"]) {
         id value = config[key];
         if ([value isKindOfClass:[NSNumber class]]) longest = MAX(longest, MIN([value doubleValue], 0.8));
     }

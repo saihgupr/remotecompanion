@@ -42,6 +42,9 @@
 @property (nonatomic, assign) double volumeHoldTime;
 // Seconds a Power press is held before it counts as a long press: 0.3 to 0.75, default 0.5
 @property (nonatomic, assign) double powerHoldTime;
+// Seconds a finger rests on the Touch ID sensor before it counts as a Hold rather than a Tap:
+// 0.2 to 0.8, default 0.35
+@property (nonatomic, assign) double touchIdHoldTime;
 // Settings > Banners: actions that show a banner when a trigger runs them (built by RCBannersViewController)
 @property (nonatomic, copy) NSArray<NSDictionary *> *bannerActions;
 // Actions with a banner of their own that have been switched off in Settings > Banners

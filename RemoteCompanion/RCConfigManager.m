@@ -734,6 +734,8 @@ static id RCLockTogglePasscodeWalk(id object, NSMutableSet *pins, NSString *repl
 - (void)setVolumeHoldTime:(double)seconds { _config[@"volumeHoldTime"] = @(seconds); [self saveConfig]; }
 - (double)powerHoldTime { return [self timingForKey:@"powerHoldTime" fallback:0.5 min:0.3 max:0.75]; }
 - (void)setPowerHoldTime:(double)seconds { _config[@"powerHoldTime"] = @(seconds); [self saveConfig]; }
+- (double)touchIdHoldTime { return [self timingForKey:@"touchIdHoldTime" fallback:0.35 min:0.2 max:0.8]; }
+- (void)setTouchIdHoldTime:(double)seconds { _config[@"touchIdHoldTime"] = @(seconds); [self saveConfig]; }
 
 - (NSArray<NSDictionary *> *)bannerActions {
     id list = _config[@"bannerActions"];
